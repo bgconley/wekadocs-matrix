@@ -36,6 +36,29 @@ class TestIncrementalUpdates:
     def incremental_updater(self, neo4j_driver, config):
         return IncrementalUpdater(neo4j_driver, config)
 
+    @pytest.fixture(autouse=True)
+    def cleanup_test_data(self, neo4j_driver):
+        """Clean up test documents before each test."""
+        yield  # Run test first
+        # Cleanup after test
+        with neo4j_driver.session() as session:
+            session.run(
+                """
+                MATCH (d:Document)
+                WHERE d.source_uri STARTS WITH 'test://'
+                DETACH DELETE d
+                """
+            )
+            session.run(
+                """
+                MATCH (s:Section)
+                WHERE s.document_id STARTS WITH '535b6ac'
+                    OR s.document_id STARTS WITH 'c1c5dce'
+                    OR s.document_id STARTS WITH 'fcb5c86'
+                DETACH DELETE s
+                """
+            )
+
     def test_compute_diff_no_changes(
         self, graph_builder, incremental_updater, neo4j_driver
     ):

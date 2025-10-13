@@ -116,10 +116,8 @@ class IncrementalUpdater:
         document_id = sections[0].get("document_id") if sections else ""
 
         # Extract modified section objects from the modified list
-        # Modified contains {"from": old_id, "to": new_id} dicts
-        modified_section_ids = {
-            m.get("to") if isinstance(m, dict) else m for m in diff.get("modified", [])
-        }
+        # Modified contains section objects with IDs
+        modified_section_ids = {m["id"] for m in diff.get("modified", [])}
         modified_sections = [s for s in sections if s["id"] in modified_section_ids]
 
         # Build internal Diff object

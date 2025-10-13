@@ -1,22 +1,276 @@
 {
   "phase": 3,
-  "timestamp": "2025-10-13T05:52:54.355284",
+  "timestamp": "2025-10-13T08:06:37.080830",
   "success": true,
   "tests": {
-    "total": 1,
-    "passed": 0,
-    "failed": 0,
+    "total": 43,
+    "passed": 40,
+    "failed": 3,
     "skipped": 0,
-    "errors": 1
+    "errors": 0
   },
   "test_details": [
     {
-      "name": "tests.p3_t4_integration_test",
-      "classname": "",
-      "duration": 0.0,
-      "status": "error",
-      "message": "collection failure"
+      "name": "test_parse_getting_started",
+      "classname": "tests.p3_t1_test.TestMarkdownParser",
+      "duration": 0.039,
+      "status": "passed"
+    },
+    {
+      "name": "test_parse_determinism",
+      "classname": "tests.p3_t1_test.TestMarkdownParser",
+      "duration": 0.06,
+      "status": "passed"
+    },
+    {
+      "name": "test_preserves_code_blocks",
+      "classname": "tests.p3_t1_test.TestMarkdownParser",
+      "duration": 0.009,
+      "status": "passed"
+    },
+    {
+      "name": "test_anchor_generation",
+      "classname": "tests.p3_t1_test.TestMarkdownParser",
+      "duration": 0.014,
+      "status": "passed"
+    },
+    {
+      "name": "test_token_counting",
+      "classname": "tests.p3_t1_test.TestMarkdownParser",
+      "duration": 0.012,
+      "status": "passed"
+    },
+    {
+      "name": "test_parse_html_document",
+      "classname": "tests.p3_t1_test.TestHTMLParser",
+      "duration": 0.004,
+      "status": "passed"
+    },
+    {
+      "name": "test_html_determinism",
+      "classname": "tests.p3_t1_test.TestHTMLParser",
+      "duration": 0.008,
+      "status": "passed"
+    },
+    {
+      "name": "test_html_preserves_code",
+      "classname": "tests.p3_t1_test.TestHTMLParser",
+      "duration": 0.004,
+      "status": "passed"
+    },
+    {
+      "name": "test_html_preserves_tables",
+      "classname": "tests.p3_t1_test.TestHTMLParser",
+      "duration": 0.004,
+      "status": "passed"
+    },
+    {
+      "name": "test_section_id_uniqueness_within_document",
+      "classname": "tests.p3_t1_test.TestParserDeterminism",
+      "duration": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "test_checksum_changes_with_content",
+      "classname": "tests.p3_t1_test.TestParserDeterminism",
+      "duration": 0.002,
+      "status": "passed"
+    },
+    {
+      "name": "test_extracts_commands_from_code_blocks",
+      "classname": "tests.p3_t2_test.TestCommandExtraction",
+      "duration": 0.014,
+      "status": "passed"
+    },
+    {
+      "name": "test_commands_have_mentions",
+      "classname": "tests.p3_t2_test.TestCommandExtraction",
+      "duration": 0.011,
+      "status": "passed"
+    },
+    {
+      "name": "test_command_confidence_scores",
+      "classname": "tests.p3_t2_test.TestCommandExtraction",
+      "duration": 0.011,
+      "status": "passed"
+    },
+    {
+      "name": "test_extracts_config_files",
+      "classname": "tests.p3_t2_test.TestConfigurationExtraction",
+      "duration": 0.012,
+      "status": "passed"
+    },
+    {
+      "name": "test_extracts_config_parameters",
+      "classname": "tests.p3_t2_test.TestConfigurationExtraction",
+      "duration": 0.011,
+      "status": "passed"
+    },
+    {
+      "name": "test_extracts_env_variables",
+      "classname": "tests.p3_t2_test.TestConfigurationExtraction",
+      "duration": 0.01,
+      "status": "passed"
+    },
+    {
+      "name": "test_extracts_procedures_from_titled_sections",
+      "classname": "tests.p3_t2_test.TestProcedureExtraction",
+      "duration": 0.011,
+      "status": "passed"
+    },
+    {
+      "name": "test_extracts_steps_from_numbered_lists",
+      "classname": "tests.p3_t2_test.TestProcedureExtraction",
+      "duration": 0.011,
+      "status": "passed"
+    },
+    {
+      "name": "test_steps_have_procedure_relationship",
+      "classname": "tests.p3_t2_test.TestProcedureExtraction",
+      "duration": 0.011,
+      "status": "passed"
+    },
+    {
+      "name": "test_minimal_false_positives",
+      "classname": "tests.p3_t2_test.TestEntityExtractionPrecision",
+      "duration": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "test_extracts_from_realistic_documentation",
+      "classname": "tests.p3_t2_test.TestEntityExtractionPrecision",
+      "duration": 0.038,
+      "status": "passed"
+    },
+    {
+      "name": "test_mention_provenance",
+      "classname": "tests.p3_t2_test.TestEntityExtractionPrecision",
+      "duration": 0.014,
+      "status": "passed"
+    },
+    {
+      "name": "test_idempotent_graph_build",
+      "classname": "tests.p3_t3_integration_test.TestGraphConstruction",
+      "duration": 4.703,
+      "status": "passed"
+    },
+    {
+      "name": "test_vector_parity",
+      "classname": "tests.p3_t3_integration_test.TestGraphConstruction",
+      "duration": 2.158,
+      "status": "failed",
+      "message": "AssertionError: Vector parity failed: Neo4j=528, Qdrant=5\nassert 528 == 5"
+    },
+    {
+      "name": "test_upsert_document_creates_nodes",
+      "classname": "tests.p3_t3_test.TestGraphConstruction",
+      "duration": 1.112,
+      "status": "passed"
+    },
+    {
+      "name": "test_idempotent_upsert",
+      "classname": "tests.p3_t3_test.TestGraphConstruction",
+      "duration": 1.32,
+      "status": "passed"
+    },
+    {
+      "name": "test_mentions_have_provenance",
+      "classname": "tests.p3_t3_test.TestGraphConstruction",
+      "duration": 0.979,
+      "status": "passed"
+    },
+    {
+      "name": "test_embeddings_computed",
+      "classname": "tests.p3_t3_test.TestGraphConstruction",
+      "duration": 1.084,
+      "status": "passed"
+    },
+    {
+      "name": "test_vector_parity_with_graph",
+      "classname": "tests.p3_t3_test.TestGraphConstruction",
+      "duration": 1.06,
+      "status": "passed"
+    },
+    {
+      "name": "test_embedding_version_set",
+      "classname": "tests.p3_t3_test.TestGraphConstruction",
+      "duration": 1.279,
+      "status": "passed"
+    },
+    {
+      "name": "test_batch_size_respected",
+      "classname": "tests.p3_t3_test.TestBatchProcessing",
+      "duration": 6.896,
+      "status": "passed"
+    },
+    {
+      "name": "test_incremental_update_minimal_delta",
+      "classname": "tests.p3_t4_integration_test.TestIncrementalUpdates",
+      "duration": 1.05,
+      "status": "failed",
+      "message": "AssertionError: Should have at least 3 sections initially, got 0\nassert 0 >= 3"
+    },
+    {
+      "name": "test_reconciliation_drift_repair",
+      "classname": "tests.p3_t4_integration_test.TestReconciliation",
+      "duration": 1.068,
+      "status": "failed",
+      "message": "AssertionError: Should have at least 5 sections for drift test\nassert 0 >= 5"
+    },
+    {
+      "name": "test_compute_diff_no_changes",
+      "classname": "tests.p3_t4_test.TestIncrementalUpdates",
+      "duration": 1.124,
+      "status": "passed"
+    },
+    {
+      "name": "test_compute_diff_with_modifications",
+      "classname": "tests.p3_t4_test.TestIncrementalUpdates",
+      "duration": 0.887,
+      "status": "passed"
+    },
+    {
+      "name": "test_incremental_update_limited_changes",
+      "classname": "tests.p3_t4_test.TestIncrementalUpdates",
+      "duration": 0.921,
+      "status": "passed"
+    },
+    {
+      "name": "test_staged_sections_cleanup",
+      "classname": "tests.p3_t4_test.TestIncrementalUpdates",
+      "duration": 0.931,
+      "status": "passed"
+    },
+    {
+      "name": "test_reconcile_no_drift",
+      "classname": "tests.p3_t4_test.TestReconciliation",
+      "duration": 0.948,
+      "status": "passed"
+    },
+    {
+      "name": "test_reconcile_repairs_drift",
+      "classname": "tests.p3_t4_test.TestReconciliation",
+      "duration": 1.822,
+      "status": "passed"
+    },
+    {
+      "name": "test_reconciliation_performance",
+      "classname": "tests.p3_t4_test.TestReconciliation",
+      "duration": 0.938,
+      "status": "passed"
+    },
+    {
+      "name": "test_drift_percentage_calculation",
+      "classname": "tests.p3_t4_test.TestDriftMetrics",
+      "duration": 0.05,
+      "status": "passed"
+    },
+    {
+      "name": "test_drift_threshold_configuration",
+      "classname": "tests.p3_t4_test.TestDriftMetrics",
+      "duration": 0.012,
+      "status": "passed"
     }
   ],
-  "duration_seconds": 3.418
+  "duration_seconds": 34.241
 }
