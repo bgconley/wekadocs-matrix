@@ -8,8 +8,8 @@ from typing import Optional
 import redis.asyncio as aioredis
 from neo4j import Driver, GraphDatabase
 from qdrant_client import QdrantClient
-from qdrant_client.models import (FieldCondition, Filter, MatchValue,
-                                  PointIdsList)
+from qdrant_client.models import (FieldCondition, Filter, FilterSelector,
+                                  MatchValue, PointIdsList)
 from redis.asyncio.connection import ConnectionPool
 
 from .config import Settings, get_settings
@@ -28,6 +28,9 @@ def _normalize_points_selector(kwargs):
         # Already a model type?
         if hasattr(ps, "dict") or hasattr(ps, "model_fields"):
             return ps
+        # Plain list (test passes points_selector=[id1, id2, ...])
+        if isinstance(ps, list):
+            return PointIdsList(points=ps)
         # Dict with 'filter'
         if isinstance(ps, dict) and "filter" in ps:
             f = ps["filter"]
@@ -55,6 +58,7 @@ def _normalize_points_selector(kwargs):
 class CompatQdrantClient:
     """
     Thin adapter to tolerate different delete() call shapes used by tests.
+    Handles conversion of section_ids to UUIDs for point operations.
     Other methods are proxied to the real client.
     """
 
@@ -62,8 +66,55 @@ class CompatQdrantClient:
         self._c = client
 
     def delete(self, collection_name: str, **kwargs):
+        """
+        Delete points, with automatic conversion of section IDs to UUIDs.
+        Accepts points_selector as list of IDs or typed selector.
+        """
         selector = _normalize_points_selector(kwargs)
+
+        # If selector is PointIdsList, convert section IDs to UUIDs
+        if isinstance(selector, PointIdsList):
+            import uuid
+
+            # Convert each ID to UUID using same scheme as build_graph
+            uuid_points = []
+            for point_id in selector.points:
+                # If it looks like a hex hash (64 chars), convert to UUID
+                if isinstance(point_id, str) and len(point_id) == 64:
+                    uuid_points.append(str(uuid.uuid5(uuid.NAMESPACE_DNS, point_id)))
+                else:
+                    # Already a UUID or other format, keep as-is
+                    uuid_points.append(point_id)
+            selector = PointIdsList(points=uuid_points)
+
         return self._c.delete(collection_name=collection_name, points_selector=selector)
+
+    def purge_document(self, collection_name: str, document_id: str):
+        """Delete all vectors for a specific document."""
+        filt = Filter(
+            must=[
+                FieldCondition(key="document_id", match=MatchValue(value=document_id))
+            ]
+        )
+        return self._c.delete(
+            collection_name=collection_name, points_selector=FilterSelector(filter=filt)
+        )
+
+    def upsert(self, collection_name: str, points, **kwargs):
+        """Explicit passthrough for upsert to avoid serialization issues."""
+        return self._c.upsert(collection_name=collection_name, points=points, **kwargs)
+
+    def scroll(self, collection_name: str, **kwargs):
+        """Explicit passthrough for scroll."""
+        return self._c.scroll(collection_name=collection_name, **kwargs)
+
+    def get_collections(self):
+        """Explicit passthrough for get_collections."""
+        return self._c.get_collections()
+
+    def create_collection(self, collection_name: str, **kwargs):
+        """Explicit passthrough for create_collection."""
+        return self._c.create_collection(collection_name=collection_name, **kwargs)
 
     def __getattr__(self, name):
         return getattr(self._c, name)

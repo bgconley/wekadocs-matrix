@@ -22,7 +22,23 @@ class GraphBuilder:
     def __init__(self, driver: Driver, config: Config, qdrant_client=None):
         self.driver = driver
         self.config = config
-        self.qdrant_client = qdrant_client
+
+        # Wrap qdrant_client with CompatQdrantClient if it's not already wrapped
+        if qdrant_client is not None:
+            from src.shared.connections import CompatQdrantClient
+
+            if not isinstance(qdrant_client, CompatQdrantClient):
+                from qdrant_client import QdrantClient
+
+                if isinstance(qdrant_client, QdrantClient):
+                    self.qdrant_client = CompatQdrantClient(qdrant_client)
+                else:
+                    self.qdrant_client = qdrant_client
+            else:
+                self.qdrant_client = qdrant_client
+        else:
+            self.qdrant_client = None
+
         self.embedder = None
         self.embedding_version = config.embedding.version
         self.vector_primary = config.search.vector.primary
@@ -236,6 +252,15 @@ class GraphBuilder:
             )
             self.embedder = SentenceTransformer(self.config.embedding.model_name)
 
+        # Purge existing vectors for this document BEFORE upserting to prevent drift
+        if sections and self.vector_primary == "qdrant" and self.qdrant_client:
+            document_id = sections[0].get("document_id")
+            if document_id:
+                self.qdrant_client.purge_document(
+                    self.config.search.vector.qdrant.collection_name, document_id
+                )
+                logger.debug("Purged vectors for document", document_id=document_id)
+
         # Process sections
         for section in sections:
             # Compute embedding
@@ -316,23 +341,29 @@ class GraphBuilder:
     def _upsert_to_qdrant(
         self, node_id: str, embedding: List[float], metadata: Dict, label: str
     ):
-        """Upsert embedding to Qdrant."""
+        """Upsert embedding to Qdrant with exact section_id as point_id."""
         if not self.qdrant_client:
             logger.warning("Qdrant client not available")
             return
+
+        import uuid
 
         from qdrant_client.models import PointStruct
 
         collection_name = self.config.search.vector.qdrant.collection_name
 
-        # Use node_id directly as the point ID
-        # The reconciler expects exact node IDs to match between Neo4j and Qdrant
+        # Convert section_id (SHA-256 hex string) to UUID for Qdrant compatibility
+        # Use UUID5 with a namespace to ensure deterministic mapping
+        point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, node_id))
+
+        # CRITICAL: Store original node_id in payload for reconciliation
+        # Parity checks will use payload.node_id to match with Neo4j
         point = PointStruct(
-            id=node_id,  # Use node_id directly for exact parity
+            id=point_uuid,  # UUID compatible with Qdrant
             vector=embedding,
             payload={
-                "node_id": node_id,
-                "label": label,  # Use 'label' not 'node_label' to match reconciler
+                "node_id": node_id,  # Original section_id for matching
+                "label": label,
                 "document_id": metadata.get("document_id"),
                 "title": metadata.get("title"),
                 "anchor": metadata.get("anchor"),
@@ -349,6 +380,7 @@ class GraphBuilder:
         logger.debug(
             "Vector upserted to Qdrant",
             node_id=node_id,
+            point_uuid=point_uuid,
             collection=collection_name,
         )
 

@@ -3,7 +3,6 @@
 
 
 import pytest
-from qdrant_client import QdrantClient
 
 from src.ingestion.build_graph import GraphBuilder
 from src.ingestion.extract import extract_entities
@@ -201,7 +200,10 @@ class TestReconciliation:
     @pytest.fixture
     def qdrant_client(self, config):
         if config.search.vector.primary == "qdrant":
-            return QdrantClient(host="localhost", port=6333)
+            from src.shared.connections import get_connection_manager
+
+            manager = get_connection_manager()
+            return manager.get_qdrant_client()  # Returns CompatQdrantClient
         return None
 
     @pytest.fixture
@@ -312,7 +314,10 @@ class TestDriftMetrics:
     @pytest.fixture
     def qdrant_client(self, config):
         if config.search.vector.primary == "qdrant":
-            return QdrantClient(host="localhost", port=6333)
+            from src.shared.connections import get_connection_manager
+
+            manager = get_connection_manager()
+            return manager.get_qdrant_client()  # Returns CompatQdrantClient
         return None
 
     @pytest.fixture

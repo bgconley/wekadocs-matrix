@@ -48,7 +48,13 @@ class Reconciler:
             # New signature: Reconciler(neo4j, config, qdrant)
             self.config = config_or_qdrant
             self.qdrant = qdrant_client
-            self.collection = "sections"  # Use config's default
+            # Use collection from config or default
+            if hasattr(config_or_qdrant.search.vector, "qdrant") and hasattr(
+                config_or_qdrant.search.vector.qdrant, "collection_name"
+            ):
+                self.collection = config_or_qdrant.search.vector.qdrant.collection_name
+            else:
+                self.collection = collection_name or "weka_sections"
             self.version = config_or_qdrant.embedding.version
         else:
             # Test signature: Reconciler(neo4j, config, qdrant)
@@ -57,21 +63,23 @@ class Reconciler:
             self.collection = collection_name
             self.version = embedding_version
 
-    async def _graph_section_ids(self) -> Set[str]:
+    def _graph_section_ids(self) -> Set[str]:
+        """Get all Section IDs from Neo4j with matching embedding_version (synchronous)."""
         cypher = """
         MATCH (s:Section)
         WHERE s.embedding_version = $v
         RETURN s.id AS id
         """
         ids: Set[str] = set()
-        async with self.neo4j.session() as sess:
-            result = await sess.run(cypher, {"v": self.version})
-            async for rec in result:
+        with self.neo4j.session() as sess:
+            result = sess.run(cypher, {"v": self.version})
+            for rec in result:
                 ids.add(rec["id"])
         return ids
 
     def _qdrant_section_ids(self) -> Set[str]:
         # Scroll all points for the version; small datasets in tests
+        # Returns original node_ids (not UUIDs) from payload
 
         filt = Filter(
             must=[
@@ -95,6 +103,7 @@ class Reconciler:
             )
             points, next_page = res
             for p in points:
+                # Use node_id from payload (original section ID), not point.id (UUID)
                 nid = p.payload.get("node_id")
                 if nid:
                     out.add(nid)
@@ -105,10 +114,13 @@ class Reconciler:
     def _delete_points_by_node_ids(self, node_ids: List[str]) -> int:
         if not node_ids:
             return 0
-        # Support both modern and legacy delete selectors via PointIdsList
+        # Convert section IDs to UUIDs before deleting
+        import uuid
+
+        point_uuids = [str(uuid.uuid5(uuid.NAMESPACE_DNS, nid)) for nid in node_ids]
         self.qdrant.delete(
             collection_name=self.collection,
-            points_selector=PointIdsList(points=node_ids),
+            points_selector=PointIdsList(points=point_uuids),
         )
         return len(node_ids)
 
@@ -118,9 +130,12 @@ class Reconciler:
     ) -> int:
         if not records:
             return 0
+        # Convert section IDs to UUIDs for point IDs
+        import uuid
+
         pts = [
             PointStruct(
-                id=rec[0],
+                id=str(uuid.uuid5(uuid.NAMESPACE_DNS, rec[0])),  # UUID from node_id
                 vector=rec[1],
                 payload=rec[2],
             )
@@ -129,14 +144,14 @@ class Reconciler:
         self.qdrant.upsert(collection_name=self.collection, points=pts)
         return len(pts)
 
-    async def reconcile_async(
+    def reconcile_sync(
         self, embedding_fn: Optional[Callable[[str], List[float]]] = None
     ) -> DriftStats:
         """
         Make Qdrant contain exactly the Section nodes at embedding_version=self.version.
         If embedding_fn is None, uses SentenceTransformers(all-MiniLM-L6-v2) if available.
         """
-        graph_ids = await self._graph_section_ids()
+        graph_ids = self._graph_section_ids()
         vec_ids = self._qdrant_section_ids()
 
         extras = sorted(list(vec_ids - graph_ids))
@@ -151,10 +166,6 @@ class Reconciler:
                     raise RuntimeError("No embedding function available")
                 model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
-                async def _embed_text(text: str) -> List[float]:
-                    return model.encode(text).tolist()
-
-                # use _embed_text below
                 def emb_fn(t):
                     return model.encode(t).tolist()
 
@@ -168,9 +179,9 @@ class Reconciler:
             MATCH (s:Section {id: sid})
             RETURN s.id AS id, coalesce(s.content, s.title) AS text
             """
-            async with self.neo4j.session() as sess:
-                res = await sess.run(cypher, {"ids": missing})
-                async for rec in res:
+            with self.neo4j.session() as sess:
+                res = sess.run(cypher, {"ids": missing})
+                for rec in res:
                     text_map[rec["id"]] = rec["text"] or ""
 
             upserts = []
@@ -188,38 +199,46 @@ class Reconciler:
             added = 0
 
         graph_count = len(graph_ids)
-        vector_count = len(self._qdrant_section_ids())  # recount after repair
+        # Calculate drift BEFORE repair for reporting
+        initial_vector_count = len(vec_ids)
         drift_pct = (
-            0.0 if graph_count == 0 else abs(vector_count - graph_count) / graph_count
+            0.0
+            if graph_count == 0
+            else abs(initial_vector_count - graph_count) / graph_count
         )
+        # Recount after repair for final stats
+        final_vector_count = len(self._qdrant_section_ids())
 
         return DriftStats(
             embedding_version=self.version,
             graph_count=graph_count,
-            vector_count=vector_count,
+            vector_count=final_vector_count,
             extras_removed=removed,
             missing_backfilled=added,
-            drift_pct=drift_pct,
+            drift_pct=drift_pct,  # Drift before repair
         )
 
     def reconcile(
         self, embedding_fn: Optional[Callable[[str], List[float]]] = None
     ) -> Dict:
-        """Synchronous reconcile for backwards compatibility with tests."""
-        import asyncio
+        """Synchronous reconcile wrapper returning dict format."""
+        import time
 
-        stats = asyncio.run(self.reconcile_async(embedding_fn))
+        start = time.time()
+        stats = self.reconcile_sync(embedding_fn)
+        duration_ms = int((time.time() - start) * 1000)
         return {
             "drift_pct": stats.drift_pct,
             "repaired": stats.missing_backfilled,
             "removed_orphans": stats.extras_removed,
-            "total_vectorized": stats.graph_count,
+            "graph_sections_count": stats.graph_count,  # Test expects this key
             "total_in_vector_store": stats.vector_count,
+            "duration_ms": duration_ms,
         }
 
-    async def check_parity(self):
-        """Wrapper for backwards compatibility."""
-        stats = await self.reconcile_async()
+    def check_parity(self):
+        """Wrapper for backwards compatibility (synchronous)."""
+        stats = self.reconcile_sync()
         return {
             "neo4j_count": stats.graph_count,
             "qdrant_count": stats.vector_count,
