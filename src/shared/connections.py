@@ -3,7 +3,9 @@
 # See: /docs/expert-coder-guidance.md → 1.2 (connection pools, graceful shutdown)
 # Connection pools for Neo4j, Qdrant, and Redis
 
-from typing import Optional
+import string
+import uuid
+from typing import Any, Dict, Iterable, Optional, Sequence
 
 import redis.asyncio as aioredis
 from neo4j import Driver, GraphDatabase
@@ -23,78 +25,107 @@ from .observability import get_logger
 logger = get_logger(__name__)
 
 
-def _normalize_points_selector(kwargs):
-    """
-    Accepts either `points=[ids]` or `points_selector={<filter or ids>}` and
-    returns a proper selector object.
-    """
-    if "points_selector" in kwargs:
-        ps = kwargs["points_selector"]
-        # Already a model type?
-        if hasattr(ps, "dict") or hasattr(ps, "model_fields"):
-            return ps
-        # Plain list (test passes points_selector=[id1, id2, ...])
-        if isinstance(ps, list):
-            return PointIdsList(points=ps)
-        # Dict with 'filter'
-        if isinstance(ps, dict) and "filter" in ps:
-            f = ps["filter"]
-            # Try to map a simple {"must":[{"key":..,"match":{"value":..}}, ...]}
-            must = []
-            for cond in f.get("must", []):
-                match = cond.get("match", {})
-                must.append(
-                    FieldCondition(
-                        key=cond["key"], match=MatchValue(value=match.get("value"))
-                    )
-                )
-            return FilterSelector(filter=Filter(must=must))
-        # Dict with 'points'
-        if isinstance(ps, dict) and "points" in ps:
-            return PointIdsList(points=ps["points"])
+def _as_sequence(points: Iterable[str] | str | None) -> Sequence[str]:
+    if points is None:
+        return ()
+    if isinstance(points, (list, tuple, set)):
+        return list(points)
+    return [points]
 
-    if "points" in kwargs:
-        return PointIdsList(points=kwargs["points"])
+
+def _convert_point_id(point_id: str) -> str:
+    if (
+        isinstance(point_id, str)
+        and len(point_id) == 64
+        and all(ch in string.hexdigits for ch in point_id)
+    ):
+        return str(uuid.uuid5(uuid.NAMESPACE_DNS, point_id))
+    return point_id
+
+
+def _normalize_points_selector(
+    *,
+    points: Optional[Iterable[str]] = None,
+    points_selector: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Accepts either `points=[ids]` or `points_selector={<filter or ids>}`
+    and returns kwargs suitable for Qdrant delete APIs.
+    """
+    if points_selector is not None:
+        ps = points_selector
+        if isinstance(ps, PointIdsList):
+            converted = [_convert_point_id(pid) for pid in ps.points]
+            return {"points_selector": PointIdsList(points=converted)}
+        if isinstance(ps, FilterSelector):
+            return {"points_selector": ps}
+        if hasattr(ps, "dict") or hasattr(ps, "model_fields"):
+            return {"points_selector": ps}
+        if isinstance(ps, (list, tuple, set)):
+            converted = [_convert_point_id(pid) for pid in ps]
+            return {"points_selector": PointIdsList(points=converted)}
+        if isinstance(ps, dict):
+            filt = ps.get("filter")
+            if filt:
+                must = []
+                for cond in filt.get("must", []):
+                    match = cond.get("match", {})
+                    must.append(
+                        FieldCondition(
+                            key=cond.get("key"),
+                            match=MatchValue(value=match.get("value")),
+                        )
+                    )
+                return {"points_selector": FilterSelector(filter=Filter(must=must))}
+            if "points" in ps:
+                converted = [
+                    _convert_point_id(pid) for pid in _as_sequence(ps["points"])
+                ]
+                return {"points_selector": PointIdsList(points=converted)}
+
+    if points is not None:
+        converted = [_convert_point_id(pid) for pid in _as_sequence(points)]
+        return {"points_selector": PointIdsList(points=converted)}
 
     raise ValueError(
         "Unsupported points selector. Provide `points=[...]` or `points_selector=Filter/PointIdsList`."
     )
 
 
-class CompatQdrantClient:
+class CompatQdrantClient(QdrantClient):
     """
-    Thin adapter to tolerate different delete() call shapes used by tests.
-    Handles conversion of section_ids to UUIDs for point operations.
-    Other methods are proxied to the real client.
+    Subclass of QdrantClient that normalizes delete selectors and converts
+    deterministic Section IDs (SHA-256 hex) to UUIDs expected by the vector store.
     """
 
-    def __init__(self, client: QdrantClient):
-        self._c = client
+    def __init__(self, *args, **kwargs):
+        if args and isinstance(args[0], QdrantClient):
+            base_client: QdrantClient = args[0]
+            self.__dict__ = base_client.__dict__
+        else:
+            super().__init__(*args, **kwargs)
+
+    def delete_compat(
+        self,
+        collection_name: str,
+        *,
+        points: Optional[Iterable[str]] = None,
+        points_selector: Optional[Any] = None,
+        wait: bool = True,
+    ):
+        normalized = _normalize_points_selector(
+            points=points, points_selector=points_selector
+        )
+        return super().delete(collection_name=collection_name, wait=wait, **normalized)
 
     def delete(self, collection_name: str, wait: bool | None = None, **kwargs):
-        """
-        Delete points, with automatic conversion of section IDs to UUIDs.
-        Accepts points_selector as list of IDs or typed selector.
-        """
-        selector = _normalize_points_selector(kwargs)
-
-        # If selector is PointIdsList, convert section IDs to UUIDs
-        if isinstance(selector, PointIdsList):
-            import uuid
-
-            # Convert each ID to UUID using same scheme as build_graph
-            uuid_points = []
-            for point_id in selector.points:
-                # If it looks like a hex hash (64 chars), convert to UUID
-                if isinstance(point_id, str) and len(point_id) == 64:
-                    uuid_points.append(str(uuid.uuid5(uuid.NAMESPACE_DNS, point_id)))
-                else:
-                    # Already a UUID or other format, keep as-is
-                    uuid_points.append(point_id)
-            selector = PointIdsList(points=uuid_points)
-
-        return self._c.delete(
-            collection_name=collection_name, points_selector=selector, wait=wait
+        normalized = _normalize_points_selector(
+            points=kwargs.pop("points", None),
+            points_selector=kwargs.pop("points_selector", None),
+        )
+        wait_arg = wait if wait is not None else kwargs.pop("wait", True)
+        return super().delete(
+            collection_name=collection_name, wait=wait_arg, **normalized
         )
 
     def purge_document(self, collection_name: str, document_id: str):
@@ -104,30 +135,11 @@ class CompatQdrantClient:
                 FieldCondition(key="document_id", match=MatchValue(value=document_id))
             ]
         )
-        return self._c.delete(
+        return super().delete(
             collection_name=collection_name,
             points_selector=FilterSelector(filter=filt),
             wait=True,
         )
-
-    def upsert(self, collection_name: str, points, **kwargs):
-        """Explicit passthrough for upsert to avoid serialization issues."""
-        return self._c.upsert(collection_name=collection_name, points=points, **kwargs)
-
-    def scroll(self, collection_name: str, **kwargs):
-        """Explicit passthrough for scroll."""
-        return self._c.scroll(collection_name=collection_name, **kwargs)
-
-    def get_collections(self):
-        """Explicit passthrough for get_collections."""
-        return self._c.get_collections()
-
-    def create_collection(self, collection_name: str, **kwargs):
-        """Explicit passthrough for create_collection."""
-        return self._c.create_collection(collection_name=collection_name, **kwargs)
-
-    def __getattr__(self, name):
-        return getattr(self._c, name)
 
 
 class ConnectionManager:
@@ -177,12 +189,12 @@ class ConnectionManager:
                 host=self.settings.qdrant_host,
                 port=self.settings.qdrant_port,
             )
-            raw_client = QdrantClient(
+            raw_client = CompatQdrantClient(
                 host=self.settings.qdrant_host,
                 port=self.settings.qdrant_port,
                 timeout=30,
             )
-            self._qdrant_client = CompatQdrantClient(raw_client)
+            self._qdrant_client = raw_client
             logger.info("Qdrant client initialized successfully")
         return self._qdrant_client
 
@@ -190,9 +202,7 @@ class ConnectionManager:
         """Close Qdrant client"""
         if self._qdrant_client:
             logger.info("Closing Qdrant client")
-            # Close the underlying client
-            if hasattr(self._qdrant_client, "_c"):
-                self._qdrant_client._c.close()
+            self._qdrant_client.close()
             self._qdrant_client = None
 
     # Redis

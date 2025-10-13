@@ -6,7 +6,7 @@
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from neo4j import Driver
 from sentence_transformers import SentenceTransformer
@@ -298,16 +298,46 @@ class GraphBuilder:
             self.embedder = SentenceTransformer(self.config.embedding.model_name)
 
         # Purge existing vectors for this document BEFORE upserting to prevent drift
-        if sections and self.vector_primary == "qdrant" and self.qdrant_client:
-            document_id = document.get("id") or sections[0].get("document_id")
-            if document_id:
-                self.qdrant_client.purge_document(
-                    self.config.search.vector.qdrant.collection_name, document_id
-                )
-                logger.debug("Purged vectors for document", document_id=document_id)
-
         source_uri = document.get("source_uri", "")
         document_uri = Path(source_uri).name if source_uri else source_uri
+
+        if sections and self.vector_primary == "qdrant" and self.qdrant_client:
+            collection_name = self.config.search.vector.qdrant.collection_name
+            filter_must = [
+                {"key": "node_label", "match": {"value": "Section"}},
+                {
+                    "key": "embedding_version",
+                    "match": {"value": self.embedding_version},
+                },
+            ]
+            if source_uri:
+                filter_must.append(
+                    {"key": "document_uri", "match": {"value": source_uri}}
+                )
+            else:
+                document_id = document.get("id") or sections[0].get("document_id")
+                if document_id:
+                    filter_must.append(
+                        {"key": "document_id", "match": {"value": document_id}}
+                    )
+            try:
+                self.qdrant_client.delete_compat(
+                    collection_name=collection_name,
+                    points_selector={"filter": {"must": filter_must}},
+                    wait=True,
+                )
+                logger.debug(
+                    "Purged existing vectors for document",
+                    collection=collection_name,
+                    document_uri=source_uri or document.get("id"),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to purge existing vectors before upsert",
+                    error=str(exc),
+                    collection=collection_name,
+                    document_uri=source_uri or document.get("id"),
+                )
 
         # Process sections
         for section in sections:
@@ -494,7 +524,14 @@ class GraphBuilder:
 
 
 # Integration test wrapper
-def ingest_document(source_uri: str, content: str, format: str = "markdown") -> Dict:
+def ingest_document(
+    source_uri: str,
+    content: str,
+    format: str = "markdown",
+    *,
+    embedding_model: Optional[str] = None,
+    embedding_version: Optional[str] = None,
+) -> Dict:
     """
     Top-level function for ingesting a document.
 
@@ -507,14 +544,32 @@ def ingest_document(source_uri: str, content: str, format: str = "markdown") -> 
         Ingestion stats
     """
     from neo4j import GraphDatabase
-    from qdrant_client import QdrantClient
 
     from src.ingestion.extract import extract_entities
     from src.ingestion.parsers.markdown import parse_markdown
     from src.shared.config import get_config, get_settings
+    from src.shared.connections import CompatQdrantClient
 
     config = get_config()
     settings = get_settings()
+
+    # Allow optional overrides prior to ingestion
+    if embedding_model:
+        try:
+            config.embedding.model_name = embedding_model
+        except Exception:
+            logger.warning(
+                "Failed to override embedding model via ingest_document",
+                requested_model=embedding_model,
+            )
+    if embedding_version:
+        try:
+            config.embedding.version = embedding_version
+        except Exception:
+            logger.warning(
+                "Failed to override embedding version via ingest_document",
+                requested_version=embedding_version,
+            )
 
     # Initialize clients
     neo4j_driver = GraphDatabase.driver(
@@ -525,7 +580,7 @@ def ingest_document(source_uri: str, content: str, format: str = "markdown") -> 
 
     qdrant_client = None
     if config.search.vector.primary == "qdrant" or config.search.vector.dual_write:
-        qdrant_client = QdrantClient(
+        qdrant_client = CompatQdrantClient(
             host=settings.qdrant_host, port=settings.qdrant_port, timeout=30
         )
 

@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 
 from neo4j import Driver
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointIdsList, PointStruct
+from qdrant_client.models import PointStruct
 
 
 @dataclass
@@ -146,14 +146,10 @@ class IncrementalUpdater:
 
             # Delete vectors
             if self.qdrant:
-                # Convert section IDs to UUIDs for deletion
-                point_uuids = [
-                    str(uuid.uuid5(uuid.NAMESPACE_DNS, sid))
-                    for sid in internal_diff.deletes
-                ]
-                self.qdrant.delete(
+                self.qdrant.delete_compat(
                     collection_name=self.collection,
-                    points_selector=PointIdsList(points=point_uuids),
+                    points=internal_diff.deletes,
+                    wait=True,
                 )
 
         # 2) Upsert added/modified sections
