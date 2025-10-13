@@ -1,0 +1,11 @@
+[run]
+branch = True
+source =
+    src
+omit =
+    src/mcp_server/**/generated_*
+    */__init__.py
+
+[report]
+show_missing = True
+precision = 2

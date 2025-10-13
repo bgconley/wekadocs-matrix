@@ -56,6 +56,30 @@ python scripts/test/summarize.py \
   --junit "${REPORTS_DIR}/junit.xml" \
   --out "${REPORTS_DIR}/summary.json"
 
+if [ "${PHASE}" = "3" ]; then
+  if ! python scripts/test/check_phase3_metrics.py "${REPORTS_DIR}/summary.json"; then
+    PYTEST_EXIT_CODE=1
+  fi
+fi
+
+if [ -f .coveragerc ]; then
+  GLOBAL_DIR="reports/global"
+  echo "Generating global coverage report into ${GLOBAL_DIR}"
+  mkdir -p "${GLOBAL_DIR}"
+  coverage erase
+  GLOBAL_PYTEST_LOG="${GLOBAL_DIR}/pytest.out"
+  set +e
+  COVERAGE_FILE="${GLOBAL_DIR}/.coverage" coverage run -m pytest -q \
+    | tee "${GLOBAL_PYTEST_LOG}"
+  GLOBAL_STATUS=${PIPESTATUS[0]}
+  set -e
+  coverage xml -o "${GLOBAL_DIR}/coverage.xml" || true
+  coverage html -d "${GLOBAL_DIR}/coverage" >/dev/null 2>&1 || true
+  if [ "${GLOBAL_STATUS}" -ne 0 ]; then
+    echo "Global coverage run exited with status ${GLOBAL_STATUS}" >&2
+  fi
+fi
+
 echo ""
 echo "=== Reports Generated ==="
 echo "JUnit XML: ${REPORTS_DIR}/junit.xml"

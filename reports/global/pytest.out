@@ -1,0 +1,114 @@
+........................................................................ [ 41%]
+..............F......................................................... [ 82%]
+...............................                                          [100%]
+=================================== FAILURES ===================================
+________________ TestHybridSearch.test_hybrid_search_distances _________________
+
+self = <p2_t3_test.TestHybridSearch object at 0x115afd690>
+search_engine = <src.query.hybrid_search.HybridSearchEngine object at 0x11bc2f190>
+
+    def test_hybrid_search_distances(self, search_engine):
+        """Test that expanded results have higher distances."""
+        results = search_engine.search("installation", k=10, expand_graph=True)
+
+        distances = [r.distance for r in results.results]
+        # Should have mix of distance 0 (seeds) and higher (expanded)
+        assert 0 in distances
+        if len(results.results) > 3:
+>           assert any(d > 0 for d in distances)
+E           assert False
+E            +  where False = any(<generator object TestHybridSearch.test_hybrid_search_distances.<locals>.<genexpr> at 0x11bbb58a0>)
+
+tests/p2_t3_test.py:134: AssertionError
+=============================== warnings summary ===============================
+../../../../opt/homebrew/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149
+  /opt/homebrew/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_name" has conflict with protected namespace "model_".
+
+  You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+    warnings.warn(
+
+../../../../opt/homebrew/lib/python3.11/site-packages/pydantic/_internal/_fields.py:184
+  /opt/homebrew/lib/python3.11/site-packages/pydantic/_internal/_fields.py:184: UserWarning: Field name "schema" shadows an attribute in parent "BaseModel";
+    warnings.warn(
+
+../../../../opt/homebrew/lib/python3.11/site-packages/pydantic/_internal/_config.py:271
+  /opt/homebrew/lib/python3.11/site-packages/pydantic/_internal/_config.py:271: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.5/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+../../../../opt/homebrew/lib/python3.11/site-packages/opentelemetry/instrumentation/dependencies.py:4
+  /opt/homebrew/lib/python3.11/site-packages/opentelemetry/instrumentation/dependencies.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+    from pkg_resources import (
+
+tests/p2_t3_test.py:242
+  /Users/brennanconley/vibecode/wekadocs-matrix/tests/p2_t3_test.py:242: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+tests/p2_t3_test.py:279
+  /Users/brennanconley/vibecode/wekadocs-matrix/tests/p2_t3_test.py:279: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+tests/p2_t3_test.py:301
+  /Users/brennanconley/vibecode/wekadocs-matrix/tests/p2_t3_test.py:301: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+tests/p1_t1_test.py::test_redis_connectivity
+  /opt/homebrew/lib/python3.11/site-packages/pytest_asyncio/plugin.py:749: DeprecationWarning: The event_loop fixture provided by pytest-asyncio has been redefined in
+  /Users/brennanconley/vibecode/wekadocs-matrix/tests/conftest.py:24
+  Replacing the event_loop fixture with a custom implementation is deprecated
+  and will lead to errors in the future.
+  If you want to request an asyncio event loop with a scope other than function
+  scope, use the "scope" argument to the asyncio mark when marking the tests.
+  If you want to return different types of event loops, use the event_loop_policy
+  fixture.
+
+    warnings.warn(
+
+tests/p1_t1_test.py::test_redis_connectivity
+  /Users/brennanconley/vibecode/wekadocs-matrix/tests/p1_t1_test.py:77: DeprecationWarning: Call to deprecated close. (Use aclose() instead) -- Deprecated since version 5.0.0.
+    await client.close()
+
+tests/p1_t1_test.py::test_health_endpoint
+  /Users/brennanconley/vibecode/wekadocs-matrix/src/mcp_server/main.py:103: DeprecationWarning:
+          on_event is deprecated, use lifespan event handlers instead.
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    @app.on_event("startup")
+
+tests/p1_t1_test.py::test_health_endpoint
+tests/p1_t1_test.py::test_health_endpoint
+  /opt/homebrew/lib/python3.11/site-packages/fastapi/applications.py:4495: DeprecationWarning:
+          on_event is deprecated, use lifespan event handlers instead.
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    return self.router.on_event(event_type)
+
+tests/p1_t1_test.py::test_health_endpoint
+  /Users/brennanconley/vibecode/wekadocs-matrix/src/mcp_server/main.py:115: DeprecationWarning:
+          on_event is deprecated, use lifespan event handlers instead.
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    @app.on_event("shutdown")
+
+tests/p1_t2_test.py::test_async_connection_pools
+tests/p5_t4_test.py::test_scaffold_smoke
+  /Users/brennanconley/vibecode/wekadocs-matrix/src/shared/connections.py:237: DeprecationWarning: Call to deprecated close. (Use aclose() instead) -- Deprecated since version 5.0.0.
+    await self._redis_client.close()
+
+tests/p2_t3_test.py: 55 warnings
+tests/p3_t3_integration_test.py: 48 warnings
+tests/p3_t3_test.py: 106 warnings
+tests/p3_t4_integration_test.py: 52 warnings
+tests/p3_t4_test.py: 74 warnings
+  /opt/homebrew/lib/python3.11/site-packages/httpx/_content.py:204: DeprecationWarning: Use 'content=<...>' to upload raw bytes/text content.
+    warnings.warn(message, DeprecationWarning)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/p2_t3_test.py::TestHybridSearch::test_hybrid_search_distances - ...
+1 failed, 174 passed, 350 warnings in 52.12s

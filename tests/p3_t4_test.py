@@ -198,6 +198,42 @@ Content C
             diff, sections2, entities2, mentions2
         )
 
+    def test_compute_diff_heading_rename(
+        self, graph_builder, incremental_updater, neo4j_driver
+    ):
+        """Renaming a heading should register as remove+add, not checksum modifications."""
+
+        original = """# Rename Test
+
+## Section 1
+Body stays the same.
+"""
+        result_before = parse_markdown("test://incremental-rename", original)
+        document = result_before["Document"]
+        sections_before = result_before["Sections"]
+        entities_before, mentions_before = extract_entities(sections_before)
+
+        graph_builder.upsert_document(
+            document, sections_before, entities_before, mentions_before
+        )
+
+        renamed = """# Rename Test
+
+## Updated Section 1
+Body stays the same.
+"""
+        result_after = parse_markdown("test://incremental-rename", renamed)
+        sections_after = result_after["Sections"]
+
+        diff = incremental_updater.compute_diff(document["id"], sections_after)
+
+        assert diff["total_changes"] == 2
+        assert len(diff["added"]) == 1
+        assert len(diff["removed"]) == 1
+        assert not diff[
+            "modified"
+        ], "Heading rename should not report modified checksums"
+
         # Verify no staged sections remain
         with neo4j_driver.session() as session:
             result = session.run("MATCH (s:Section_Staged) RETURN count(s) as count")
