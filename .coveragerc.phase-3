@@ -1,0 +1,14 @@
+[run]
+branch = True
+source =
+    src/ingestion
+    src/shared
+omit =
+    src/query/*
+    src/mcp_server/*
+    src/learning/*
+    src/ops/*
+    */__init__.py
+
+[report]
+fail_under = 80

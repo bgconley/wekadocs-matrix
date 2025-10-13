@@ -1,0 +1,61 @@
+...........................................                              [100%]
+=============================== warnings summary ===============================
+../../../../opt/homebrew/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149
+  /opt/homebrew/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_name" has conflict with protected namespace "model_".
+
+  You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+    warnings.warn(
+
+../../../../opt/homebrew/lib/python3.11/site-packages/pydantic/_internal/_fields.py:184
+  /opt/homebrew/lib/python3.11/site-packages/pydantic/_internal/_fields.py:184: UserWarning: Field name "schema" shadows an attribute in parent "BaseModel";
+    warnings.warn(
+
+../../../../opt/homebrew/lib/python3.11/site-packages/pydantic/_internal/_config.py:271
+  /opt/homebrew/lib/python3.11/site-packages/pydantic/_internal/_config.py:271: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.5/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+../../../../opt/homebrew/lib/python3.11/site-packages/opentelemetry/instrumentation/dependencies.py:4
+  /opt/homebrew/lib/python3.11/site-packages/opentelemetry/instrumentation/dependencies.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+    from pkg_resources import (
+
+tests/p3_t3_integration_test.py: 48 warnings
+tests/p3_t3_test.py: 106 warnings
+tests/p3_t4_integration_test.py: 51 warnings
+tests/p3_t4_test.py: 74 warnings
+  /opt/homebrew/lib/python3.11/site-packages/httpx/_content.py:204: DeprecationWarning: Use 'content=<...>' to upload raw bytes/text content.
+    warnings.warn(message, DeprecationWarning)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /Users/brennanconley/vibecode/wekadocs-matrix/reports/phase-3/junit.xml -
+
+--------- coverage: platform darwin, python 3.11.13-final-0 ----------
+Name                                   Stmts   Miss Branch BrPart  Cover
+------------------------------------------------------------------------
+src/ingestion/__init__.py                  2      0      0      0   100%
+src/ingestion/api.py                       4      0      0      0   100%
+src/ingestion/build_graph.py             217     32     54     10    83%
+src/ingestion/extract/__init__.py         27      0     10      0   100%
+src/ingestion/extract/commands.py        106     26     36      8    70%
+src/ingestion/extract/configs.py         111      3     36      6    94%
+src/ingestion/extract/procedures.py       42      1     12      2    94%
+src/ingestion/incremental.py              76      8     22      7    81%
+src/ingestion/parsers/html.py            102     11     40     11    82%
+src/ingestion/parsers/markdown.py        120     15     42      7    83%
+src/ingestion/reconcile.py               118     18     30      7    83%
+src/ingestion/worker.py                   27     27      2      0     0%
+src/shared/__init__.py                     4      0      0      0   100%
+src/shared/audit/__init__.py               2      0      0      0   100%
+src/shared/audit/logger.py                58     41     22      0    21%
+src/shared/cache.py                        0      0      0      0   100%
+src/shared/config.py                     127      4      8      2    96%
+src/shared/connections.py                137     57     46      7    54%
+src/shared/observability/__init__.py       3      0      0      0   100%
+src/shared/observability/logging.py       45     23      4      0    45%
+src/shared/observability/tracing.py       31     18      2      0    39%
+src/shared/schema.py                     107    107     22      0     0%
+------------------------------------------------------------------------
+TOTAL                                   1466    391    388     67    70%
+Coverage HTML written to dir reports/phase-3/coverage
+Coverage XML written to file reports/phase-3/coverage.xml
+
+43 passed, 283 warnings in 47.51s
