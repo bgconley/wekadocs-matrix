@@ -8,6 +8,8 @@ from typing import Optional
 import redis.asyncio as aioredis
 from neo4j import Driver, GraphDatabase
 from qdrant_client import QdrantClient
+from qdrant_client.models import (FieldCondition, Filter, MatchValue,
+                                  PointIdsList)
 from redis.asyncio.connection import ConnectionPool
 
 from .config import Settings, get_settings
@@ -16,13 +18,64 @@ from .observability import get_logger
 logger = get_logger(__name__)
 
 
+def _normalize_points_selector(kwargs):
+    """
+    Accepts either `points=[ids]` or `points_selector={<filter or ids>}` and
+    returns a proper selector object.
+    """
+    if "points_selector" in kwargs:
+        ps = kwargs["points_selector"]
+        # Already a model type?
+        if hasattr(ps, "dict") or hasattr(ps, "model_fields"):
+            return ps
+        # Dict with 'filter'
+        if isinstance(ps, dict) and "filter" in ps:
+            f = ps["filter"]
+            # Try to map a simple {"must":[{"key":..,"match":{"value":..}}, ...]}
+            must = []
+            for cond in f.get("must", []):
+                must.append(
+                    FieldCondition(
+                        key=cond["key"], match=MatchValue(value=cond["match"]["value"])
+                    )
+                )
+            return Filter(must=must)
+        # Dict with 'points'
+        if isinstance(ps, dict) and "points" in ps:
+            return PointIdsList(points=ps["points"])
+
+    if "points" in kwargs:
+        return PointIdsList(points=kwargs["points"])
+
+    raise ValueError(
+        "Unsupported points selector. Provide `points=[...]` or `points_selector=Filter/PointIdsList`."
+    )
+
+
+class CompatQdrantClient:
+    """
+    Thin adapter to tolerate different delete() call shapes used by tests.
+    Other methods are proxied to the real client.
+    """
+
+    def __init__(self, client: QdrantClient):
+        self._c = client
+
+    def delete(self, collection_name: str, **kwargs):
+        selector = _normalize_points_selector(kwargs)
+        return self._c.delete(collection_name=collection_name, points_selector=selector)
+
+    def __getattr__(self, name):
+        return getattr(self._c, name)
+
+
 class ConnectionManager:
     """Manages connections to Neo4j, Qdrant, and Redis"""
 
     def __init__(self, settings: Optional[Settings] = None):
         self.settings = settings or get_settings()
         self._neo4j_driver: Optional[Driver] = None
-        self._qdrant_client: Optional[QdrantClient] = None
+        self._qdrant_client: Optional[CompatQdrantClient] = None
         self._redis_pool: Optional[ConnectionPool] = None
         self._redis_client: Optional[aioredis.Redis] = None
 
@@ -55,19 +108,20 @@ class ConnectionManager:
             self._neo4j_driver = None
 
     # Qdrant
-    def get_qdrant_client(self) -> QdrantClient:
-        """Get or create Qdrant client"""
+    def get_qdrant_client(self) -> CompatQdrantClient:
+        """Get or create Qdrant client with compatibility wrapper"""
         if self._qdrant_client is None:
             logger.info(
                 "Initializing Qdrant client",
                 host=self.settings.qdrant_host,
                 port=self.settings.qdrant_port,
             )
-            self._qdrant_client = QdrantClient(
+            raw_client = QdrantClient(
                 host=self.settings.qdrant_host,
                 port=self.settings.qdrant_port,
                 timeout=30,
             )
+            self._qdrant_client = CompatQdrantClient(raw_client)
             logger.info("Qdrant client initialized successfully")
         return self._qdrant_client
 
@@ -75,7 +129,9 @@ class ConnectionManager:
         """Close Qdrant client"""
         if self._qdrant_client:
             logger.info("Closing Qdrant client")
-            self._qdrant_client.close()
+            # Close the underlying client
+            if hasattr(self._qdrant_client, "_c"):
+                self._qdrant_client._c.close()
             self._qdrant_client = None
 
     # Redis

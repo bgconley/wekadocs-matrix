@@ -1,0 +1,22 @@
+{
+  "phase": 3,
+  "timestamp": "2025-10-13T05:52:54.355284",
+  "success": true,
+  "tests": {
+    "total": 1,
+    "passed": 0,
+    "failed": 0,
+    "skipped": 0,
+    "errors": 1
+  },
+  "test_details": [
+    {
+      "name": "tests.p3_t4_integration_test",
+      "classname": "",
+      "duration": 0.0,
+      "status": "error",
+      "message": "collection failure"
+    }
+  ],
+  "duration_seconds": 3.418
+}

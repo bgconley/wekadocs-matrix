@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WekaFS Quick Reference</title>
+</head>
+<body>
+    <h1>WekaFS Quick Reference</h1>
+
+    <p>This is a quick reference guide for WekaFS administrators.</p>
+
+    <h2>Essential Commands</h2>
+
+    <p>The most commonly used commands:</p>
+
+    <ul>
+        <li><code>weka status</code> - Check cluster status</li>
+        <li><code>weka mount</code> - Mount a filesystem</li>
+        <li><code>weka cluster info</code> - View cluster information</li>
+    </ul>
+
+    <h2>Configuration Files</h2>
+
+    <p>Important configuration files to know:</p>
+
+    <table border="1">
+        <tr>
+            <th>File</th>
+            <th>Purpose</th>
+            <th>Location</th>
+        </tr>
+        <tr>
+            <td>weka.conf</td>
+            <td>Main configuration</td>
+            <td>/etc/weka/weka.conf</td>
+        </tr>
+        <tr>
+            <td>network.conf</td>
+            <td>Network settings</td>
+            <td>/etc/weka/network.conf</td>
+        </tr>
+        <tr>
+            <td>storage.conf</td>
+            <td>Storage configuration</td>
+            <td>/etc/weka/storage.conf</td>
+        </tr>
+    </table>
+
+    <h2>Common Procedures</h2>
+
+    <h3>How to Add a Node</h3>
+
+    <p>Follow these steps to add a new node to your cluster:</p>
+
+    <ol>
+        <li>Install Weka on the new node</li>
+        <li>Configure network connectivity</li>
+        <li>Join the cluster: <code>weka cluster join --ip=MASTER_IP</code></li>
+        <li>Verify node status: <code>weka cluster nodes</code></li>
+    </ol>
+
+    <h3>How to Create a Filesystem</h3>
+
+    <p>Creating a new filesystem:</p>
+
+    <pre>
+weka filesystem create my-fs \
+    --capacity=10TB \
+    --stripe-width=1M \
+    --replica-count=2
+    </pre>
+
+    <h2>Environment Variables</h2>
+
+    <p>Set these environment variables for optimal operation:</p>
+
+    <ul>
+        <li><code>WEKA_HOME=/opt/weka</code></li>
+        <li><code>WEKA_CONFIG_PATH=/etc/weka</code></li>
+        <li><code>WEKA_LOG_LEVEL=INFO</code></li>
+    </ul>
+</body>
+</html>

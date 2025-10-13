@@ -18,9 +18,21 @@ class EmbeddingConfig(BaseModel):
     version: str = "v1"
 
 
+class QdrantVectorConfig(BaseModel):
+    collection_name: str = "weka_sections"
+    use_grpc: bool = False
+    timeout: int = 30
+
+
+class Neo4jVectorConfig(BaseModel):
+    index_name: str = "section_embeddings"
+
+
 class VectorSearchConfig(BaseModel):
     primary: str = "qdrant"
     dual_write: bool = False
+    qdrant: QdrantVectorConfig
+    neo4j: Neo4jVectorConfig
 
 
 class HybridSearchConfig(BaseModel):
@@ -68,6 +80,20 @@ class TelemetryConfig(BaseModel):
     enabled: bool = True
 
 
+class ReconciliationConfig(BaseModel):
+    enabled: bool = True
+    schedule: str = "0 2 * * *"
+    drift_threshold: float = 0.01
+
+
+class IngestionConfig(BaseModel):
+    batch_size: int = 500
+    max_section_tokens: int = 1000
+    timeout_seconds: int = 300
+    workers: int = 2
+    reconciliation: ReconciliationConfig
+
+
 class SchemaConfig(BaseModel):
     version: str = "v1"
     auto_migrate: bool = False
@@ -91,6 +117,7 @@ class Config(BaseModel):
     audit: AuditConfig
     validator: ValidatorConfig
     telemetry: TelemetryConfig
+    ingestion: IngestionConfig
     schema: SchemaConfig
 
 
