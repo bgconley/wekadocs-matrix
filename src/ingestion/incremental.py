@@ -188,8 +188,10 @@ class IncrementalUpdater:
                             vector=[0.0] * 384,  # placeholder
                             payload={
                                 "node_id": sec["id"],
-                                "label": "Section",
+                                "node_label": "Section",
                                 "document_id": document_id,
+                                "document_uri": sec.get("source_uri")
+                                or sec.get("document_uri"),
                                 "embedding_version": self.version,
                             },
                         )

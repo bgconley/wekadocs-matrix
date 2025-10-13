@@ -9,7 +9,9 @@ repos:
         args: [--fix]
   - repo: https://github.com/pycqa/isort
     rev: 5.13.2
-    hooks: [{ id: isort }]
+    hooks:
+      - id: isort
+        args: [--profile=black]
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:

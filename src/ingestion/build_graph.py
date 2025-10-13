@@ -5,6 +5,7 @@
 
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List
 
 from neo4j import Driver
@@ -90,6 +91,17 @@ class GraphBuilder:
                 session, document["id"], sections
             )
 
+            # Step 2b: Remove stale sections no longer present
+            removed = self._remove_missing_sections(
+                session, document["id"], [s["id"] for s in sections]
+            )
+            if removed:
+                logger.debug(
+                    "Removed stale sections",
+                    document_id=document["id"],
+                    removed_count=removed,
+                )
+
             # Step 3: Upsert Entities in batches
             stats["entities_upserted"] = self._upsert_entities(session, entities)
 
@@ -97,9 +109,23 @@ class GraphBuilder:
             stats["mentions_created"] = self._create_mentions(session, mentions)
 
         # Step 5: Compute embeddings and upsert to vector store
-        embedding_stats = self._process_embeddings(sections, entities)
+        embedding_stats = self._process_embeddings(document, sections, entities)
         stats["embeddings_computed"] = embedding_stats["computed"]
         stats["vectors_upserted"] = embedding_stats["upserted"]
+
+        # Optional reconciliation step to repair drift for legacy data
+        if (
+            self.config.ingestion.reconciliation.enabled
+            and self.qdrant_client
+            and self.vector_primary == "qdrant"
+        ):
+            from src.ingestion.reconcile import Reconciler
+
+            try:
+                reconciler = Reconciler(self.driver, self.config, self.qdrant_client)
+                reconciler.reconcile()
+            except Exception as exc:
+                logger.warning("Reconciliation after upsert failed", error=str(exc))
 
         stats["duration_ms"] = int((time.time() - start_time) * 1000)
         logger.info("Graph upsert complete", stats=stats)
@@ -161,6 +187,25 @@ class GraphBuilder:
             )
 
         return total_sections
+
+    def _remove_missing_sections(
+        self, session, document_id: str, valid_section_ids: List[str]
+    ) -> int:
+        """Remove sections that are no longer present in the latest ingestion."""
+        query = """
+        MATCH (d:Document {id: $document_id})-[r:HAS_SECTION]->(s:Section)
+        WHERE NOT s.id IN $section_ids
+        WITH s
+        DETACH DELETE s
+        RETURN count(s) AS removed
+        """
+        result = session.run(
+            query,
+            document_id=document_id,
+            section_ids=valid_section_ids or [],
+        )
+        record = result.single()
+        return record["removed"] if record else 0
 
     def _upsert_entities(self, session, entities: Dict[str, Dict]) -> int:
         """Upsert Entity nodes in batches."""
@@ -240,7 +285,7 @@ class GraphBuilder:
         return total_mentions
 
     def _process_embeddings(
-        self, sections: List[Dict], entities: Dict[str, Dict]
+        self, document: Dict, sections: List[Dict], entities: Dict[str, Dict]
     ) -> Dict:
         """Compute embeddings and upsert to vector store."""
         stats = {"computed": 0, "upserted": 0}
@@ -254,15 +299,20 @@ class GraphBuilder:
 
         # Purge existing vectors for this document BEFORE upserting to prevent drift
         if sections and self.vector_primary == "qdrant" and self.qdrant_client:
-            document_id = sections[0].get("document_id")
+            document_id = document.get("id") or sections[0].get("document_id")
             if document_id:
                 self.qdrant_client.purge_document(
                     self.config.search.vector.qdrant.collection_name, document_id
                 )
                 logger.debug("Purged vectors for document", document_id=document_id)
 
+        source_uri = document.get("source_uri", "")
+        document_uri = Path(source_uri).name if source_uri else source_uri
+
         # Process sections
         for section in sections:
+            section.setdefault("source_uri", source_uri)
+            section.setdefault("document_uri", document_uri)
             # Compute embedding
             text_to_embed = self._build_section_text_for_embedding(section)
             embedding = self.embedder.encode(text_to_embed).tolist()
@@ -270,7 +320,9 @@ class GraphBuilder:
 
             # Upsert to vector store
             if self.vector_primary == "qdrant":
-                self._upsert_to_qdrant(section["id"], embedding, section, "Section")
+                self._upsert_to_qdrant(
+                    section["id"], embedding, section, document, "Section"
+                )
                 stats["upserted"] += 1
 
                 # Dual write to Neo4j if enabled
@@ -286,7 +338,9 @@ class GraphBuilder:
 
                 # Dual write to Qdrant if enabled
                 if self.dual_write and self.qdrant_client:
-                    self._upsert_to_qdrant(section["id"], embedding, section, "Section")
+                    self._upsert_to_qdrant(
+                        section["id"], embedding, section, document, "Section"
+                    )
 
         logger.info("Embeddings processed", stats=stats)
         return stats
@@ -339,7 +393,12 @@ class GraphBuilder:
             raise
 
     def _upsert_to_qdrant(
-        self, node_id: str, embedding: List[float], metadata: Dict, label: str
+        self,
+        node_id: str,
+        embedding: List[float],
+        section: Dict,
+        document: Dict,
+        label: str,
     ):
         """Upsert embedding to Qdrant with exact section_id as point_id."""
         if not self.qdrant_client:
@@ -351,6 +410,9 @@ class GraphBuilder:
         from qdrant_client.models import PointStruct
 
         collection_name = self.config.search.vector.qdrant.collection_name
+        source_uri = document.get("source_uri", "")
+        document_uri = Path(source_uri).name if source_uri else source_uri
+        document_id = document.get("id") or section.get("document_id")
 
         # Convert section_id (SHA-256 hex string) to UUID for Qdrant compatibility
         # Use UUID5 with a namespace to ensure deterministic mapping
@@ -363,10 +425,12 @@ class GraphBuilder:
             vector=embedding,
             payload={
                 "node_id": node_id,  # Original section_id for matching
-                "label": label,
-                "document_id": metadata.get("document_id"),
-                "title": metadata.get("title"),
-                "anchor": metadata.get("anchor"),
+                "node_label": label,
+                "document_id": document_id,
+                "document_uri": document_uri,
+                "source_uri": source_uri,
+                "title": section.get("title"),
+                "anchor": section.get("anchor"),
                 "updated_at": datetime.utcnow().isoformat(),
                 "embedding_version": self.embedding_version,
             },

@@ -1,9 +1,9 @@
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import (FieldCondition, Filter, MatchValue,
-                                  PointIdsList, PointStruct)
+from qdrant_client.models import PointStruct
 
 # Optional: use the same embedder as build_graph uses
 try:
@@ -81,14 +81,12 @@ class Reconciler:
         # Scroll all points for the version; small datasets in tests
         # Returns original node_ids (not UUIDs) from payload
 
-        filt = Filter(
-            must=[
-                FieldCondition(key="label", match=MatchValue(value="Section")),
-                FieldCondition(
-                    key="embedding_version", match=MatchValue(value=self.version)
-                ),
+        filt = {
+            "must": [
+                {"key": "node_label", "match": {"value": "Section"}},
+                {"key": "embedding_version", "match": {"value": self.version}},
             ]
-        )
+        }
 
         out: Set[str] = set()
         next_page = None
@@ -115,13 +113,36 @@ class Reconciler:
         if not node_ids:
             return 0
         # Convert section IDs to UUIDs before deleting
-        import uuid
-
-        point_uuids = [str(uuid.uuid5(uuid.NAMESPACE_DNS, nid)) for nid in node_ids]
-        self.qdrant.delete(
-            collection_name=self.collection,
-            points_selector=PointIdsList(points=point_uuids),
-        )
+        for nid in node_ids:
+            try:
+                self.qdrant.delete(
+                    collection_name=self.collection,
+                    points_selector={
+                        "filter": {
+                            "must": [
+                                {"key": "node_id", "match": {"value": nid}},
+                                {
+                                    "key": "embedding_version",
+                                    "match": {"value": self.version},
+                                },
+                            ]
+                        }
+                    },
+                    wait=True,
+                )
+            except Exception:
+                # Fall back to best-effort deletion without embedding filter
+                self.qdrant.delete(
+                    collection_name=self.collection,
+                    points_selector={
+                        "filter": {
+                            "must": [
+                                {"key": "node_id", "match": {"value": nid}},
+                            ]
+                        }
+                    },
+                    wait=True,
+                )
         return len(node_ids)
 
     def _upsert_points(
@@ -173,23 +194,39 @@ class Reconciler:
                 emb_fn = embedding_fn
 
             # Fetch section text to embed
-            text_map: Dict[str, str] = {}
+            text_map: Dict[str, Dict[str, str]] = {}
             cypher = """
             UNWIND $ids AS sid
-            MATCH (s:Section {id: sid})
-            RETURN s.id AS id, coalesce(s.content, s.title) AS text
+            MATCH (d:Document)-[:HAS_SECTION]->(s:Section {id: sid})
+            RETURN
+                s.id AS id,
+                coalesce(s.text, s.content, s.title, '') AS text,
+                coalesce(s.document_id, d.id) AS document_id,
+                d.source_uri AS source_uri
             """
             with self.neo4j.session() as sess:
                 res = sess.run(cypher, {"ids": missing})
                 for rec in res:
-                    text_map[rec["id"]] = rec["text"] or ""
+                    text_map[rec["id"]] = {
+                        "text": rec["text"] or "",
+                        "document_id": rec.get("document_id"),
+                        "source_uri": rec.get("source_uri"),
+                    }
 
             upserts = []
             for sid in missing:
-                vec = emb_fn(text_map.get(sid, ""))
+                meta = text_map.get(
+                    sid, {"text": "", "document_id": None, "source_uri": None}
+                )
+                vec = emb_fn(meta["text"])
+                source_uri = meta.get("source_uri") or ""
+                document_uri = Path(source_uri).name if source_uri else source_uri
                 payload = {
                     "node_id": sid,
-                    "label": "Section",
+                    "node_label": "Section",
+                    "document_id": meta.get("document_id"),
+                    "document_uri": document_uri,
+                    "source_uri": source_uri,
                     "embedding_version": self.version,
                 }
                 upserts.append((sid, vec, payload))

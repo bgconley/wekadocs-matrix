@@ -9,6 +9,6 @@ line-length=72
 # Conventional type, optional (pX.Y) scope, then subject
 regex=^(feat|fix|chore|docs|refactor|test|perf|build|ci|revert)(\(p\d+\.\d+\))?: .+$
 
-[body-required]
+[body-match-regex]
 # Encourage Phase/Task traceability in body
 regex=.*(Phase\s\d+\.\d+|/docs/implementation-plan\.md).*

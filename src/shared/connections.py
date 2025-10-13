@@ -8,8 +8,13 @@ from typing import Optional
 import redis.asyncio as aioredis
 from neo4j import Driver, GraphDatabase
 from qdrant_client import QdrantClient
-from qdrant_client.models import (FieldCondition, Filter, FilterSelector,
-                                  MatchValue, PointIdsList)
+from qdrant_client.models import (
+    FieldCondition,
+    Filter,
+    FilterSelector,
+    MatchValue,
+    PointIdsList,
+)
 from redis.asyncio.connection import ConnectionPool
 
 from .config import Settings, get_settings
@@ -37,12 +42,13 @@ def _normalize_points_selector(kwargs):
             # Try to map a simple {"must":[{"key":..,"match":{"value":..}}, ...]}
             must = []
             for cond in f.get("must", []):
+                match = cond.get("match", {})
                 must.append(
                     FieldCondition(
-                        key=cond["key"], match=MatchValue(value=cond["match"]["value"])
+                        key=cond["key"], match=MatchValue(value=match.get("value"))
                     )
                 )
-            return Filter(must=must)
+            return FilterSelector(filter=Filter(must=must))
         # Dict with 'points'
         if isinstance(ps, dict) and "points" in ps:
             return PointIdsList(points=ps["points"])
@@ -65,7 +71,7 @@ class CompatQdrantClient:
     def __init__(self, client: QdrantClient):
         self._c = client
 
-    def delete(self, collection_name: str, **kwargs):
+    def delete(self, collection_name: str, wait: bool | None = None, **kwargs):
         """
         Delete points, with automatic conversion of section IDs to UUIDs.
         Accepts points_selector as list of IDs or typed selector.
@@ -87,7 +93,9 @@ class CompatQdrantClient:
                     uuid_points.append(point_id)
             selector = PointIdsList(points=uuid_points)
 
-        return self._c.delete(collection_name=collection_name, points_selector=selector)
+        return self._c.delete(
+            collection_name=collection_name, points_selector=selector, wait=wait
+        )
 
     def purge_document(self, collection_name: str, document_id: str):
         """Delete all vectors for a specific document."""
@@ -97,7 +105,9 @@ class CompatQdrantClient:
             ]
         )
         return self._c.delete(
-            collection_name=collection_name, points_selector=FilterSelector(filter=filt)
+            collection_name=collection_name,
+            points_selector=FilterSelector(filter=filt),
+            wait=True,
         )
 
     def upsert(self, collection_name: str, points, **kwargs):
