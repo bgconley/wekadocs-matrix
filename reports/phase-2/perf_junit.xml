@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="3" failures="0" skipped="0" tests="3" time="2.284" timestamp="2025-10-12T23:05:05.455723" hostname="bgc-mbp-m1.local"><testcase classname="tests.p2_t3_test.TestPerformance" name="test_hybrid_search_p95_latency_warmed" time="0.005"><error message="failed on setup with &quot;AttributeError: 'Config' object has no attribute 'get'&quot;">tests/p2_t3_test.py:53: in vector_store
+    vector_primary = config.get('search', {}).get('vector', {}).get('primary', 'qdrant')
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'Config' object has no attribute 'get'</error></testcase><testcase classname="tests.p2_t3_test.TestPerformance" name="test_vector_search_latency" time="0.000"><error message="failed on setup with &quot;AttributeError: 'Config' object has no attribute 'get'&quot;">tests/p2_t3_test.py:53: in vector_store
+    vector_primary = config.get('search', {}).get('vector', {}).get('primary', 'qdrant')
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'Config' object has no attribute 'get'</error></testcase><testcase classname="tests.p2_t3_test.TestPerformance" name="test_graph_expansion_bounded" time="0.000"><error message="failed on setup with &quot;AttributeError: 'Config' object has no attribute 'get'&quot;">tests/p2_t3_test.py:53: in vector_store
+    vector_primary = config.get('search', {}).get('vector', {}).get('primary', 'qdrant')
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'Config' object has no attribute 'get'</error></testcase></testsuite></testsuites>

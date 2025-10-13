@@ -1,0 +1,14 @@
+[general]
+ignore=body-is-missing
+contrib=contrib-title-conventional-commits
+
+[title-max-length]
+line-length=72
+
+[title-match-regex]
+# Conventional type, optional (pX.Y) scope, then subject
+regex=^(feat|fix|chore|docs|refactor|test|perf|build|ci|revert)(\(p\d+\.\d+\))?: .+$
+
+[body-required]
+# Encourage Phase/Task traceability in body
+regex=.*(Phase\s\d+\.\d+|/docs/implementation-plan\.md).*

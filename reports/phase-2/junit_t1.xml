@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="9" skipped="0" tests="20" time="0.862" timestamp="2025-10-12T22:02:41.613003" hostname="bgc-mbp-m1.local"><testcase classname="tests.p2_t1_test.TestIntentClassifier" name="test_classify_search_intent" time="0.001" /><testcase classname="tests.p2_t1_test.TestIntentClassifier" name="test_classify_troubleshoot_intent" time="0.000" /><testcase classname="tests.p2_t1_test.TestIntentClassifier" name="test_classify_compare_intent" time="0.000" /><testcase classname="tests.p2_t1_test.TestIntentClassifier" name="test_classify_explain_intent" time="0.000"><failure message="AssertionError: assert 'search' == 'explain'&#10;  - explain&#10;  + search">tests/p2_t1_test.py:33: in test_classify_explain_intent
+    assert classifier.classify("what is a backend node?") == "explain"
+E   AssertionError: assert 'search' == 'explain'
+E     - explain
+E     + search</failure></testcase><testcase classname="tests.p2_t1_test.TestIntentClassifier" name="test_classify_traverse_intent" time="0.000" /><testcase classname="tests.p2_t1_test.TestEntityLinker" name="test_link_error_code" time="0.000" /><testcase classname="tests.p2_t1_test.TestEntityLinker" name="test_link_command" time="0.000" /><testcase classname="tests.p2_t1_test.TestEntityLinker" name="test_link_component" time="0.000" /><testcase classname="tests.p2_t1_test.TestTemplateLibrary" name="test_templates_loaded" time="0.001" /><testcase classname="tests.p2_t1_test.TestTemplateLibrary" name="test_has_template" time="0.000" /><testcase classname="tests.p2_t1_test.TestTemplateLibrary" name="test_get_template" time="0.000" /><testcase classname="tests.p2_t1_test.TestTemplateLibrary" name="test_render_template" time="0.000" /><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_plan_search_query" time="0.006"><failure message="AttributeError: 'Config' object has no attribute 'get'">tests/p2_t1_test.py:99: in test_plan_search_query
+    plan = planner.plan("find documentation about installation")
+src/query/planner.py:192: in plan
+    params = self._build_params(entities, filters)
+src/query/planner.py:219: in _build_params
+    validator_config = self.config.get('validator', {})
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'Config' object has no attribute 'get'</failure></testcase><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_plan_troubleshoot_query" time="0.001"><failure message="AttributeError: 'Config' object has no attribute 'get'">tests/p2_t1_test.py:110: in test_plan_troubleshoot_query
+    plan = planner.plan("how to fix error E1001")
+src/query/planner.py:192: in plan
+    params = self._build_params(entities, filters)
+src/query/planner.py:219: in _build_params
+    validator_config = self.config.get('validator', {})
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'Config' object has no attribute 'get'</failure></testcase><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_plan_has_parameters" time="0.001"><failure message="AttributeError: 'Config' object has no attribute 'get'">tests/p2_t1_test.py:120: in test_plan_has_parameters
+    plan = planner.plan("show me configurations")
+src/query/planner.py:192: in plan
+    params = self._build_params(entities, filters)
+src/query/planner.py:219: in _build_params
+    validator_config = self.config.get('validator', {})
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'Config' object has no attribute 'get'</failure></testcase><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_plan_has_depth_limit" time="0.001"><failure message="AttributeError: 'Config' object has no attribute 'get'">tests/p2_t1_test.py:128: in test_plan_has_depth_limit
+    plan = planner.plan("traverse from component X")
+src/query/planner.py:192: in plan
+    params = self._build_params(entities, filters)
+src/query/planner.py:219: in _build_params
+    validator_config = self.config.get('validator', {})
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'Config' object has no attribute 'get'</failure></testcase><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_plan_injects_limit" time="0.001"><failure message="AttributeError: 'Config' object has no attribute 'get'">tests/p2_t1_test.py:137: in test_plan_injects_limit
+    plan = planner.plan("find all sections")
+src/query/planner.py:192: in plan
+    params = self._build_params(entities, filters)
+src/query/planner.py:219: in _build_params
+    validator_config = self.config.get('validator', {})
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'Config' object has no attribute 'get'</failure></testcase><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_plan_template_confidence_high" time="0.003"><failure message="AttributeError: 'Config' object has no attribute 'get'">tests/p2_t1_test.py:144: in test_plan_template_confidence_high
+    plan = planner.plan("search for installation docs")
+src/query/planner.py:192: in plan
+    params = self._build_params(entities, filters)
+src/query/planner.py:219: in _build_params
+    validator_config = self.config.get('validator', {})
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'Config' object has no attribute 'get'</failure></testcase><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_plan_fallback_confidence_lower" time="0.001"><failure message="AttributeError: 'Config' object has no attribute 'get'">tests/p2_t1_test.py:152: in test_plan_fallback_confidence_lower
+    plan = planner.plan("some random unrecognized query xyz123")
+src/query/planner.py:192: in plan
+    params = self._build_params(entities, filters)
+src/query/planner.py:219: in _build_params
+    validator_config = self.config.get('validator', {})
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'Config' object has no attribute 'get'</failure></testcase><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_parameterization_no_literals" time="0.001"><failure message="AttributeError: 'Config' object has no attribute 'get'">tests/p2_t1_test.py:160: in test_parameterization_no_literals
+    plan = planner.plan("find section with id abc123")
+src/query/planner.py:192: in plan
+    params = self._build_params(entities, filters)
+src/query/planner.py:219: in _build_params
+    validator_config = self.config.get('validator', {})
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'Config' object has no attribute 'get'</failure></testcase></testsuite></testsuites>

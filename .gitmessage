@@ -1,0 +1,18 @@
+Phase <X.Y>: <short title in imperative mood>
+
+Context
+- Spec: /docs/spec.md §<section if useful>
+- Plan: /docs/implementation-plan.md → Task <X.Y>
+- Pseudocode: /docs/pseudocode-reference.md → <X.Y label>
+
+Changes
+- <bullet 1>
+- <bullet 2>
+
+Tests (NO MOCKS)
+- Added tests/p<X>_t<Y>_* hitting live stack
+- Artifacts: reports/phase-<X>/junit.xml, reports/phase-<X>/summary.json
+
+Notes
+- Constraints & safety: <validator, limits, timeouts, etc.>
+Signed-off-by: <Your Name> <you@example.com>

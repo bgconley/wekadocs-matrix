@@ -1,0 +1,126 @@
+# Implements Phase 1, Task 1.1 (Docker environment setup)
+# See: /docs/spec.md §3.3 (IDs, versions, consistency)
+# See: /docs/implementation-plan.md → Task 1.3 (Schema with config-driven vectors)
+
+app:
+  name: wekadocs-graphrag-mcp
+  version: "0.1.0"
+  log_level: INFO
+  environment: development
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  timeout: 30
+
+# Embedding configuration (used by schema creation and ingestion)
+embedding:
+  model_name: "sentence-transformers/all-MiniLM-L6-v2"
+  dims: 384
+  similarity: "cosine"  # cosine | euclidean | dot
+  multilingual: false
+  version: "v1"
+
+# Vector store configuration
+search:
+  vector:
+    primary: "qdrant"  # qdrant | neo4j
+    dual_write: false  # if true, write to both stores
+    qdrant:
+      collection_name: "weka_sections"
+      use_grpc: false
+      timeout: 30
+    neo4j:
+      index_name: "section_embeddings"
+  graph:
+    max_depth: 2
+    max_results: 100
+    timeout: 30
+  hybrid:
+    vector_weight: 0.7
+    graph_weight: 0.3
+    top_k: 20
+
+# Neo4j configuration
+neo4j:
+  max_connection_lifetime: 3600
+  max_connection_pool_size: 50
+  connection_acquisition_timeout: 60
+  encrypted: false
+  trust: "TRUST_ALL_CERTIFICATES"
+  database: "neo4j"
+
+# Redis configuration
+redis:
+  db: 0
+  socket_timeout: 5
+  socket_connect_timeout: 5
+  max_connections: 50
+
+# Rate limiting (Redis token bucket)
+rate_limit:
+  enabled: true
+  requests_per_minute: 60
+  burst_size: 10
+  window_seconds: 60
+
+# JWT authentication
+auth:
+  enabled: true
+  algorithm: "HS256"
+  expiry_minutes: 60
+
+# Audit logging
+audit:
+  enabled: true
+  log_params: true
+  log_results: false  # avoid large payloads in audit log
+  retention_days: 90
+
+# Query validation
+validator:
+  max_depth: 3
+  max_label_scans: 2
+  max_expand_ops: 5
+  max_estimated_rows: 10000
+  timeout_seconds: 30
+  enforce_parameters: true
+  enforce_limits: true
+
+# Cache configuration
+cache:
+  l1:
+    enabled: true
+    ttl_seconds: 300
+    max_size: 1000
+  l2:
+    enabled: true
+    ttl_seconds: 3600
+    key_prefix: "weka:cache:v1"
+
+# OpenTelemetry
+telemetry:
+  enabled: true
+  traces:
+    enabled: true
+    sample_rate: 1.0  # 1.0 = 100% sampling in dev
+  metrics:
+    enabled: true
+    interval_seconds: 60
+
+# Ingestion pipeline
+ingestion:
+  batch_size: 500
+  max_section_tokens: 1000
+  timeout_seconds: 300
+  workers: 2
+  reconciliation:
+    enabled: true
+    schedule: "0 2 * * *"  # 2 AM daily
+    drift_threshold: 0.01  # 1% drift triggers repair
+
+# Schema versioning
+schema:
+  version: "v1"
+  auto_migrate: false

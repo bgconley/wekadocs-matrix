@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+.pytest_cache/
+
+# Coverage & build
+htmlcov/
+.coverage
+dist/
+build/
+
+# Node (if any)
+node_modules/
+
+# Docker
+*.log
+docker/*.log
+
+# Reports: ignore heavy artifacts but keep gate files
+reports/**/coverage/
+reports/**/*.html
+reports/**/*.png
+reports/**/*.tar.gz
+reports/**/*.csv
+# Keep junit.xml and summary.json for phase gates
+!reports/**/junit.xml
+!reports/**/summary.json

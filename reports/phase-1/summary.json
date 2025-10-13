@@ -1,0 +1,243 @@
+{
+  "phase": 1,
+  "timestamp": "2025-10-13T01:46:58.975850",
+  "success": true,
+  "tests": {
+    "total": 38,
+    "passed": 38,
+    "failed": 0,
+    "skipped": 0,
+    "errors": 0
+  },
+  "test_details": [
+    {
+      "name": "test_docker_compose_exists",
+      "classname": "tests.p1_t1_test",
+      "duration": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "test_env_example_exists",
+      "classname": "tests.p1_t1_test",
+      "duration": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "test_neo4j_connectivity",
+      "classname": "tests.p1_t1_test",
+      "duration": 0.022,
+      "status": "passed"
+    },
+    {
+      "name": "test_redis_connectivity",
+      "classname": "tests.p1_t1_test",
+      "duration": 0.01,
+      "status": "passed"
+    },
+    {
+      "name": "test_qdrant_connectivity",
+      "classname": "tests.p1_t1_test",
+      "duration": 0.654,
+      "status": "passed"
+    },
+    {
+      "name": "test_health_endpoint",
+      "classname": "tests.p1_t1_test",
+      "duration": 0.285,
+      "status": "passed"
+    },
+    {
+      "name": "test_readiness_endpoint",
+      "classname": "tests.p1_t1_test",
+      "duration": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "test_data_persistence_after_restart",
+      "classname": "tests.p1_t1_test",
+      "duration": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "test_mcp_initialize_endpoint",
+      "classname": "tests.p1_t2_test",
+      "duration": 0.003,
+      "status": "passed"
+    },
+    {
+      "name": "test_mcp_tools_list_endpoint",
+      "classname": "tests.p1_t2_test",
+      "duration": 0.003,
+      "status": "passed"
+    },
+    {
+      "name": "test_mcp_tools_call_endpoint",
+      "classname": "tests.p1_t2_test",
+      "duration": 0.003,
+      "status": "passed"
+    },
+    {
+      "name": "test_correlation_id_header",
+      "classname": "tests.p1_t2_test",
+      "duration": 0.002,
+      "status": "passed"
+    },
+    {
+      "name": "test_metrics_endpoint",
+      "classname": "tests.p1_t2_test",
+      "duration": 0.003,
+      "status": "passed"
+    },
+    {
+      "name": "test_connection_pools_created",
+      "classname": "tests.p1_t2_test",
+      "duration": 0.002,
+      "status": "passed"
+    },
+    {
+      "name": "test_async_connection_pools",
+      "classname": "tests.p1_t2_test",
+      "duration": 0.007,
+      "status": "passed"
+    },
+    {
+      "name": "test_graceful_shutdown_handlers_exist",
+      "classname": "tests.p1_t2_test",
+      "duration": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "test_structured_logging_configured",
+      "classname": "tests.p1_t2_test",
+      "duration": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "test_opentelemetry_tracing_setup",
+      "classname": "tests.p1_t2_test",
+      "duration": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "test_schema_creation",
+      "classname": "tests.p1_t3_test",
+      "duration": 0.121,
+      "status": "passed"
+    },
+    {
+      "name": "test_constraints_exist",
+      "classname": "tests.p1_t3_test",
+      "duration": 0.003,
+      "status": "passed"
+    },
+    {
+      "name": "test_indexes_exist",
+      "classname": "tests.p1_t3_test",
+      "duration": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "test_vector_indexes_exist",
+      "classname": "tests.p1_t3_test",
+      "duration": 0.003,
+      "status": "passed"
+    },
+    {
+      "name": "test_schema_version_node",
+      "classname": "tests.p1_t3_test",
+      "duration": 0.009,
+      "status": "passed"
+    },
+    {
+      "name": "test_schema_idempotence",
+      "classname": "tests.p1_t3_test",
+      "duration": 0.068,
+      "status": "passed"
+    },
+    {
+      "name": "test_can_create_document_node",
+      "classname": "tests.p1_t3_test",
+      "duration": 0.009,
+      "status": "passed"
+    },
+    {
+      "name": "test_can_create_section_node",
+      "classname": "tests.p1_t3_test",
+      "duration": 0.008,
+      "status": "passed"
+    },
+    {
+      "name": "test_jwt_token_creation",
+      "classname": "tests.p1_t4_test",
+      "duration": 0.029,
+      "status": "passed"
+    },
+    {
+      "name": "test_jwt_token_verification",
+      "classname": "tests.p1_t4_test",
+      "duration": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "test_invalid_jwt_token_rejected",
+      "classname": "tests.p1_t4_test",
+      "duration": 0.046,
+      "status": "passed"
+    },
+    {
+      "name": "test_expired_jwt_token_rejected",
+      "classname": "tests.p1_t4_test",
+      "duration": 0.007,
+      "status": "passed"
+    },
+    {
+      "name": "test_rate_limiter_allows_normal_requests",
+      "classname": "tests.p1_t4_test",
+      "duration": 0.019,
+      "status": "passed"
+    },
+    {
+      "name": "test_rate_limiter_blocks_burst_requests",
+      "classname": "tests.p1_t4_test",
+      "duration": 0.012,
+      "status": "passed"
+    },
+    {
+      "name": "test_rate_limiter_refills_over_time",
+      "classname": "tests.p1_t4_test",
+      "duration": 2.006,
+      "status": "passed"
+    },
+    {
+      "name": "test_audit_logger_logs_request",
+      "classname": "tests.p1_t4_test",
+      "duration": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "test_audit_logger_logs_response",
+      "classname": "tests.p1_t4_test",
+      "duration": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "test_audit_logger_logs_auth_events",
+      "classname": "tests.p1_t4_test",
+      "duration": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "test_audit_logger_logs_security_events",
+      "classname": "tests.p1_t4_test",
+      "duration": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "test_correlation_id_in_logs",
+      "classname": "tests.p1_t4_test",
+      "duration": 0.004,
+      "status": "passed"
+    }
+  ],
+  "duration_seconds": 3.683
+}
