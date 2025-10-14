@@ -94,4 +94,23 @@ else
   echo "❌ Some Phase ${PHASE} tests failed. Check reports for details."
 fi
 
+# --- Add to scripts/test/run_phase.sh ---
+elif [ "$PHASE" = "4" ]; then
+  echo "[PHASE-4] Running tests..."
+  pytest -q --maxfail=1 --junitxml="reports/phase-4/junit.xml" -k "p4_" | tee "reports/phase-4/pytest.out"
+
+  # Reuse summarizer if present; it's ok if this step is a no-op for now.
+  if [ -f "scripts/test/summarize.py" ]; then
+    python scripts/test/summarize.py --phase "4" \
+      --junit "reports/phase-4/junit.xml" \
+      --out "reports/phase-4/summary.json" || true
+  fi
+
+  # Phase‑4 gate: all p4_ tests must pass, EXPLAIN index seek checked, cache perf checked
+  python scripts/test/check_phase4_metrics.py \
+    --junit "reports/phase-4/junit.xml" \
+    --summary "reports/phase-4/summary.json"
+fi
+
+
 exit "${PYTEST_EXIT_CODE}"

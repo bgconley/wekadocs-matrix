@@ -1,0 +1,686 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="4" skipped="0" tests="11" time="3.243" timestamp="2025-10-13T21:08:51.915464" hostname="bgc-mbp-m1.local"><testcase classname="tests.p4_t1_complex_patterns_test" name="test_dependency_chain_query" time="0.194"><failure message="AssertionError: Expected multi-hop DEPENDS_ON chain (&gt;=2).&#10;assert (&lt;Record depth=1&gt; is not None and 1 &gt;= 2)">neo4j_driver = &lt;neo4j._sync.driver.BoltDriver object at 0x1193b6890&gt;
+
+    @pytest.mark.order(1)
+    def test_dependency_chain_query(neo4j_driver):
+        with neo4j_driver.session() as s:
+            _seed_advanced_graph(s)
+            rec = s.run("""
+                MATCH path = (start:Component {name:'Comp A'})-[:DEPENDS_ON*1..5]-&gt;(end)
+                RETURN length(path) AS depth
+                LIMIT 1
+            """).single()
+&gt;           assert rec is not None and rec["depth"] &gt;= 2, "Expected multi-hop DEPENDS_ON chain (&gt;=2)."
+E           AssertionError: Expected multi-hop DEPENDS_ON chain (&gt;=2).
+E           assert (&lt;Record depth=1&gt; is not None and 1 &gt;= 2)
+
+tests/p4_t1_complex_patterns_test.py:61: AssertionError</failure></testcase><testcase classname="tests.p4_t1_complex_patterns_test" name="test_impact_assessment_query" time="0.002" /><testcase classname="tests.p4_t1_complex_patterns_test" name="test_troubleshooting_path_query" time="0.031" /><testcase classname="tests.p4_t1_test" name="test_scaffold_smoke" time="0.000" /><testcase classname="tests.p4_t2_optimizer_test" name="test_explain_uses_index_seek_for_point_lookup" time="0.005"><failure message="AssertionError: Expected IndexSeek in EXPLAIN plan, got: []&#10;assert False&#10; +  where False = any(&lt;generator object test_explain_uses_index_seek_for_point_lookup.&lt;locals&gt;.&lt;genexpr&gt; at 0x11af0e810&gt;)">neo4j_driver = &lt;neo4j._sync.driver.BoltDriver object at 0x11af2a410&gt;
+
+    @pytest.mark.order(4)
+    def test_explain_uses_index_seek_for_point_lookup(neo4j_driver):
+        with neo4j_driver.session() as s:
+            # Ensure index exists on Configuration.name
+            s.run("CREATE INDEX config_name IF NOT EXISTS FOR (c:Configuration) ON (c.name)").consume()
+            res = s.run("EXPLAIN MATCH (c:Configuration {name:$name}) RETURN c", name="fsync")
+            summary = res.consume()
+            plan = summary.plan
+            ops = _flatten_plan(plan)
+&gt;           assert any("IndexSeek" in o or "NodeIndexSeek" in o for o in ops), \
+                f"Expected IndexSeek in EXPLAIN plan, got: {ops}"
+E           AssertionError: Expected IndexSeek in EXPLAIN plan, got: []
+E           assert False
+E            +  where False = any(&lt;generator object test_explain_uses_index_seek_for_point_lookup.&lt;locals&gt;.&lt;genexpr&gt; at 0x11af0e810&gt;)
+
+tests/p4_t2_optimizer_test.py:37: AssertionError</failure></testcase><testcase classname="tests.p4_t2_optimizer_test" name="test_traversal_depth_is_capped" time="0.002"><failure message="assert 0 &gt; 0&#10; +  where 0 = len([])">neo4j_driver = &lt;neo4j._sync.driver.BoltDriver object at 0x11af2a410&gt;
+
+    @pytest.mark.order(5)
+    def test_traversal_depth_is_capped(neo4j_driver):
+        with neo4j_driver.session() as s:
+            # A deliberately aggressive query; system should keep this bounded by configuration / template
+            res = s.run("EXPLAIN MATCH p=(n)-[*1..10]-(m) RETURN p LIMIT 10")
+            plan_ops = _flatten_plan(res.consume().plan)
+            # This is a heuristic assertion: the presence of 'Expand(All)' is fine, but your validator/optimizer
+            # should cap depth in templates to &lt;=5. Adjust once your templates expose depth caps.
+            # For kickoff we just assert EXPLAIN returns a valid plan.
+&gt;           assert len(plan_ops) &gt; 0
+E           assert 0 &gt; 0
+E            +  where 0 = len([])
+
+tests/p4_t2_optimizer_test.py:49: AssertionError</failure></testcase><testcase classname="tests.p4_t2_test" name="test_scaffold_smoke" time="0.000" /><testcase classname="tests.p4_t3_cache_perf_test" name="test_cold_to_warm_latency_improves_and_cache_key_exists" time="0.010"><failure message="requests.exceptions.ConnectionError: HTTPConnectionPool(host='localhost', port=3000): Max retries exceeded with url: /mcp (Caused by NewConnectionError('&lt;urllib3.connection.HTTPConnection object at 0x119d6d990&gt;: Failed to establish a new connection: [Errno 61] Connection refused'))">self = &lt;urllib3.connection.HTTPConnection object at 0x119d6d990&gt;
+
+    def _new_conn(self):
+        """Establish a socket connection and set nodelay settings on it.
+
+        :return: New socket connection.
+        """
+        extra_kw = {}
+        if self.source_address:
+            extra_kw["source_address"] = self.source_address
+
+        if self.socket_options:
+            extra_kw["socket_options"] = self.socket_options
+
+        try:
+&gt;           conn = connection.create_connection(
+                (self._dns_host, self.port), self.timeout, **extra_kw
+            )
+
+/opt/homebrew/lib/python3.11/site-packages/urllib3/connection.py:174:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/opt/homebrew/lib/python3.11/site-packages/urllib3/util/connection.py:95: in create_connection
+    raise err
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+address = ('localhost', 3000), timeout = 30, source_address = None, socket_options = [(6, 1, 1)]
+
+    def create_connection(
+        address,
+        timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
+        source_address=None,
+        socket_options=None,
+    ):
+        """Connect to *address* and return the socket object.
+
+        Convenience function.  Connect to *address* (a 2-tuple ``(host,
+        port)``) and return the socket object.  Passing the optional
+        *timeout* parameter will set the timeout on the socket instance
+        before attempting to connect.  If no *timeout* is supplied, the
+        global default timeout setting returned by :func:`socket.getdefaulttimeout`
+        is used.  If *source_address* is set it must be a tuple of (host, port)
+        for the socket to bind as a source address before making the connection.
+        An host of '' or port 0 tells the OS to use the default.
+        """
+
+        host, port = address
+        if host.startswith("["):
+            host = host.strip("[]")
+        err = None
+
+        # Using the value from allowed_gai_family() in the context of getaddrinfo lets
+        # us select whether to work with IPv4 DNS records, IPv6 records, or both.
+        # The original create_connection function always returns all records.
+        family = allowed_gai_family()
+
+        try:
+            host.encode("idna")
+        except UnicodeError:
+            return six.raise_from(
+                LocationParseError(u"'%s', label empty or too long" % host), None
+            )
+
+        for res in socket.getaddrinfo(host, port, family, socket.SOCK_STREAM):
+            af, socktype, proto, canonname, sa = res
+            sock = None
+            try:
+                sock = socket.socket(af, socktype, proto)
+
+                # If provided, set socket level options before connecting.
+                _set_socket_options(sock, socket_options)
+
+                if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                    sock.settimeout(timeout)
+                if source_address:
+                    sock.bind(source_address)
+&gt;               sock.connect(sa)
+E               ConnectionRefusedError: [Errno 61] Connection refused
+
+/opt/homebrew/lib/python3.11/site-packages/urllib3/util/connection.py:85: ConnectionRefusedError
+
+During handling of the above exception, another exception occurred:
+
+self = &lt;urllib3.connectionpool.HTTPConnectionPool object at 0x119d6d290&gt;, method = 'POST', url = '/mcp'
+body = b'{"method": "tools/call", "params": {"name": "search_documentation", "arguments": {"query": "fsync configuration", "limit": 5}}, "id": "94ac6497-249d-468d-ab31-1d98d12a0dab"}'
+headers = {'User-Agent': 'python-requests/2.32.5', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '173', 'Content-Type': 'application/json'}
+retries = Retry(total=0, connect=None, read=False, redirect=None, status=None), redirect = False, assert_same_host = False
+timeout = Timeout(connect=30, read=30, total=None), pool_timeout = None, release_conn = False, chunked = False
+body_pos = None, response_kw = {'decode_content': False, 'preload_content': False}
+parsed_url = Url(scheme=None, auth=None, host=None, port=None, path='/mcp', query=None, fragment=None)
+destination_scheme = None, conn = None, release_this_conn = True, http_tunnel_required = False, err = None, clean_exit = False
+
+    def urlopen(
+        self,
+        method,
+        url,
+        body=None,
+        headers=None,
+        retries=None,
+        redirect=True,
+        assert_same_host=True,
+        timeout=_Default,
+        pool_timeout=None,
+        release_conn=None,
+        chunked=False,
+        body_pos=None,
+        **response_kw
+    ):
+        """
+        Get a connection from the pool and perform an HTTP request. This is the
+        lowest level call for making a request, so you'll need to specify all
+        the raw details.
+
+        .. note::
+
+           More commonly, it's appropriate to use a convenience method provided
+           by :class:`.RequestMethods`, such as :meth:`request`.
+
+        .. note::
+
+           `release_conn` will only behave as expected if
+           `preload_content=False` because we want to make
+           `preload_content=False` the default behaviour someday soon without
+           breaking backwards compatibility.
+
+        :param method:
+            HTTP request method (such as GET, POST, PUT, etc.)
+
+        :param url:
+            The URL to perform the request on.
+
+        :param body:
+            Data to send in the request body, either :class:`str`, :class:`bytes`,
+            an iterable of :class:`str`/:class:`bytes`, or a file-like object.
+
+        :param headers:
+            Dictionary of custom headers to send, such as User-Agent,
+            If-None-Match, etc. If None, pool headers are used. If provided,
+            these headers completely replace any pool-specific headers.
+
+        :param retries:
+            Configure the number of retries to allow before raising a
+            :class:`~urllib3.exceptions.MaxRetryError` exception.
+
+            Pass ``None`` to retry until you receive a response. Pass a
+            :class:`~urllib3.util.retry.Retry` object for fine-grained control
+            over different types of retries.
+            Pass an integer number to retry connection errors that many times,
+            but no other types of errors. Pass zero to never retry.
+
+            If ``False``, then retries are disabled and any exception is raised
+            immediately. Also, instead of raising a MaxRetryError on redirects,
+            the redirect response will be returned.
+
+        :type retries: :class:`~urllib3.util.retry.Retry`, False, or an int.
+
+        :param redirect:
+            If True, automatically handle redirects (status codes 301, 302,
+            303, 307, 308). Each redirect counts as a retry. Disabling retries
+            will disable redirect, too.
+
+        :param assert_same_host:
+            If ``True``, will make sure that the host of the pool requests is
+            consistent else will raise HostChangedError. When ``False``, you can
+            use the pool on an HTTP proxy and request foreign hosts.
+
+        :param timeout:
+            If specified, overrides the default timeout for this one
+            request. It may be a float (in seconds) or an instance of
+            :class:`urllib3.util.Timeout`.
+
+        :param pool_timeout:
+            If set and the pool is set to block=True, then this method will
+            block for ``pool_timeout`` seconds and raise EmptyPoolError if no
+            connection is available within the time period.
+
+        :param release_conn:
+            If False, then the urlopen call will not release the connection
+            back into the pool once a response is received (but will release if
+            you read the entire contents of the response such as when
+            `preload_content=True`). This is useful if you're not preloading
+            the response's content immediately. You will need to call
+            ``r.release_conn()`` on the response ``r`` to return the connection
+            back into the pool. If None, it takes the value of
+            ``response_kw.get('preload_content', True)``.
+
+        :param chunked:
+            If True, urllib3 will send the body using chunked transfer
+            encoding. Otherwise, urllib3 will send the body using the standard
+            content-length form. Defaults to False.
+
+        :param int body_pos:
+            Position to seek to in file-like body in the event of a retry or
+            redirect. Typically this won't need to be set because urllib3 will
+            auto-populate the value when needed.
+
+        :param \\**response_kw:
+            Additional parameters are passed to
+            :meth:`urllib3.response.HTTPResponse.from_httplib`
+        """
+
+        parsed_url = parse_url(url)
+        destination_scheme = parsed_url.scheme
+
+        if headers is None:
+            headers = self.headers
+
+        if not isinstance(retries, Retry):
+            retries = Retry.from_int(retries, redirect=redirect, default=self.retries)
+
+        if release_conn is None:
+            release_conn = response_kw.get("preload_content", True)
+
+        # Check host
+        if assert_same_host and not self.is_same_host(url):
+            raise HostChangedError(self, url, retries)
+
+        # Ensure that the URL we're connecting to is properly encoded
+        if url.startswith("/"):
+            url = six.ensure_str(_encode_target(url))
+        else:
+            url = six.ensure_str(parsed_url.url)
+
+        conn = None
+
+        # Track whether `conn` needs to be released before
+        # returning/raising/recursing. Update this variable if necessary, and
+        # leave `release_conn` constant throughout the function. That way, if
+        # the function recurses, the original value of `release_conn` will be
+        # passed down into the recursive call, and its value will be respected.
+        #
+        # See issue #651 [1] for details.
+        #
+        # [1] &lt;https://github.com/urllib3/urllib3/issues/651&gt;
+        release_this_conn = release_conn
+
+        http_tunnel_required = connection_requires_http_tunnel(
+            self.proxy, self.proxy_config, destination_scheme
+        )
+
+        # Merge the proxy headers. Only done when not using HTTP CONNECT. We
+        # have to copy the headers dict so we can safely change it without those
+        # changes being reflected in anyone else's copy.
+        if not http_tunnel_required:
+            headers = headers.copy()
+            headers.update(self.proxy_headers)
+
+        # Must keep the exception bound to a separate variable or else Python 3
+        # complains about UnboundLocalError.
+        err = None
+
+        # Keep track of whether we cleanly exited the except block. This
+        # ensures we do proper cleanup in finally.
+        clean_exit = False
+
+        # Rewind body position, if needed. Record current position
+        # for future rewinds in the event of a redirect/retry.
+        body_pos = set_file_position(body, body_pos)
+
+        try:
+            # Request a connection from the queue.
+            timeout_obj = self._get_timeout(timeout)
+            conn = self._get_conn(timeout=pool_timeout)
+
+            conn.timeout = timeout_obj.connect_timeout
+
+            is_new_proxy_conn = self.proxy is not None and not getattr(
+                conn, "sock", None
+            )
+            if is_new_proxy_conn and http_tunnel_required:
+                self._prepare_proxy(conn)
+
+            # Make the request on the httplib connection object.
+&gt;           httplib_response = self._make_request(
+                conn,
+                method,
+                url,
+                timeout=timeout_obj,
+                body=body,
+                headers=headers,
+                chunked=chunked,
+            )
+
+/opt/homebrew/lib/python3.11/site-packages/urllib3/connectionpool.py:716:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/opt/homebrew/lib/python3.11/site-packages/urllib3/connectionpool.py:416: in _make_request
+    conn.request(method, url, **httplib_request_kw)
+/opt/homebrew/lib/python3.11/site-packages/urllib3/connection.py:244: in request
+    super(HTTPConnection, self).request(method, url, body=body, headers=headers)
+/opt/homebrew/Cellar/python@3.11/3.11.13_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/http/client.py:1303: in request
+    self._send_request(method, url, body, headers, encode_chunked)
+/opt/homebrew/Cellar/python@3.11/3.11.13_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/http/client.py:1349: in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+/opt/homebrew/Cellar/python@3.11/3.11.13_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/http/client.py:1298: in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+/opt/homebrew/Cellar/python@3.11/3.11.13_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/http/client.py:1058: in _send_output
+    self.send(msg)
+/opt/homebrew/Cellar/python@3.11/3.11.13_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/http/client.py:996: in send
+    self.connect()
+/opt/homebrew/lib/python3.11/site-packages/urllib3/connection.py:205: in connect
+    conn = self._new_conn()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;urllib3.connection.HTTPConnection object at 0x119d6d990&gt;
+
+    def _new_conn(self):
+        """Establish a socket connection and set nodelay settings on it.
+
+        :return: New socket connection.
+        """
+        extra_kw = {}
+        if self.source_address:
+            extra_kw["source_address"] = self.source_address
+
+        if self.socket_options:
+            extra_kw["socket_options"] = self.socket_options
+
+        try:
+            conn = connection.create_connection(
+                (self._dns_host, self.port), self.timeout, **extra_kw
+            )
+
+        except SocketTimeout:
+            raise ConnectTimeoutError(
+                self,
+                "Connection to %s timed out. (connect timeout=%s)"
+                % (self.host, self.timeout),
+            )
+
+        except SocketError as e:
+&gt;           raise NewConnectionError(
+                self, "Failed to establish a new connection: %s" % e
+            )
+E           urllib3.exceptions.NewConnectionError: &lt;urllib3.connection.HTTPConnection object at 0x119d6d990&gt;: Failed to establish a new connection: [Errno 61] Connection refused
+
+/opt/homebrew/lib/python3.11/site-packages/urllib3/connection.py:186: NewConnectionError
+
+During handling of the above exception, another exception occurred:
+
+self = &lt;requests.adapters.HTTPAdapter object at 0x11ae4cfd0&gt;, request = &lt;PreparedRequest [POST]&gt;, stream = False
+timeout = Timeout(connect=30, read=30, total=None), verify = True, cert = None, proxies = OrderedDict()
+
+    def send(
+        self, request, stream=False, timeout=None, verify=True, cert=None, proxies=None
+    ):
+        """Sends PreparedRequest object. Returns Response object.
+
+        :param request: The :class:`PreparedRequest &lt;PreparedRequest&gt;` being sent.
+        :param stream: (optional) Whether to stream the request content.
+        :param timeout: (optional) How long to wait for the server to send
+            data before giving up, as a float, or a :ref:`(connect timeout,
+            read timeout) &lt;timeouts&gt;` tuple.
+        :type timeout: float or tuple or urllib3 Timeout object
+        :param verify: (optional) Either a boolean, in which case it controls whether
+            we verify the server's TLS certificate, or a string, in which case it
+            must be a path to a CA bundle to use
+        :param cert: (optional) Any user-provided SSL certificate to be trusted.
+        :param proxies: (optional) The proxies dictionary to apply to the request.
+        :rtype: requests.Response
+        """
+
+        try:
+            conn = self.get_connection_with_tls_context(
+                request, verify, proxies=proxies, cert=cert
+            )
+        except LocationValueError as e:
+            raise InvalidURL(e, request=request)
+
+        self.cert_verify(conn, request.url, verify, cert)
+        url = self.request_url(request, proxies)
+        self.add_headers(
+            request,
+            stream=stream,
+            timeout=timeout,
+            verify=verify,
+            cert=cert,
+            proxies=proxies,
+        )
+
+        chunked = not (request.body is None or "Content-Length" in request.headers)
+
+        if isinstance(timeout, tuple):
+            try:
+                connect, read = timeout
+                timeout = TimeoutSauce(connect=connect, read=read)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid timeout {timeout}. Pass a (connect, read) timeout tuple, "
+                    f"or a single float to set both timeouts to the same value."
+                )
+        elif isinstance(timeout, TimeoutSauce):
+            pass
+        else:
+            timeout = TimeoutSauce(connect=timeout, read=timeout)
+
+        try:
+&gt;           resp = conn.urlopen(
+                method=request.method,
+                url=url,
+                body=request.body,
+                headers=request.headers,
+                redirect=False,
+                assert_same_host=False,
+                preload_content=False,
+                decode_content=False,
+                retries=self.max_retries,
+                timeout=timeout,
+                chunked=chunked,
+            )
+
+/opt/homebrew/lib/python3.11/site-packages/requests/adapters.py:644:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/opt/homebrew/lib/python3.11/site-packages/urllib3/connectionpool.py:802: in urlopen
+    retries = retries.increment(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = Retry(total=0, connect=None, read=False, redirect=None, status=None), method = 'POST', url = '/mcp', response = None
+error = NewConnectionError('&lt;urllib3.connection.HTTPConnection object at 0x119d6d990&gt;: Failed to establish a new connection: [Errno 61] Connection refused')
+_pool = &lt;urllib3.connectionpool.HTTPConnectionPool object at 0x119d6d290&gt;, _stacktrace = &lt;traceback object at 0x11966c180&gt;
+
+    def increment(
+        self,
+        method=None,
+        url=None,
+        response=None,
+        error=None,
+        _pool=None,
+        _stacktrace=None,
+    ):
+        """Return a new Retry object with incremented retry counters.
+
+        :param response: A response object, or None, if the server did not
+            return a response.
+        :type response: :class:`~urllib3.response.HTTPResponse`
+        :param Exception error: An error encountered during the request, or
+            None if the response was received successfully.
+
+        :return: A new ``Retry`` object.
+        """
+        if self.total is False and error:
+            # Disabled, indicate to re-raise the error.
+            raise six.reraise(type(error), error, _stacktrace)
+
+        total = self.total
+        if total is not None:
+            total -= 1
+
+        connect = self.connect
+        read = self.read
+        redirect = self.redirect
+        status_count = self.status
+        other = self.other
+        cause = "unknown"
+        status = None
+        redirect_location = None
+
+        if error and self._is_connection_error(error):
+            # Connect retry?
+            if connect is False:
+                raise six.reraise(type(error), error, _stacktrace)
+            elif connect is not None:
+                connect -= 1
+
+        elif error and self._is_read_error(error):
+            # Read retry?
+            if read is False or not self._is_method_retryable(method):
+                raise six.reraise(type(error), error, _stacktrace)
+            elif read is not None:
+                read -= 1
+
+        elif error:
+            # Other retry?
+            if other is not None:
+                other -= 1
+
+        elif response and response.get_redirect_location():
+            # Redirect retry?
+            if redirect is not None:
+                redirect -= 1
+            cause = "too many redirects"
+            redirect_location = response.get_redirect_location()
+            status = response.status
+
+        else:
+            # Incrementing because of a server error like a 500 in
+            # status_forcelist and the given method is in the allowed_methods
+            cause = ResponseError.GENERIC_ERROR
+            if response and response.status:
+                if status_count is not None:
+                    status_count -= 1
+                cause = ResponseError.SPECIFIC_ERROR.format(status_code=response.status)
+                status = response.status
+
+        history = self.history + (
+            RequestHistory(method, url, error, status, redirect_location),
+        )
+
+        new_retry = self.new(
+            total=total,
+            connect=connect,
+            read=read,
+            redirect=redirect,
+            status=status_count,
+            other=other,
+            history=history,
+        )
+
+        if new_retry.is_exhausted():
+&gt;           raise MaxRetryError(_pool, url, error or ResponseError(cause))
+E           urllib3.exceptions.MaxRetryError: HTTPConnectionPool(host='localhost', port=3000): Max retries exceeded with url: /mcp (Caused by NewConnectionError('&lt;urllib3.connection.HTTPConnection object at 0x119d6d990&gt;: Failed to establish a new connection: [Errno 61] Connection refused'))
+
+/opt/homebrew/lib/python3.11/site-packages/urllib3/util/retry.py:594: MaxRetryError
+
+During handling of the above exception, another exception occurred:
+
+redis_sync = Redis&lt;ConnectionPool&lt;Connection&lt;host=localhost,port=6379,db=0&gt;&gt;&gt;
+
+    @pytest.mark.order(6)
+    def test_cold_to_warm_latency_improves_and_cache_key_exists(redis_sync):
+        # Tool name should match your server’s registry (adjust if different)
+        tool = os.getenv("P4_CACHE_TEST_TOOL", "search_documentation")
+        args = {"query": "fsync configuration", "limit": 5}
+
+        # Compose the cache key the server uses (keep in sync with server logic)
+        cache_key = f"tool:{tool}:{json.dumps(args, sort_keys=True)}"
+
+        # Ensure clean slate
+        redis_sync.delete(cache_key)
+
+        t0 = time.time()
+&gt;       _ = _call_tool(tool, args)   # cold
+
+tests/p4_t3_cache_perf_test.py:33:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests/p4_t3_cache_perf_test.py:16: in _call_tool
+    r = requests.post(f"{MCP_URL}", json=payload, timeout=30)
+/opt/homebrew/lib/python3.11/site-packages/requests/api.py:115: in post
+    return request("post", url, data=data, json=json, **kwargs)
+/opt/homebrew/lib/python3.11/site-packages/requests/api.py:59: in request
+    return session.request(method=method, url=url, **kwargs)
+/opt/homebrew/lib/python3.11/site-packages/requests/sessions.py:589: in request
+    resp = self.send(prep, **send_kwargs)
+/opt/homebrew/lib/python3.11/site-packages/requests/sessions.py:703: in send
+    r = adapter.send(request, **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;requests.adapters.HTTPAdapter object at 0x11ae4cfd0&gt;, request = &lt;PreparedRequest [POST]&gt;, stream = False
+timeout = Timeout(connect=30, read=30, total=None), verify = True, cert = None, proxies = OrderedDict()
+
+    def send(
+        self, request, stream=False, timeout=None, verify=True, cert=None, proxies=None
+    ):
+        """Sends PreparedRequest object. Returns Response object.
+
+        :param request: The :class:`PreparedRequest &lt;PreparedRequest&gt;` being sent.
+        :param stream: (optional) Whether to stream the request content.
+        :param timeout: (optional) How long to wait for the server to send
+            data before giving up, as a float, or a :ref:`(connect timeout,
+            read timeout) &lt;timeouts&gt;` tuple.
+        :type timeout: float or tuple or urllib3 Timeout object
+        :param verify: (optional) Either a boolean, in which case it controls whether
+            we verify the server's TLS certificate, or a string, in which case it
+            must be a path to a CA bundle to use
+        :param cert: (optional) Any user-provided SSL certificate to be trusted.
+        :param proxies: (optional) The proxies dictionary to apply to the request.
+        :rtype: requests.Response
+        """
+
+        try:
+            conn = self.get_connection_with_tls_context(
+                request, verify, proxies=proxies, cert=cert
+            )
+        except LocationValueError as e:
+            raise InvalidURL(e, request=request)
+
+        self.cert_verify(conn, request.url, verify, cert)
+        url = self.request_url(request, proxies)
+        self.add_headers(
+            request,
+            stream=stream,
+            timeout=timeout,
+            verify=verify,
+            cert=cert,
+            proxies=proxies,
+        )
+
+        chunked = not (request.body is None or "Content-Length" in request.headers)
+
+        if isinstance(timeout, tuple):
+            try:
+                connect, read = timeout
+                timeout = TimeoutSauce(connect=connect, read=read)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid timeout {timeout}. Pass a (connect, read) timeout tuple, "
+                    f"or a single float to set both timeouts to the same value."
+                )
+        elif isinstance(timeout, TimeoutSauce):
+            pass
+        else:
+            timeout = TimeoutSauce(connect=timeout, read=timeout)
+
+        try:
+            resp = conn.urlopen(
+                method=request.method,
+                url=url,
+                body=request.body,
+                headers=request.headers,
+                redirect=False,
+                assert_same_host=False,
+                preload_content=False,
+                decode_content=False,
+                retries=self.max_retries,
+                timeout=timeout,
+                chunked=chunked,
+            )
+
+        except (ProtocolError, OSError) as err:
+            raise ConnectionError(err, request=request)
+
+        except MaxRetryError as e:
+            if isinstance(e.reason, ConnectTimeoutError):
+                # TODO: Remove this in 3.0.0: see #2811
+                if not isinstance(e.reason, NewConnectionError):
+                    raise ConnectTimeout(e, request=request)
+
+            if isinstance(e.reason, ResponseError):
+                raise RetryError(e, request=request)
+
+            if isinstance(e.reason, _ProxyError):
+                raise ProxyError(e, request=request)
+
+            if isinstance(e.reason, _SSLError):
+                # This branch is for urllib3 v1.22 and later.
+                raise SSLError(e, request=request)
+
+&gt;           raise ConnectionError(e, request=request)
+E           requests.exceptions.ConnectionError: HTTPConnectionPool(host='localhost', port=3000): Max retries exceeded with url: /mcp (Caused by NewConnectionError('&lt;urllib3.connection.HTTPConnection object at 0x119d6d990&gt;: Failed to establish a new connection: [Errno 61] Connection refused'))
+
+/opt/homebrew/lib/python3.11/site-packages/requests/adapters.py:677: ConnectionError</failure></testcase><testcase classname="tests.p4_t3_cache_perf_test" name="test_cache_invalidation_after_graph_update" time="0.001" /><testcase classname="tests.p4_t3_test" name="test_scaffold_smoke" time="0.000" /><testcase classname="tests.p4_t4_test" name="test_scaffold_smoke" time="0.000" /></testsuite></testsuites>
