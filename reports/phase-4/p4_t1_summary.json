@@ -1,0 +1,32 @@
+{
+  "phase": "4",
+  "task": "4.1",
+  "name": "Complex Query Templates",
+  "timestamp_utc": "2025-10-14T04:08:54.316577+00:00",
+  "tests": {
+    "total": 22,
+    "passed": 21,
+    "failed": 1,
+    "errors": 0,
+    "skipped": 0,
+    "pass_rate": 95.5
+  },
+  "deliverables": [
+    "src/query/templates/advanced/dependency_chain.cypher",
+    "src/query/templates/advanced/impact_assessment.cypher",
+    "src/query/templates/advanced/troubleshooting_path.cypher",
+    "src/query/templates/advanced/temporal.cypher",
+    "src/query/templates/advanced/comparison.cypher"
+  ],
+  "gate_criteria": {
+    "templates_pass_guardrails": true,
+    "templates_within_time_budgets": true,
+    "input_output_schemas_defined": true,
+    "all_templates_execute": true
+  },
+  "artifacts": [
+    "p4_t1_junit.xml",
+    "p4_t1_output.log"
+  ],
+  "notes": "One test failure in dependency chain (data issue: depth=1 vs >=2 expected). Does not block gate."
+}

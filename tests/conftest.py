@@ -20,6 +20,10 @@ os.environ.setdefault("NEO4J_PASSWORD", "testpassword123")
 os.environ.setdefault("REDIS_PASSWORD", "testredis123")
 os.environ.setdefault("JWT_SECRET", "test-secret-key-change-in-production-min-32-chars")
 
+# Set Redis URI with password for cache tests
+redis_password = os.environ.get("REDIS_PASSWORD", "testredis123")
+os.environ.setdefault("CACHE_REDIS_URI", f"redis://:{redis_password}@localhost:6379/0")
+
 
 @pytest.fixture(scope="session")
 def event_loop():

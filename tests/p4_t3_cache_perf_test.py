@@ -8,15 +8,17 @@ import pytest
 import requests
 from redis import Redis
 
-MCP_URL = os.getenv("MCP_BASE_URL", "http://localhost:3000/mcp")
+MCP_URL = os.getenv("MCP_BASE_URL", "http://localhost:8000/mcp")
 
 
 @pytest.fixture(scope="module", name="redis_sync")
 def _redis_sync():
     """Return a synchronous Redis client regardless of any async fixture elsewhere."""
-    return Redis.from_url(
-        os.getenv("CACHE_REDIS_URI", "redis://localhost:6379"), decode_responses=True
+    redis_password = os.getenv("REDIS_PASSWORD", "testredis123")
+    redis_uri = os.getenv(
+        "CACHE_REDIS_URI", f"redis://:{redis_password}@localhost:6379/0"
     )
+    return Redis.from_url(redis_uri, decode_responses=True)
 
 
 def _call_tool(name: str, args: dict):

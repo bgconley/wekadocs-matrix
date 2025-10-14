@@ -99,6 +99,23 @@ class SchemaConfig(BaseModel):
     auto_migrate: bool = False
 
 
+class L1CacheConfig(BaseModel):
+    enabled: bool = True
+    ttl_seconds: int = 300
+    max_size: int = 1000
+
+
+class L2CacheConfig(BaseModel):
+    enabled: bool = True
+    ttl_seconds: int = 3600
+    key_prefix: str = "weka:cache:v1"
+
+
+class CacheConfig(BaseModel):
+    l1: L1CacheConfig
+    l2: L2CacheConfig
+
+
 class AppConfig(BaseModel):
     name: str = "wekadocs-graphrag-mcp"
     version: str = "0.1.0"
@@ -119,6 +136,7 @@ class Config(BaseModel):
     telemetry: TelemetryConfig
     ingestion: IngestionConfig
     schema: SchemaConfig
+    cache: CacheConfig
 
 
 class Settings(BaseSettings):

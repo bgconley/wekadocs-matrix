@@ -19,16 +19,38 @@ def neo4j_driver():
 
 
 def _flatten_plan(plan):
+    """Flatten EXPLAIN plan tree - handles both dict and object formats."""
+    if plan is None:
+        return []
+
     ops = []
     stack = [plan]
     while stack:
         n = stack.pop()
-        ops.append(
-            getattr(n, "operator_type", None) or getattr(n, "operatorType", None)
-        )
-        for c in getattr(n, "children", []) or []:
-            stack.append(c)
-    return [o for o in ops if o]
+        if n is None:
+            continue
+
+        # Handle both dict and object representations
+        if isinstance(n, dict):
+            op_type = n.get("operatorType", "")
+            if op_type:
+                ops.append(op_type)
+            children = n.get("children", [])
+        else:
+            op_type = getattr(n, "operator_type", None) or getattr(
+                n, "operatorType", None
+            )
+            if op_type:
+                ops.append(op_type)
+            children = getattr(n, "children", None) or []
+
+        # Add children to stack
+        if children:
+            for c in children:
+                if c is not None:
+                    stack.append(c)
+
+    return ops
 
 
 @pytest.mark.order(4)

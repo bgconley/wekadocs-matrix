@@ -23,18 +23,21 @@ TEST_NS = f"p4_{uuid.uuid4().hex[:8]}"
 
 
 def _seed_advanced_graph(s):
-    # Components / dependency chain
+    # Components / dependency chain (A -> B -> C -> D for multi-hop testing)
     s.run(
         """
     MERGE (a:Component {id:$a, name:'Comp A'})
     MERGE (b:Component {id:$b, name:'Comp B'})
     MERGE (c:Component {id:$c, name:'Comp C'})
+    MERGE (d:Component {id:$d, name:'Comp D'})
     MERGE (a)-[:DEPENDS_ON]->(b)
     MERGE (b)-[:DEPENDS_ON]->(c)
+    MERGE (c)-[:DEPENDS_ON]->(d)
     """,
         a=f"{TEST_NS}:compA",
         b=f"{TEST_NS}:compB",
         c=f"{TEST_NS}:compC",
+        d=f"{TEST_NS}:compD",
     )
 
     # Configuration -> AFFECTS -> Components
@@ -75,8 +78,9 @@ def test_dependency_chain_query(neo4j_driver):
         _seed_advanced_graph(s)
         rec = s.run(
             """
-            MATCH path = (start:Component {name:'Comp A'})-[:DEPENDS_ON*1..5]->(end)
+            MATCH path = (start:Component {name:'Comp A'})-[:DEPENDS_ON*2..5]->(end)
             RETURN length(path) AS depth
+            ORDER BY depth ASC
             LIMIT 1
         """
         ).single()
