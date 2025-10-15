@@ -10,14 +10,30 @@ import uvicorn
 from fastapi import FastAPI, Request
 
 from src.shared import close_connections, init_config, initialize_connections
-from src.shared.observability import (get_correlation_id, get_logger,
-                                      set_correlation_id, setup_logging,
-                                      setup_tracing)
+from src.shared.observability import (
+    get_correlation_id,
+    get_logger,
+    set_correlation_id,
+    setup_logging,
+    setup_tracing,
+)
+from src.shared.observability.metrics import (
+    PrometheusMiddleware,
+    get_metrics,
+    setup_metrics,
+)
 
-from .models import (HealthResponse, MCPInitializeRequest,
-                     MCPInitializeResponse, MCPTool, MCPToolCallRequest,
-                     MCPToolCallResponse, MCPToolsListResponse,
-                     MetricsResponse, ReadinessResponse)
+from .models import (
+    HealthResponse,
+    MCPInitializeRequest,
+    MCPInitializeResponse,
+    MCPTool,
+    MCPToolCallRequest,
+    MCPToolCallResponse,
+    MCPToolsListResponse,
+    MetricsResponse,
+    ReadinessResponse,
+)
 
 # Initialize config and logging
 config, settings = init_config()
@@ -33,6 +49,12 @@ app = FastAPI(
 
 # Setup OpenTelemetry tracing
 setup_tracing(app, settings)
+
+# Setup Prometheus metrics
+setup_metrics(settings)
+
+# Add Prometheus middleware
+app.add_middleware(PrometheusMiddleware)
 
 # Metrics storage (in-memory for Phase 1; will be Redis/Prometheus later)
 metrics_store = {
@@ -189,9 +211,17 @@ async def readiness():
     )
 
 
-@app.get("/metrics", response_model=MetricsResponse)
+@app.get("/metrics")
 async def metrics():
-    """Metrics endpoint"""
+    """Prometheus metrics endpoint"""
+    from starlette.responses import Response
+
+    return Response(content=get_metrics(), media_type="text/plain; version=0.0.4")
+
+
+@app.get("/metrics/json", response_model=MetricsResponse)
+async def metrics_json():
+    """JSON metrics endpoint (legacy)"""
     latencies = metrics_store["latencies"]
 
     def percentile(data, p):

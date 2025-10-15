@@ -1,0 +1,228 @@
+# Implements Phase 5, Task 5.2 (Monitoring & observability)
+# See: /docs/spec.md §7 (Observability & SLOs)
+# Prometheus metrics for WekaDocs GraphRAG MCP
+
+from typing import Callable
+
+from prometheus_client import Counter, Gauge, Histogram, Info, generate_latest
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+
+from ..config import Settings
+from .logging import get_logger
+
+logger = get_logger(__name__)
+
+# ===== Request metrics =====
+http_requests_total = Counter(
+    "http_requests_total",
+    "Total HTTP requests",
+    ["method", "endpoint", "status"],
+)
+
+http_request_duration_seconds = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request duration in seconds",
+    ["method", "endpoint"],
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+
+# ===== MCP tool metrics =====
+mcp_tool_calls_total = Counter(
+    "mcp_tool_calls_total",
+    "Total MCP tool calls",
+    ["tool_name", "status"],
+)
+
+mcp_tool_duration_seconds = Histogram(
+    "mcp_tool_duration_seconds",
+    "MCP tool execution duration in seconds",
+    ["tool_name"],
+    buckets=(0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0),
+)
+
+# ===== Query processing metrics =====
+cypher_query_duration_seconds = Histogram(
+    "cypher_query_duration_seconds",
+    "Cypher query execution duration in seconds",
+    ["template_name", "status"],
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0),
+)
+
+cypher_queries_total = Counter(
+    "cypher_queries_total",
+    "Total Cypher queries executed",
+    ["template_name", "status"],
+)
+
+cypher_validation_failures_total = Counter(
+    "cypher_validation_failures_total",
+    "Total Cypher validation failures",
+    ["reason"],
+)
+
+# ===== Cache metrics =====
+cache_operations_total = Counter(
+    "cache_operations_total",
+    "Total cache operations",
+    ["operation", "layer", "result"],
+)
+
+cache_hit_rate = Gauge(
+    "cache_hit_rate",
+    "Cache hit rate (rolling average)",
+    ["layer"],
+)
+
+cache_size_bytes = Gauge(
+    "cache_size_bytes",
+    "Current cache size in bytes",
+    ["layer"],
+)
+
+# ===== Vector search metrics =====
+vector_search_duration_seconds = Histogram(
+    "vector_search_duration_seconds",
+    "Vector search duration in seconds",
+    ["store"],
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0),
+)
+
+vector_search_total = Counter(
+    "vector_search_total",
+    "Total vector searches",
+    ["store", "status"],
+)
+
+# ===== Hybrid search metrics =====
+hybrid_search_duration_seconds = Histogram(
+    "hybrid_search_duration_seconds",
+    "Hybrid search (vector + graph) duration in seconds",
+    buckets=(0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0),
+)
+
+graph_expansion_duration_seconds = Histogram(
+    "graph_expansion_duration_seconds",
+    "Graph expansion duration in seconds",
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5),
+)
+
+# ===== Ingestion metrics =====
+ingestion_queue_size = Gauge(
+    "ingestion_queue_size",
+    "Current ingestion queue size",
+)
+
+ingestion_queue_lag_seconds = Gauge(
+    "ingestion_queue_lag_seconds",
+    "Ingestion queue lag (oldest item age)",
+)
+
+ingestion_documents_total = Counter(
+    "ingestion_documents_total",
+    "Total documents ingested",
+    ["status"],
+)
+
+ingestion_duration_seconds = Histogram(
+    "ingestion_duration_seconds",
+    "Document ingestion duration in seconds",
+    buckets=(0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0),
+)
+
+# ===== Reconciliation metrics =====
+reconciliation_drift_percentage = Gauge(
+    "reconciliation_drift_percentage",
+    "Reconciliation drift percentage (graph vs vector)",
+)
+
+reconciliation_duration_seconds = Histogram(
+    "reconciliation_duration_seconds",
+    "Reconciliation run duration in seconds",
+    buckets=(1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
+)
+
+reconciliation_repairs_total = Counter(
+    "reconciliation_repairs_total",
+    "Total drift repairs performed",
+)
+
+# ===== Connection pool metrics =====
+connection_pool_active = Gauge(
+    "connection_pool_active",
+    "Active connections in pool",
+    ["pool_name"],
+)
+
+connection_pool_idle = Gauge(
+    "connection_pool_idle",
+    "Idle connections in pool",
+    ["pool_name"],
+)
+
+# ===== Service info =====
+service_info = Info(
+    "wekadocs_mcp",
+    "WekaDocs GraphRAG MCP service information",
+)
+
+
+class PrometheusMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to collect HTTP request metrics for Prometheus.
+    """
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        # Skip metrics endpoint itself
+        if request.url.path == "/metrics":
+            return await call_next(request)
+
+        method = request.method
+        endpoint = request.url.path
+
+        # Time the request
+        with http_request_duration_seconds.labels(
+            method=method, endpoint=endpoint
+        ).time():
+            response = await call_next(request)
+
+        # Record request
+        http_requests_total.labels(
+            method=method,
+            endpoint=endpoint,
+            status=response.status_code,
+        ).inc()
+
+        return response
+
+
+def setup_metrics(settings: Settings) -> None:
+    """
+    Setup Prometheus metrics collection.
+
+    Args:
+        settings: Application settings
+    """
+    logger.info("Setting up Prometheus metrics")
+
+    # Set service info with available settings
+    service_info.info(
+        {
+            "version": "0.1.0",
+            "environment": settings.env,
+            "service_name": settings.otel_service_name,
+        }
+    )
+
+    logger.info("Prometheus metrics enabled")
+
+
+def get_metrics() -> bytes:
+    """
+    Get current metrics in Prometheus exposition format.
+
+    Returns:
+        Metrics as bytes
+    """
+    return generate_latest()

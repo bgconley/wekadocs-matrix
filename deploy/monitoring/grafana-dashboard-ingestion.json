@@ -1,0 +1,184 @@
+{
+  "dashboard": {
+    "title": "WekaDocs GraphRAG MCP - Ingestion & Reconciliation",
+    "tags": ["wekadocs", "mcp", "ingestion", "reconciliation"],
+    "timezone": "utc",
+    "schemaVersion": 27,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Ingestion Queue Size",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "ingestion_queue_size",
+            "legendFormat": "Queue Size",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"label": "items", "format": "short"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Ingestion Queue Lag",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "ingestion_queue_lag_seconds",
+            "legendFormat": "Lag (oldest item)",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"label": "seconds", "format": "s"},
+          {"format": "short"}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [300], "type": "gt"},
+              "query": {"params": ["A", "5m", "now"]},
+              "reducer": {"params": [], "type": "avg"},
+              "type": "query"
+            }
+          ],
+          "frequency": "60s",
+          "handler": 1,
+          "name": "Ingestion Queue Lag Alert",
+          "message": "Ingestion queue lag exceeded 5 minutes"
+        }
+      },
+      {
+        "id": 3,
+        "title": "Document Ingestion Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "rate(ingestion_documents_total[5m])",
+            "legendFormat": "{{status}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"label": "docs/sec", "format": "short"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Ingestion Duration (P95)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(ingestion_duration_seconds_bucket[5m]))",
+            "legendFormat": "P95",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"label": "seconds", "format": "s"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Reconciliation Drift Percentage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "reconciliation_drift_percentage",
+            "legendFormat": "Drift %",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"label": "drift %", "format": "percent", "min": 0},
+          {"format": "short"}
+        ],
+        "thresholds": [
+          {"value": 0.5, "colorMode": "critical", "op": "gt", "fill": true, "line": true}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [0.5], "type": "gt"},
+              "query": {"params": ["A", "5m", "now"]},
+              "reducer": {"params": [], "type": "avg"},
+              "type": "query"
+            }
+          ],
+          "frequency": "60s",
+          "handler": 1,
+          "name": "Reconciliation Drift Alert",
+          "message": "Drift exceeded 0.5% threshold"
+        }
+      },
+      {
+        "id": 6,
+        "title": "Reconciliation Duration",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+        "targets": [
+          {
+            "expr": "reconciliation_duration_seconds",
+            "legendFormat": "Duration",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"label": "seconds", "format": "s"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Reconciliation Repairs",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+        "targets": [
+          {
+            "expr": "rate(reconciliation_repairs_total[5m])",
+            "legendFormat": "Repairs/sec",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"label": "repairs/sec", "format": "short"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Connection Pool Status",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+        "targets": [
+          {
+            "expr": "connection_pool_active",
+            "legendFormat": "{{pool_name}} active",
+            "refId": "A"
+          },
+          {
+            "expr": "connection_pool_idle",
+            "legendFormat": "{{pool_name}} idle",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"label": "connections", "format": "short"},
+          {"format": "short"}
+        ]
+      }
+    ]
+  }
+}

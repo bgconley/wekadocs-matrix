@@ -1,0 +1,180 @@
+# Implements Phase 5, Task 5.2 (Monitoring & observability)
+# Prometheus alert rules for WekaDocs GraphRAG MCP
+# See: /docs/spec.md §7 (Observability & SLOs)
+
+groups:
+  - name: wekadocs_mcp_slo_alerts
+    interval: 60s
+    rules:
+      # ===== SLO Alerts (P99 Latency) =====
+      - alert: HighP99Latency
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) > 2.0
+        for: 5m
+        labels:
+          severity: critical
+          component: mcp_server
+        annotations:
+          summary: "P99 latency exceeded 2s threshold"
+          description: "HTTP request P99 latency is {{ $value }}s (threshold: 2s). SLO breach."
+          runbook_url: "https://docs.wekadocs.com/runbooks/high-latency"
+
+      - alert: HybridSearchSlowP95
+        expr: histogram_quantile(0.95, rate(hybrid_search_duration_seconds_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: query_engine
+        annotations:
+          summary: "Hybrid search P95 exceeded 500ms SLO"
+          description: "Hybrid search P95 latency is {{ $value }}s (SLO: 500ms)"
+          runbook_url: "https://docs.wekadocs.com/runbooks/slow-search"
+
+      # ===== Error Rate Alerts =====
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          component: mcp_server
+        annotations:
+          summary: "Error rate exceeded 1% threshold"
+          description: "HTTP 5xx error rate is {{ $value | humanizePercentage }} (threshold: 1%)"
+          runbook_url: "https://docs.wekadocs.com/runbooks/high-errors"
+
+      - alert: CypherValidationFailures
+        expr: rate(cypher_validation_failures_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: validator
+        annotations:
+          summary: "High Cypher validation failure rate"
+          description: "Cypher validation failures at {{ $value }} per second. Possible attack or misconfigured client."
+          runbook_url: "https://docs.wekadocs.com/runbooks/validation-failures"
+
+      # ===== Cache Performance Alerts =====
+      - alert: LowCacheHitRate
+        expr: cache_hit_rate < 0.8
+        for: 10m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Cache hit rate below 80% threshold"
+          description: "Cache hit rate for {{ $labels.layer }} is {{ $value | humanizePercentage }} (threshold: 80%)"
+          runbook_url: "https://docs.wekadocs.com/runbooks/low-cache-hit-rate"
+
+      # ===== Ingestion Alerts =====
+      - alert: IngestionQueueBacklog
+        expr: ingestion_queue_size > 1000
+        for: 10m
+        labels:
+          severity: warning
+          component: ingestion
+        annotations:
+          summary: "Ingestion queue backlog detected"
+          description: "Ingestion queue has {{ $value }} items. Possible processing bottleneck."
+          runbook_url: "https://docs.wekadocs.com/runbooks/queue-backlog"
+
+      - alert: IngestionQueueLag
+        expr: ingestion_queue_lag_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+          component: ingestion
+        annotations:
+          summary: "Ingestion queue lag exceeded 5 minutes"
+          description: "Oldest item in ingestion queue is {{ $value | humanizeDuration }} old"
+          runbook_url: "https://docs.wekadocs.com/runbooks/queue-lag"
+
+      # ===== Drift Alerts =====
+      - alert: ReconciliationDriftHigh
+        expr: reconciliation_drift_percentage > 0.5
+        for: 5m
+        labels:
+          severity: critical
+          component: reconciliation
+        annotations:
+          summary: "Reconciliation drift exceeded 0.5% threshold"
+          description: "Drift between graph and vector store is {{ $value }}% (threshold: 0.5%)"
+          runbook_url: "https://docs.wekadocs.com/runbooks/drift-repair"
+
+      # ===== Resource Alerts =====
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            process_resident_memory_bytes
+            /
+            node_memory_MemTotal_bytes
+          ) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          component: mcp_server
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value | humanizePercentage }} of available (threshold: 85%)"
+          runbook_url: "https://docs.wekadocs.com/runbooks/high-memory"
+
+      - alert: ConnectionPoolExhaustion
+        expr: connection_pool_active / (connection_pool_active + connection_pool_idle) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: connections
+        annotations:
+          summary: "Connection pool near exhaustion"
+          description: "Pool {{ $labels.pool_name }} is {{ $value | humanizePercentage }} utilized (threshold: 90%)"
+          runbook_url: "https://docs.wekadocs.com/runbooks/connection-pool"
+
+  - name: wekadocs_mcp_availability
+    interval: 60s
+    rules:
+      - alert: ServiceDown
+        expr: up{job="wekadocs-mcp"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: mcp_server
+        annotations:
+          summary: "WekaDocs MCP service is down"
+          description: "Service has been down for 2 minutes"
+          runbook_url: "https://docs.wekadocs.com/runbooks/service-down"
+
+      - alert: Neo4jDown
+        expr: up{job="neo4j"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: neo4j
+        annotations:
+          summary: "Neo4j database is down"
+          description: "Neo4j has been unreachable for 2 minutes"
+          runbook_url: "https://docs.wekadocs.com/runbooks/neo4j-down"
+
+      - alert: QdrantDown
+        expr: up{job="qdrant"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: qdrant
+        annotations:
+          summary: "Qdrant vector store is down"
+          description: "Qdrant has been unreachable for 2 minutes"
+          runbook_url: "https://docs.wekadocs.com/runbooks/qdrant-down"
+
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: redis
+        annotations:
+          summary: "Redis cache/queue is down"
+          description: "Redis has been unreachable for 2 minutes"
+          runbook_url: "https://docs.wekadocs.com/runbooks/redis-down"
