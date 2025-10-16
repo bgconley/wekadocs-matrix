@@ -115,3 +115,67 @@ def jwt_token():
     auth = get_jwt_auth()
     token = auth.create_token(subject="test_user")
     return token
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_tracing():
+    """Initialize OpenTelemetry tracing for all tests"""
+    from opentelemetry import trace
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+
+    # Create a basic TracerProvider for tests (no exporter needed)
+    resource = Resource.create(
+        {
+            "service.name": "wekadocs-mcp-test",
+            "service.version": "0.1.0-test",
+        }
+    )
+    provider = TracerProvider(resource=resource)
+    trace.set_tracer_provider(provider)
+
+    yield provider
+
+    # Cleanup not needed - provider will be garbage collected
+
+
+@pytest.fixture
+def watch_dir(tmp_path):
+    """Create temporary watch directory for ingestion tests"""
+    watch_path = tmp_path / "watch"
+    watch_path.mkdir(parents=True, exist_ok=True)
+    return watch_path
+
+
+@pytest.fixture
+def config():
+    """Get application config for tests"""
+    from src.shared.config import get_config
+
+    return get_config()
+
+
+@pytest.fixture(scope="session")
+def redis_sync_client(docker_services_running):
+    """Get synchronous Redis client for testing (for Phase 6 orchestrator)"""
+    import os
+
+    import redis
+
+    password = os.environ.get("REDIS_PASSWORD", "testredis123")
+    client = redis.Redis(
+        host="localhost",
+        port=6379,
+        password=password,
+        db=0,
+        decode_responses=False,  # Keep bytes for compatibility
+    )
+
+    # Test connection
+    try:
+        client.ping()
+    except Exception as e:
+        pytest.skip(f"Redis not available: {e}")
+
+    yield client
+    # Don't close - shared across tests

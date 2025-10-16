@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="13" time="28.257" timestamp="2025-10-16T16:17:59.255178" hostname="bgc-mbp-m1.local"><testcase classname="tests.p6_t2_test.TestStateMachine" name="test_state_progression" time="5.336" /><testcase classname="tests.p6_t2_test.TestStateMachine" name="test_error_state" time="0.089" /><testcase classname="tests.p6_t2_test.TestResumeLogic" name="test_resume_from_parsing" time="2.258" /><testcase classname="tests.p6_t2_test.TestResumeLogic" name="test_resume_from_embedding" time="0.967"><failure message="TypeError: 'NoneType' object is not iterable">tests/p6_t2_test.py:245: in test_resume_from_embedding
+    stats = orchestrator.process_job(job_id)
+src/ingestion/auto/orchestrator.py:145: in process_job
+    state = self._execute_pipeline(state, tracker)
+src/ingestion/auto/orchestrator.py:209: in _execute_pipeline
+    state = self._stage_embedding(state, tracker)
+src/ingestion/auto/orchestrator.py:442: in _stage_embedding
+    for section in state.sections:
+E   TypeError: 'NoneType' object is not iterable</failure></testcase><testcase classname="tests.p6_t2_test.TestResumeLogic" name="test_no_duplicate_work_on_resume" time="1.922" /><testcase classname="tests.p6_t2_test.TestIdempotency" name="test_reingest_unchanged_doc" time="2.043" /><testcase classname="tests.p6_t2_test.TestIdempotency" name="test_deterministic_ids" time="3.057" /><testcase classname="tests.p6_t2_test.TestProgressEvents" name="test_progress_events_emitted" time="1.975" /><testcase classname="tests.p6_t2_test.TestProgressEvents" name="test_progress_percentages" time="2.341" /><testcase classname="tests.p6_t2_test.TestPipelineIntegration" name="test_calls_existing_parsers" time="2.025" /><testcase classname="tests.p6_t2_test.TestPipelineIntegration" name="test_calls_existing_extractors" time="1.975"><failure message="neo4j.exceptions.CypherSyntaxError: {code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '(': expected &quot;+&quot; or &quot;-&quot; (line 3, column 55 (offset: 91))&#10;&quot;                WHERE s.document_id = (SELECT d.id FROM Document d WHERE d.source_uri = $uri LIMIT 1)&quot;&#10;                                       ^}">tests/p6_t2_test.py:762: in test_calls_existing_extractors
+    result = session.run("""
+/opt/homebrew/lib/python3.11/site-packages/neo4j/_sync/work/session.py:313: in run
+    self._auto_result._run(
+/opt/homebrew/lib/python3.11/site-packages/neo4j/_sync/work/result.py:181: in _run
+    self._attach()
+/opt/homebrew/lib/python3.11/site-packages/neo4j/_sync/work/result.py:298: in _attach
+    self._connection.fetch_message()
+/opt/homebrew/lib/python3.11/site-packages/neo4j/_sync/io/_common.py:178: in inner
+    func(*args, **kwargs)
+/opt/homebrew/lib/python3.11/site-packages/neo4j/_sync/io/_bolt.py:849: in fetch_message
+    res = self._process_message(tag, fields)
+/opt/homebrew/lib/python3.11/site-packages/neo4j/_sync/io/_bolt5.py:374: in _process_message
+    response.on_failure(summary_metadata or {})
+/opt/homebrew/lib/python3.11/site-packages/neo4j/_sync/io/_common.py:245: in on_failure
+    raise Neo4jError.hydrate(**metadata)
+E   neo4j.exceptions.CypherSyntaxError: {code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '(': expected "+" or "-" (line 3, column 55 (offset: 91))
+E   "                WHERE s.document_id = (SELECT d.id FROM Document d WHERE d.source_uri = $uri LIMIT 1)"
+E                                          ^}</failure></testcase><testcase classname="tests.p6_t2_test.TestPipelineIntegration" name="test_calls_build_graph" time="1.908" /><testcase classname="tests.p6_t2_test.TestE2EOrchestratorFlow" name="test_complete_job_lifecycle" time="2.226" /></testsuite></testsuites>

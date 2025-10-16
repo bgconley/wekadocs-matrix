@@ -2,9 +2,9 @@
 # See: /docs/implementation-plan.md → Phase 1
 
 # FastAPI and ASGI server
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7,<3
 pydantic-settings==2.1.0
 
 # Neo4j driver
@@ -14,7 +14,10 @@ neo4j==5.15.0
 qdrant-client==1.7.0
 
 # Redis client
-redis==5.0.1
+redis>=5.0.3
+
+# File system watcher (Phase 6)
+watchdog>=4.0.0
 
 # JWT authentication
 pyjwt==2.8.0
@@ -53,3 +56,12 @@ jsonschema==4.20.0
 # Utilities
 python-multipart==0.0.6
 aiofiles==23.2.1
+orjson>=3.10.0
+
+# Phase 3: Ingestion pipeline dependencies
+sentence-transformers==2.7.0
+beautifulsoup4==4.12.2
+html2text==2024.2.26
+markdown==3.5.1
+tiktoken==0.5.2
+lxml==4.9.3

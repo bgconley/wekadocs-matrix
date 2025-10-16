@@ -137,6 +137,7 @@ services:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - QDRANT_GRPC_PORT=6334
+      - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD}
@@ -173,13 +174,16 @@ services:
       context: .
       dockerfile: docker/ingestion-worker.Dockerfile
     container_name: weka-ingestion-worker
+    command: python -m src.ingestion.worker
     networks:
       - weka-net
     volumes:
       - ./config:/app/config:ro
-      - ./src:/app/src:ro
+      - ./src:/app/src
       - ./data:/app/data:ro
     environment:
+      - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - INGEST_NS=ingest
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
       - NEO4J_URI=bolt://neo4j:7687
@@ -187,13 +191,12 @@ services:
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
+      - QDRANT_GRPC_PORT=6334
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD}
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
-      - OTEL_SERVICE_NAME=weka-ingestion-worker
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       neo4j:
@@ -210,6 +213,46 @@ services:
         reservations:
           cpus: '1'
           memory: 1G
+    restart: unless-stopped
+
+  # Phase 6: Auto-Ingestion Service (Task 6.1)
+  ingestion-service:
+    build:
+      context: .
+      dockerfile: docker/ingestion-service.Dockerfile
+    container_name: weka-ingestion-service
+    command: python -m src.ingestion.auto.service
+    networks:
+      - weka-net
+    ports:
+      - "8081:8081"  # Health/metrics/ready endpoints
+    volumes:
+      - ./config:/app/config:ro
+      - ./src:/app/src
+      - ./data:/app/data
+    environment:
+      - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - INGEST_NS=ingest
+      - INGEST_WATCH_DIR=/app/data/ingest
+      - INGEST_PORT=8081
+      - ENV=${ENV:-development}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
 
   # Optional: Jaeger for OpenTelemetry tracing

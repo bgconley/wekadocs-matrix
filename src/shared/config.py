@@ -9,13 +9,22 @@ import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
+from .models import WekaBaseModel
+
 
 class EmbeddingConfig(BaseModel):
-    model_name: str
+    """Embedding configuration - renamed model_name to embedding_model to avoid Pydantic v2 namespace conflict"""
+
+    embedding_model: str = Field(
+        alias="model_name"
+    )  # Support both names for backwards compat
     dims: int
     similarity: str = "cosine"
     multilingual: bool = False
     version: str = "v1"
+
+    class Config:
+        populate_by_name = True  # Allow both embedding_model and model_name
 
 
 class QdrantVectorConfig(BaseModel):
@@ -123,7 +132,7 @@ class AppConfig(BaseModel):
     environment: str = "development"
 
 
-class Config(BaseModel):
+class Config(WekaBaseModel):
     """Main configuration model"""
 
     app: AppConfig
@@ -135,8 +144,13 @@ class Config(BaseModel):
     validator: ValidatorConfig
     telemetry: TelemetryConfig
     ingestion: IngestionConfig
-    schema: SchemaConfig
+    graph_schema: SchemaConfig = Field(
+        alias="schema"
+    )  # Renamed from schema to avoid shadowing BaseModel attribute
     cache: CacheConfig
+
+    class Config:
+        populate_by_name = True  # Allow both graph_schema and schema
 
 
 class Settings(BaseSettings):
@@ -159,10 +173,14 @@ class Settings(BaseSettings):
     # Redis
     redis_host: str = Field(default="localhost", alias="REDIS_HOST")
     redis_port: int = Field(default=6379, alias="REDIS_PORT")
-    redis_password: str = Field(..., alias="REDIS_PASSWORD")
+    redis_password: str = Field(
+        default="", alias="REDIS_PASSWORD"
+    )  # Optional for workers
 
-    # JWT
-    jwt_secret: str = Field(..., alias="JWT_SECRET")
+    # JWT (only required for MCP server, not workers)
+    jwt_secret: str = Field(
+        default="dev-secret-key", alias="JWT_SECRET"
+    )  # Optional for workers
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
 
     # OpenTelemetry

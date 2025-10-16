@@ -1,0 +1,123 @@
+"""
+Phase 6, Task 6.1: Auto-Ingestion Service
+
+HTTP service exposing health, metrics, and backpressure endpoints.
+
+Endpoints:
+- GET /health: Health check with queue depth
+- GET /ready: Readiness check (503 if backpressure active)
+- GET /metrics: Prometheus metrics
+
+See: /docs/implementation-plan-phase-6.md → Task 6.1
+"""
+
+import os
+import asyncio
+import time
+import threading
+import uvicorn
+import structlog
+from fastapi import FastAPI, Response, status
+from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
+
+# Import queue and watcher functions
+from . import queue
+from . import watcher
+
+logger = structlog.get_logger()
+
+# FastAPI app
+app = FastAPI(title="Ingestion Service")
+
+# Prometheus metrics
+JOBS_G = Gauge("ingest_queue_depth", "Depth of ingest:jobs queue")
+BACKPRESSURE = Gauge("ingest_backpressure", "1 if backpressure active else 0")
+REQS = Counter("ingest_http_requests_total", "requests", ["endpoint"])
+
+# Configuration
+MAX_Q = int(os.getenv("BACKPRESSURE_MAX_QUEUE", "2000"))
+P95_MS = int(os.getenv("BACKPRESSURE_P95_MS", "800"))
+
+
+@app.get("/health")
+def health():
+    """
+    Health check endpoint.
+
+    Returns:
+        dict: Status and queue depth
+    """
+    REQS.labels("/health").inc()
+
+    try:
+        depth = queue.r.llen("ingest:jobs")
+        return {"status": "ok", "queue_depth": depth}
+    except Exception as exc:
+        logger.error("Health check failed", error=str(exc))
+        return {"status": "error", "error": str(exc)}
+
+
+@app.get("/metrics")
+def metrics():
+    """
+    Prometheus metrics endpoint.
+
+    Returns:
+        Response: Prometheus metrics in text format
+    """
+    REQS.labels("/metrics").inc()
+
+    try:
+        # Update queue depth gauge
+        JOBS_G.set(queue.r.llen("ingest:jobs"))
+    except Exception as exc:
+        logger.error("Failed to update queue depth metric", error=str(exc))
+
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.get("/ready")
+def ready():
+    """
+    Readiness check endpoint.
+
+    Returns 503 if backpressure is active (queue depth exceeds threshold).
+
+    Returns:
+        dict or Response: Ready status or 503 if not ready
+    """
+    try:
+        # Simple back-pressure model: queue depth threshold
+        # (can wire real P95s from phase-2 metrics if available)
+        depth = queue.r.llen("ingest:jobs")
+        is_backpressure = 1 if depth > MAX_Q else 0
+
+        BACKPRESSURE.set(is_backpressure)
+
+        if is_backpressure:
+            return Response(
+                '{"ready":false,"reason":"backpressure","queue_depth":' + str(depth) + '}',
+                media_type="application/json",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        return {"ready": True, "queue_depth": depth}
+
+    except Exception as exc:
+        logger.error("Readiness check failed", error=str(exc))
+        return Response(
+            '{"ready":false,"reason":"error","error":"' + str(exc) + '"}',
+            media_type="application/json",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+
+if __name__ == "__main__":
+    # Run watcher in a background thread + API
+    import threading
+
+    t = threading.Thread(target=watcher.run_watcher, daemon=True)
+    t.start()
+
+    logger.info("Starting ingestion service on 0.0.0.0:8081...")
+    uvicorn.run(app, host="0.0.0.0", port=8081)

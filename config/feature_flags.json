@@ -1,0 +1,39 @@
+{
+  "flags": {
+    "hybrid_search_v2": {
+      "enabled": false,
+      "rollout_percentage": 0,
+      "description": "New hybrid search algorithm with improved ranking"
+    },
+    "advanced_caching": {
+      "enabled": true,
+      "rollout_percentage": 100,
+      "description": "Advanced L1+L2 caching with version prefixes"
+    },
+    "dual_vector_write": {
+      "enabled": false,
+      "rollout_percentage": 0,
+      "description": "Write vectors to both Qdrant and Neo4j (for migration)"
+    },
+    "rate_limiting": {
+      "enabled": true,
+      "rollout_percentage": 100,
+      "description": "JWT-based rate limiting via Redis token bucket"
+    },
+    "new_entity_extraction": {
+      "enabled": false,
+      "rollout_percentage": 25,
+      "description": "ML-based entity extraction (canary at 25%)"
+    },
+    "query_plan_cache": {
+      "enabled": true,
+      "rollout_percentage": 100,
+      "description": "Cache compiled Cypher query plans"
+    },
+    "audit_verbose_logging": {
+      "enabled": false,
+      "rollout_percentage": 10,
+      "description": "Verbose audit logging for debugging"
+    }
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "task": "6.2",
+  "name": "Orchestrator (Resumable, Idempotent Jobs)",
+  "timestamp_utc": "2025-10-16T20:48:00Z",
+  "status": "COMPLETE",
+  "gate_criteria_met": true,
+  "tests": {
+    "total": 13,
+    "passed": 13,
+    "failed": 0,
+    "skipped": 0,
+    "pass_rate": 100.0
+  },
+  "bugs_fixed": [
+    {
+      "issue": "state.sections becomes None when loading from Redis",
+      "root_cause": "setdefault() doesn't replace existing None values",
+      "fix": "Explicitly check and replace None with [] for sections, entities, mentions, and document fields",
+      "files_modified": ["src/ingestion/auto/orchestrator.py:687-699"]
+    },
+    {
+      "issue": "Missing Optional and Dict imports in queue.py",
+      "root_cause": "Type hints used without importing from typing module",
+      "fix": "Added 'from typing import Optional, Dict' to imports",
+      "files_modified": ["src/ingestion/auto/queue.py:15"]
+    },
+    {
+      "issue": "Cypher syntax error using SELECT subquery",
+      "root_cause": "Neo4j doesn't support SQL-style SELECT subqueries",
+      "fix": "Rewrote query using proper Cypher MATCH syntax",
+      "files_modified": ["tests/p6_t2_test.py:762-766"]
+    }
+  ],
+  "test_results": {
+    "TestStateMachine": {
+      "test_state_progression": "PASSED",
+      "test_error_state": "PASSED"
+    },
+    "TestResumeLogic": {
+      "test_resume_from_parsing": "PASSED",
+      "test_resume_from_embedding": "PASSED",
+      "test_no_duplicate_work_on_resume": "PASSED"
+    },
+    "TestIdempotency": {
+      "test_reingest_unchanged_doc": "PASSED",
+      "test_deterministic_ids": "PASSED"
+    },
+    "TestProgressEvents": {
+      "test_progress_events_emitted": "PASSED",
+      "test_progress_percentages": "PASSED"
+    },
+    "TestPipelineIntegration": {
+      "test_calls_existing_parsers": "PASSED",
+      "test_calls_existing_extractors": "PASSED",
+      "test_calls_build_graph": "PASSED"
+    },
+    "TestE2EOrchestratorFlow": {
+      "test_complete_job_lifecycle": "PASSED"
+    }
+  },
+  "deliverables": {
+    "orchestrator": {
+      "path": "src/ingestion/auto/orchestrator.py",
+      "lines": 911,
+      "features": [
+        "State machine with 6 stages (PENDING→PARSING→EXTRACTING→GRAPHING→EMBEDDING→VECTORS→DONE)",
+        "Resume from any stage",
+        "Idempotent operations (MERGE semantics)",
+        "Progress tracking via Redis events",
+        "Error handling with state preservation",
+        "Integration with Phase 3 pipeline (parsers, extractors, build_graph)"
+      ]
+    },
+    "progress_tracker": {
+      "path": "src/ingestion/auto/progress.py",
+      "lines": 404,
+      "features": [
+        "Redis stream-based progress events",
+        "Stage transitions with percentages",
+        "Event emission for CLI/UI consumption"
+      ]
+    }
+  },
+  "code_quality": {
+    "test_coverage": "Comprehensive (state machine, resume, idempotency, progress, pipeline integration, e2e)",
+    "no_mocks": true,
+    "live_stack_tested": "Neo4j, Redis, Qdrant, Phase 3 components"
+  },
+  "gate_verdict": "PASS - All 13 tests passing, orchestrator fully functional, resume logic working, idempotency verified"
+}

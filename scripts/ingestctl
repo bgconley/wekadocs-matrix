@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""
+Phase 6, Task 6.3: ingestctl CLI
+
+Command-line interface for auto-ingestion jobs.
+
+Usage:
+    ingestctl ingest FILE|DIR|URL [--tag TAG] [--watch] [--dry-run] [--json]
+    ingestctl status [JOB_ID] [--json]
+    ingestctl tail JOB_ID [--json]
+    ingestctl cancel JOB_ID
+    ingestctl report JOB_ID [--json]
+
+See: /docs/implementation-plan-phase-6.md → Task 6.3
+"""
+
+import os
+import sys
+
+# Add src to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from src.ingestion.auto.cli import main
+
+if __name__ == "__main__":
+    sys.exit(main())

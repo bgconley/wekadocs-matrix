@@ -292,10 +292,16 @@ class GraphBuilder:
 
         # Initialize embedder lazily
         if not self.embedder:
-            logger.info(
-                "Loading embedding model", model=self.config.embedding.model_name
+            # Access via alias-compatible attribute
+            model_name = getattr(
+                self.config.embedding, "embedding_model", None
+            ) or getattr(
+                self.config.embedding,
+                "model_name",
+                "sentence-transformers/all-MiniLM-L6-v2",
             )
-            self.embedder = SentenceTransformer(self.config.embedding.model_name)
+            logger.info("Loading embedding model", model=model_name)
+            self.embedder = SentenceTransformer(model_name)
 
         # Purge existing vectors for this document BEFORE upserting to prevent drift
         source_uri = document.get("source_uri", "")

@@ -400,6 +400,260 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 ---
 
+### 8. Neo4jDown
+
+**Symptom:** Prometheus alert `Neo4jDown` firing for 2+ minutes. Health checks failing on :7474/7687.
+
+**Impact:** All graph operations fail; MCP tools depending on Cypher are degraded or return errors.
+
+**Diagnosis Steps:**
+
+1. **Container/Pod status**
+   ```bash
+   docker ps | grep neo4j
+   docker logs weka-neo4j --tail=200
+   ```
+
+2. **Process & ports**
+   ```bash
+   docker exec weka-neo4j ss -lntp | grep -E '7474|7687'
+   ```
+
+3. **Disk / memory / heap**
+   ```bash
+   # Check host disk
+   df -h
+
+   # Check Neo4j logs for OOM or pagecache errors
+   docker exec weka-neo4j cat /logs/neo4j.log | tail -100
+   docker exec weka-neo4j cat /logs/debug.log | tail -100
+   ```
+
+4. **Bolt connectivity**
+   ```bash
+   docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "RETURN 1"
+   ```
+
+5. **Cluster (if applicable)**
+   ```bash
+   docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "CALL dbms.cluster.overview()"
+   ```
+
+**Immediate Mitigation:**
+
+- **Single node:** Restart service
+  ```bash
+  docker restart weka-neo4j
+  ```
+
+- **Cluster:** Restart **followers** first; avoid leader restart until quorum confirmed
+
+- **Reduce load:** Scale MCP replicas down temporarily or enable degraded mode (graph-only / no vector)
+  ```bash
+  docker-compose scale mcp-server=1
+  ```
+
+**Short-Term Fix:**
+
+- **Clear stuck transactions**
+  ```bash
+  docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "CALL dbms.listQueries()"
+  docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "CALL dbms.killQuery('<query-id>')"
+  ```
+
+- **Free disk:** Remove old logs and snapshots
+  ```bash
+  docker exec weka-neo4j find /logs -name "*.log.*" -mtime +7 -delete
+  ```
+
+- **Verify memory settings:** Ensure `NEO4J_dbms_memory_*` envs match capacity
+  ```bash
+  docker exec weka-neo4j env | grep NEO4J_dbms_memory
+  ```
+
+**Long-Term Fix:**
+
+- Increase heap/pagecache to recommended ratios; add disk
+- Add liveness/readiness probes and circuit breakers to ingestion
+- Schedule compaction/maintenance during off-peak
+
+**Resolution Criteria:** Health check passes, `RETURN 1` via cypher-shell succeeds, alerts clear.
+
+---
+
+### 9. QdrantDown
+
+**Symptom:** Prometheus alert `QdrantDown` firing for 2+ minutes. Health checks failing on :6333/6334.
+
+**Impact:** Vector search fails; hybrid search degraded to graph-only mode; embedding operations fail.
+
+**Diagnosis Steps:**
+
+1. **Container/Pod status**
+   ```bash
+   docker ps | grep qdrant
+   docker logs weka-qdrant --tail=200
+   ```
+
+2. **Process & ports**
+   ```bash
+   docker exec weka-qdrant netstat -lntp | grep -E '6333|6334'
+   ```
+
+3. **Health endpoint**
+   ```bash
+   curl http://localhost:6333/health
+   curl http://localhost:6333/collections/weka_sections
+   ```
+
+4. **Disk space & storage**
+   ```bash
+   df -h
+   docker exec weka-qdrant du -sh /qdrant/storage/*
+   ```
+
+5. **Memory usage**
+   ```bash
+   docker stats --no-stream weka-qdrant
+   ```
+
+**Immediate Mitigation:**
+
+- **Container stopped:** Restart service
+  ```bash
+  docker restart weka-qdrant
+  ```
+
+- **Disk full:** Free up space or increase volume size
+  ```bash
+  docker volume inspect wekadocs-matrix_qdrant_data
+  ```
+
+- **Reduce load:** Enable graph-only mode temporarily
+  ```yaml
+  # config/development.yaml
+  search:
+    vector:
+      enabled: false  # Fallback to graph-only
+  ```
+
+**Short-Term Fix:**
+
+- **Collection corrupted:** Re-create collection
+  ```bash
+  curl -X DELETE http://localhost:6333/collections/weka_sections
+  # Then trigger re-indexing via ingestion
+  ```
+
+- **Memory exhaustion:** Increase container memory limit
+  ```yaml
+  # docker-compose.yml
+  services:
+    qdrant:
+      deploy:
+        resources:
+          limits:
+            memory: 4G
+  ```
+
+**Long-Term Fix:**
+
+- Implement collection sharding for large datasets
+- Set up Qdrant cluster for high availability
+- Add disk monitoring and auto-cleanup of old vectors
+- Configure vector compression to reduce storage
+
+**Resolution Criteria:** Health endpoint returns 200, collections accessible, vector search operational.
+
+---
+
+### 10. RedisDown
+
+**Symptom:** Prometheus alert `RedisDown` firing for 2+ minutes. Connection failures on :6379.
+
+**Impact:** L2 cache unavailable; rate limiting disabled; increased load on Neo4j and Qdrant.
+
+**Diagnosis Steps:**
+
+1. **Container/Pod status**
+   ```bash
+   docker ps | grep redis
+   docker logs weka-redis --tail=200
+   ```
+
+2. **Process & ports**
+   ```bash
+   docker exec weka-redis netstat -lntp | grep 6379
+   ```
+
+3. **Redis connectivity**
+   ```bash
+   docker exec weka-redis redis-cli ping
+   docker exec weka-redis redis-cli INFO server
+   ```
+
+4. **Memory usage & evictions**
+   ```bash
+   docker exec weka-redis redis-cli INFO memory
+   docker exec weka-redis redis-cli INFO stats | grep evicted
+   ```
+
+5. **Persistence (if enabled)**
+   ```bash
+   docker exec weka-redis redis-cli INFO persistence
+   docker exec weka-redis ls -lh /data/
+   ```
+
+**Immediate Mitigation:**
+
+- **Container stopped:** Restart service
+  ```bash
+  docker restart weka-redis
+  ```
+
+- **Memory maxed out:** Flush old keys or increase maxmemory
+  ```bash
+  # Temporary: flush least-recently-used keys
+  docker exec weka-redis redis-cli --scan --pattern "weka:cache:*" | head -1000 | xargs docker exec -i weka-redis redis-cli DEL
+  ```
+
+- **Graceful degradation:** Application continues with L1 cache only (in-process)
+
+**Short-Term Fix:**
+
+- **Increase memory limit**
+  ```yaml
+  # docker-compose.yml
+  services:
+    redis:
+      command: redis-server --maxmemory 1gb --maxmemory-policy allkeys-lru
+  ```
+
+- **Clear stale cache entries**
+  ```bash
+  docker exec weka-redis redis-cli FLUSHDB
+  # Note: Will cause temporary cache miss spike
+  ```
+
+- **Check for memory leaks:** Monitor key count growth
+  ```bash
+  docker exec weka-redis redis-cli DBSIZE
+  ```
+
+**Long-Term Fix:**
+
+- Set up Redis Sentinel or Cluster for high availability
+- Implement cache key TTL policies to prevent unbounded growth
+- Add monitoring for Redis slow log
+  ```bash
+  docker exec weka-redis redis-cli SLOWLOG GET 10
+  ```
+- Consider Redis persistence (RDB/AOF) for critical cache data
+
+**Resolution Criteria:** Redis responding to PING, application reconnected, rate limiting and L2 cache operational.
+
+---
+
 ## Monitoring Access
 
 - **Grafana:** http://localhost:3000 (default: admin/admin)

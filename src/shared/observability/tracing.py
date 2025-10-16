@@ -5,8 +5,7 @@
 from typing import Optional
 
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import \
-    OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.redis import RedisInstrumentor
 from opentelemetry.sdk.resources import Resource
@@ -28,16 +27,12 @@ def setup_tracing(app, settings: Settings) -> Optional[TracerProvider]:
         settings: Application settings
 
     Returns:
-        TracerProvider if tracing is enabled, None otherwise
+        TracerProvider (always created, even without exporter)
     """
-    if not settings.otel_exporter_otlp_endpoint:
-        logger.info("OpenTelemetry tracing disabled (no endpoint configured)")
-        return None
-
     try:
         logger.info(
             "Setting up OpenTelemetry tracing",
-            endpoint=settings.otel_exporter_otlp_endpoint,
+            endpoint=settings.otel_exporter_otlp_endpoint or "in-memory",
             service=settings.otel_service_name,
         )
 
@@ -49,18 +44,22 @@ def setup_tracing(app, settings: Settings) -> Optional[TracerProvider]:
             }
         )
 
-        # Create tracer provider
+        # Create tracer provider (always create, even without exporter)
         provider = TracerProvider(resource=resource)
 
-        # Create OTLP exporter
-        otlp_exporter = OTLPSpanExporter(
-            endpoint=f"{settings.otel_exporter_otlp_endpoint}/v1/traces"
-        )
+        # Add exporter if endpoint configured
+        if settings.otel_exporter_otlp_endpoint:
+            # Create OTLP exporter
+            otlp_exporter = OTLPSpanExporter(
+                endpoint=f"{settings.otel_exporter_otlp_endpoint}/v1/traces"
+            )
+            # Add batch span processor
+            provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+            logger.info("OTLP exporter configured")
+        else:
+            logger.info("OpenTelemetry tracing enabled (in-memory, no exporter)")
 
-        # Add batch span processor
-        provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
-
-        # Set global tracer provider
+        # Set global tracer provider (important: do this even without exporter)
         trace.set_tracer_provider(provider)
 
         # Instrument FastAPI
@@ -74,7 +73,10 @@ def setup_tracing(app, settings: Settings) -> Optional[TracerProvider]:
 
     except Exception as e:
         logger.error("Failed to setup OpenTelemetry tracing", error=str(e))
-        return None
+        # Still create a basic provider as fallback
+        provider = TracerProvider()
+        trace.set_tracer_provider(provider)
+        return provider
 
 
 def get_tracer(name: str):

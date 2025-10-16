@@ -124,3 +124,45 @@ ingestion:
 schema:
   version: "v1"
   auto_migrate: false
+
+# Phase 6: Auto-ingestion configuration
+ingest:
+  # File system watcher
+  watch:
+    enabled: true
+    paths:
+      - "./ingest/watch"
+    debounce_seconds: 3
+    poll_interval: 5
+
+  # S3 watcher (disabled by default)
+  s3:
+    enabled: false
+    buckets: []
+
+  # HTTP watcher (disabled by default)
+  http:
+    enabled: false
+    endpoints: []
+    poll_interval: 300  # 5 minutes
+
+  # Processing settings
+  tag: "wekadocs"
+  concurrency: 4
+  batch_size: 500
+  timeout_seconds: 300
+
+  # Sample queries for verification (per tag)
+  sample_queries:
+    wekadocs:
+      - "How do I configure a cluster?"
+      - "What are the performance tuning options?"
+      - "How do I troubleshoot performance issues?"
+    default:
+      - "What is this documentation about?"
+
+  # Back-pressure thresholds
+  backpressure:
+    neo4j_cpu_threshold: 0.8
+    qdrant_p95_threshold_ms: 200.0
+    pause_seconds: 30

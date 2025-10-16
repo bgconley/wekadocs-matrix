@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-server-green
+  namespace: wekadocs
+  labels:
+    app: mcp-server
+    version: green
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: mcp-server
+      version: green
+  template:
+    metadata:
+      labels:
+        app: mcp-server
+        version: green
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: mcp-server
+        image: wekadocs-mcp-server:latest
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: NEO4J_URI
+          value: "bolt://neo4j:7687"
+        - name: NEO4J_USER
+          value: "neo4j"
+        - name: NEO4J_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: wekadocs-secrets
+              key: neo4j-password
+        - name: REDIS_URL
+          value: "redis://redis:6379"
+        - name: QDRANT_URL
+          value: "http://qdrant:6333"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: wekadocs-secrets
+              key: jwt-secret
+        - name: OTEL_EXPORTER_JAEGER_ENDPOINT
+          value: "http://jaeger:14268/api/traces"
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: config
+        configMap:
+          name: wekadocs-config

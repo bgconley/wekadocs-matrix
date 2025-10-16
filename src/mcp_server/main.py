@@ -310,40 +310,66 @@ async def mcp_tools_list():
 @app.post("/mcp/tools/call", response_model=MCPToolCallResponse)
 async def mcp_tools_call(request: MCPToolCallRequest):
     """Execute an MCP tool"""
+    from src.shared.observability.exemplars import trace_mcp_tool
+    from src.shared.observability.metrics import (
+        mcp_tool_calls_total,
+        mcp_tool_duration_seconds,
+    )
+
     logger.info("MCP tool call request", tool=request.name, args=request.arguments)
 
-    # Phase 1: Return placeholder responses (will be implemented in Phase 2+)
-    if request.name == "search_documentation":
-        return MCPToolCallResponse(
-            content=[
-                {
-                    "type": "text",
-                    "text": "Search tool will be implemented in Phase 2. Query: "
-                    + request.arguments.get("query", ""),
-                }
-            ],
-            is_error=False,
-        )
-    elif request.name == "traverse_relationships":
-        return MCPToolCallResponse(
-            content=[
-                {
-                    "type": "text",
-                    "text": f"Traverse tool will be implemented in Phase 2. Node: {request.arguments.get('node_id', '')}",
-                }
-            ],
-            is_error=False,
-        )
-    else:
-        return MCPToolCallResponse(
-            content=[
-                {
-                    "type": "text",
-                    "text": f"Unknown tool: {request.name}",
-                }
-            ],
-            is_error=True,
-        )
+    start_time = time.time()
+
+    try:
+        # Trace tool execution
+        with trace_mcp_tool(request.name, request.arguments):
+            # Phase 1: Return placeholder responses (will be implemented in Phase 2+)
+            if request.name == "search_documentation":
+                result = MCPToolCallResponse(
+                    content=[
+                        {
+                            "type": "text",
+                            "text": "Search tool will be implemented in Phase 2. Query: "
+                            + request.arguments.get("query", ""),
+                        }
+                    ],
+                    is_error=False,
+                )
+            elif request.name == "traverse_relationships":
+                result = MCPToolCallResponse(
+                    content=[
+                        {
+                            "type": "text",
+                            "text": f"Traverse tool will be implemented in Phase 2. Node: {request.arguments.get('node_id', '')}",
+                        }
+                    ],
+                    is_error=False,
+                )
+            else:
+                result = MCPToolCallResponse(
+                    content=[
+                        {
+                            "type": "text",
+                            "text": f"Unknown tool: {request.name}",
+                        }
+                    ],
+                    is_error=True,
+                )
+
+            # Record metrics
+            duration = time.time() - start_time
+            status = "error" if result.is_error else "success"
+            mcp_tool_calls_total.labels(tool_name=request.name, status=status).inc()
+            mcp_tool_duration_seconds.labels(tool_name=request.name).observe(duration)
+
+            return result
+
+    except Exception as e:
+        duration = time.time() - start_time
+        mcp_tool_calls_total.labels(tool_name=request.name, status="error").inc()
+        mcp_tool_duration_seconds.labels(tool_name=request.name).observe(duration)
+        logger.error("MCP tool call failed", tool=request.name, error=str(e))
+        raise
 
 
 if __name__ == "__main__":

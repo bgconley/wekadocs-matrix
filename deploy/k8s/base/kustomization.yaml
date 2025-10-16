@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: wekadocs
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secrets.yaml
+  - neo4j-statefulset.yaml
+  - qdrant-statefulset.yaml
+  - redis-statefulset.yaml
+  - mcp-server-deployment.yaml
+  - mcp-server-green-deployment.yaml
+  - mcp-server-canary-deployment.yaml
+  - ingestion-worker-deployment.yaml
+  - jaeger-deployment.yaml
+  - ingress.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: wekadocs-graphrag-mcp
+  app.kubernetes.io/managed-by: kustomize
+
+images:
+  - name: wekadocs-mcp-server
+    newName: ghcr.io/wekadocs/mcp-server
+    newTag: latest

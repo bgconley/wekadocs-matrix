@@ -29,10 +29,27 @@ class L1Cache:
         self._hits = 0
         self._misses = 0
 
+        # Initialize Prometheus metrics with layer label
+        try:
+            from src.shared.observability.metrics import (
+                cache_hit_rate,
+                cache_operations_total,
+                cache_size_bytes,
+            )
+
+            cache_operations_total.labels(
+                operation="get", layer="l1", result="hit"
+            )  # Initialize label
+            cache_hit_rate.labels(layer="l1").set(0.0)  # Initialize gauge
+            cache_size_bytes.labels(layer="l1").set(0)  # Initialize gauge
+        except Exception:
+            pass  # Metrics not available in tests
+
     def get(self, key: str) -> Optional[Any]:
         """Get value from cache if present and not expired."""
         if key not in self._cache:
             self._misses += 1
+            self._record_metrics("miss")
             return None
 
         value, expiry = self._cache[key]
@@ -40,12 +57,33 @@ class L1Cache:
             # Expired
             del self._cache[key]
             self._misses += 1
+            self._record_metrics("miss")
             return None
 
         # Move to end (most recently used)
         self._cache.move_to_end(key)
         self._hits += 1
+        self._record_metrics("hit")
         return value
+
+    def _record_metrics(self, result: str):
+        """Record cache operation metrics."""
+        try:
+            from src.shared.observability.metrics import (
+                cache_hit_rate,
+                cache_operations_total,
+                cache_size_bytes,
+            )
+
+            cache_operations_total.labels(
+                operation="get", layer="l1", result=result
+            ).inc()
+            total = self._hits + self._misses
+            if total > 0:
+                cache_hit_rate.labels(layer="l1").set(self._hits / total)
+            cache_size_bytes.labels(layer="l1").set(len(self._cache))
+        except Exception:
+            pass
 
     def put(self, key: str, value: Any) -> None:
         """Put value in cache with TTL."""
@@ -102,19 +140,53 @@ class L2Cache:
         self._hits = 0
         self._misses = 0
 
+        # Initialize Prometheus metrics with layer label
+        try:
+            from src.shared.observability.metrics import (
+                cache_hit_rate,
+                cache_operations_total,
+            )
+
+            cache_operations_total.labels(
+                operation="get", layer="l2", result="hit"
+            )  # Initialize label
+            cache_hit_rate.labels(layer="l2").set(0.0)  # Initialize gauge
+        except Exception:
+            pass  # Metrics not available in tests
+
     def get(self, key: str) -> Optional[Any]:
         """Get value from Redis cache."""
         try:
             value_bytes = self.redis.get(key)
             if value_bytes is None:
                 self._misses += 1
+                self._record_metrics("miss")
                 return None
 
             self._hits += 1
+            self._record_metrics("hit")
             return json.loads(value_bytes)
         except Exception:
             self._misses += 1
+            self._record_metrics("miss")
             return None
+
+    def _record_metrics(self, result: str):
+        """Record cache operation metrics."""
+        try:
+            from src.shared.observability.metrics import (
+                cache_hit_rate,
+                cache_operations_total,
+            )
+
+            cache_operations_total.labels(
+                operation="get", layer="l2", result=result
+            ).inc()
+            total = self._hits + self._misses
+            if total > 0:
+                cache_hit_rate.labels(layer="l2").set(self._hits / total)
+        except Exception:
+            pass
 
     def put(self, key: str, value: Any) -> None:
         """Put value in Redis cache with TTL."""

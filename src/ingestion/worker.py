@@ -1,50 +1,72 @@
-# Ingestion worker stub for Phase 1
-# Full implementation in Phase 3
-# See: /docs/implementation-plan.md → Phase 3
-
 import asyncio
-import signal
-import sys
+import os
+import traceback
 
-from src.shared import init_config
-from src.shared.observability import get_logger, setup_logging
+import structlog
 
-# Initialize config and logging
-config, settings = init_config()
-setup_logging(config.app.log_level)
-logger = get_logger(__name__)
+from src.ingestion.auto.queue import IngestJob, JobStatus, ack, brpoplpush, fail
 
-# Shutdown flag
-shutdown_event = asyncio.Event()
+# Optional: wire up your existing ingestion pipeline here
+from src.ingestion.build_graph import ingest_document
+
+log = structlog.get_logger()
 
 
-def signal_handler(signum, frame):
-    """Handle shutdown signals"""
-    logger.info("Shutdown signal received", signal=signum)
-    shutdown_event.set()
+async def process_job(job: IngestJob):
+    """Process an ingestion job using Phase 3 pipeline"""
+    if job.kind != "file" or not job.path:
+        raise ValueError(f"Unsupported job kind={job.kind} path={job.path}")
+
+    # Minimal existence check
+    if not os.path.exists(job.path):
+        raise FileNotFoundError(job.path)
+
+    # Read file content
+    with open(job.path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Detect format from extension
+    ext = os.path.splitext(job.path)[1].lower()
+    if ext in (".md", ".markdown"):
+        format = "markdown"
+    elif ext in (".html", ".htm"):
+        format = "html"
+    else:
+        format = "markdown"  # default
+
+    # Call Phase 3 ingestion pipeline
+    source_uri = f"file://{job.path}"
+    stats = ingest_document(source_uri, content, format=format)
+
+    log.info("Ingestion completed", job_id=job.job_id, stats=stats)
+    return stats
 
 
 async def main():
-    """Main worker loop - stub for Phase 1"""
-    logger.info("Ingestion worker starting (Phase 1 stub)")
-
-    # Register signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    logger.info("Ingestion worker ready (waiting for Phase 3 implementation)")
-
-    # Wait for shutdown signal
-    await shutdown_event.wait()
-
-    logger.info("Ingestion worker shutting down")
+    log.info("Ingestion worker starting")
+    while True:
+        try:
+            item = brpoplpush(timeout=1)
+            if not item:
+                await asyncio.sleep(0.05)
+                continue
+            raw, job_id = item
+            job = IngestJob.from_json(raw)
+            try:
+                await process_job(job)
+                ack(raw, job_id)
+                log.info(
+                    "Job done", job_id=job_id, path=job.path, status=JobStatus.DONE
+                )
+            except Exception as e:
+                log.error("Job failed", job_id=job_id, error=str(e))
+                fail(raw, job_id, reason=str(e), requeue=True)
+        except Exception as loop_err:
+            log.error(
+                "Worker loop error", error=str(loop_err), exc=traceback.format_exc()
+            )
+            await asyncio.sleep(0.25)
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Ingestion worker stopped by user")
-    except Exception as e:
-        logger.error("Ingestion worker failed", error=str(e))
-        sys.exit(1)
+    asyncio.run(main())
