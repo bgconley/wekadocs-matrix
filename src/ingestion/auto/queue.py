@@ -217,8 +217,8 @@ class JobQueue:
         # Store checksum to prevent duplicates
         self.redis_client.sadd(checksum_key, checksum)
 
-        # Create job state
-        state = {
+        # Create minimal job state for status hash (for quick lookups)
+        status_state = {
             "job_id": job_id,
             "source_uri": source_uri,
             "tag": tag,
@@ -229,8 +229,34 @@ class JobQueue:
             "attempts": 0,
         }
 
-        # Store state in hash
-        self.redis_client.hset(KEY_STATUS_HASH, job_id, json.dumps(state))
+        # Store in status hash
+        self.redis_client.hset(KEY_STATUS_HASH, job_id, json.dumps(status_state))
+
+        # Also create full state structure for orchestrator (ingest:state:{job_id})
+        # This matches the structure expected by Orchestrator._load_state()
+        state_key = f"{NS}:state:{job_id}"
+        full_state = {
+            "job_id": job_id,
+            "source_uri": source_uri,
+            "checksum": checksum,
+            "tag": tag,
+            "status": JobStatus.QUEUED.value,
+            "created_at": str(timestamp),
+            "updated_at": str(timestamp),
+            "started_at": "None",
+            "completed_at": "None",
+            "error": "",
+            "stages_completed": json.dumps([]),
+            "document_id": "",
+            "document": "null",
+            "sections": "null",
+            "entities": "null",
+            "mentions": "null",
+            "stats": json.dumps({}),
+        }
+        self.redis_client.hset(state_key, mapping=full_state)
+        # Set TTL (7 days, matching orchestrator)
+        self.redis_client.expire(state_key, 7 * 24 * 60 * 60)
 
         # Enqueue job
         job = IngestJob(

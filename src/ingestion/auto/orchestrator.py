@@ -430,9 +430,9 @@ class Orchestrator:
         # Initialize embedder lazily
         if not self.embedder:
             logger.info(
-                "Loading embedding model", model=self.config.embedding.model_name
+                "Loading embedding model", model=self.config.embedding.embedding_model
             )
-            self.embedder = SentenceTransformer(self.config.embedding.model_name)
+            self.embedder = SentenceTransformer(self.config.embedding.embedding_model)
 
         # Compute embeddings for sections
         embeddings_computed = 0
@@ -604,18 +604,19 @@ class Orchestrator:
 
         # Task 6.4 Verification
         verifier = PostIngestVerifier(
-            neo4j_driver=self.neo4j,
+            driver=self.neo4j,
             config=self.config,
             qdrant_client=self.qdrant,
         )
         verification_result = verifier.verify_ingestion(
             job_id=state.job_id,
-            embedding_version=self.config.embedding.version,
+            parsed={"Document": state.document, "Sections": state.sections or []},
+            tag=state.tag,
         )
 
         # Task 6.4 Report Generation
         report_gen = ReportGenerator(
-            neo4j_driver=self.neo4j,
+            driver=self.neo4j,
             config=self.config,
             qdrant_client=self.qdrant,
         )
@@ -634,11 +635,12 @@ class Orchestrator:
             tag=state.tag,
             parsed={"Document": state.document, "Sections": state.sections or []},
             verdict=verification_result,
-            timings_ms=timings_ms,
+            timings=timings_ms,
         )
 
-        # Write report to disk
-        report_paths = report_gen.write_report(report)
+        # Write report to disk (use job_id as directory for test compatibility)
+        output_dir = f"reports/ingest/{state.job_id}"
+        report_paths = report_gen.write_report(report, output_dir=output_dir)
 
         # Save to state (store report path for CLI access)
         state.status = JobStage.REPORTING.value
