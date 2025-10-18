@@ -167,7 +167,7 @@ def redis_sync_client(docker_services_running):
         host="localhost",
         port=6379,
         password=password,
-        db=0,
+        db=1,  # Use db=1 to avoid conflicts with running ingestion worker on db=0
         decode_responses=False,  # Keep bytes for compatibility
     )
 

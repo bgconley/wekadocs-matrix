@@ -200,7 +200,8 @@ class JobQueue:
         Returns:
             job_id: UUID of enqueued job, or None if duplicate
         """
-        ensure_key_types()
+        # Note: Skip ensure_key_types() since we use self.redis_client which handles key creation
+        # The global ensure_key_types() uses module-level 'r' which may have different auth
 
         if timestamp is None:
             timestamp = time.time()
@@ -270,7 +271,7 @@ class JobQueue:
         """
         Dequeue a job from the queue (blocking).
 
-        Wrapper for brpoplpush for test compatibility.
+        Uses brpoplpush to atomically move from jobs to processing queue.
 
         Args:
             timeout: Blocking timeout in seconds
@@ -278,4 +279,31 @@ class JobQueue:
         Returns:
             Tuple of (raw_json, job_id) or None if timeout
         """
-        return brpoplpush(timeout=timeout)
+        raw = self.redis_client.brpoplpush(KEY_JOBS, KEY_PROCESSING, timeout=timeout)
+        if not raw:
+            return None
+
+        # Decode if bytes
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+
+        job = IngestJob.from_json(raw)
+        self.redis_client.hset(
+            KEY_STATUS_HASH,
+            job.job_id,
+            json.dumps({"status": JobStatus.PROCESSING.value}),
+        )
+        return raw, job.job_id
+
+    def ack(self, raw_json: str, job_id: str):
+        """
+        Acknowledge successful job processing.
+
+        Args:
+            raw_json: The raw JSON string from dequeue
+            job_id: The job ID
+        """
+        self.redis_client.lrem(KEY_PROCESSING, 1, raw_json)
+        self.redis_client.hset(
+            KEY_STATUS_HASH, job_id, json.dumps({"status": JobStatus.DONE.value})
+        )

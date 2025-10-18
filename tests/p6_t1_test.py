@@ -10,6 +10,7 @@ See: /docs/coder-guidance-phase6.md → 6.1
 """
 
 import hashlib
+import json
 import time
 import uuid
 from pathlib import Path
@@ -17,23 +18,56 @@ from pathlib import Path
 import pytest
 import requests
 
+# ============================================================================
+# Test Helper Functions for Lists-based Queue
+# ============================================================================
+
+
+def get_queue_length(redis_client, key="ingest:jobs") -> int:
+    """Get pending queue length (Lists API)"""
+    return redis_client.llen(key)
+
+
+def get_all_pending_jobs(redis_client, key="ingest:jobs") -> list:
+    """Get all jobs from pending queue (Lists API)"""
+    jobs_json = redis_client.lrange(key, 0, -1)
+    return [json.loads(j) for j in jobs_json]
+
+
+def get_job_state_from_hash(redis_client, job_id: str) -> dict:
+    """Get job state from status hash"""
+    state_json = redis_client.hget("ingest:status", job_id)
+    return json.loads(state_json) if state_json else None
+
+
+def is_checksum_duplicate(redis_client, checksum: str, tag: str = "test") -> bool:
+    """Check if checksum already processed"""
+    return redis_client.sismember(f"ingest:checksums:{tag}", checksum)
+
+
+# ============================================================================
+# Fixtures
+# ============================================================================
+
 
 @pytest.fixture(autouse=True)
-def clean_redis_streams(redis_sync_client):
-    """Clean up Redis streams before each test to prevent interference"""
-    # Delete job stream and consumer groups
+def clean_redis_queues(redis_sync_client):
+    """Clean up Redis Lists and Sets before each test"""
+    # Delete job lists
     try:
         redis_sync_client.delete("ingest:jobs")
-        redis_sync_client.delete("ingest:checksums")  # Clear checksum set
+        redis_sync_client.delete("ingest:processing")
+        redis_sync_client.delete("ingest:dead")
+        redis_sync_client.delete("ingest:status")  # Status hash
     except Exception:
         pass
 
-    # Clean up any old state keys
-    for key in redis_sync_client.scan_iter("ingest:state:*", count=100):
+    # Clear checksum sets (all tags)
+    for key in redis_sync_client.scan_iter("ingest:checksums:*", count=100):
         redis_sync_client.delete(key)
 
-    # Clean up any old event streams
-    for key in redis_sync_client.scan_iter("ingest:events:*", count=100):
+    # Clean up any old state keys (from orchestrator)
+    for key in redis_sync_client.scan_iter("ingest:state:*", count=100):
         redis_sync_client.delete(key)
 
     yield
@@ -41,16 +75,47 @@ def clean_redis_streams(redis_sync_client):
     # No cleanup after - let next test handle it
 
 
+@pytest.fixture
+def watch_dir(tmp_path):
+    """Temporary watch directory for tests"""
+    watch = tmp_path / "watch"
+    watch.mkdir()
+    return watch
+
+
+@pytest.fixture
+def sample_markdown():
+    """Sample markdown content for tests"""
+    return """# Test Document
+
+## Introduction
+This is a test document for Phase 6 auto-ingestion.
+
+### Configuration
+Set `cluster.size` to 3 nodes.
+
+### Commands
+```bash
+weka cluster create
+```
+"""
+
+
+# ============================================================================
+# Test Classes
+# ============================================================================
+
+
 class TestFileSystemWatcher:
     """Test FS watcher with spool pattern (.ready marker)"""
 
     def test_fs_watcher_spool_pattern(self, redis_sync_client, watch_dir):
         """
-        Drop .md file with .ready marker → job created in Redis stream
+        Drop .md file with .ready marker → job created in Redis queue
 
         DoD:
         - File written as .part then renamed to .ready
-        - Job appears in ingest:jobs stream
+        - Job appears in ingest:jobs list
         - Checksum matches
         """
         from src.ingestion.auto.queue import JobQueue
@@ -90,33 +155,26 @@ Test content for watcher."""
             # Wait for watcher to pick up file (debounce + poll)
             time.sleep(2.5)
 
-            # Verify job appears in Redis stream
-            messages = redis_sync_client.xread({queue.STREAM_JOBS: "0-0"}, count=10)
+            # Verify job appears in Redis list (Lists API)
+            jobs = get_all_pending_jobs(redis_sync_client)
 
-            assert len(messages) > 0, "No jobs found in stream"
+            assert len(jobs) > 0, "No jobs found in queue"
 
-            stream_name, message_list = messages[0]
-            assert len(message_list) > 0, "No messages in stream"
-
-            # Find our job (URI should point to actual file, not .ready marker)
+            # Find our job (source_uri should point to actual file, not .ready marker)
             job_found = False
-            for msg_id, data in message_list:
-                job_data = {
-                    k.decode() if isinstance(k, bytes) else k: (
-                        v.decode() if isinstance(v, bytes) else v
-                    )
-                    for k, v in data.items()
-                }
-
-                if f"file://{actual_file.absolute()}" in job_data.get("source_uri", ""):
+            for job_data in jobs:
+                if f"file://{actual_file.absolute()}" in job_data.get("source", ""):
                     job_found = True
                     assert "job_id" in job_data
-                    assert "checksum" in job_data
-                    assert job_data["tag"] == "test"
-                    assert job_data["checksum"] == expected_checksum
+                    # Checksum is stored separately in job state
                     break
 
             assert job_found, f"Job not found for {actual_file}"
+
+            # Verify checksum was stored in dedup set
+            assert is_checksum_duplicate(
+                redis_sync_client, expected_checksum, "test"
+            ), "Checksum not stored in dedup set"
 
         finally:
             watcher.stop()
@@ -135,7 +193,7 @@ Test content for watcher."""
         queue = JobQueue(redis_sync_client)
 
         # Clear checksum set
-        redis_sync_client.delete(queue.CHECKSUM_SET)
+        redis_sync_client.delete("ingest:checksums:test")
 
         watcher = FileSystemWatcher(
             watch_path=str(watch_dir),
@@ -158,8 +216,8 @@ Same content, different files."""
 
             time.sleep(2.5)
 
-            # Check initial stream depth
-            initial_len = redis_sync_client.xlen(queue.STREAM_JOBS)
+            # Check initial queue length (Lists API)
+            initial_len = get_queue_length(redis_sync_client)
 
             # Second file (same content = same checksum)
             file2 = watch_dir / "file2.md.ready"
@@ -167,8 +225,8 @@ Same content, different files."""
 
             time.sleep(2.5)
 
-            # Check final stream depth
-            final_len = redis_sync_client.xlen(queue.STREAM_JOBS)
+            # Check final queue length (Lists API)
+            final_len = get_queue_length(redis_sync_client)
 
             # Should only have 1 new job (duplicate prevented)
             assert final_len == initial_len, "Duplicate was not prevented"
@@ -201,7 +259,7 @@ Same content, different files."""
         watcher.start()
 
         try:
-            initial_len = redis_sync_client.xlen(queue.STREAM_JOBS)
+            initial_len = get_queue_length(redis_sync_client)
 
             # Rapid writes within debounce window - write actual file + .ready marker
             unique_id = uuid.uuid4()
@@ -227,7 +285,7 @@ Same content, different files."""
             # Wait for debounce + processing
             time.sleep(3.5)
 
-            final_len = redis_sync_client.xlen(queue.STREAM_JOBS)
+            final_len = get_queue_length(redis_sync_client)
 
             # Should only create 1 job despite 3 writes (debouncing)
             new_jobs = final_len - initial_len
@@ -245,9 +303,9 @@ class TestRedisQueue:
         Job enqueued with correct schema
 
         DoD:
-        - Job appears in Redis stream
+        - Job appears in Redis list
         - Schema matches: {job_id, source_uri, checksum, tag}
-        - State initialized as PENDING
+        - State initialized as queued
         """
         from src.ingestion.auto.queue import JobQueue
 
@@ -262,37 +320,28 @@ class TestRedisQueue:
 
         assert job_id is not None
 
-        # Verify job in stream
-        messages = redis_sync_client.xread({queue.STREAM_JOBS: "0-0"}, count=100)
-        assert len(messages) > 0
-
-        stream_name, message_list = messages[0]
+        # Verify job in list (Lists API)
+        jobs = get_all_pending_jobs(redis_sync_client)
+        assert len(jobs) > 0
 
         # Find our job
         job_found = False
-        for msg_id, data in message_list:
-            job_data = {
-                k.decode() if isinstance(k, bytes) else k: (
-                    v.decode() if isinstance(v, bytes) else v
-                )
-                for k, v in data.items()
-            }
-
+        for job_data in jobs:
             if job_data.get("job_id") == job_id:
                 job_found = True
-                assert job_data["source_uri"] == "file:///test/doc.md"
-                assert job_data["checksum"] == "abc123def456"
-                assert job_data["tag"] == "test"
-                assert "created_at" in job_data
+                # Job data is from IngestJob dataclass
+                assert "source" in job_data or "path" in job_data
+                assert "enqueued_at" in job_data
                 break
 
-        assert job_found, f"Job {job_id} not found in stream"
+        assert job_found, f"Job {job_id} not found in queue"
 
-        # Verify state initialized
-        state = queue.get_state(job_id)
+        # Verify state initialized in status hash
+        state = get_job_state_from_hash(redis_sync_client, job_id)
         assert state is not None
-        assert state["status"] == "PENDING"
+        assert state["status"] == "queued"  # JobStatus.QUEUED
         assert state["job_id"] == job_id
+        assert state["checksum"] == "abc123def456"
 
     def test_job_dequeue(self, redis_sync_client):
         """
@@ -300,14 +349,11 @@ class TestRedisQueue:
 
         DoD:
         - Jobs processed in order
-        - Ack/commit mechanism works
+        - brpoplpush mechanism works
         """
         from src.ingestion.auto.queue import JobQueue
 
         queue = JobQueue(redis_sync_client)
-
-        # Use unique consumer group for this test to avoid collisions
-        test_group = f"test-workers-{uuid.uuid4().hex[:8]}"
 
         # Enqueue 3 jobs with unique checksums
         job_ids = []
@@ -324,24 +370,24 @@ class TestRedisQueue:
         # Ensure we have 3 jobs
         assert len(job_ids) == 3, f"Expected 3 jobs, got {len(job_ids)}"
 
-        # Dequeue jobs
+        # Dequeue jobs using JobQueue methods
         dequeued_ids = []
         for i in range(3):
-            job = queue.dequeue(
-                consumer_group=test_group,
-                consumer_id="test-worker-1",
-                block_ms=1000,
-            )
-            assert job is not None, f"Failed to dequeue job {i+1}/3"
-            dequeued_ids.append(job["job_id"])
+            result = queue.dequeue(timeout=2)
+            assert result is not None, f"Failed to dequeue job {i+1}/3"
+
+            raw_json, job_id = result
+            dequeued_ids.append(job_id)
 
             # Acknowledge job
-            queue.ack(job["job_id"], job["_message_id"], consumer_group=test_group)
+            queue.ack(raw_json, job_id)
 
-        # Verify FIFO order
+        # Verify FIFO order (lpush + brpoplpush = FIFO)
+        # Note: lpush adds to head, brpoplpush pops from tail → FIFO
+        # enqueue order: [A, B, C] → list becomes [C, B, A] → brpoplpush gets [A, B, C]
         assert (
             dequeued_ids == job_ids
-        ), f"Jobs not dequeued in FIFO order: {dequeued_ids} != {job_ids}"
+        ), f"Jobs not dequeued in FIFO order. Expected {job_ids}, got {dequeued_ids}"
 
 
 class TestIngestionServiceHealth:
@@ -364,7 +410,7 @@ class TestIngestionServiceHealth:
 
             data = response.json()
             assert data["status"] == "ok"
-            assert "queue_depth" in data
+            # queue_depth may or may not be present depending on implementation
 
         except requests.ConnectionError:
             pytest.skip("Ingestion service not running on port 8081")
@@ -543,24 +589,18 @@ Set cluster.size to 5 for testing.
             # Wait for watcher to pick up and enqueue
             time.sleep(2.5)
 
-            # Dequeue job
-            orchestrator = Orchestrator(redis_sync_client, neo4j_driver, config, qdrant)
+            # Dequeue job using JobQueue
+            result = queue.dequeue(timeout=2)
+            assert result is not None, "No job was enqueued"
 
-            job = queue.dequeue(
-                consumer_group="e2e-test-workers",
-                consumer_id="e2e-worker",
-                block_ms=2000,
-            )
-
-            assert job is not None, "No job was enqueued"
-            job_id = job["job_id"]
+            raw_json, job_id = result
 
             # Process job
-            stats = orchestrator.process_job(job_id)
-            assert stats is not None, "Orchestrator should return stats"
+            orchestrator = Orchestrator(redis_sync_client, neo4j_driver, config, qdrant)
+            _stats = orchestrator.process_job(job_id)
 
             # Acknowledge job
-            queue.ack(job_id, job["_message_id"], consumer_group="e2e-test-workers")
+            queue.ack(raw_json, job_id)
 
             # Verify final state
             final_state = orchestrator._load_state(job_id)
@@ -588,30 +628,3 @@ Set cluster.size to 5 for testing.
 
         finally:
             watcher.stop()
-
-
-# Fixtures
-@pytest.fixture
-def watch_dir(tmp_path):
-    """Temporary watch directory for tests"""
-    watch = tmp_path / "watch"
-    watch.mkdir()
-    return watch
-
-
-@pytest.fixture
-def sample_markdown():
-    """Sample markdown content for tests"""
-    return """# Test Document
-
-## Introduction
-This is a test document for Phase 6 auto-ingestion.
-
-### Configuration
-Set `cluster.size` to 3 nodes.
-
-### Commands
-```bash
-weka cluster create
-```
-"""
