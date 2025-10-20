@@ -310,6 +310,7 @@ async def mcp_tools_list():
 @app.post("/mcp/tools/call", response_model=MCPToolCallResponse)
 async def mcp_tools_call(request: MCPToolCallRequest):
     """Execute an MCP tool"""
+    from src.mcp_server.query_service import get_query_service
     from src.shared.observability.exemplars import trace_mcp_tool
     from src.shared.observability.metrics import (
         mcp_tool_calls_total,
@@ -323,24 +324,65 @@ async def mcp_tools_call(request: MCPToolCallRequest):
     try:
         # Trace tool execution
         with trace_mcp_tool(request.name, request.arguments):
-            # Phase 1: Return placeholder responses (will be implemented in Phase 2+)
+            # Execute search_documentation tool
             if request.name == "search_documentation":
-                result = MCPToolCallResponse(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": "Search tool will be implemented in Phase 2. Query: "
-                            + request.arguments.get("query", ""),
-                        }
-                    ],
-                    is_error=False,
-                )
+                query = request.arguments.get("query", "")
+                top_k = request.arguments.get("top_k", 20)
+
+                if not query:
+                    result = MCPToolCallResponse(
+                        content=[
+                            {
+                                "type": "text",
+                                "text": "Error: query parameter is required",
+                            }
+                        ],
+                        is_error=True,
+                    )
+                else:
+                    try:
+                        # Execute search via query service
+                        query_service = get_query_service()
+                        response = query_service.search(
+                            query=query,
+                            top_k=top_k,
+                            expand_graph=True,
+                            find_paths=False,
+                        )
+
+                        # Build MCP response with Markdown + JSON
+                        result = MCPToolCallResponse(
+                            content=[
+                                {
+                                    "type": "text",
+                                    "text": response.answer_markdown,
+                                },
+                                {
+                                    "type": "json",
+                                    "json": response.answer_json.to_dict(),
+                                },
+                            ],
+                            is_error=False,
+                        )
+
+                    except Exception as e:
+                        logger.error(f"Search failed: {e}", exc_info=True)
+                        result = MCPToolCallResponse(
+                            content=[
+                                {
+                                    "type": "text",
+                                    "text": f"Search failed: {str(e)}",
+                                }
+                            ],
+                            is_error=True,
+                        )
+
             elif request.name == "traverse_relationships":
                 result = MCPToolCallResponse(
                     content=[
                         {
                             "type": "text",
-                            "text": f"Traverse tool will be implemented in Phase 2. Node: {request.arguments.get('node_id', '')}",
+                            "text": f"Traverse tool will be implemented in a future phase. Node: {request.arguments.get('node_id', '')}",
                         }
                     ],
                     is_error=False,
