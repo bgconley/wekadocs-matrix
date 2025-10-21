@@ -9,7 +9,13 @@ from datetime import datetime
 import uvicorn
 from fastapi import FastAPI, Request
 
-from src.shared import close_connections, init_config, initialize_connections
+from src.query.traversal import TraversalService
+from src.shared import (
+    close_connections,
+    get_connection_manager,
+    init_config,
+    initialize_connections,
+)
 from src.shared.observability import (
     get_correlation_id,
     get_logger,
@@ -274,12 +280,18 @@ async def mcp_tools_list():
     tools = [
         MCPTool(
             name="search_documentation",
-            description="Search Weka documentation using hybrid retrieval",
+            description="Search Weka documentation using hybrid retrieval with graph context",
             input_schema={
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search query"},
                     "top_k": {"type": "integer", "default": 20},
+                    "verbosity": {
+                        "type": "string",
+                        "enum": ["full", "graph"],
+                        "default": "graph",
+                        "description": "Response detail level: full (complete section text only, faster), graph (full text + related entities and relationships, better answers, default)",
+                    },
                 },
                 "required": ["query"],
             },
@@ -328,6 +340,7 @@ async def mcp_tools_call(request: MCPToolCallRequest):
             if request.name == "search_documentation":
                 query = request.arguments.get("query", "")
                 top_k = request.arguments.get("top_k", 20)
+                verbosity = request.arguments.get("verbosity", "graph")
 
                 if not query:
                     result = MCPToolCallResponse(
@@ -348,6 +361,7 @@ async def mcp_tools_call(request: MCPToolCallRequest):
                             top_k=top_k,
                             expand_graph=True,
                             find_paths=False,
+                            verbosity=verbosity,
                         )
 
                         # Build MCP response with Markdown + JSON
@@ -378,15 +392,62 @@ async def mcp_tools_call(request: MCPToolCallRequest):
                         )
 
             elif request.name == "traverse_relationships":
-                result = MCPToolCallResponse(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": f"Traverse tool will be implemented in a future phase. Node: {request.arguments.get('node_id', '')}",
-                        }
-                    ],
-                    is_error=False,
-                )
+                try:
+                    # Extract arguments
+                    start_ids = request.arguments.get("start_ids", [])
+                    rel_types = request.arguments.get("rel_types")
+                    max_depth = request.arguments.get("max_depth", 2)
+                    include_text = request.arguments.get("include_text", True)
+
+                    # Validate
+                    if not start_ids:
+                        raise ValueError("start_ids is required and cannot be empty")
+
+                    # Get Neo4j driver and execute traversal
+                    manager = get_connection_manager()
+                    neo4j_driver = manager.get_neo4j_driver()
+                    traversal_svc = TraversalService(neo4j_driver)
+
+                    traversal_result = traversal_svc.traverse(
+                        start_ids=start_ids,
+                        rel_types=rel_types,
+                        max_depth=max_depth,
+                        include_text=include_text,
+                    )
+
+                    # Format response
+                    result_dict = traversal_result.to_dict()
+                    result = MCPToolCallResponse(
+                        content=[
+                            {
+                                "type": "text",
+                                "text": str(result_dict),
+                            }
+                        ],
+                        is_error=False,
+                    )
+
+                except ValueError as e:
+                    result = MCPToolCallResponse(
+                        content=[
+                            {
+                                "type": "text",
+                                "text": f"Validation error: {str(e)}",
+                            }
+                        ],
+                        is_error=True,
+                    )
+                except Exception as e:
+                    logger.error(f"Traversal failed: {e}", exc_info=True)
+                    result = MCPToolCallResponse(
+                        content=[
+                            {
+                                "type": "text",
+                                "text": f"Traversal failed: {str(e)}",
+                            }
+                        ],
+                        is_error=True,
+                    )
             else:
                 result = MCPToolCallResponse(
                     content=[

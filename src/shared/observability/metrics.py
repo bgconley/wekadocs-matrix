@@ -108,6 +108,32 @@ graph_expansion_duration_seconds = Histogram(
     buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5),
 )
 
+# ===== Enhanced Response Features (E5) =====
+mcp_search_verbosity_total = Counter(
+    "mcp_search_verbosity_total",
+    "Search requests by verbosity level",
+    ["verbosity"],
+)
+
+mcp_search_response_size_bytes = Histogram(
+    "mcp_search_response_size_bytes",
+    "Response size distribution by verbosity",
+    ["verbosity"],
+    buckets=(1024, 5120, 10240, 20480, 40960, 65536),  # 1KB to 64KB
+)
+
+mcp_traverse_depth_total = Counter(
+    "mcp_traverse_depth_total",
+    "Traversal requests by depth",
+    ["depth"],
+)
+
+mcp_traverse_nodes_found = Histogram(
+    "mcp_traverse_nodes_found",
+    "Number of nodes found in traversal",
+    buckets=(1, 5, 10, 20, 50, 100),
+)
+
 # ===== Ingestion metrics =====
 ingestion_queue_size = Gauge(
     "ingestion_queue_size",

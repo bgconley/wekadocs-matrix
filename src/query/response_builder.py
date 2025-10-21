@@ -3,12 +3,25 @@ Response Builder (Task 2.4)
 Generates Markdown + JSON responses with evidence and confidence.
 See: /docs/spec.md §5 (Responses & explainability)
 See: /docs/pseudocode-reference.md Phase 2, Task 2.4
+
+Enhanced Response Features (E1-E7):
+- Verbosity modes: full (text only), graph (text + relationships, default)
+- Graph mode provides complete context for better LLM reasoning
+- Supports multi-turn exploration via traverse_relationships
 """
 
 from dataclasses import asdict, dataclass
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from src.query.ranking import RankedResult
+
+
+class Verbosity(str, Enum):
+    """Response verbosity levels for search results."""
+
+    FULL = "full"  # Complete section text only (32KB limit, faster)
+    GRAPH = "graph"  # Full text + related entities (default, better answers)
 
 
 @dataclass
@@ -21,6 +34,13 @@ class Evidence:
     snippet: Optional[str] = None
     path: Optional[List[str]] = None
     confidence: float = 1.0
+
+    # Enhanced fields for full and graph modes (E1)
+    title: Optional[str] = None
+    full_text: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    related_entities: Optional[List[Dict[str, Any]]] = None
+    related_sections: Optional[List[Dict[str, Any]]] = None
 
 
 @dataclass
@@ -72,6 +92,15 @@ class ResponseBuilder:
     Builds dual-format responses (Markdown + JSON) from ranked results.
     """
 
+    def __init__(self, neo4j_driver=None):
+        """
+        Initialize ResponseBuilder.
+
+        Args:
+            neo4j_driver: Optional Neo4j driver for graph mode queries (E3)
+        """
+        self.neo4j_driver = neo4j_driver
+
     def build_response(
         self,
         query: str,
@@ -79,6 +108,7 @@ class ResponseBuilder:
         ranked_results: List[RankedResult],
         timing: Dict[str, float],
         filters: Optional[Dict[str, Any]] = None,
+        verbosity: Verbosity = Verbosity.GRAPH,
     ) -> Response:
         """
         Build complete response from ranked results.
@@ -89,12 +119,13 @@ class ResponseBuilder:
             ranked_results: Ranked search results
             timing: Timing information
             filters: Optional filters applied
+            verbosity: Response detail level (full=text only, graph=text+relationships, default=graph)
 
         Returns:
             Response with Markdown and JSON
         """
-        # Extract top evidence
-        evidence = self._extract_evidence(ranked_results[:5])
+        # Extract top evidence with verbosity mode
+        evidence = self._extract_evidence(ranked_results[:5], verbosity)
 
         # Estimate confidence
         confidence = self._estimate_confidence(ranked_results, evidence)
@@ -119,12 +150,24 @@ class ResponseBuilder:
 
         return Response(answer_markdown=markdown, answer_json=structured)
 
-    def _extract_evidence(self, top_results: List[RankedResult]) -> List[Evidence]:
-        """Extract evidence from top results."""
+    def _extract_evidence(
+        self, top_results: List[RankedResult], verbosity: Verbosity = Verbosity.GRAPH
+    ) -> List[Evidence]:
+        """
+        Extract evidence from top results based on verbosity mode.
+
+        Args:
+            top_results: Top ranked results
+            verbosity: Response detail level (full or graph, default=graph)
+
+        Returns:
+            List of Evidence with fields populated based on verbosity
+        """
         evidence_list = []
 
         for ranked in top_results:
             result = ranked.result
+            metadata = result.metadata
 
             # Determine section_id and node_id
             section_id = None
@@ -134,23 +177,190 @@ class ResponseBuilder:
                 section_id = result.node_id
             else:
                 # For non-sections, try to get section from metadata
-                section_id = result.metadata.get("section_id")
+                section_id = metadata.get("section_id")
 
-            # Extract snippet
-            snippet = self._extract_snippet(result.metadata)
-
-            evidence_list.append(
-                Evidence(
-                    section_id=section_id,
-                    node_id=node_id,
-                    node_label=result.node_label,
-                    snippet=snippet,
-                    path=result.path,
-                    confidence=ranked.features.semantic_score,
+            # Mode-specific evidence extraction
+            if verbosity == Verbosity.FULL:
+                # Full mode: complete section text (32KB limit)
+                # Fetch full text from Neo4j
+                full_text, node_title, tokens = self._fetch_full_text_from_neo4j(
+                    node_id
                 )
-            )
+
+                if len(full_text) > 32768:  # 32KB limit
+                    full_text = full_text[:32768] + "...[truncated]"
+
+                evidence_list.append(
+                    Evidence(
+                        section_id=section_id,
+                        node_id=node_id,
+                        node_label=result.node_label,
+                        snippet=self._extract_snippet(metadata, max_length=200),
+                        title=node_title or metadata.get("title"),
+                        full_text=full_text,
+                        metadata={
+                            "document_id": metadata.get("document_id"),
+                            "level": metadata.get("level"),
+                            "anchor": metadata.get("anchor"),
+                            "tokens": tokens,
+                        },
+                        path=result.path,
+                        confidence=ranked.features.semantic_score,
+                    )
+                )
+
+            elif verbosity == Verbosity.GRAPH:
+                # Graph mode: full text + related entities
+                # Fetch full text from Neo4j
+                full_text, node_title, tokens = self._fetch_full_text_from_neo4j(
+                    node_id
+                )
+
+                if len(full_text) > 32768:  # 32KB limit
+                    full_text = full_text[:32768] + "...[truncated]"
+
+                # Get related entities from Neo4j (E3 implementation)
+                related = (
+                    self._get_related_entities(node_id)
+                    if self.neo4j_driver
+                    else {
+                        "entities": [],
+                        "sections": [],
+                    }
+                )
+
+                evidence_list.append(
+                    Evidence(
+                        section_id=section_id,
+                        node_id=node_id,
+                        node_label=result.node_label,
+                        snippet=self._extract_snippet(metadata, max_length=200),
+                        title=node_title or metadata.get("title"),
+                        full_text=full_text,
+                        metadata={
+                            "document_id": metadata.get("document_id"),
+                            "level": metadata.get("level"),
+                            "anchor": metadata.get("anchor"),
+                            "tokens": tokens,
+                        },
+                        related_entities=related["entities"],
+                        related_sections=related["sections"],
+                        path=result.path,
+                        confidence=ranked.features.semantic_score,
+                    )
+                )
 
         return evidence_list
+
+    def _get_related_entities(
+        self, node_id: str, max_entities: int = 20
+    ) -> Dict[str, List]:
+        """
+        Fetch related entities and sections from Neo4j (E3 implementation).
+
+        Query: 1-hop neighbors via MENTIONS, CONTAINS_STEP, REQUIRES, AFFECTS.
+        Filter: Only entity labels (Command, Configuration, Step, Error, Concept).
+
+        Args:
+            node_id: Starting node ID
+            max_entities: Maximum entities to return (default: 20)
+
+        Returns:
+            Dict with "entities" and "sections" lists
+        """
+        from src.shared.observability import get_logger
+
+        logger = get_logger(__name__)
+        logger.info(
+            f"_get_related_entities called for node_id={node_id[:20]}..., neo4j_driver={self.neo4j_driver is not None}"
+        )
+
+        if not self.neo4j_driver:
+            logger.warning("Neo4j driver is None, returning empty relationships")
+            return {"entities": [], "sections": []}
+
+        try:
+            # Parameterized Cypher query for 1-hop neighbors (bi-directional)
+            # Why bi-directional: Sections may have incoming HAS_SECTION from Documents
+            query = """
+            MATCH (n {id: $node_id})-[r:MENTIONS|CONTAINS_STEP|REQUIRES|AFFECTS]-(e)
+            WHERE labels(e)[0] IN ['Command', 'Configuration', 'Step', 'Error', 'Concept']
+            RETURN DISTINCT
+                e.id AS entity_id,
+                labels(e)[0] AS label,
+                e.name AS name,
+                type(r) AS relationship,
+                COALESCE(r.confidence, 1.0) AS confidence
+            ORDER BY confidence DESC
+            LIMIT $max_entities
+            """
+
+            entities = []
+            with self.neo4j_driver.session() as session:
+                result = session.run(query, node_id=node_id, max_entities=max_entities)
+
+                for record in result:
+                    entities.append(
+                        {
+                            "entity_id": record["entity_id"],
+                            "label": record["label"],
+                            "name": record["name"],
+                            "relationship": record["relationship"],
+                            "confidence": record["confidence"],
+                        }
+                    )
+
+            # TODO: Add related sections query (optional enhancement)
+            sections = []
+
+            return {"entities": entities, "sections": sections}
+
+        except Exception as e:
+            # Log error but don't fail the entire response
+            from src.shared.observability import get_logger
+
+            logger = get_logger(__name__)
+            logger.warning(f"Failed to fetch related entities for {node_id}: {e}")
+            return {"entities": [], "sections": []}
+
+    def _fetch_full_text_from_neo4j(self, node_id: str) -> tuple[str, str, int]:
+        """
+        Fetch full text, title, and token count from Neo4j for a given node.
+
+        Args:
+            node_id: The node ID to fetch
+
+        Returns:
+            Tuple of (full_text, title, tokens)
+        """
+        if not self.neo4j_driver:
+            return ("", "", 0)
+
+        try:
+            query = """
+            MATCH (n {id: $node_id})
+            RETURN n.text AS text, n.title AS title, n.tokens AS tokens
+            LIMIT 1
+            """
+
+            with self.neo4j_driver.session() as session:
+                result = session.run(query, node_id=node_id)
+                record = result.single()
+
+                if record:
+                    text = record["text"] or ""
+                    title = record["title"] or ""
+                    tokens = record["tokens"] or 0
+                    return (text, title, tokens)
+                else:
+                    return ("", "", 0)
+
+        except Exception as e:
+            from src.shared.observability import get_logger
+
+            logger = get_logger(__name__)
+            logger.warning(f"Failed to fetch full text for {node_id}: {e}")
+            return ("", "", 0)
 
     def _extract_snippet(self, metadata: Dict[str, Any], max_length: int = 200) -> str:
         """Extract a text snippet from metadata."""
@@ -362,7 +572,25 @@ def build_response(
     ranked_results: List[RankedResult],
     timing: Dict[str, float],
     filters: Optional[Dict[str, Any]] = None,
+    verbosity: Verbosity = Verbosity.GRAPH,
+    neo4j_driver=None,
 ) -> Response:
-    """Convenience function to build a response."""
-    builder = ResponseBuilder()
-    return builder.build_response(query, intent, ranked_results, timing, filters)
+    """
+    Convenience function to build a response.
+
+    Args:
+        query: Original query text
+        intent: Classified intent
+        ranked_results: Ranked search results
+        timing: Timing information
+        filters: Optional filters applied
+        verbosity: Response detail level (full=text only, graph=text+relationships, default=graph)
+        neo4j_driver: Optional Neo4j driver for graph mode
+
+    Returns:
+        Response with Markdown and JSON
+    """
+    builder = ResponseBuilder(neo4j_driver=neo4j_driver)
+    return builder.build_response(
+        query, intent, ranked_results, timing, filters, verbosity
+    )

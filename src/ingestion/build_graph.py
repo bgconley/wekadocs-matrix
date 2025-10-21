@@ -252,8 +252,44 @@ class GraphBuilder:
         return total_entities
 
     def _create_mentions(self, session, mentions: List[Dict]) -> int:
-        """Create MENTIONS relationships in batches."""
+        """
+        Create relationship batches (both MENTIONS and other types like CONTAINS_STEP).
+        Separates Section→Entity (MENTIONS) from Entity→Entity (typed) relationships.
+        """
         batch_size = self.config.ingestion.batch_size
+
+        # Separate Section→Entity from Entity→Entity relationships
+        section_entity_rels = []
+        entity_entity_rels = []
+
+        for m in mentions:
+            if "section_id" in m and "entity_id" in m:
+                # Standard Section→Entity MENTIONS relationship
+                section_entity_rels.append(m)
+            elif "from_id" in m and "to_id" in m and "relationship" in m:
+                # Entity→Entity typed relationship (e.g., CONTAINS_STEP)
+                entity_entity_rels.append(m)
+            else:
+                logger.warning(f"Unknown mention structure, skipping: {m.keys()}")
+
+        total_created = 0
+
+        # Create Section→Entity MENTIONS relationships
+        total_created += self._create_section_entity_mentions(
+            session, section_entity_rels, batch_size
+        )
+
+        # Create Entity→Entity typed relationships
+        total_created += self._create_entity_entity_relationships(
+            session, entity_entity_rels, batch_size
+        )
+
+        return total_created
+
+    def _create_section_entity_mentions(
+        self, session, mentions: List[Dict], batch_size: int
+    ) -> int:
+        """Create Section→Entity MENTIONS relationships in batches."""
         total_mentions = 0
 
         for i in range(0, len(mentions), batch_size):
@@ -277,12 +313,71 @@ class GraphBuilder:
             total_mentions += count
 
             logger.debug(
-                "MENTIONS batch created",
+                "Section→Entity MENTIONS batch created",
                 batch_num=i // batch_size + 1,
                 count=count,
             )
 
         return total_mentions
+
+    def _create_entity_entity_relationships(
+        self, session, relationships: List[Dict], batch_size: int
+    ) -> int:
+        """
+        Create Entity→Entity typed relationships in batches.
+        Supports dynamic relationship types (e.g., CONTAINS_STEP, REQUIRES, AFFECTS).
+        """
+        if not relationships:
+            return 0
+
+        # Group by relationship type for efficient batch processing
+        by_type = {}
+        for rel in relationships:
+            rel_type = rel.get("relationship", "UNKNOWN")
+            if rel_type not in by_type:
+                by_type[rel_type] = []
+            by_type[rel_type].append(rel)
+
+        total_created = 0
+
+        for rel_type, rels in by_type.items():
+            for i in range(0, len(rels), batch_size):
+                batch = rels[i : i + batch_size]
+
+                # Build dynamic Cypher query with relationship type
+                # Using CALL {} subquery to work around Cypher's limitation
+                # on parameterized relationship types
+                query = f"""
+                UNWIND $rels as r
+                MATCH (from {{id: r.from_id}})
+                MATCH (to {{id: r.to_id}})
+                CALL {{
+                    WITH from, to, r
+                    MERGE (from)-[rel:{rel_type}]->(to)
+                    SET rel.confidence = r.confidence,
+                        rel.source_section_id = r.source_section_id,
+                        rel.updated_at = datetime()
+                    SET rel = CASE
+                        WHEN r.order IS NOT NULL THEN rel {{.*, order: r.order}}
+                        ELSE rel
+                    END
+                    RETURN count(rel) as cnt
+                }}
+                RETURN sum(cnt) as count
+                """
+
+                result = session.run(query, rels=batch)
+                count = result.single()["count"]
+                total_created += count
+
+                logger.debug(
+                    f"Entity→Entity {rel_type} batch created",
+                    batch_num=i // batch_size + 1,
+                    count=count,
+                    rel_type=rel_type,
+                )
+
+        return total_created
 
     def _process_embeddings(
         self, document: Dict, sections: List[Dict], entities: Dict[str, Dict]

@@ -4,6 +4,7 @@ Integrates hybrid search, ranking, and response building.
 Provides cached embedder and connection management.
 """
 
+import json
 import time
 from typing import Any, Dict, Optional
 
@@ -12,10 +13,14 @@ from sentence_transformers import SentenceTransformer
 from src.query.hybrid_search import HybridSearchEngine, QdrantVectorStore
 from src.query.planner import QueryPlanner
 from src.query.ranking import rank_results
-from src.query.response_builder import Response, build_response
+from src.query.response_builder import Response, Verbosity, build_response
 from src.shared.config import get_config
 from src.shared.connections import get_connection_manager
 from src.shared.observability import get_logger
+from src.shared.observability.metrics import (
+    mcp_search_response_size_bytes,
+    mcp_search_verbosity_total,
+)
 
 logger = get_logger(__name__)
 
@@ -91,6 +96,7 @@ class QueryService:
         filters: Optional[Dict[str, Any]] = None,
         expand_graph: bool = True,
         find_paths: bool = False,
+        verbosity: str = "graph",
     ) -> Response:
         """
         Execute a search query and return formatted response.
@@ -101,16 +107,26 @@ class QueryService:
             filters: Optional filters for vector search
             expand_graph: Whether to expand from seeds via graph
             find_paths: Whether to find connecting paths
+            verbosity: Response detail level (full=text only, graph=text+relationships, default=graph)
 
         Returns:
             Response with Markdown and JSON including evidence and confidence
 
         Raises:
             Exception: If search fails
+            ValueError: If verbosity is invalid
         """
         start_time = time.time()
 
         try:
+            # Convert verbosity string to enum
+            try:
+                verb_enum = Verbosity(verbosity)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid verbosity '{verbosity}'. Must be one of: full, graph"
+                )
+
             # Classify intent using planner
             planner = self._get_planner()
             query_plan = planner.plan(query, filters=filters)
@@ -150,17 +166,34 @@ class QueryService:
                 "total_ms": (time.time() - start_time) * 1000,
             }
 
-            # Build response
+            # Build response with verbosity mode
+            manager = get_connection_manager()
+            neo4j_driver = manager.get_neo4j_driver()
+
             response = build_response(
                 query=query,
                 intent=intent,
                 ranked_results=ranked_results,
                 timing=timing,
                 filters=filters,
+                verbosity=verb_enum,
+                neo4j_driver=neo4j_driver,
+            )
+
+            # Instrument metrics (E5)
+            mcp_search_verbosity_total.labels(verbosity=verbosity).inc()
+
+            # Measure response size
+            response_json = json.dumps(response.to_dict())
+            response_size = len(response_json.encode("utf-8"))
+            mcp_search_response_size_bytes.labels(verbosity=verbosity).observe(
+                response_size
             )
 
             logger.info(
-                f"Query completed: confidence={response.answer_json.confidence:.2f}, "
+                f"Query completed: verbosity={verbosity}, "
+                f"response_size_kb={response_size/1024:.1f}, "
+                f"confidence={response.answer_json.confidence:.2f}, "
                 f"evidence_count={len(response.answer_json.evidence)}, "
                 f"total_time={timing['total_ms']:.1f}ms"
             )
