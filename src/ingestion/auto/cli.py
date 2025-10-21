@@ -561,6 +561,178 @@ def cmd_cancel(args):
     return 0
 
 
+def cmd_clean(args):
+    """
+    Implement 'ingestctl clean' command.
+
+    Cleans stale jobs from processing queue.
+    """
+    redis_uri = os.getenv("REDIS_URI", "redis://localhost:6379")
+    redis_password = os.getenv("REDIS_PASSWORD", "")
+
+    try:
+        if redis_password:
+            redis_client = redis.Redis.from_url(
+                redis_uri, password=redis_password, decode_responses=True
+            )
+        else:
+            redis_client = redis.Redis.from_url(redis_uri, decode_responses=True)
+
+        redis_client.ping()
+    except Exception as e:
+        print(f"Error: Failed to connect to Redis: {e}", file=sys.stderr)
+        return 1
+
+    from src.ingestion.auto.queue import (
+        KEY_DLQ,
+        KEY_JOBS,
+        KEY_PROCESSING,
+        KEY_STATUS_HASH,
+        IngestJob,
+    )
+
+    # Get all jobs in processing queue
+    processing_jobs = redis_client.lrange(KEY_PROCESSING, 0, -1)
+
+    if not processing_jobs:
+        print("No jobs in processing queue")
+        return 0
+
+    # Analyze each job
+    stale_jobs = []
+    now = time.time()
+
+    for raw_json in processing_jobs:
+        try:
+            job = IngestJob.from_json(raw_json)
+        except Exception:
+            continue
+
+        # Get job status
+        status_json = redis_client.hget(KEY_STATUS_HASH, job.job_id)
+        if not status_json:
+            # No status - definitely stale
+            age = None
+            stale_jobs.append((raw_json, job, age, "No status timestamp"))
+            continue
+
+        status = json.loads(status_json)
+        started_at = status.get("started_at")
+
+        if not started_at:
+            # No timestamp - stale
+            stale_jobs.append((raw_json, job, None, "No started_at timestamp"))
+            continue
+
+        age = now - started_at
+
+        # Check if older than threshold
+        if args.older_than and age >= args.older_than:
+            stale_jobs.append((raw_json, job, age, f"Age: {int(age)}s"))
+        elif not args.older_than:
+            # No filter - show all
+            stale_jobs.append((raw_json, job, age, f"Age: {int(age)}s"))
+
+    if not stale_jobs:
+        print(f"No stale jobs found (scanned {len(processing_jobs)} jobs)")
+        return 0
+
+    # Display stale jobs
+    if args.json:
+        output = {
+            "total_processing": len(processing_jobs),
+            "stale_count": len(stale_jobs),
+            "stale_jobs": [
+                {
+                    "job_id": job.job_id,
+                    "path": job.path,
+                    "attempts": job.attempts,
+                    "age_seconds": int(age) if age else None,
+                    "reason": reason,
+                }
+                for _, job, age, reason in stale_jobs
+            ],
+        }
+        print(json.dumps(output, indent=2))
+    else:
+        print(f"\nFound {len(stale_jobs)} stale job(s):\n")
+        print(f"{'Job ID':<36} | {'Age':<10} | {'Attempts':<8} | {'Path':<40}")
+        print("-" * 100)
+
+        for _, job, age, reason in stale_jobs:
+            age_str = f"{int(age)}s" if age else "Unknown"
+            path_str = (job.path or "N/A")[:39]
+            print(f"{job.job_id[:35]} | {age_str:<10} | {job.attempts:<8} | {path_str}")
+
+    # Dry run mode
+    if args.dry_run:
+        print(f"\nDry run: Would clean {len(stale_jobs)} stale job(s)")
+        return 0
+
+    # Confirm before cleaning
+    if not args.yes:
+        response = input(f"\nClean {len(stale_jobs)} stale job(s)? (y/N): ")
+        if response.lower() != "y":
+            print("Cancelled")
+            return 0
+
+    # Clean stale jobs
+    config = get_config()
+    max_retries = 3
+    if hasattr(config, "ingest") and hasattr(config.ingest, "queue_recovery"):
+        max_retries = config.ingest.queue_recovery.max_retries
+
+    requeued = 0
+    failed = 0
+
+    for raw_json, job, age, reason in stale_jobs:
+        job.attempts += 1
+
+        # Remove from processing
+        redis_client.lrem(KEY_PROCESSING, 1, raw_json)
+
+        if job.attempts < max_retries:
+            # Requeue
+            redis_client.lpush(KEY_JOBS, job.to_json())
+            redis_client.hset(
+                KEY_STATUS_HASH,
+                job.job_id,
+                json.dumps(
+                    {
+                        "status": "queued",
+                        "attempts": job.attempts,
+                        "last_error": f"Cleaned: {reason}",
+                        "requeued_at": time.time(),
+                        "cleaned": True,
+                    }
+                ),
+            )
+            requeued += 1
+        else:
+            # Move to DLQ
+            redis_client.lpush(KEY_DLQ, raw_json)
+            redis_client.hset(
+                KEY_STATUS_HASH,
+                job.job_id,
+                json.dumps(
+                    {
+                        "status": "failed",
+                        "attempts": job.attempts,
+                        "error": f"Max retries exceeded. {reason}",
+                        "failed_at": time.time(),
+                        "cleaned": True,
+                    }
+                ),
+            )
+            failed += 1
+
+    print(f"\nCleaned {len(stale_jobs)} stale job(s):")
+    print(f"  Requeued: {requeued}")
+    print(f"  Failed (to DLQ): {failed}")
+
+    return 0
+
+
 def cmd_report(args):
     """
     Implement 'ingestctl report' command.
@@ -738,6 +910,26 @@ def main():
     report_parser.add_argument("job_id", help="Job ID")
     report_parser.add_argument("--json", action="store_true", help="JSON output")
 
+    # Clean command
+    clean_parser = subparsers.add_parser(
+        "clean", help="Clean stale jobs from processing queue"
+    )
+    clean_parser.add_argument(
+        "--older-than",
+        type=int,
+        metavar="SECONDS",
+        help="Only clean jobs older than N seconds",
+    )
+    clean_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be cleaned without doing it",
+    )
+    clean_parser.add_argument(
+        "--yes", "-y", action="store_true", help="Skip confirmation prompt"
+    )
+    clean_parser.add_argument("--json", action="store_true", help="JSON output")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -755,6 +947,8 @@ def main():
         return cmd_cancel(args)
     elif args.command == "report":
         return cmd_report(args)
+    elif args.command == "clean":
+        return cmd_clean(args)
     else:
         parser.print_help()
         return 1
