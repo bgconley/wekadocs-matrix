@@ -125,6 +125,26 @@ schema:
   version: "v1"
   auto_migrate: false
 
+# Phase 7a: Feature flags for enhanced responses
+feature_flags:
+  verbosity_enabled: true
+  graph_mode_enabled: true
+  # Phase 7 performance/safety limits
+  graph_limits:
+    max_depth_soft: 3
+    max_depth_hard: 5
+    max_nodes_hard: 200
+    timeout_ms: 2000
+    rel_whitelist:
+      - "MENTIONS"
+      - "HAS_SECTION"
+    label_whitelist:
+      - "Section"
+      - "Chunk"
+      - "Entity"
+      - "Document"
+      - "Topic"
+
 # Phase 6: Auto-ingestion configuration
 ingest:
   # File system watcher
@@ -166,3 +186,11 @@ ingest:
     neo4j_cpu_threshold: 0.8
     qdrant_p95_threshold_ms: 200.0
     pause_seconds: 30
+
+  # Queue recovery & stale job handling
+  queue_recovery:
+    enabled: true
+    job_timeout_seconds: 600      # 10 min max processing time per job
+    reaper_interval_seconds: 30   # Check for stale jobs every 30s
+    max_retries: 3                # Max requeue attempts before DLQ
+    stale_job_action: "requeue"   # "requeue" | "fail" | "dlq"

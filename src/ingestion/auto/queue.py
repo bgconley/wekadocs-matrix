@@ -88,7 +88,15 @@ def brpoplpush(timeout: int = 1) -> Optional[Tuple[str, str]]:
         return None
     job = IngestJob.from_json(raw)
     r.hset(
-        KEY_STATUS_HASH, job.job_id, json.dumps({"status": JobStatus.PROCESSING.value})
+        KEY_STATUS_HASH,
+        job.job_id,
+        json.dumps(
+            {
+                "status": JobStatus.PROCESSING.value,
+                "started_at": time.time(),
+                "attempts": job.attempts,
+            }
+        ),
     )
     return raw, job.job_id
 
@@ -125,6 +133,7 @@ def fail(
                     "status": JobStatus.QUEUED.value,
                     "attempts": job.attempts,
                     "last_error": reason,
+                    "requeued_at": time.time(),
                 }
             ),
         )
@@ -138,6 +147,7 @@ def fail(
                     "status": JobStatus.FAILED.value,
                     "attempts": job.attempts,
                     "error": reason,
+                    "failed_at": time.time(),
                 }
             ),
         )
