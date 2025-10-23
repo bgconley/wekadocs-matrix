@@ -1,84 +1,150 @@
-# Implements Phase 1, Task 1.1 (Docker environment setup)
-# See: /docs/spec.md §3.3 (IDs, versions, consistency)
-# See: /docs/implementation-plan.md → Task 1.3 (Schema with config-driven vectors)
+# WekaDocs Matrix Configuration - Development Environment
+# This is the single source of truth for all configuration values
+# Eliminates phantom defaults and hardcoded values throughout the codebase
 
+# Application metadata
 app:
-  name: wekadocs-graphrag-mcp
-  version: "0.1.0"
-  log_level: INFO
+  name: wekadocs-matrix
   environment: development
+  log_level: INFO
+  version: "2.0.0"
 
-server:
-  host: "0.0.0.0"
-  port: 8000
-  workers: 4
-  timeout: 30
-
-# Embedding configuration (used by schema creation and ingestion)
+# Embedding configuration - critical for vector operations
 embedding:
+  # Model configuration
   model_name: "sentence-transformers/all-MiniLM-L6-v2"
-  dims: 384
-  similarity: "cosine"  # cosine | euclidean | dot
-  multilingual: false
-  version: "v1"
+  dims: 384  # MUST match the model's actual output dimensions
+  similarity: "cosine"  # Options: cosine, dot, euclidean
 
-# Vector store configuration
+  # Version tracking for provenance
+  # This ensures we can filter vectors by the model version used
+  version: "miniLM-L6-v2-2024-01-01"
+
+  # Provider configuration
+  provider: "sentence-transformers"  # Will expand to "jina" in Phase 7
+
+  # Task configuration (for future Jina support)
+  task: "retrieval.passage"  # Options: retrieval.passage, retrieval.query
+
+  # Performance settings
+  batch_size: 32
+  max_sequence_length: 512
+
+# Search configuration
 search:
+  # Vector search settings
   vector:
-    primary: "qdrant"  # qdrant | neo4j
-    dual_write: false  # if true, write to both stores
+    primary: "qdrant"
+    dual_write: false
     qdrant:
       collection_name: "weka_sections"
       use_grpc: false
       timeout: 30
     neo4j:
       index_name: "section_embeddings"
-  graph:
-    max_depth: 2
-    max_results: 100
-    timeout: 30
+
+  # Hybrid search settings
   hybrid:
-    vector_weight: 0.7
-    graph_weight: 0.3
-    top_k: 20
+    vector_weight: 0.7  # Weight for vector similarity (0.0-1.0)
+    graph_weight: 0.3   # Weight for graph/text match
+    top_k: 20  # Number of candidates to retrieve
 
-# Neo4j configuration
-neo4j:
-  max_connection_lifetime: 3600
-  max_connection_pool_size: 50
-  connection_acquisition_timeout: 60
-  encrypted: false
-  trust: "TRUST_ALL_CERTIFICATES"
-  database: "neo4j"
+  # Graph search settings
+  graph:
+    max_depth: 3
+    max_related_per_seed: 20
 
-# Redis configuration
-redis:
-  db: 0
-  socket_timeout: 5
-  socket_connect_timeout: 5
-  max_connections: 50
+  # Response building
+  response:
+    max_bytes_full: 32768  # 32KB limit for FULL mode
+    max_sections: 10
+    include_citations: true
 
-# Rate limiting (Redis token bucket)
+# Database connections
+databases:
+  neo4j:
+    # Connection details from environment variables
+    uri_env: "NEO4J_URI"
+    username_env: "NEO4J_USERNAME"
+    password_env: "NEO4J_PASSWORD"  # pragma: allowlist secret
+    database: "neo4j"
+
+  qdrant:
+    # Connection details
+    host_env: "QDRANT_HOST"
+    port_env: "QDRANT_PORT"
+    api_key_env: "QDRANT_API_KEY"  # pragma: allowlist secret
+    timeout: 30
+
+  redis:
+    # Connection details
+    host_env: "REDIS_HOST"
+    port_env: "REDIS_PORT"
+    password_env: "REDIS_PASSWORD"  # pragma: allowlist secret
+    db: 0
+
+# Ingestion settings
+ingestion:
+  # Batch processing
+  batch_size: 500
+  max_section_tokens: 1000
+  timeout_seconds: 300
+  workers: 2
+
+  # Reconciliation (for drift detection)
+  reconciliation:
+    enabled: true
+    schedule: "0 2 * * *"  # 2 AM daily
+    drift_threshold: 0.01
+
+# Ranking configuration
+ranking:
+  # Score normalization
+  normalize_scores: true
+  score_range: [0.0, 1.0]
+
+  # Recency weighting
+  recency:
+    enabled: true
+    decay_factor: 365  # Days for exponential decay
+
+  # Entity focus (Phase 7 will activate)
+  entity_focus:
+    enabled: false  # Will be true in Phase 7
+    boost_weight: 0.2
+
+  # Coverage signals
+  coverage:
+    enabled: true
+    connection_weight: 0.1
+    mention_weight: 0.15
+
+# Schema configuration
+schema:
+  version: "v1"  # Current production version
+  auto_migrate: false
+
+# Rate limiting configuration
 rate_limit:
   enabled: true
   requests_per_minute: 60
   burst_size: 10
   window_seconds: 60
 
-# JWT authentication
+# Authentication configuration
 auth:
   enabled: true
   algorithm: "HS256"
   expiry_minutes: 60
 
-# Audit logging
+# Audit logging configuration
 audit:
   enabled: true
   log_params: true
-  log_results: false  # avoid large payloads in audit log
+  log_results: false
   retention_days: 90
 
-# Query validation
+# Query validator configuration
 validator:
   max_depth: 3
   max_label_scans: 2
@@ -87,6 +153,10 @@ validator:
   timeout_seconds: 30
   enforce_parameters: true
   enforce_limits: true
+
+# Telemetry configuration
+telemetry:
+  enabled: true
 
 # Cache configuration
 cache:
@@ -99,98 +169,39 @@ cache:
     ttl_seconds: 3600
     key_prefix: "weka:cache:v1"
 
-# OpenTelemetry
-telemetry:
-  enabled: true
-  traces:
-    enabled: true
-    sample_rate: 1.0  # 1.0 = 100% sampling in dev
-  metrics:
-    enabled: true
-    interval_seconds: 60
-
-# Ingestion pipeline
-ingestion:
-  batch_size: 500
-  max_section_tokens: 1000
-  timeout_seconds: 300
-  workers: 2
-  reconciliation:
-    enabled: true
-    schedule: "0 2 * * *"  # 2 AM daily
-    drift_threshold: 0.01  # 1% drift triggers repair
-
-# Schema versioning
-schema:
-  version: "v1"
-  auto_migrate: false
-
-# Phase 7a: Feature flags for enhanced responses
+# Feature flags for gradual rollout
 feature_flags:
-  verbosity_enabled: true
-  graph_mode_enabled: true
-  # Phase 7 performance/safety limits
-  graph_limits:
-    max_depth_soft: 3
-    max_depth_hard: 5
-    max_nodes_hard: 200
-    timeout_ms: 2000
-    rel_whitelist:
-      - "MENTIONS"
-      - "HAS_SECTION"
-    label_whitelist:
-      - "Section"
-      - "Chunk"
-      - "Entity"
-      - "Document"
-      - "Topic"
+  use_embedding_provider: true  # New in pre-phase7
+  validate_dimensions: true     # New in pre-phase7
+  coverage_enrichment: true      # New in pre-phase7
+  byte_cap_responses: true       # New in pre-phase7
+  schema_v2_1_dev: true         # Dev only for pre-phase7
 
-# Phase 6: Auto-ingestion configuration
-ingest:
-  # File system watcher
-  watch:
-    enabled: true
-    paths:
-      - "./ingest/watch"
-    debounce_seconds: 3
-    poll_interval: 5
+# Performance tuning
+performance:
+  # Connection pools
+  neo4j_max_connections: 50
+  qdrant_max_connections: 20
 
-  # S3 watcher (disabled by default)
-  s3:
-    enabled: false
-    buckets: []
+  # Timeouts (seconds)
+  default_timeout: 30
+  embedding_timeout: 10
+  search_timeout: 5
 
-  # HTTP watcher (disabled by default)
-  http:
-    enabled: false
-    endpoints: []
-    poll_interval: 300  # 5 minutes
+  # Caching
+  cache_ttl_seconds: 3600
+  cache_max_size: 1000
 
-  # Processing settings
-  tag: "wekadocs"
-  concurrency: 4
-  batch_size: 500
-  timeout_seconds: 300
+# Development settings
+development:
+  # Debug options
+  debug: false
+  verbose_logging: false
 
-  # Sample queries for verification (per tag)
-  sample_queries:
-    wekadocs:
-      - "How do I configure a cluster?"
-      - "What are the performance tuning options?"
-      - "How do I troubleshoot performance issues?"
-    default:
-      - "What is this documentation about?"
+  # Testing helpers
+  use_mock_embeddings: false
+  deterministic_ids: true
 
-  # Back-pressure thresholds
-  backpressure:
-    neo4j_cpu_threshold: 0.8
-    qdrant_p95_threshold_ms: 200.0
-    pause_seconds: 30
-
-  # Queue recovery & stale job handling
-  queue_recovery:
-    enabled: true
-    job_timeout_seconds: 600      # 10 min max processing time per job
-    reaper_interval_seconds: 30   # Check for stale jobs every 30s
-    max_retries: 3                # Max requeue attempts before DLQ
-    stale_job_action: "requeue"   # "requeue" | "fail" | "dlq"
+  # Hot reload
+  watch_config: true
+  reload_on_change: false

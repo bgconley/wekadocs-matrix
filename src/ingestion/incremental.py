@@ -176,12 +176,17 @@ class IncrementalUpdater:
             # Upsert vectors (placeholder embeddings for tests)
             if self.qdrant:
                 points = []
+                # Pre-Phase 7: Use config-driven dimensions for placeholders
+                embedding_dims = 384  # Default fallback
+                if self.config and hasattr(self.config, "embedding"):
+                    embedding_dims = self.config.embedding.dims
+
                 for sec in to_upsert:
                     point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, sec["id"]))
                     points.append(
                         PointStruct(
                             id=point_uuid,
-                            vector=[0.0] * 384,  # placeholder
+                            vector=[0.0] * embedding_dims,  # config-driven placeholder
                             payload={
                                 "node_id": sec["id"],
                                 "node_label": "Section",
@@ -193,7 +198,12 @@ class IncrementalUpdater:
                         )
                     )
                 if points:
-                    self.qdrant.upsert(collection_name=self.collection, points=points)
+                    # Pre-Phase 7: Use validated upsert with config-driven dimensions
+                    self.qdrant.upsert_validated(
+                        collection_name=self.collection,
+                        points=points,
+                        expected_dim=embedding_dims,
+                    )
 
         return {
             "sections_updated": upserted_count,

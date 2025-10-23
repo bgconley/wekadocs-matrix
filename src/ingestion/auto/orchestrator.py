@@ -853,7 +853,12 @@ class Orchestrator:
             points.append(point)
 
         if points:
-            self.qdrant.upsert(collection_name=collection_name, points=points)
+            # Pre-Phase 7: Use validated upsert with dimension checking
+            self.qdrant.upsert_validated(
+                collection_name=collection_name,
+                points=points,
+                expected_dim=self.config.embedding.dims,
+            )
 
         return len(points)
 

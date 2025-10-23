@@ -162,7 +162,17 @@ class Reconciler:
             )
             for rec in records
         ]
-        self.qdrant.upsert(collection_name=self.collection, points=pts)
+
+        # Pre-Phase 7: Determine expected dimension from config or first vector
+        expected_dim = 384  # Default fallback
+        if self.config and hasattr(self.config, "embedding"):
+            expected_dim = self.config.embedding.dims
+        elif pts and len(pts[0].vector) > 0:
+            expected_dim = len(pts[0].vector)
+
+        self.qdrant.upsert_validated(
+            collection_name=self.collection, points=pts, expected_dim=expected_dim
+        )
         return len(pts)
 
     def reconcile_sync(

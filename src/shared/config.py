@@ -1,27 +1,69 @@
 # Implements Phase 1, Task 1.2 (MCP server foundation)
 # See: /docs/spec.md §2 (Architecture)
 # Configuration loader with environment variable support
+# Enhanced for Pre-Phase 7: Added validation for embedding configuration
 
+import logging
 from pathlib import Path
 from typing import Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from pydantic_settings import BaseSettings
 
 from .models import WekaBaseModel
 
+logger = logging.getLogger(__name__)
+
 
 class EmbeddingConfig(BaseModel):
-    """Embedding configuration - renamed model_name to embedding_model to avoid Pydantic v2 namespace conflict"""
+    """
+    Embedding configuration - enhanced for Pre-Phase 7.
+    This is the single source of truth for all embedding parameters.
+    """
 
+    # Model configuration
     embedding_model: str = Field(
         alias="model_name"
     )  # Support both names for backwards compat
-    dims: int
-    similarity: str = "cosine"
+    dims: int = Field(..., gt=0)  # Must be positive
+    similarity: str = Field(default="cosine")
+    version: str = Field(...)  # Required for provenance tracking
+
+    # Provider configuration (Pre-Phase 7)
+    provider: str = Field(default="sentence-transformers")
+    task: str = Field(default="retrieval.passage")
+
+    # Performance settings
+    batch_size: int = Field(default=32, gt=0)
+    max_sequence_length: int = Field(default=512, gt=0)
+
+    # Legacy fields for compatibility
     multilingual: bool = False
-    version: str = "v1"
+
+    @validator("similarity")
+    def validate_similarity(cls, v):
+        """Validate similarity metric is supported"""
+        valid_metrics = {"cosine", "dot", "euclidean"}
+        if v not in valid_metrics:
+            raise ValueError(f"similarity must be one of {valid_metrics}, got {v}")
+        return v
+
+    @validator("dims")
+    def validate_dims(cls, v):
+        """Validate dimensions are reasonable"""
+        if v <= 0:
+            raise ValueError(f"dims must be positive, got {v}")
+        if v > 4096:  # Sanity check
+            logger.warning(f"dims={v} is unusually large, typical range is 128-1536")
+        return v
+
+    @validator("version")
+    def validate_version(cls, v):
+        """Ensure version is not empty"""
+        if not v or v.strip() == "":
+            raise ValueError("version cannot be empty - required for provenance")
+        return v
 
     class Config:
         populate_by_name = True  # Allow both embedding_model and model_name
@@ -201,9 +243,14 @@ class Settings(BaseSettings):
 def load_config() -> tuple[Config, Settings]:
     """
     Load configuration from YAML file and environment variables.
+    Enhanced for Pre-Phase 7 with startup validation.
 
     Returns:
         tuple: (Config, Settings) - YAML config and environment settings
+
+    Raises:
+        FileNotFoundError: If config file not found
+        ValueError: If configuration validation fails
     """
     # Load environment settings
     settings = Settings()
@@ -220,12 +267,72 @@ def load_config() -> tuple[Config, Settings]:
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
+    logger.info(f"Loading configuration from: {config_path}")
+
     with open(config_path, "r") as f:
         config_dict = yaml.safe_load(f)
 
     config = Config(**config_dict)
 
+    # Pre-Phase 7: Perform startup validation
+    validate_config_at_startup(config, settings)
+
     return config, settings
+
+
+def validate_config_at_startup(config: Config, settings: Settings) -> None:
+    """
+    Validate critical configuration at startup.
+    Pre-Phase 7 requirement: Fail fast on invalid configuration.
+
+    Args:
+        config: Loaded configuration
+        settings: Environment settings
+
+    Raises:
+        ValueError: If critical validation fails
+    """
+    # Log embedding configuration (Pre-Phase 7 requirement)
+    logger.info(
+        f"Embedding configuration loaded: "
+        f"model={config.embedding.embedding_model}, "
+        f"dims={config.embedding.dims}, "
+        f"version={config.embedding.version}, "
+        f"provider={config.embedding.provider}"
+    )
+
+    # Validate embedding dimensions are positive
+    if config.embedding.dims <= 0:
+        raise ValueError(
+            f"embedding.dims must be positive, got {config.embedding.dims}"
+        )
+
+    # Validate embedding version is set
+    if not config.embedding.version:
+        raise ValueError("embedding.version is required for provenance tracking")
+
+    # Validate similarity metric
+    valid_similarities = {"cosine", "dot", "euclidean"}
+    if config.embedding.similarity not in valid_similarities:
+        raise ValueError(
+            f"embedding.similarity must be one of {valid_similarities}, "
+            f"got {config.embedding.similarity}"
+        )
+
+    # Validate Qdrant distance matches embedding similarity
+    if hasattr(config.search.vector.qdrant, "distance"):
+        qdrant_distance = getattr(config.search.vector.qdrant, "distance", "cosine")
+        if qdrant_distance != config.embedding.similarity:
+            logger.warning(
+                f"Qdrant distance ({qdrant_distance}) != embedding similarity "
+                f"({config.embedding.similarity}). This may cause issues."
+            )
+
+    # Log feature flags (Pre-Phase 7)
+    if hasattr(config, "feature_flags"):
+        logger.info(f"Feature flags: {config.feature_flags}")
+
+    logger.info("Configuration validation successful")
 
 
 # Global config instances (loaded once at startup)

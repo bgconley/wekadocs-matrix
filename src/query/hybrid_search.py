@@ -10,6 +10,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from src.shared.config import get_config
+from src.shared.observability import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -151,6 +154,7 @@ class Neo4jVectorStore(VectorStore):
 class HybridSearchEngine:
     """
     Hybrid search combining vector similarity with graph structure.
+    Pre-Phase 7 B5: Modified to use embedding provider API.
     """
 
     def __init__(self, vector_store: VectorStore, neo4j_driver, embedder):
@@ -162,6 +166,12 @@ class HybridSearchEngine:
         # Get search configuration
         self.max_hops = self.config.validator.max_depth  # Use validator's max_depth
         self.top_k = self.config.search.hybrid.top_k
+
+        # Pre-Phase 7: Log embedder info once at init
+        logger.info(
+            f"HybridSearchEngine initialized with embedder: "
+            f"model_id={embedder.model_id}, dims={embedder.dims}"
+        )
 
     def search(
         self,
@@ -188,21 +198,27 @@ class HybridSearchEngine:
 
         # Step 1: Vector search for seed nodes
         vector_start = time.time()
-        query_vector = self.embedder.encode(query_text)
+        # Pre-Phase 7 B5: Use provider's embed_query method for queries
+        query_vector = self.embedder.embed_query(query_text)
         vector_seeds = self.vector_store.search(query_vector, k=k, filters=filters)
         vector_time_ms = (time.time() - vector_start) * 1000
 
         # Convert to SearchResult objects
-        results = [
-            SearchResult(
-                node_id=seed["node_id"],
-                node_label=seed["node_label"],
-                score=seed["score"],
-                distance=0,  # Seeds have distance 0
-                metadata=seed.get("metadata", {}),
+        # Pre-Phase 7 (D3): Tag score kind for ranking normalization
+        results = []
+        for seed in vector_seeds:
+            metadata = seed.get("metadata", {})
+            # Tag the score kind as similarity (Qdrant cosine similarity)
+            metadata["score_kind"] = "similarity"
+            results.append(
+                SearchResult(
+                    node_id=seed["node_id"],
+                    node_label=seed["node_label"],
+                    score=seed["score"],
+                    distance=0,  # Seeds have distance 0
+                    metadata=metadata,
+                )
             )
-            for seed in vector_seeds
-        ]
 
         # Step 2: Graph expansion (if enabled)
         graph_time_ms = 0
@@ -228,12 +244,16 @@ class HybridSearchEngine:
                 seen.add(result.node_id)
                 unique_results.append(result)
 
+        # Pre-Phase 7 (D2): Enrich results with coverage signals
+        # This adds connection_count and mention_count for ranking
+        unique_results = self._enrich_with_coverage(unique_results[:k])
+
         ranking_time_ms = 0  # Placeholder - actual ranking in ranking.py
 
         total_time_ms = (time.time() - start_time) * 1000
 
         return HybridSearchResults(
-            results=unique_results[:k],
+            results=unique_results,
             total_found=len(unique_results),
             vector_time_ms=vector_time_ms,
             graph_time_ms=graph_time_ms,
@@ -335,3 +355,61 @@ class HybridSearchEngine:
             print(f"Path finding error: {e}")
 
         return bridge_results
+
+    def _enrich_with_coverage(self, results: List[SearchResult]) -> List[SearchResult]:
+        """
+        Pre-Phase 7 (D2): Enrich results with coverage signals.
+        Adds connection_count and mention_count via batched Cypher query.
+
+        Args:
+            results: List of search results to enrich
+
+        Returns:
+            Results with coverage metadata added
+        """
+        if not results:
+            return results
+
+        # Extract node IDs for batch query
+        node_ids = [r.node_id for r in results]
+
+        # Batched Cypher to compute coverage signals
+        coverage_query = """
+        UNWIND $ids AS sid
+        MATCH (s:Section {id: sid})
+        OPTIONAL MATCH (s)-[r]->()
+        WITH s, count(DISTINCT r) AS conn_count
+        OPTIONAL MATCH (s)-[:MENTIONS]->(e:Entity)
+        WITH s, conn_count, count(DISTINCT e) AS mention_count
+        RETURN s.id AS id,
+               conn_count AS connection_count,
+               mention_count AS mention_count
+        """
+
+        # Create mapping of coverage data
+        coverage_map = {}
+        try:
+            with self.neo4j_driver.session() as session:
+                result = session.run(coverage_query, ids=node_ids)
+                for record in result:
+                    coverage_map[record["id"]] = {
+                        "connection_count": record["connection_count"],
+                        "mention_count": record["mention_count"],
+                    }
+
+            logger.debug(f"Enriched {len(coverage_map)} results with coverage signals")
+        except Exception as e:
+            logger.warning(f"Failed to enrich with coverage signals: {e}")
+            # Return original results if enrichment fails
+            return results
+
+        # Update results with coverage data
+        for result in results:
+            if result.node_id in coverage_map:
+                result.metadata.update(coverage_map[result.node_id])
+            else:
+                # Default values if not found
+                result.metadata["connection_count"] = 0
+                result.metadata["mention_count"] = 0
+
+        return results

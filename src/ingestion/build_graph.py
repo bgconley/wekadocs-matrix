@@ -2,6 +2,7 @@
 # See: /docs/spec.md §3 (Data model, IDs, vectors)
 # See: /docs/implementation-plan.md → Task 3.3
 # See: /docs/pseudocode-reference.md → Task 3.3
+# Pre-Phase 7 B3: Modified to use embedding provider abstraction
 
 import time
 from datetime import datetime
@@ -9,8 +10,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from neo4j import Driver
-from sentence_transformers import SentenceTransformer
 
+from src.providers.embeddings import SentenceTransformersProvider
 from src.shared.config import Config
 from src.shared.observability import get_logger
 
@@ -382,21 +383,39 @@ class GraphBuilder:
     def _process_embeddings(
         self, document: Dict, sections: List[Dict], entities: Dict[str, Dict]
     ) -> Dict:
-        """Compute embeddings and upsert to vector store."""
+        """
+        Compute embeddings and upsert to vector store.
+        Pre-Phase 7 B3: Modified to use embedding provider with dimension validation.
+        """
         stats = {"computed": 0, "upserted": 0}
 
-        # Initialize embedder lazily
+        # Initialize embedder lazily using provider pattern
         if not self.embedder:
-            # Access via alias-compatible attribute
-            model_name = getattr(
-                self.config.embedding, "embedding_model", None
-            ) or getattr(
-                self.config.embedding,
-                "model_name",
-                "sentence-transformers/all-MiniLM-L6-v2",
+            logger.info(
+                "Initializing embedding provider",
+                provider=self.config.embedding.provider,
+                model=self.config.embedding.embedding_model,
+                dims=self.config.embedding.dims,
             )
-            logger.info("Loading embedding model", model=model_name)
-            self.embedder = SentenceTransformer(model_name)
+
+            # Pre-Phase 7: Use provider abstraction instead of direct SentenceTransformer
+            self.embedder = SentenceTransformersProvider(
+                model_name=self.config.embedding.embedding_model,
+                expected_dims=self.config.embedding.dims,
+            )
+
+            # Validate dimensions match configuration
+            if self.embedder.dims != self.config.embedding.dims:
+                raise ValueError(
+                    f"Provider dimension mismatch: expected {self.config.embedding.dims}, "
+                    f"got {self.embedder.dims}"
+                )
+
+            logger.info(
+                "Embedding provider initialized",
+                actual_dims=self.embedder.dims,
+                model_id=self.embedder.model_id,
+            )
 
         # Purge existing vectors for this document BEFORE upserting to prevent drift
         source_uri = document.get("source_uri", "")
@@ -440,20 +459,36 @@ class GraphBuilder:
                     document_uri=source_uri or document.get("id"),
                 )
 
-        # Process sections
+        # Pre-Phase 7 B3: Process sections with provider and metadata
+        # Batch process embeddings for efficiency
+        sections_to_embed = []
         for section in sections:
             section.setdefault("source_uri", source_uri)
             section.setdefault("document_uri", document_uri)
-            # Compute embedding
             text_to_embed = self._build_section_text_for_embedding(section)
-            embedding = self.embedder.encode(text_to_embed).tolist()
-            stats["computed"] += 1
+            sections_to_embed.append((section, text_to_embed))
 
-            # Upsert to vector store
-            if self.vector_primary == "qdrant":
-                self._upsert_to_qdrant(
-                    section["id"], embedding, section, document, "Section"
-                )
+        # Generate embeddings in batch
+        if sections_to_embed:
+            texts = [text for _, text in sections_to_embed]
+            embeddings = self.embedder.embed_documents(texts)
+
+            # Process each section with its embedding
+            for (section, _), embedding in zip(sections_to_embed, embeddings):
+                # Pre-Phase 7: Validate dimension before upsert
+                if len(embedding) != self.config.embedding.dims:
+                    raise ValueError(
+                        f"Embedding dimension mismatch for section {section['id']}: "
+                        f"expected {self.config.embedding.dims}, got {len(embedding)}"
+                    )
+
+                stats["computed"] += 1
+
+                # Upsert to vector store
+                if self.vector_primary == "qdrant":
+                    self._upsert_to_qdrant(
+                        section["id"], embedding, section, document, "Section"
+                    )
                 stats["upserted"] += 1
 
                 # Dual write to Neo4j if enabled
@@ -551,6 +586,7 @@ class GraphBuilder:
 
         # CRITICAL: Store original node_id in payload for reconciliation
         # Parity checks will use payload.node_id to match with Neo4j
+        # Pre-Phase 7 B3: Enhanced payload with comprehensive embedding metadata
         point = PointStruct(
             id=point_uuid,  # UUID compatible with Qdrant
             vector=embedding,
@@ -562,14 +598,22 @@ class GraphBuilder:
                 "source_uri": source_uri,
                 "title": section.get("title"),
                 "anchor": section.get("anchor"),
-                "updated_at": datetime.utcnow().isoformat(),
+                # Pre-Phase 7: Enhanced embedding metadata for provenance
                 "embedding_version": self.embedding_version,
+                "embedding_provider": "sentence-transformers",  # From provider
+                "embedding_dimensions": len(embedding),  # Actual dimensions
+                "embedding_task": "retrieval.passage",  # Document embedding task
+                "embedding_timestamp": datetime.utcnow().isoformat()
+                + "Z",  # ISO-8601 UTC
+                "updated_at": datetime.utcnow().isoformat() + "Z",  # ISO-8601 UTC
             },
         )
 
-        self.qdrant_client.upsert(
+        # Pre-Phase 7: Use validated upsert with dimension checking
+        self.qdrant_client.upsert_validated(
             collection_name=collection_name,
             points=[point],
+            expected_dim=self.config.embedding.dims,
         )
 
         logger.debug(

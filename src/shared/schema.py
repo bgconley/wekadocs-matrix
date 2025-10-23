@@ -32,7 +32,7 @@ def create_schema(driver: Driver, config: Config) -> Dict[str, any]:
         "constraints_created": 0,
         "indexes_created": 0,
         "vector_indexes_created": 0,
-        "schema_version": config.schema.version,
+        "schema_version": config.graph_schema.version,
         "errors": [],
     }
 
@@ -91,6 +91,20 @@ def create_schema(driver: Driver, config: Config) -> Dict[str, any]:
             results["vector_indexes_created"] = vector_indexes["created"]
             results["vector_indexes_details"] = vector_indexes["details"]
 
+            # Step 2.5: Optionally run schema v2.1 (Pre-Phase 7, F2)
+            # Only runs if file exists - safe to omit in production
+            v2_1_result = apply_schema_v2_1(session)
+            if v2_1_result["executed"]:
+                results["schema_v2_1_applied"] = True
+                results["schema_v2_1_details"] = v2_1_result
+                logger.info("Schema v2.1 applied successfully", details=v2_1_result)
+            else:
+                results["schema_v2_1_applied"] = False
+                logger.debug(
+                    "Schema v2.1 not applied",
+                    reason=v2_1_result.get("reason", "file not found"),
+                )
+
             # Step 3: Verify schema
             logger.info("Verifying schema")
             verification = verify_schema(session)
@@ -104,6 +118,107 @@ def create_schema(driver: Driver, config: Config) -> Dict[str, any]:
         logger.error("Schema creation failed", error=str(e))
         results["errors"].append(str(e))
         return results
+
+
+def apply_schema_v2_1(session) -> Dict[str, any]:
+    """
+    Optionally apply schema v2.1 DDL (Pre-Phase 7, F2).
+
+    This function:
+    1. Checks if create_schema_v2_1.cypher exists
+    2. If exists, executes it (idempotent - safe to re-run)
+    3. If not, returns quietly (not an error)
+
+    Purpose: Prepare for Phase 7 without disrupting current operations.
+    Changes: Dual-label Sections, add Session/Query/Answer constraints.
+
+    Args:
+        session: Neo4j session
+
+    Returns:
+        Dict with execution status
+    """
+    result = {
+        "executed": False,
+        "dual_labeled_sections": 0,
+        "constraints_created": 0,
+        "schema_version": None,
+    }
+
+    try:
+        # Check if v2.1 script exists
+        v2_1_script_path = (
+            Path(__file__).parent.parent.parent
+            / "scripts"
+            / "neo4j"
+            / "create_schema_v2_1.cypher"
+        )
+
+        if not v2_1_script_path.exists():
+            logger.debug("Schema v2.1 script not found, skipping")
+            result["reason"] = "script not found"
+            return result
+
+        logger.info("Applying schema v2.1 (Pre-Phase 7 foundation)")
+
+        # Read and execute script
+        with open(v2_1_script_path, "r") as f:
+            cypher_script = f.read()
+
+        # Split into statements
+        statements = [
+            stmt.strip()
+            for stmt in cypher_script.split(";")
+            if stmt.strip()
+            and not stmt.strip().startswith("//")
+            and not stmt.strip().startswith("--")
+        ]
+
+        for stmt in statements:
+            if not stmt:
+                continue
+            try:
+                execution_result = session.run(stmt)
+
+                # Track dual-labeling
+                if "SET s:Chunk" in stmt:
+                    # Get count from execution result
+                    summary = execution_result.consume()
+                    result["dual_labeled_sections"] = summary.counters.labels_added
+
+                # Track constraint creation
+                if "CREATE CONSTRAINT" in stmt:
+                    result["constraints_created"] += 1
+
+            except Exception as e:
+                # Ignore already exists errors (idempotent)
+                if (
+                    "already exists" not in str(e).lower()
+                    and "equivalent" not in str(e).lower()
+                ):
+                    logger.warning(f"Error executing v2.1 statement: {str(e)[:100]}")
+
+        # Verify schema version was set
+        version_result = session.run(
+            "MATCH (sv:SchemaVersion {id: 'singleton'}) RETURN sv.version AS version"
+        )
+        version_record = version_result.single()
+        if version_record:
+            result["schema_version"] = version_record["version"]
+
+        result["executed"] = True
+        logger.info(
+            "Schema v2.1 applied successfully",
+            dual_labeled=result["dual_labeled_sections"],
+            constraints=result["constraints_created"],
+            version=result["schema_version"],
+        )
+
+    except Exception as e:
+        logger.warning(f"Failed to apply schema v2.1: {str(e)}")
+        result["error"] = str(e)
+
+    return result
 
 
 def create_vector_indexes(session, config: Config) -> Dict[str, any]:

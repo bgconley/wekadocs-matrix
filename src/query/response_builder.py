@@ -92,14 +92,94 @@ class ResponseBuilder:
     Builds dual-format responses (Markdown + JSON) from ranked results.
     """
 
-    def __init__(self, neo4j_driver=None):
+    def __init__(self, neo4j_driver=None, max_text_bytes: int = 32768):
         """
         Initialize ResponseBuilder.
 
         Args:
             neo4j_driver: Optional Neo4j driver for graph mode queries (E3)
+            max_text_bytes: Maximum bytes for full text truncation (E1, default: 32KB)
         """
         self.neo4j_driver = neo4j_driver
+        self.max_text_bytes = max_text_bytes
+
+    def _truncate_to_bytes(self, text: str, max_bytes: Optional[int] = None) -> str:
+        """
+        Truncate text to max bytes (UTF-8) without breaking multi-byte sequences.
+
+        Pre-Phase 7 (E1): Byte-accurate truncation for FULL mode 32KB cap.
+        Uses UTF-8 encoding and safe decoding to avoid splitting multi-byte chars.
+
+        Args:
+            text: Text to truncate
+            max_bytes: Maximum bytes (defaults to self.max_text_bytes)
+
+        Returns:
+            Truncated text with ellipsis if truncated
+        """
+        if max_bytes is None:
+            max_bytes = self.max_text_bytes
+
+        # Encode to UTF-8 bytes
+        text_bytes = text.encode("utf-8")
+
+        if len(text_bytes) <= max_bytes:
+            return text
+
+        # Truncate at byte boundary
+        truncated_bytes = text_bytes[:max_bytes]
+
+        # Decode with error handling (ignores incomplete multi-byte sequences)
+        truncated_text = truncated_bytes.decode("utf-8", errors="ignore")
+
+        return truncated_text + "...[truncated]"
+
+    def format_citations(
+        self, results: List[RankedResult], max_citations: int = 5
+    ) -> str:
+        """
+        Format citations from ranked results as Markdown.
+
+        Pre-Phase 7 (E3): Citation scaffolding - currently unused.
+        Will be integrated in Phase 7 for answer provenance tracking.
+
+        Args:
+            results: Ranked search results to cite
+            max_citations: Maximum citations to include (default: 5)
+
+        Returns:
+            Markdown-formatted citation block
+
+        Example output:
+            [1] Installation Prerequisites (prerequisites.md#network-requirements)
+            [2] Network Configuration Guide (network-config.md#interface-setup)
+        """
+        if not results:
+            return ""
+
+        lines = []
+        for i, ranked in enumerate(results[:max_citations], 1):
+            metadata = ranked.result.metadata
+
+            # Extract citation components
+            title = metadata.get("title") or metadata.get("name") or "Untitled"
+            document_uri = metadata.get("document_uri") or metadata.get(
+                "source_uri", ""
+            )
+            anchor = metadata.get("anchor", "")
+
+            # Format citation
+            if document_uri:
+                if anchor:
+                    citation = f"[{i}] {title} ({document_uri}#{anchor})"
+                else:
+                    citation = f"[{i}] {title} ({document_uri})"
+            else:
+                citation = f"[{i}] {title}"
+
+            lines.append(citation)
+
+        return "\n".join(lines)
 
     def build_response(
         self,
@@ -181,14 +261,14 @@ class ResponseBuilder:
 
             # Mode-specific evidence extraction
             if verbosity == Verbosity.FULL:
-                # Full mode: complete section text (32KB limit)
-                # Fetch full text from Neo4j
+                # Full mode: complete section text (32KB byte limit)
+                # Pre-Phase 7 (E1): Byte-accurate UTF-8 truncation
                 full_text, node_title, tokens = self._fetch_full_text_from_neo4j(
                     node_id
                 )
 
-                if len(full_text) > 32768:  # 32KB limit
-                    full_text = full_text[:32768] + "...[truncated]"
+                # Apply byte cap (32KB)
+                full_text = self._truncate_to_bytes(full_text, max_bytes=32768)
 
                 evidence_list.append(
                     Evidence(
@@ -211,17 +291,18 @@ class ResponseBuilder:
 
             elif verbosity == Verbosity.GRAPH:
                 # Graph mode: full text + related entities
-                # Fetch full text from Neo4j
+                # Pre-Phase 7 (E1, E2): Byte-accurate truncation + safety caps
                 full_text, node_title, tokens = self._fetch_full_text_from_neo4j(
                     node_id
                 )
 
-                if len(full_text) > 32768:  # 32KB limit
-                    full_text = full_text[:32768] + "...[truncated]"
+                # Apply byte cap (32KB)
+                full_text = self._truncate_to_bytes(full_text, max_bytes=32768)
 
-                # Get related entities from Neo4j (E3 implementation)
+                # Get related entities from Neo4j with safety caps (E2)
+                # Max 20 related entities per seed (prevents explosion)
                 related = (
-                    self._get_related_entities(node_id)
+                    self._get_related_entities(node_id, max_entities=20)
                     if self.neo4j_driver
                     else {
                         "entities": [],
@@ -253,17 +334,22 @@ class ResponseBuilder:
         return evidence_list
 
     def _get_related_entities(
-        self, node_id: str, max_entities: int = 20
+        self, node_id: str, max_entities: int = 20, max_depth: int = 1
     ) -> Dict[str, List]:
         """
-        Fetch related entities and sections from Neo4j (E3 implementation).
+        Fetch related entities and sections from Neo4j (E2, E3 implementation).
+
+        Pre-Phase 7 (E2): Safety caps prevent graph explosion
+        - max_entities: Limit entities per seed (default: 20)
+        - max_depth: Limit traversal depth (default: 1, currently enforced)
 
         Query: 1-hop neighbors via MENTIONS, CONTAINS_STEP, REQUIRES, AFFECTS.
         Filter: Only entity labels (Command, Configuration, Step, Error, Concept).
 
         Args:
             node_id: Starting node ID
-            max_entities: Maximum entities to return (default: 20)
+            max_entities: Maximum entities to return (default: 20, E2 cap)
+            max_depth: Maximum traversal depth (default: 1, E2 cap - future expansion)
 
         Returns:
             Dict with "entities" and "sections" lists
@@ -281,6 +367,7 @@ class ResponseBuilder:
 
         try:
             # Parameterized Cypher query for 1-hop neighbors (bi-directional)
+            # Pre-Phase 7 (E2): max_depth=1 enforced (prevents deep traversal)
             # Why bi-directional: Sections may have incoming HAS_SECTION from Documents
             query = """
             MATCH (n {id: $node_id})-[r:MENTIONS|CONTAINS_STEP|REQUIRES|AFFECTS]-(e)

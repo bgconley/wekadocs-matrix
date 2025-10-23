@@ -65,6 +65,19 @@ class FeatureFlagManager:
                 rollout_percentage=100,
                 description="JWT-based rate limiting",
             ),
+            # Phase 7a: Enhanced Responses + Graph Exploration
+            "verbosity_enabled": FeatureFlag(
+                name="verbosity_enabled",
+                enabled=True,
+                rollout_percentage=100,
+                description="Phase 7a: Verbosity modes (snippet|full|graph)",
+            ),
+            "graph_mode_enabled": FeatureFlag(
+                name="graph_mode_enabled",
+                enabled=True,
+                rollout_percentage=100,
+                description="Phase 7a: Graph exploration mode with traversal",
+            ),
         }
 
         # Override from config file if exists

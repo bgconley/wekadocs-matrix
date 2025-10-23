@@ -2,14 +2,14 @@
 Query Service for MCP Server
 Integrates hybrid search, ranking, and response building.
 Provides cached embedder and connection management.
+Pre-Phase 7 B4: Modified to use embedding provider abstraction.
 """
 
 import json
 import time
 from typing import Any, Dict, Optional
 
-from sentence_transformers import SentenceTransformer
-
+from src.providers.embeddings import SentenceTransformersProvider
 from src.query.hybrid_search import HybridSearchEngine, QdrantVectorStore
 from src.query.planner import QueryPlanner
 from src.query.ranking import rank_results
@@ -33,19 +33,41 @@ class QueryService:
 
     def __init__(self):
         self.config = get_config()
-        self._embedder: Optional[SentenceTransformer] = None
+        self._embedder: Optional[SentenceTransformersProvider] = None
         self._search_engine: Optional[HybridSearchEngine] = None
         self._planner: Optional[QueryPlanner] = None
 
         logger.info("QueryService initialized")
 
-    def _get_embedder(self) -> SentenceTransformer:
-        """Get or initialize the cached embedder."""
+    def _get_embedder(self) -> SentenceTransformersProvider:
+        """
+        Get or initialize the cached embedder.
+        Pre-Phase 7 B4: Uses provider abstraction with dimension validation.
+        """
         if self._embedder is None:
             model_name = self.config.embedding.embedding_model
-            logger.info(f"Loading embedding model: {model_name}")
-            self._embedder = SentenceTransformer(model_name)
-            logger.info("Embedding model loaded successfully")
+            expected_dims = self.config.embedding.dims
+
+            logger.info(
+                f"Loading embedding provider: {model_name}, dims={expected_dims}"
+            )
+
+            # Pre-Phase 7: Use provider abstraction
+            self._embedder = SentenceTransformersProvider(
+                model_name=model_name, expected_dims=expected_dims
+            )
+
+            # Validate dimensions match configuration
+            if self._embedder.dims != expected_dims:
+                raise ValueError(
+                    f"Provider dimension mismatch: expected {expected_dims}, "
+                    f"got {self._embedder.dims}"
+                )
+
+            logger.info(
+                f"Embedding provider loaded successfully: "
+                f"dims={self._embedder.dims}, model_id={self._embedder.model_id}"
+            )
         return self._embedder
 
     def _get_search_engine(self) -> HybridSearchEngine:
@@ -132,6 +154,17 @@ class QueryService:
             query_plan = planner.plan(query, filters=filters)
             intent = query_plan.intent
             logger.info(f"Query intent classified: {intent}")
+
+            # Pre-Phase 7 B4: Add embedding_version filter to ensure version consistency
+            # This ensures we only retrieve vectors created with the current embedding model
+            if filters is None:
+                filters = {}
+
+            # Add embedding_version to filters
+            filters["embedding_version"] = self.config.embedding.version
+            logger.debug(
+                f"Added embedding_version filter: {self.config.embedding.version}"
+            )
 
             # Execute hybrid search
             search_start = time.time()
