@@ -46,9 +46,20 @@ class GraphBuilder:
         self.vector_primary = config.search.vector.primary
         self.dual_write = config.search.vector.dual_write
 
-        # Ensure Qdrant collection exists if using Qdrant
+        # Phase 7C.4: Dual-write setup for 384-D + 1024-D migration
+        self.dual_write_1024d = config.feature_flags.dual_write_1024d
+        self.legacy_embedder = None  # 384-D provider
+        self.new_embedder = None  # 1024-D provider
+
+        # Ensure Qdrant collections exist if using Qdrant
         if self.qdrant_client and (self.vector_primary == "qdrant" or self.dual_write):
             self._ensure_qdrant_collection()
+
+            # Phase 7C.4: Ensure both collections exist for dual-write
+            if self.dual_write_1024d:
+                self._ensure_qdrant_collection(
+                    collection_name="weka_sections_v2", dims=1024
+                )
 
     def upsert_document(
         self,
@@ -385,37 +396,87 @@ class GraphBuilder:
     ) -> Dict:
         """
         Compute embeddings and upsert to vector store.
-        Pre-Phase 7 B3: Modified to use embedding provider with dimension validation.
+        Phase 7C.4: Dual-write support for 384-D + 1024-D migration.
         """
-        stats = {"computed": 0, "upserted": 0}
+        stats = {
+            "computed": 0,
+            "upserted": 0,
+            "dual_write_1024d": self.dual_write_1024d,
+        }
 
-        # Initialize embedder lazily using provider pattern
-        if not self.embedder:
-            logger.info(
-                "Initializing embedding provider",
-                provider=self.config.embedding.provider,
-                model=self.config.embedding.embedding_model,
-                dims=self.config.embedding.dims,
-            )
-
-            # Pre-Phase 7: Use provider abstraction instead of direct SentenceTransformer
-            self.embedder = SentenceTransformersProvider(
-                model_name=self.config.embedding.embedding_model,
-                expected_dims=self.config.embedding.dims,
-            )
-
-            # Validate dimensions match configuration
-            if self.embedder.dims != self.config.embedding.dims:
-                raise ValueError(
-                    f"Provider dimension mismatch: expected {self.config.embedding.dims}, "
-                    f"got {self.embedder.dims}"
+        # Phase 7C.4: Initialize embedders for dual-write
+        if self.dual_write_1024d:
+            # Initialize legacy 384-D provider
+            if not self.legacy_embedder:
+                logger.info(
+                    "Initializing legacy embedding provider (384-D)",
+                    model="sentence-transformers/all-MiniLM-L6-v2",
+                )
+                self.legacy_embedder = SentenceTransformersProvider(
+                    model_name="sentence-transformers/all-MiniLM-L6-v2",
+                    expected_dims=384,
+                )
+                logger.info(
+                    "Legacy embedding provider initialized",
+                    dims=self.legacy_embedder.dims,
+                    model_id=self.legacy_embedder.model_id,
                 )
 
-            logger.info(
-                "Embedding provider initialized",
-                actual_dims=self.embedder.dims,
-                model_id=self.embedder.model_id,
-            )
+            # Initialize new 1024-D provider from factory
+            if not self.new_embedder:
+                from src.providers.factory import ProviderFactory
+
+                logger.info(
+                    "Initializing new embedding provider (1024-D)",
+                    provider=self.config.embedding.provider,
+                    model=self.config.embedding.embedding_model,
+                )
+                self.new_embedder = ProviderFactory.create_embedding_provider()
+
+                # Validate 1024-D dimensions
+                if self.new_embedder.dims != 1024:
+                    raise ValueError(
+                        f"New provider must generate 1024-D vectors, got {self.new_embedder.dims}-D"
+                    )
+
+                logger.info(
+                    "New embedding provider initialized",
+                    dims=self.new_embedder.dims,
+                    model_id=self.new_embedder.model_id,
+                    provider=self.new_embedder.provider_name,
+                )
+
+            # For dual-write, embedder references the new provider
+            self.embedder = self.new_embedder
+
+        else:
+            # Single-write mode: Initialize embedder as before
+            if not self.embedder:
+                logger.info(
+                    "Initializing embedding provider",
+                    provider=self.config.embedding.provider,
+                    model=self.config.embedding.embedding_model,
+                    dims=self.config.embedding.dims,
+                )
+
+                # Use provider abstraction
+                self.embedder = SentenceTransformersProvider(
+                    model_name=self.config.embedding.embedding_model,
+                    expected_dims=self.config.embedding.dims,
+                )
+
+                # Validate dimensions match configuration
+                if self.embedder.dims != self.config.embedding.dims:
+                    raise ValueError(
+                        f"Provider dimension mismatch: expected {self.config.embedding.dims}, "
+                        f"got {self.embedder.dims}"
+                    )
+
+                logger.info(
+                    "Embedding provider initialized",
+                    actual_dims=self.embedder.dims,
+                    model_id=self.embedder.model_id,
+                )
 
         # Purge existing vectors for this document BEFORE upserting to prevent drift
         source_uri = document.get("source_uri", "")
@@ -459,7 +520,7 @@ class GraphBuilder:
                     document_uri=source_uri or document.get("id"),
                 )
 
-        # Pre-Phase 7 B3: Process sections with provider and metadata
+        # Phase 7C.4: Process sections with dual-write support
         # Batch process embeddings for efficiency
         sections_to_embed = []
         for section in sections:
@@ -471,42 +532,139 @@ class GraphBuilder:
         # Generate embeddings in batch
         if sections_to_embed:
             texts = [text for _, text in sections_to_embed]
-            embeddings = self.embedder.embed_documents(texts)
 
-            # Process each section with its embedding
-            for (section, _), embedding in zip(sections_to_embed, embeddings):
-                # Pre-Phase 7: Validate dimension before upsert
-                if len(embedding) != self.config.embedding.dims:
-                    raise ValueError(
-                        f"Embedding dimension mismatch for section {section['id']}: "
-                        f"expected {self.config.embedding.dims}, got {len(embedding)}"
-                    )
+            # Phase 7C.4: Dual-write mode generates BOTH 384-D and 1024-D embeddings
+            if self.dual_write_1024d:
+                logger.info(
+                    "Dual-write mode: generating both 384-D and 1024-D embeddings",
+                    section_count=len(texts),
+                )
 
-                stats["computed"] += 1
+                # Generate legacy 384-D embeddings
+                legacy_embeddings = self.legacy_embedder.embed_documents(texts)
 
-                # Upsert to vector store
-                if self.vector_primary == "qdrant":
+                # Generate new 1024-D embeddings
+                new_embeddings = self.new_embedder.embed_documents(texts)
+
+                # Process each section with BOTH embeddings
+                for (section, _), legacy_emb, new_emb in zip(
+                    sections_to_embed, legacy_embeddings, new_embeddings
+                ):
+                    # Validate dimensions
+                    if len(legacy_emb) != 384:
+                        raise ValueError(
+                            f"Legacy embedding dimension mismatch for section {section['id']}: "
+                            f"expected 384-D, got {len(legacy_emb)}-D"
+                        )
+                    if len(new_emb) != 1024:
+                        raise ValueError(
+                            f"New embedding dimension mismatch for section {section['id']}: "
+                            f"expected 1024-D, got {len(new_emb)}-D"
+                        )
+
+                    stats["computed"] += 2  # Two embeddings computed
+
+                    # Write to legacy 384-D collection
                     self._upsert_to_qdrant(
-                        section["id"], embedding, section, document, "Section"
+                        section["id"],
+                        legacy_emb,
+                        section,
+                        document,
+                        "Section",
+                        collection_name="weka_sections",
+                        embedding_metadata={
+                            "version": "miniLM-L6-v2-2024-01-01",
+                            "provider": "sentence-transformers",
+                            "dimensions": 384,
+                            "task": "retrieval.passage",
+                        },
                     )
-                stats["upserted"] += 1
 
-                # Dual write to Neo4j if enabled
-                if self.dual_write:
-                    self._upsert_to_neo4j_vector(section["id"], embedding, "Section")
-                else:
-                    # Always set embedding_version in Neo4j for reconciliation tracking
-                    self._set_embedding_version_in_neo4j(section["id"], "Section")
-
-            else:  # neo4j primary
-                self._upsert_to_neo4j_vector(section["id"], embedding, "Section")
-                stats["upserted"] += 1
-
-                # Dual write to Qdrant if enabled
-                if self.dual_write and self.qdrant_client:
+                    # Write to new 1024-D collection
                     self._upsert_to_qdrant(
-                        section["id"], embedding, section, document, "Section"
+                        section["id"],
+                        new_emb,
+                        section,
+                        document,
+                        "Section",
+                        collection_name="weka_sections_v2",
+                        embedding_metadata={
+                            "version": self.config.embedding.version,
+                            "provider": self.new_embedder.provider_name,
+                            "dimensions": 1024,
+                            "task": getattr(
+                                self.new_embedder, "task", "retrieval.passage"
+                            ),
+                        },
                     )
+
+                    stats["upserted"] += 2  # Two collections updated
+
+                    # Update Neo4j with new 1024-D embedding metadata
+                    self._upsert_section_embedding_metadata(
+                        section["id"],
+                        {
+                            "embedding_version": self.config.embedding.version,
+                            "embedding_provider": self.new_embedder.provider_name,
+                            "embedding_dimensions": 1024,
+                            "embedding_task": getattr(
+                                self.new_embedder, "task", "retrieval.passage"
+                            ),
+                            "embedding_timestamp": datetime.utcnow(),
+                        },
+                    )
+
+                    logger.debug(
+                        "Dual-write complete for section",
+                        section_id=section["id"],
+                        legacy_dims=384,
+                        new_dims=1024,
+                    )
+
+            else:
+                # Single-write mode (original behavior)
+                embeddings = self.embedder.embed_documents(texts)
+
+                # Process each section with its embedding
+                for (section, _), embedding in zip(sections_to_embed, embeddings):
+                    # Validate dimension before upsert
+                    if len(embedding) != self.config.embedding.dims:
+                        raise ValueError(
+                            f"Embedding dimension mismatch for section {section['id']}: "
+                            f"expected {self.config.embedding.dims}, got {len(embedding)}"
+                        )
+
+                    stats["computed"] += 1
+
+                    # Upsert to vector store
+                    if self.vector_primary == "qdrant":
+                        self._upsert_to_qdrant(
+                            section["id"], embedding, section, document, "Section"
+                        )
+                        stats["upserted"] += 1
+
+                        # Dual write to Neo4j if enabled
+                        if self.dual_write:
+                            self._upsert_to_neo4j_vector(
+                                section["id"], embedding, "Section"
+                            )
+                        else:
+                            # Always set embedding_version in Neo4j for reconciliation tracking
+                            self._set_embedding_version_in_neo4j(
+                                section["id"], "Section"
+                            )
+
+                    else:  # neo4j primary
+                        self._upsert_to_neo4j_vector(
+                            section["id"], embedding, "Section"
+                        )
+                        stats["upserted"] += 1
+
+                        # Dual write to Qdrant if enabled
+                        if self.dual_write and self.qdrant_client:
+                            self._upsert_to_qdrant(
+                                section["id"], embedding, section, document, "Section"
+                            )
 
         logger.info("Embeddings processed", stats=stats)
         return stats
@@ -521,23 +679,34 @@ class GraphBuilder:
             return f"{title}\n\n{text}"
         return text
 
-    def _ensure_qdrant_collection(self):
-        """Ensure Qdrant collection exists with correct schema."""
+    def _ensure_qdrant_collection(
+        self, collection_name: Optional[str] = None, dims: Optional[int] = None
+    ):
+        """
+        Ensure Qdrant collection exists with correct schema.
+
+        Phase 7C.4: Enhanced to support creating multiple collections with different dimensions.
+
+        Args:
+            collection_name: Optional collection name (defaults to config)
+            dims: Optional dimension count (defaults to config)
+        """
         from qdrant_client.models import Distance, VectorParams
 
-        collection_name = self.config.search.vector.qdrant.collection_name
+        collection = collection_name or self.config.search.vector.qdrant.collection_name
+        dimensions = dims or self.config.embedding.dims
 
         try:
             # Check if collection exists
             collections = self.qdrant_client.get_collections()
-            exists = any(c.name == collection_name for c in collections.collections)
+            exists = any(c.name == collection for c in collections.collections)
 
             if not exists:
                 # Create collection with vector config
                 self.qdrant_client.create_collection(
-                    collection_name=collection_name,
+                    collection_name=collection,
                     vectors_config=VectorParams(
-                        size=self.config.embedding.dims,
+                        size=dimensions,
                         distance=(
                             Distance.COSINE
                             if self.config.embedding.similarity == "cosine"
@@ -547,15 +716,17 @@ class GraphBuilder:
                 )
                 logger.info(
                     "Created Qdrant collection",
-                    collection=collection_name,
-                    dims=self.config.embedding.dims,
+                    collection=collection,
+                    dims=dimensions,
                 )
             else:
-                logger.debug(
-                    "Qdrant collection already exists", collection=collection_name
-                )
+                logger.debug("Qdrant collection already exists", collection=collection)
         except Exception as e:
-            logger.error("Failed to ensure Qdrant collection", error=str(e))
+            logger.error(
+                "Failed to ensure Qdrant collection",
+                collection=collection,
+                error=str(e),
+            )
             raise
 
     def _upsert_to_qdrant(
@@ -565,8 +736,23 @@ class GraphBuilder:
         section: Dict,
         document: Dict,
         label: str,
+        collection_name: Optional[str] = None,
+        embedding_metadata: Optional[Dict] = None,
     ):
-        """Upsert embedding to Qdrant with exact section_id as point_id."""
+        """
+        Upsert embedding to Qdrant with exact section_id as point_id.
+
+        Phase 7C.4: Enhanced to support dual-write with custom collection and metadata.
+
+        Args:
+            node_id: Node identifier
+            embedding: Embedding vector
+            section: Section data
+            document: Document data
+            label: Node label
+            collection_name: Optional collection name (defaults to config)
+            embedding_metadata: Optional embedding metadata override
+        """
         if not self.qdrant_client:
             logger.warning("Qdrant client not available")
             return
@@ -575,7 +761,9 @@ class GraphBuilder:
 
         from qdrant_client.models import PointStruct
 
-        collection_name = self.config.search.vector.qdrant.collection_name
+        # Use provided collection name or default from config
+        collection = collection_name or self.config.search.vector.qdrant.collection_name
+
         source_uri = document.get("source_uri", "")
         document_uri = Path(source_uri).name if source_uri else source_uri
         document_id = document.get("id") or section.get("document_id")
@@ -584,9 +772,20 @@ class GraphBuilder:
         # Use UUID5 with a namespace to ensure deterministic mapping
         point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, node_id))
 
+        # Phase 7C.4: Use provided metadata or defaults
+        if embedding_metadata:
+            emb_version = embedding_metadata.get("version", self.embedding_version)
+            emb_provider = embedding_metadata.get("provider", "sentence-transformers")
+            emb_dimensions = embedding_metadata.get("dimensions", len(embedding))
+            emb_task = embedding_metadata.get("task", "retrieval.passage")
+        else:
+            emb_version = self.embedding_version
+            emb_provider = "sentence-transformers"
+            emb_dimensions = len(embedding)
+            emb_task = "retrieval.passage"
+
         # CRITICAL: Store original node_id in payload for reconciliation
         # Parity checks will use payload.node_id to match with Neo4j
-        # Pre-Phase 7 B3: Enhanced payload with comprehensive embedding metadata
         point = PointStruct(
             id=point_uuid,  # UUID compatible with Qdrant
             vector=embedding,
@@ -598,29 +797,29 @@ class GraphBuilder:
                 "source_uri": source_uri,
                 "title": section.get("title"),
                 "anchor": section.get("anchor"),
-                # Pre-Phase 7: Enhanced embedding metadata for provenance
-                "embedding_version": self.embedding_version,
-                "embedding_provider": "sentence-transformers",  # From provider
-                "embedding_dimensions": len(embedding),  # Actual dimensions
-                "embedding_task": "retrieval.passage",  # Document embedding task
-                "embedding_timestamp": datetime.utcnow().isoformat()
-                + "Z",  # ISO-8601 UTC
-                "updated_at": datetime.utcnow().isoformat() + "Z",  # ISO-8601 UTC
+                # Phase 7C.4: Enhanced embedding metadata for provenance
+                "embedding_version": emb_version,
+                "embedding_provider": emb_provider,
+                "embedding_dimensions": emb_dimensions,
+                "embedding_task": emb_task,
+                "embedding_timestamp": datetime.utcnow().isoformat() + "Z",
+                "updated_at": datetime.utcnow().isoformat() + "Z",
             },
         )
 
-        # Pre-Phase 7: Use validated upsert with dimension checking
+        # Use validated upsert with dimension checking
         self.qdrant_client.upsert_validated(
-            collection_name=collection_name,
+            collection_name=collection,
             points=[point],
-            expected_dim=self.config.embedding.dims,
+            expected_dim=emb_dimensions,
         )
 
         logger.debug(
             "Vector upserted to Qdrant",
             node_id=node_id,
             point_uuid=point_uuid,
-            collection=collection_name,
+            collection=collection,
+            dimensions=emb_dimensions,
         )
 
     def _upsert_to_neo4j_vector(self, node_id: str, embedding: List[float], label: str):
@@ -665,6 +864,45 @@ class GraphBuilder:
             "Embedding version set in Neo4j",
             node_id=node_id,
             label=label,
+        )
+
+    def _upsert_section_embedding_metadata(self, node_id: str, metadata: Dict):
+        """
+        Update Section node with embedding metadata (Phase 7C.4).
+
+        This is used in dual-write mode to update Neo4j with the new provider's
+        metadata while vectors are stored in Qdrant collections.
+
+        Args:
+            node_id: Section ID
+            metadata: Dict with embedding metadata fields
+        """
+        query = """
+        MATCH (s:Section {id: $node_id})
+        SET s.embedding_version = $embedding_version,
+            s.embedding_provider = $embedding_provider,
+            s.embedding_dimensions = $embedding_dimensions,
+            s.embedding_timestamp = $embedding_timestamp,
+            s.embedding_task = $embedding_task
+        RETURN s.id as id
+        """
+
+        with self.driver.session() as session:
+            session.run(
+                query,
+                node_id=node_id,
+                embedding_version=metadata.get("embedding_version"),
+                embedding_provider=metadata.get("embedding_provider"),
+                embedding_dimensions=metadata.get("embedding_dimensions"),
+                embedding_timestamp=metadata.get("embedding_timestamp"),
+                embedding_task=metadata.get("embedding_task", "retrieval.passage"),
+            )
+
+        logger.debug(
+            "Section embedding metadata updated in Neo4j",
+            node_id=node_id,
+            provider=metadata.get("embedding_provider"),
+            dimensions=metadata.get("embedding_dimensions"),
         )
 
 

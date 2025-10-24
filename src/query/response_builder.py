@@ -190,6 +190,15 @@ class ResponseBuilder:
         filters: Optional[Dict[str, Any]] = None,
         verbosity: Verbosity = Verbosity.GRAPH,
     ) -> Response:
+        # Pre-Phase 7 (G1): Metrics instrumentation for response builder
+        import time
+
+        from src.shared.observability.metrics import (
+            response_builder_evidence_count,
+            response_builder_latency_ms,
+        )
+
+        start_time = time.time()
         """
         Build complete response from ranked results.
 
@@ -226,6 +235,13 @@ class ResponseBuilder:
             evidence=evidence,
             confidence=confidence,
             diagnostics=diagnostics,
+        )
+
+        # Record metrics
+        latency = (time.time() - start_time) * 1000
+        response_builder_latency_ms.labels(verbosity=verbosity.value).observe(latency)
+        response_builder_evidence_count.labels(verbosity=verbosity.value).observe(
+            len(evidence)
         )
 
         return Response(answer_markdown=markdown, answer_json=structured)
@@ -396,6 +412,20 @@ class ResponseBuilder:
                             "confidence": record["confidence"],
                         }
                     )
+
+            # Pre-Phase 7 (E2): Payload size early-stop (defensive guard)
+            # Check if accumulated entities exceed safe payload size
+            MAX_PAYLOAD_BYTES = 50000  # 50KB safety limit (defensive guard)
+            payload_size = sum(len(str(entity)) for entity in entities)
+
+            if payload_size > MAX_PAYLOAD_BYTES:
+                logger.warning(
+                    f"Payload size {payload_size} bytes exceeds limit {MAX_PAYLOAD_BYTES}, "
+                    f"truncating from {len(entities)} entities"
+                )
+                # Truncate to approximately half to get under limit
+                entities = entities[: len(entities) // 2]
+                logger.info(f"Truncated to {len(entities)} entities")
 
             # TODO: Add related sections query (optional enhancement)
             sections = []

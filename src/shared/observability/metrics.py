@@ -81,6 +81,94 @@ cache_size_bytes = Gauge(
     ["layer"],
 )
 
+# ===== Pre-Phase 7 (G1): Embedding provider metrics =====
+embedding_request_total = Counter(
+    "embedding_request_total",
+    "Total embedding requests",
+    ["model_id", "operation"],  # operation: documents, query
+)
+
+embedding_error_total = Counter(
+    "embedding_error_total",
+    "Total embedding errors",
+    ["model_id", "error_type"],
+)
+
+embedding_latency_ms = Histogram(
+    "embedding_latency_ms",
+    "Embedding generation latency in milliseconds",
+    ["model_id", "operation"],
+    buckets=(10, 25, 50, 100, 250, 500, 1000, 2500, 5000),
+)
+
+# ===== Pre-Phase 7 (G1): Qdrant metrics =====
+qdrant_upsert_total = Counter(
+    "qdrant_upsert_total",
+    "Total Qdrant upsert operations",
+    ["collection_name", "status"],
+)
+
+qdrant_search_total = Counter(
+    "qdrant_search_total",
+    "Total Qdrant search operations",
+    ["collection_name", "status"],
+)
+
+qdrant_operation_latency_ms = Histogram(
+    "qdrant_operation_latency_ms",
+    "Qdrant operation latency in milliseconds",
+    ["collection_name", "operation"],  # operation: upsert, search
+    buckets=(1, 5, 10, 25, 50, 100, 250, 500, 1000),
+)
+
+# ===== Pre-Phase 7 (G1): Ranking metrics =====
+ranking_latency_ms = Histogram(
+    "ranking_latency_ms",
+    "Ranking operation latency in milliseconds",
+    buckets=(1, 5, 10, 25, 50, 100, 250, 500),
+)
+
+ranking_candidates_total = Histogram(
+    "ranking_candidates_total",
+    "Number of candidates ranked",
+    buckets=(1, 5, 10, 20, 50, 100, 200),
+)
+
+# ===== Phase 7C: Reranking metrics =====
+rerank_request_total = Counter(
+    "rerank_request_total",
+    "Total reranking requests",
+    ["model_id", "status"],
+)
+
+rerank_error_total = Counter(
+    "rerank_error_total",
+    "Total reranking errors",
+    ["model_id", "error_type"],
+)
+
+rerank_latency_ms = Histogram(
+    "rerank_latency_ms",
+    "Reranking latency in milliseconds",
+    ["model_id"],
+    buckets=(10, 25, 50, 100, 250, 500, 1000, 2500, 5000),
+)
+
+# ===== Pre-Phase 7 (G1): Response builder metrics =====
+response_builder_latency_ms = Histogram(
+    "response_builder_latency_ms",
+    "Response builder latency in milliseconds",
+    ["verbosity"],
+    buckets=(5, 10, 25, 50, 100, 250, 500, 1000),
+)
+
+response_builder_evidence_count = Histogram(
+    "response_builder_evidence_count",
+    "Number of evidence items in response",
+    ["verbosity"],
+    buckets=(1, 3, 5, 10, 20),
+)
+
 # ===== Vector search metrics =====
 vector_search_duration_seconds = Histogram(
     "vector_search_duration_seconds",

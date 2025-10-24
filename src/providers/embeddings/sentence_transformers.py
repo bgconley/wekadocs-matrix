@@ -126,6 +126,17 @@ class SentenceTransformersProvider:
         if not texts:
             raise ValueError("Cannot embed empty text list")
 
+        # Pre-Phase 7 (G1): Metrics instrumentation
+        import time
+
+        from src.shared.observability.metrics import (
+            embedding_error_total,
+            embedding_latency_ms,
+            embedding_request_total,
+        )
+
+        start_time = time.time()
+
         try:
             # Generate embeddings as numpy array
             embeddings = self._model.encode(
@@ -147,9 +158,22 @@ class SentenceTransformersProvider:
                         f"expected {self._dims}, got {len(emb)}"
                     )
 
+            # Record success metrics
+            latency_ms = (time.time() - start_time) * 1000
+            embedding_request_total.labels(
+                model_id=self._model_name, operation="documents"
+            ).inc()
+            embedding_latency_ms.labels(
+                model_id=self._model_name, operation="documents"
+            ).observe(latency_ms)
+
             return embeddings_list
 
         except Exception as e:
+            # Record error metrics
+            embedding_error_total.labels(
+                model_id=self._model_name, error_type=type(e).__name__
+            ).inc()
             logger.error(f"Failed to embed documents: {e}")
             raise RuntimeError(f"Document embedding failed: {e}")
 
@@ -173,6 +197,17 @@ class SentenceTransformersProvider:
         if not text or not text.strip():
             raise ValueError("Cannot embed empty query text")
 
+        # Pre-Phase 7 (G1): Metrics instrumentation
+        import time
+
+        from src.shared.observability.metrics import (
+            embedding_error_total,
+            embedding_latency_ms,
+            embedding_request_total,
+        )
+
+        start_time = time.time()
+
         try:
             # Generate single embedding
             embedding = self._model.encode(
@@ -191,9 +226,22 @@ class SentenceTransformersProvider:
                     f"expected {self._dims}, got {len(embedding_list)}"
                 )
 
+            # Record success metrics
+            latency_ms = (time.time() - start_time) * 1000
+            embedding_request_total.labels(
+                model_id=self._model_name, operation="query"
+            ).inc()
+            embedding_latency_ms.labels(
+                model_id=self._model_name, operation="query"
+            ).observe(latency_ms)
+
             return embedding_list
 
         except Exception as e:
+            # Record error metrics
+            embedding_error_total.labels(
+                model_id=self._model_name, error_type=type(e).__name__
+            ).inc()
             logger.error(f"Failed to embed query: {e}")
             raise RuntimeError(f"Query embedding failed: {e}")
 

@@ -106,6 +106,16 @@ class Ranker:
         if not results:
             return []
 
+        # Pre-Phase 7 (G1): Metrics instrumentation for ranking
+        import time
+
+        from src.shared.observability.metrics import (
+            ranking_candidates_total,
+            ranking_latency_ms,
+        )
+
+        start_time = time.time()
+
         # Extract all features
         ranked = []
         for result in results:
@@ -121,6 +131,11 @@ class Ranker:
 
         # Deterministic tie-breaking for same scores
         ranked = self._break_ties(ranked)
+
+        # Record metrics
+        latency = (time.time() - start_time) * 1000
+        ranking_latency_ms.observe(latency)
+        ranking_candidates_total.observe(len(results))
 
         return ranked
 

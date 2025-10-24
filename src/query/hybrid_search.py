@@ -73,14 +73,42 @@ class QdrantVectorStore(VectorStore):
             if conditions:
                 qdrant_filter = Filter(must=conditions)
 
-        # Search
-        results = self.client.search(
-            collection_name=self.collection_name,
-            query_vector=vector,
-            limit=k,
-            query_filter=qdrant_filter,
-            with_payload=True,
+        # Pre-Phase 7 (G1): Metrics instrumentation for Qdrant search
+        import time
+
+        from src.shared.observability.metrics import (
+            qdrant_operation_latency_ms,
+            qdrant_search_total,
         )
+
+        start_time = time.time()
+        status = "success"
+
+        try:
+            # Search
+            results = self.client.search(
+                collection_name=self.collection_name,
+                query_vector=vector,
+                limit=k,
+                query_filter=qdrant_filter,
+                with_payload=True,
+            )
+
+            # Record success metrics
+            latency_ms = (time.time() - start_time) * 1000
+            qdrant_search_total.labels(
+                collection_name=self.collection_name, status=status
+            ).inc()
+            qdrant_operation_latency_ms.labels(
+                collection_name=self.collection_name, operation="search"
+            ).observe(latency_ms)
+
+        except Exception:
+            status = "error"
+            qdrant_search_total.labels(
+                collection_name=self.collection_name, status=status
+            ).inc()
+            raise
 
         # Convert to standard format
         return [

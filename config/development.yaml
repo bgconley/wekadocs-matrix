@@ -10,38 +10,39 @@ app:
   version: "2.0.0"
 
 # Embedding configuration - critical for vector operations
+# Phase 7C: Updated to Jina v4 @ 1024-D by default
 embedding:
-  # Model configuration
-  model_name: "sentence-transformers/all-MiniLM-L6-v2"
-  dims: 384  # MUST match the model's actual output dimensions
+  # Model configuration (ENV overrideable via EMBEDDINGS_MODEL)
+  model_name: "jina-embeddings-v4"  # Phase 7C: Upgraded from MiniLM
+  dims: 1024  # Phase 7C: Upgraded from 384-D
   similarity: "cosine"  # Options: cosine, dot, euclidean
 
   # Version tracking for provenance
   # This ensures we can filter vectors by the model version used
-  version: "miniLM-L6-v2-2024-01-01"
+  version: "jina-v4-2025-01-23"  # Phase 7C: Updated version string
 
-  # Provider configuration
-  provider: "sentence-transformers"  # Will expand to "jina" in Phase 7
+  # Provider configuration (ENV overrideable via EMBEDDINGS_PROVIDER)
+  provider: "jina-ai"  # Phase 7C: Changed from sentence-transformers
 
-  # Task configuration (for future Jina support)
+  # Task configuration (Jina-specific)
   task: "retrieval.passage"  # Options: retrieval.passage, retrieval.query
 
   # Performance settings
   batch_size: 32
-  max_sequence_length: 512
+  max_sequence_length: 8192  # Jina v4 supports longer sequences
 
 # Search configuration
 search:
   # Vector search settings
   vector:
     primary: "qdrant"
-    dual_write: false
+    dual_write: false  # Phase 7C: Set to true during migration
     qdrant:
-      collection_name: "weka_sections"
+      collection_name: "weka_sections_v2"  # Phase 7C: New 1024-D collection
       use_grpc: false
       timeout: 30
     neo4j:
-      index_name: "section_embeddings"
+      index_name: "section_embeddings_v2"  # Phase 7C: New 1024-D index
 
   # Hybrid search settings
   hybrid:
@@ -121,7 +122,7 @@ ranking:
 
 # Schema configuration
 schema:
-  version: "v1"  # Current production version
+  version: "v2.1"  # Phase 7C: Updated to v2.1 (1024-D vectors, dual-labeling, session tracking)
   auto_migrate: false
 
 # Rate limiting configuration
@@ -176,6 +177,7 @@ feature_flags:
   coverage_enrichment: true      # New in pre-phase7
   byte_cap_responses: true       # New in pre-phase7
   schema_v2_1_dev: true         # Dev only for pre-phase7
+  dual_write_1024d: false       # Phase 7C.4: Enable dual-write to both 384-D and 1024-D indices
 
 # Performance tuning
 performance:

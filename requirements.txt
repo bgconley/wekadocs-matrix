@@ -66,3 +66,7 @@ markdown==3.5.1
 tiktoken==0.5.2
 lxml==4.9.3
 mcp[cli]>=1.8.0  # MCP SDK with CLI tools for STDIO transport (requires FastMCP)
+
+# Phase 7C: Additional provider dependencies
+# Note: Jina AI uses REST API (httpx already included above)
+# Ollama uses REST API (httpx already included above)

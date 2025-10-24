@@ -32,7 +32,7 @@ def create_schema(driver: Driver, config: Config) -> Dict[str, any]:
         "constraints_created": 0,
         "indexes_created": 0,
         "vector_indexes_created": 0,
-        "schema_version": config.graph_schema.version,
+        "schema_version": "v2.1",  # Phase 7C: Updated to v2.1
         "errors": [],
     }
 

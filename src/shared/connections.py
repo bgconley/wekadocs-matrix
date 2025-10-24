@@ -161,24 +161,56 @@ class CompatQdrantClient(QdrantClient):
         Raises:
             ValueError: If any vector dimension doesn't match expected_dim
         """
-        # Validate all point vectors before upsert
-        for i, point in enumerate(points):
-            vector = (
-                point.vector if hasattr(point, "vector") else point.get("vector", [])
-            )
-            actual_dim = len(vector)
-            if actual_dim != expected_dim:
-                raise ValueError(
-                    f"Dimension mismatch in point {i}: expected {expected_dim}, "
-                    f"got {actual_dim}. Point ID: {getattr(point, 'id', 'unknown')}"
-                )
+        # Pre-Phase 7 (G1): Metrics instrumentation
+        import time
 
-        # All dimensions valid, proceed with upsert
-        return super().upsert(
-            collection_name=collection_name,
-            points=points,
-            wait=wait,
+        from src.shared.observability.metrics import (
+            qdrant_operation_latency_ms,
+            qdrant_upsert_total,
         )
+
+        start_time = time.time()
+        status = "success"
+
+        try:
+            # Validate all point vectors before upsert
+            for i, point in enumerate(points):
+                vector = (
+                    point.vector
+                    if hasattr(point, "vector")
+                    else point.get("vector", [])
+                )
+                actual_dim = len(vector)
+                if actual_dim != expected_dim:
+                    raise ValueError(
+                        f"Dimension mismatch in point {i}: expected {expected_dim}, "
+                        f"got {actual_dim}. Point ID: {getattr(point, 'id', 'unknown')}"
+                    )
+
+            # All dimensions valid, proceed with upsert
+            result = super().upsert(
+                collection_name=collection_name,
+                points=points,
+                wait=wait,
+            )
+
+            # Record success metrics
+            latency_ms = (time.time() - start_time) * 1000
+            qdrant_upsert_total.labels(
+                collection_name=collection_name, status=status
+            ).inc()
+            qdrant_operation_latency_ms.labels(
+                collection_name=collection_name, operation="upsert"
+            ).observe(latency_ms)
+
+            return result
+
+        except Exception:
+            status = "error"
+            qdrant_upsert_total.labels(
+                collection_name=collection_name, status=status
+            ).inc()
+            raise
 
     def create_collection_with_dims(
         self,
