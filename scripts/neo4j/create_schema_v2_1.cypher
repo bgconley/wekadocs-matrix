@@ -1,12 +1,16 @@
-// WekaDocs Schema v2.1 - Complete DDL
+// WekaDocs Schema v2.1 - Complete DDL (Community Edition Compatible)
 // Phase 7C, Task 7C.3: Schema v2.1 activation with 1024-D vector indices
 //
-// CRITICAL UPDATES from stub version:
+// COMMUNITY EDITION ADAPTATION:
+// - Removed property existence constraints (require Enterprise Edition)
+// - Validation moved to application layer (already implemented in ingestion)
+// - All other features preserved: dual-labeling, vector indices, session tracking
+//
+// CRITICAL UPDATES from v2.0:
 // 1. Vector dimensions: 1024-D (not 384-D or 768-D)
-// 2. Required embedding fields enforced via constraints
-// 3. Dual vector indices: Section AND Chunk (same data, two labels)
-// 4. Session/Query/Answer multi-turn tracking nodes
-// 5. Schema version marker updated to v2.1
+// 2. Dual vector indices: Section AND Chunk (same data, two labels)
+// 3. Session/Query/Answer multi-turn tracking nodes
+// 4. Schema version marker updated to v2.1
 //
 // IMPORTANT: All changes are ADDITIVE and IDEMPOTENT
 // - Safe to re-run multiple times
@@ -39,45 +43,18 @@ FOR (s:Session) REQUIRE s.session_id IS UNIQUE;
 CREATE CONSTRAINT query_id_unique IF NOT EXISTS
 FOR (q:Query) REQUIRE q.query_id IS UNIQUE;
 
-CREATE CONSTRAINT query_text_exists IF NOT EXISTS
-FOR (q:Query) REQUIRE q.text IS NOT NULL;
+// NOTE: Property existence constraints removed for Community Edition compatibility
+// Application code must validate:
+// - q.text IS NOT NULL (before creating Query nodes)
+// - a.text IS NOT NULL (before creating Answer nodes)
+// - All Section embedding fields (already validated in ingestion pipeline)
 
 // Answer constraints
 CREATE CONSTRAINT answer_id_unique IF NOT EXISTS
 FOR (a:Answer) REQUIRE a.answer_id IS UNIQUE;
 
-CREATE CONSTRAINT answer_text_exists IF NOT EXISTS
-FOR (a:Answer) REQUIRE a.text IS NOT NULL;
-
 // ============================================================================
-// Part 3: Required Embedding Fields (CRITICAL for hybrid retrieval)
-// ============================================================================
-// Purpose: Enforce that all Sections have embeddings
-// Rationale: In hybrid system, sections without embeddings are invisible
-//           to vector search (primary retrieval path) and are broken
-// Impact: Ingestion will fail if embedding generation fails (fail-fast)
-// Idempotent: IF NOT EXISTS
-
-// Section embedding fields - REQUIRED
-CREATE CONSTRAINT section_vector_embedding_exists IF NOT EXISTS
-FOR (s:Section) REQUIRE s.vector_embedding IS NOT NULL;
-
-CREATE CONSTRAINT section_embedding_version_exists IF NOT EXISTS
-FOR (s:Section) REQUIRE s.embedding_version IS NOT NULL;
-
-CREATE CONSTRAINT section_embedding_provider_exists IF NOT EXISTS
-FOR (s:Section) REQUIRE s.embedding_provider IS NOT NULL;
-
-CREATE CONSTRAINT section_embedding_timestamp_exists IF NOT EXISTS
-FOR (s:Section) REQUIRE s.embedding_timestamp IS NOT NULL;
-
-CREATE CONSTRAINT section_embedding_dimensions_exists IF NOT EXISTS
-FOR (s:Section) REQUIRE s.embedding_dimensions IS NOT NULL;
-
-// Note: embedding_task is OPTIONAL (provider-specific, e.g., Jina task types)
-
-// ============================================================================
-// Part 4: Vector Indices - 1024-D (UPDATED from stub)
+// Part 3: Vector Indices - 1024-D (UPDATED from stub)
 // ============================================================================
 // Purpose: Semantic search on Section/Chunk nodes
 // CRITICAL: Dimensions set to 1024-D for Jina v4 (not 384-D or 768-D)
@@ -106,7 +83,7 @@ OPTIONS {
 };
 
 // ============================================================================
-// Part 5: Property Indices for Session/Query/Answer
+// Part 4: Property Indices for Session/Query/Answer
 // ============================================================================
 // Purpose: Fast lookups for multi-turn tracking
 // Idempotent: IF NOT EXISTS
@@ -139,7 +116,7 @@ CREATE INDEX answer_user_feedback IF NOT EXISTS
 FOR (a:Answer) ON (a.user_feedback);
 
 // ============================================================================
-// Part 6: Additional Section/Chunk Indices
+// Part 5: Additional Section/Chunk Indices
 // ============================================================================
 // Purpose: Optimize dual-label queries
 // Idempotent: IF NOT EXISTS
@@ -155,7 +132,7 @@ CREATE INDEX chunk_embedding_version IF NOT EXISTS
 FOR (c:Chunk) ON (c.embedding_version);
 
 // ============================================================================
-// Part 7: Schema Version Marker
+// Part 6: Schema Version Marker
 // ============================================================================
 // Purpose: Track schema version for migrations and validation
 // Pattern: Singleton node with version property
@@ -163,11 +140,14 @@ FOR (c:Chunk) ON (c.embedding_version);
 
 MERGE (sv:SchemaVersion {id: 'singleton'})
 SET sv.version = 'v2.1',
+    sv.edition = 'community',
     sv.updated_at = datetime(),
-    sv.description = 'Phase 7C: 1024-D vectors, dual-labeling, session tracking',
+    sv.description = 'Phase 7C: 1024-D vectors, dual-labeling, session tracking (Community Edition)',
     sv.vector_dimensions = 1024,
     sv.embedding_provider = 'jina-ai',
-    sv.embedding_model = 'jina-embeddings-v4';
+    sv.embedding_model = 'jina-embeddings-v4',
+    sv.validation_note = 'Property existence constraints enforced in application layer'
+;
 
 // ============================================================================
 // Verification Queries (commented out - for manual testing)
@@ -184,7 +164,6 @@ SET sv.version = 'v2.1',
 // SHOW CONSTRAINTS
 // YIELD name, type
 // WHERE name CONTAINS 'session' OR name CONTAINS 'query' OR name CONTAINS 'answer'
-//    OR name CONTAINS 'section_'
 // RETURN name, type
 // ORDER BY name;
 
@@ -197,13 +176,15 @@ SET sv.version = 'v2.1',
 // -- 4. Verify schema version
 // MATCH (sv:SchemaVersion {id: 'singleton'})
 // RETURN sv.version as version,
+//        sv.edition as edition,
 //        sv.vector_dimensions as dims,
 //        sv.embedding_provider as provider,
 //        sv.embedding_model as model,
 //        sv.updated_at as updated,
-//        sv.description as description;
+//        sv.description as description,
+//        sv.validation_note as validation_note;
 
-// -- 5. Verify all Sections have required embedding fields
+// -- 5. Count Sections with missing embedding fields (should be 0)
 // MATCH (s:Section)
 // WHERE s.vector_embedding IS NULL
 //    OR s.embedding_version IS NULL
@@ -211,8 +192,7 @@ SET sv.version = 'v2.1',
 //    OR s.embedding_timestamp IS NULL
 //    OR s.embedding_dimensions IS NULL
 // RETURN count(s) as sections_missing_embeddings;
-// -- Should return 0
 
 // ============================================================================
-// End of Schema v2.1 DDL
+// End of Schema v2.1 DDL (Community Edition)
 // ============================================================================

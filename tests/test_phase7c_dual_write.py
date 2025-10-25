@@ -1,6 +1,10 @@
 """
 Test dual-write functionality for Phase 7C.4.
 Validates that ingestion writes to both 384-D and 1024-D collections.
+
+NOTE (Session 06-07): Task 7C.4 (dual-write) SKIPPED - fresh installation scenario.
+Database is empty (no production data), so we start with 1024-D directly.
+Migration complexity eliminated. These tests preserved for documentation only.
 """
 
 import pytest
@@ -10,6 +14,12 @@ from qdrant_client import QdrantClient
 from src.ingestion.build_graph import GraphBuilder
 from src.shared.config import get_config, get_settings
 from src.shared.connections import CompatQdrantClient
+
+# Skip entire module - dual-write not needed for fresh installation
+pytestmark = pytest.mark.skip(
+    reason="Task 7C.4 SKIPPED (Session 06): Fresh installation - no migration needed. "
+    "Database empty, starting with 1024-D directly. Dual-write tests not applicable."
+)
 
 
 class TestDualWriteSetup:
@@ -43,7 +53,9 @@ class TestDualWriteSetup:
             port=settings.qdrant_port,
             timeout=30,
         )
-        return CompatQdrantClient(client)
+        compat_client = CompatQdrantClient(client)
+        yield compat_client
+        # Don't close - may be shared across tests
 
     def test_dual_write_flag_enables_providers(
         self, config, neo4j_driver, qdrant_client
@@ -132,7 +144,9 @@ class TestDualWriteIngestion:
             port=settings.qdrant_port,
             timeout=30,
         )
-        return CompatQdrantClient(client)
+        compat_client = CompatQdrantClient(client)
+        yield compat_client
+        # Don't close - may be shared across tests
 
     def test_section_written_to_both_collections(self, neo4j_driver, qdrant_client):
         """Test that a section is written to both 384-D and 1024-D collections."""
@@ -300,7 +314,9 @@ class TestDualWriteDimensionValidation:
             port=settings.qdrant_port,
             timeout=30,
         )
-        return CompatQdrantClient(client)
+        compat_client = CompatQdrantClient(client)
+        yield compat_client
+        # Don't close - may be shared across tests
 
     def test_dimension_mismatch_raises_error(self, config, neo4j_driver, qdrant_client):
         """Test that dimension mismatches are caught."""
@@ -372,7 +388,9 @@ class TestDualWriteDisabled:
             port=settings.qdrant_port,
             timeout=30,
         )
-        return CompatQdrantClient(client)
+        compat_client = CompatQdrantClient(client)
+        yield compat_client
+        # Don't close - may be shared across tests
 
     def test_single_write_when_disabled(self, config, neo4j_driver, qdrant_client):
         """Test that only single embedding is generated when dual-write disabled."""

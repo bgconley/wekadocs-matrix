@@ -98,7 +98,8 @@ class ProviderFactory:
         elif provider == "ollama":
             from src.providers.embeddings.ollama import OllamaEmbeddingProvider
 
-            base_url = kwargs.get("base_url") or os.getenv("OLLAMA_BASE_URL")
+            # Use pop to remove base_url from kwargs to avoid duplicate argument
+            base_url = kwargs.pop("base_url", None) or os.getenv("OLLAMA_BASE_URL")
             return OllamaEmbeddingProvider(
                 model=model, dims=dims, base_url=base_url, **kwargs
             )

@@ -174,6 +174,29 @@ class AppConfig(BaseModel):
     environment: str = "development"
 
 
+class FeatureFlagsConfig(BaseModel):
+    """
+    Feature flags for Phase 7C migration.
+    Controls experimental features and gradual rollout.
+    """
+
+    # Phase 7C.4: Dual-write migration flag
+    dual_write_1024d: bool = Field(
+        default=False,
+        description="Enable dual-write to both 384-D and 1024-D collections during migration",
+    )
+
+    # Phase 7C.8: Session tracking flag
+    session_tracking_enabled: bool = Field(
+        default=False, description="Enable multi-turn session tracking"
+    )
+
+    # Phase 7C.8: Entity focus bias flag
+    entity_focus_bias: bool = Field(
+        default=False, description="Enable entity focus bias in retrieval"
+    )
+
+
 class Config(WekaBaseModel):
     """Main configuration model"""
 
@@ -190,6 +213,9 @@ class Config(WekaBaseModel):
         alias="schema"
     )  # Renamed from schema to avoid shadowing BaseModel attribute
     cache: CacheConfig
+    feature_flags: FeatureFlagsConfig = Field(
+        default_factory=FeatureFlagsConfig
+    )  # Phase 7C
 
     class Config:
         populate_by_name = True  # Allow both graph_schema and schema
