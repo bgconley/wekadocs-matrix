@@ -116,9 +116,19 @@ class JinaEmbeddingProvider:
                 "Set JINA_API_KEY environment variable or pass api_key parameter."
             )
 
-        # Initialize HTTP client
+        # Initialize HTTP client with structured timeout
+        # Using separate timeouts for each phase instead of single scalar
+        # - connect: Time to establish TCP connection
+        # - read: Time to read entire response (API responds in ~3s, 60s is safe)
+        # - write: Time to send request body
+        # - pool: Time to acquire connection from pool
         self._client = httpx.Client(
-            timeout=timeout,
+            timeout=httpx.Timeout(
+                connect=10.0,  # 10s to establish connection (generous)
+                read=60.0,  # 60s to read response (Jina is fast <3s, this is safe)
+                write=10.0,  # 10s to send request (small JSON payload)
+                pool=5.0,  # 5s to get connection from pool
+            ),
             headers={
                 "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",

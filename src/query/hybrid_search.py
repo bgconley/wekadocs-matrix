@@ -3,12 +3,15 @@ Hybrid Search Engine (Task 2.3)
 Combines vector search with graph expansion and path finding.
 See: /docs/spec.md §4.1 (Hybrid retrieval)
 See: /docs/pseudocode-reference.md Phase 2, Task 2.3
+
+Phase 7C: Integrated with reranking provider for post-ANN refinement.
 """
 
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from src.providers.rerank.base import RerankProvider
 from src.shared.config import get_config
 from src.shared.observability import get_logger
 
@@ -34,6 +37,7 @@ class HybridSearchResults:
     results: List[SearchResult]
     total_found: int
     vector_time_ms: float
+    rerank_time_ms: float  # Phase 7C: Added reranking timing
     graph_time_ms: float
     ranking_time_ms: float
     total_time_ms: float
@@ -183,23 +187,45 @@ class HybridSearchEngine:
     """
     Hybrid search combining vector similarity with graph structure.
     Pre-Phase 7 B5: Modified to use embedding provider API.
+    Phase 7C: Integrated with reranking for post-ANN refinement.
     """
 
-    def __init__(self, vector_store: VectorStore, neo4j_driver, embedder):
+    def __init__(
+        self,
+        vector_store: VectorStore,
+        neo4j_driver,
+        embedder,
+        reranker: Optional[RerankProvider] = None,
+    ):
         self.vector_store = vector_store
         self.neo4j_driver = neo4j_driver
         self.embedder = embedder
+        self.reranker = reranker  # Phase 7C: Optional reranker
         self.config = get_config()
 
         # Get search configuration
         self.max_hops = self.config.validator.max_depth  # Use validator's max_depth
         self.top_k = self.config.search.hybrid.top_k
 
+        # Phase 7C: Reranking configuration
+        self.rerank_enabled = reranker is not None
+        self.rerank_k = 50  # Get more candidates for reranking
+        self.rerank_top_k = 20  # Narrow down to top 20 after reranking
+
         # Pre-Phase 7: Log embedder info once at init
         logger.info(
             f"HybridSearchEngine initialized with embedder: "
             f"model_id={embedder.model_id}, dims={embedder.dims}"
         )
+
+        # Phase 7C: Log reranker info
+        if self.reranker:
+            logger.info(
+                f"Reranking enabled: provider={self.reranker.provider_name}, "
+                f"model={self.reranker.model_id}"
+            )
+        else:
+            logger.info("Reranking disabled (no reranker provided)")
 
     def search(
         self,
@@ -210,7 +236,13 @@ class HybridSearchEngine:
         find_paths: bool = False,
     ) -> HybridSearchResults:
         """
-        Perform hybrid search: vector similarity + graph expansion.
+        Perform hybrid search: vector similarity + reranking + graph expansion.
+
+        Phase 7C workflow:
+        1. Vector search (ANN) - get top 50 candidates
+        2. Reranking (optional) - refine to top 20 using cross-attention
+        3. Graph expansion - expand from reranked results
+        4. Final ranking - done in ranking.py
 
         Args:
             query_text: Natural language query
@@ -225,10 +257,15 @@ class HybridSearchEngine:
         start_time = time.time()
 
         # Step 1: Vector search for seed nodes
+        # Phase 7C: Get more candidates (50) if reranking enabled
+        vector_k = self.rerank_k if self.rerank_enabled else k
+
         vector_start = time.time()
         # Pre-Phase 7 B5: Use provider's embed_query method for queries
         query_vector = self.embedder.embed_query(query_text)
-        vector_seeds = self.vector_store.search(query_vector, k=k, filters=filters)
+        vector_seeds = self.vector_store.search(
+            query_vector, k=vector_k, filters=filters
+        )
         vector_time_ms = (time.time() - vector_start) * 1000
 
         # Convert to SearchResult objects
@@ -246,6 +283,17 @@ class HybridSearchEngine:
                     distance=0,  # Seeds have distance 0
                     metadata=metadata,
                 )
+            )
+
+        # Step 2: Reranking (Phase 7C)
+        rerank_time_ms = 0.0
+        if self.rerank_enabled and results:
+            rerank_start = time.time()
+            results = self._apply_reranking(query_text, results)
+            rerank_time_ms = (time.time() - rerank_start) * 1000
+
+            logger.debug(
+                f"Reranking complete: {len(results)} results, {rerank_time_ms:.2f}ms"
             )
 
         # Step 2: Graph expansion (if enabled)
@@ -284,6 +332,7 @@ class HybridSearchEngine:
             results=unique_results,
             total_found=len(unique_results),
             vector_time_ms=vector_time_ms,
+            rerank_time_ms=rerank_time_ms,  # Phase 7C: Added reranking timing
             graph_time_ms=graph_time_ms,
             ranking_time_ms=ranking_time_ms,
             total_time_ms=total_time_ms,
@@ -441,3 +490,81 @@ class HybridSearchEngine:
                 result.metadata["mention_count"] = 0
 
         return results
+
+    def _apply_reranking(
+        self, query_text: str, results: List[SearchResult]
+    ) -> List[SearchResult]:
+        """
+        Phase 7C: Apply reranking to refine candidate ordering.
+
+        Uses cross-attention based reranking to improve precision after ANN.
+
+        Args:
+            query_text: Original query text
+            results: Initial results from vector search
+
+        Returns:
+            Reranked results (top_k after reranking)
+        """
+        if not self.reranker or not results:
+            return results
+
+        # Prepare candidates for reranker
+        # Reranker expects: [{"id": str, "text": str, ...}]
+        candidates = []
+        for result in results:
+            # Extract text from metadata
+            text = result.metadata.get("text", "")
+            if not text:
+                # Fallback: try title or other fields
+                text = result.metadata.get("title", result.metadata.get("name", ""))
+
+            if text:  # Only add if we have text content
+                candidates.append(
+                    {
+                        "id": result.node_id,
+                        "text": text,
+                        "original_result": result,  # Keep reference
+                    }
+                )
+
+        if not candidates:
+            logger.warning("No text content found in candidates for reranking")
+            return results
+
+        try:
+            # Call reranker
+            reranked = self.reranker.rerank(
+                query=query_text,
+                candidates=candidates,
+                top_k=self.rerank_top_k,  # Default 20
+            )
+
+            # Convert back to SearchResult objects
+            reranked_results = []
+            for reranked_cand in reranked:
+                original = reranked_cand["original_result"]
+
+                # Update score with rerank score
+                original.score = reranked_cand["rerank_score"]
+
+                # Add reranking metadata
+                original.metadata["rerank_score"] = reranked_cand["rerank_score"]
+                original.metadata["original_rank"] = reranked_cand.get(
+                    "original_rank", 0
+                )
+                original.metadata["reranker"] = reranked_cand.get("reranker", "unknown")
+                original.metadata["score_kind"] = "rerank"  # Update score kind
+
+                reranked_results.append(original)
+
+            logger.debug(
+                f"Reranked {len(candidates)} candidates to {len(reranked_results)} results"
+            )
+
+            return reranked_results
+
+        except Exception as e:
+            # Log error but don't fail the search - fallback to vector results
+            logger.error(f"Reranking failed: {e}. Falling back to vector results.")
+            return results[: self.rerank_top_k]  # At least limit to top_k

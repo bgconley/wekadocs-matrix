@@ -3,6 +3,7 @@ Query Service for MCP Server
 Integrates hybrid search, ranking, and response building.
 Provides cached embedder and connection management.
 Pre-Phase 7 B4: Modified to use embedding provider abstraction.
+Phase 7C: Integrated with reranking provider for post-ANN refinement.
 """
 
 import json
@@ -10,6 +11,8 @@ import time
 from typing import Any, Dict, Optional
 
 from src.providers.embeddings import SentenceTransformersProvider
+from src.providers.factory import ProviderFactory
+from src.providers.rerank.base import RerankProvider
 from src.query.hybrid_search import HybridSearchEngine, QdrantVectorStore
 from src.query.planner import QueryPlanner
 from src.query.ranking import rank_results
@@ -34,6 +37,7 @@ class QueryService:
     def __init__(self):
         self.config = get_config()
         self._embedder: Optional[SentenceTransformersProvider] = None
+        self._reranker: Optional[RerankProvider] = None  # Phase 7C: Reranker cache
         self._search_engine: Optional[HybridSearchEngine] = None
         self._planner: Optional[QueryPlanner] = None
 
@@ -70,6 +74,32 @@ class QueryService:
             )
         return self._embedder
 
+    def _get_reranker(self) -> Optional[RerankProvider]:
+        """
+        Get or initialize the cached reranker.
+        Phase 7C: Uses provider factory for ENV-based configuration.
+
+        Returns None if reranking is disabled (RERANK_PROVIDER=none).
+        """
+        if self._reranker is None:
+            try:
+                factory = ProviderFactory()
+                self._reranker = factory.create_rerank_provider()
+
+                logger.info(
+                    f"Reranker loaded successfully: "
+                    f"provider={self._reranker.provider_name}, "
+                    f"model={self._reranker.model_id}"
+                )
+            except Exception as e:
+                # If reranker initialization fails, log warning but continue without reranking
+                logger.warning(
+                    f"Reranker initialization failed: {e}. Continuing without reranking."
+                )
+                self._reranker = None
+
+        return self._reranker
+
     def _get_search_engine(self) -> HybridSearchEngine:
         """Get or initialize the search engine."""
         if self._search_engine is None:
@@ -95,12 +125,16 @@ class QueryService:
                 vector_store = Neo4jVectorStore(neo4j_driver, index_name)
                 logger.info(f"Using Neo4j vector store: {index_name}")
 
+            # Phase 7C: Get reranker (may be None if disabled)
+            reranker = self._get_reranker()
+
             self._search_engine = HybridSearchEngine(
                 vector_store=vector_store,
                 neo4j_driver=neo4j_driver,
                 embedder=embedder,
+                reranker=reranker,  # Phase 7C: Pass reranker
             )
-            logger.info("Search engine initialized")
+            logger.info("Search engine initialized with reranking support")
 
         return self._search_engine
 
