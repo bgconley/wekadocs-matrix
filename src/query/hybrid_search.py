@@ -234,6 +234,7 @@ class HybridSearchEngine:
         filters: Optional[Dict] = None,
         expand_graph: bool = True,
         find_paths: bool = False,
+        focused_entity_ids: Optional[List[str]] = None,  # Task 7C.8: Entity focus bias
     ) -> HybridSearchResults:
         """
         Perform hybrid search: vector similarity + reranking + graph expansion.
@@ -241,8 +242,9 @@ class HybridSearchEngine:
         Phase 7C workflow:
         1. Vector search (ANN) - get top 50 candidates
         2. Reranking (optional) - refine to top 20 using cross-attention
-        3. Graph expansion - expand from reranked results
-        4. Final ranking - done in ranking.py
+        3. Entity focus bias (Task 7C.8) - boost sections mentioning focused entities
+        4. Graph expansion - expand from reranked results
+        5. Final ranking - done in ranking.py
 
         Args:
             query_text: Natural language query
@@ -250,6 +252,7 @@ class HybridSearchEngine:
             filters: Optional filters for vector search
             expand_graph: Whether to expand from seeds via graph
             find_paths: Whether to find connecting paths between top results
+            focused_entity_ids: Entity IDs to bias toward (from session history)
 
         Returns:
             HybridSearchResults with ranked results and timing
@@ -296,7 +299,17 @@ class HybridSearchEngine:
                 f"Reranking complete: {len(results)} results, {rerank_time_ms:.2f}ms"
             )
 
-        # Step 2: Graph expansion (if enabled)
+        # Task 7C.8: Apply entity focus bias if provided
+        if focused_entity_ids:
+            bias_start = time.time()
+            results = self._apply_entity_focus_bias(results, focused_entity_ids)
+            bias_time_ms = (time.time() - bias_start) * 1000
+            logger.debug(
+                f"Entity focus bias applied: {len(focused_entity_ids)} entities, "
+                f"{bias_time_ms:.2f}ms"
+            )
+
+        # Step 3: Graph expansion (if enabled)
         graph_time_ms = 0
         if expand_graph and results:
             graph_start = time.time()
@@ -568,3 +581,92 @@ class HybridSearchEngine:
             # Log error but don't fail the search - fallback to vector results
             logger.error(f"Reranking failed: {e}. Falling back to vector results.")
             return results[: self.rerank_top_k]  # At least limit to top_k
+
+    def _apply_entity_focus_bias(
+        self, results: List[SearchResult], focused_entity_ids: List[str]
+    ) -> List[SearchResult]:
+        """
+        Task 7C.8: Boost sections that mention focused entities from session history.
+
+        This implements multi-turn context awareness by biasing retrieval toward
+        entities the user has been discussing in recent turns.
+
+        Strategy: Boost score by 20% per focused entity mention
+        Example: Section mentioning 2 focused entities gets 40% boost
+        Formula: new_score = old_score * (1 + 0.2 * focus_hits)
+
+        Args:
+            results: Initial search results
+            focused_entity_ids: Entity IDs to bias toward (from session history)
+
+        Returns:
+            Reranked results with entity focus boost applied
+        """
+        if not focused_entity_ids or not results:
+            return results
+
+        # Extract section IDs for batch query
+        section_ids = [r.node_id for r in results]
+
+        # Query graph to count focused entity mentions per section
+        # Uses MENTIONS relationship from Section to entities
+        focus_query = """
+        UNWIND $section_ids AS section_id
+        MATCH (s:Section {id: section_id})-[:MENTIONS]->(e)
+        WHERE e.id IN $focused_entity_ids
+        RETURN s.id AS section_id, count(DISTINCT e) AS focus_hits, collect(DISTINCT e.id) AS matched_entities
+        """
+
+        focus_counts = {}
+        matched_entities_map = {}
+
+        try:
+            with self.neo4j_driver.session() as session:
+                result = session.run(
+                    focus_query,
+                    section_ids=section_ids,
+                    focused_entity_ids=focused_entity_ids,
+                )
+
+                for record in result:
+                    focus_counts[record["section_id"]] = record["focus_hits"]
+                    matched_entities_map[record["section_id"]] = record[
+                        "matched_entities"
+                    ]
+
+            logger.debug(
+                f"Focus bias: {len(focus_counts)} sections mention focused entities"
+            )
+
+        except Exception as e:
+            # Log error but don't fail - return original results
+            logger.warning(f"Entity focus bias query failed: {e}")
+            return results
+
+        # Apply boost to scores
+        FOCUS_BOOST_WEIGHT = 0.2  # 20% boost per focused entity mention
+
+        for result in results:
+            focus_hits = focus_counts.get(result.node_id, 0)
+
+            if focus_hits > 0:
+                # Boost score
+                original_score = result.score
+                result.score = original_score * (1.0 + FOCUS_BOOST_WEIGHT * focus_hits)
+
+                # Add metadata for debugging
+                result.metadata["entity_focus_boost"] = focus_hits
+                result.metadata["entity_focus_score_original"] = original_score
+                result.metadata["entity_focus_entities"] = matched_entities_map.get(
+                    result.node_id, []
+                )
+
+                logger.debug(
+                    f"Boosted {result.node_id}: {original_score:.3f} -> {result.score:.3f} "
+                    f"({focus_hits} entities)"
+                )
+
+        # Re-sort by boosted scores (descending)
+        results.sort(key=lambda r: r.score, reverse=True)
+
+        return results

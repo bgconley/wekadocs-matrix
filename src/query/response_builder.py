@@ -8,13 +8,21 @@ Enhanced Response Features (E1-E7):
 - Verbosity modes: full (text only), graph (text + relationships, default)
 - Graph mode provides complete context for better LLM reasoning
 - Supports multi-turn exploration via traverse_relationships
+
+Task 7C.8: Answer provenance tracking via SessionTracker
+- Tracks which sections support each answer (SUPPORTED_BY relationships)
+- Enables citation integrity and hallucination detection
 """
 
 from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from src.query.ranking import RankedResult
+
+# Task 7C.8: Import SessionTracker for answer provenance
+if TYPE_CHECKING:
+    from src.query.session_tracker import SessionTracker
 
 
 class Verbosity(str, Enum):
@@ -189,7 +197,28 @@ class ResponseBuilder:
         timing: Dict[str, float],
         filters: Optional[Dict[str, Any]] = None,
         verbosity: Verbosity = Verbosity.GRAPH,
+        query_id: Optional[str] = None,  # Task 7C.8: For answer provenance
+        session_tracker: Optional["SessionTracker"] = None,  # Task 7C.8
     ) -> Response:
+        """
+        Build complete response from ranked results.
+
+        Task 7C.8: Now tracks answer provenance if query_id and session_tracker provided.
+        Creates Answer node with SUPPORTED_BY relationships to cited sections.
+
+        Args:
+            query: Original query text
+            intent: Classified intent
+            ranked_results: Ranked search results
+            timing: Timing information
+            filters: Optional filters applied
+            verbosity: Response detail level (full=text only, graph=text+relationships, default=graph)
+            query_id: Optional query ID for answer provenance tracking (Task 7C.8)
+            session_tracker: Optional SessionTracker instance for provenance (Task 7C.8)
+
+        Returns:
+            Response with Markdown and JSON (includes answer_id if provenance tracked)
+        """
         # Pre-Phase 7 (G1): Metrics instrumentation for response builder
         import time
 
@@ -199,20 +228,6 @@ class ResponseBuilder:
         )
 
         start_time = time.time()
-        """
-        Build complete response from ranked results.
-
-        Args:
-            query: Original query text
-            intent: Classified intent
-            ranked_results: Ranked search results
-            timing: Timing information
-            filters: Optional filters applied
-            verbosity: Response detail level (full=text only, graph=text+relationships, default=graph)
-
-        Returns:
-            Response with Markdown and JSON
-        """
         # Extract top evidence with verbosity mode
         evidence = self._extract_evidence(ranked_results[:5], verbosity)
 
@@ -236,6 +251,57 @@ class ResponseBuilder:
             confidence=confidence,
             diagnostics=diagnostics,
         )
+
+        # Task 7C.8: Track answer provenance if session tracking is active
+        answer_id = None
+        if query_id and session_tracker:
+            try:
+                # Extract supporting section IDs from top evidence (up to 5 citations)
+                supporting_section_ids = []
+                for ev in evidence[:5]:
+                    # Prefer section_id, fallback to node_id if it's a Section
+                    if ev.section_id:
+                        supporting_section_ids.append(ev.section_id)
+                    elif ev.node_label == "Section" and ev.node_id:
+                        supporting_section_ids.append(ev.node_id)
+
+                # Create answer with provenance
+                if supporting_section_ids:
+                    answer_id = session_tracker.create_answer(
+                        query_id=query_id,
+                        answer_text=markdown,  # Store full Markdown answer
+                        supporting_section_ids=supporting_section_ids,
+                        model="claude-3-5-sonnet-20241022",  # TODO: Get from config
+                        tokens_used=None,  # TODO: Track if available
+                        generation_duration_ms=None,  # TODO: Track if available
+                    )
+
+                    from src.shared.observability import get_logger
+
+                    logger = get_logger(__name__)
+                    logger.info(
+                        f"Created answer {answer_id} with {len(supporting_section_ids)} citations "
+                        f"for query {query_id}"
+                    )
+                else:
+                    from src.shared.observability import get_logger
+
+                    logger = get_logger(__name__)
+                    logger.warning(
+                        f"No supporting sections found for answer provenance (query {query_id})"
+                    )
+
+            except Exception as e:
+                # Log error but don't fail response generation
+                from src.shared.observability import get_logger
+
+                logger = get_logger(__name__)
+                logger.error(f"Failed to track answer provenance: {e}")
+
+        # Add answer_id to structured response if tracked
+        if answer_id:
+            # Store answer_id in diagnostics for reference
+            structured.diagnostics.ranking_features["answer_id"] = answer_id
 
         # Record metrics
         latency = (time.time() - start_time) * 1000
@@ -691,9 +757,13 @@ def build_response(
     filters: Optional[Dict[str, Any]] = None,
     verbosity: Verbosity = Verbosity.GRAPH,
     neo4j_driver=None,
+    query_id: Optional[str] = None,  # Task 7C.8
+    session_tracker: Optional["SessionTracker"] = None,  # Task 7C.8
 ) -> Response:
     """
     Convenience function to build a response.
+
+    Task 7C.8: Now supports answer provenance tracking via query_id and session_tracker.
 
     Args:
         query: Original query text
@@ -703,11 +773,20 @@ def build_response(
         filters: Optional filters applied
         verbosity: Response detail level (full=text only, graph=text+relationships, default=graph)
         neo4j_driver: Optional Neo4j driver for graph mode
+        query_id: Optional query ID for answer provenance tracking (Task 7C.8)
+        session_tracker: Optional SessionTracker instance for provenance (Task 7C.8)
 
     Returns:
         Response with Markdown and JSON
     """
     builder = ResponseBuilder(neo4j_driver=neo4j_driver)
     return builder.build_response(
-        query, intent, ranked_results, timing, filters, verbosity
+        query,
+        intent,
+        ranked_results,
+        timing,
+        filters,
+        verbosity,
+        query_id=query_id,
+        session_tracker=session_tracker,
     )

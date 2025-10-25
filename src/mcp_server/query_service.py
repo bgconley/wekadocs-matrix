@@ -4,19 +4,21 @@ Integrates hybrid search, ranking, and response building.
 Provides cached embedder and connection management.
 Pre-Phase 7 B4: Modified to use embedding provider abstraction.
 Phase 7C: Integrated with reranking provider for post-ANN refinement.
+Task 7C.8: Integrated with SessionTracker for multi-turn conversation support.
 """
 
 import json
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from src.providers.embeddings import SentenceTransformersProvider
+from src.providers.embeddings.base import EmbeddingProvider
 from src.providers.factory import ProviderFactory
 from src.providers.rerank.base import RerankProvider
 from src.query.hybrid_search import HybridSearchEngine, QdrantVectorStore
 from src.query.planner import QueryPlanner
 from src.query.ranking import rank_results
 from src.query.response_builder import Response, Verbosity, build_response
+from src.query.session_tracker import SessionTracker
 from src.shared.config import get_config
 from src.shared.connections import get_connection_manager
 from src.shared.observability import get_logger
@@ -36,30 +38,32 @@ class QueryService:
 
     def __init__(self):
         self.config = get_config()
-        self._embedder: Optional[SentenceTransformersProvider] = None
+        self._embedder: Optional[EmbeddingProvider] = None
         self._reranker: Optional[RerankProvider] = None  # Phase 7C: Reranker cache
         self._search_engine: Optional[HybridSearchEngine] = None
         self._planner: Optional[QueryPlanner] = None
+        self._session_tracker: Optional[SessionTracker] = (
+            None  # Task 7C.8: Session tracking
+        )
 
         logger.info("QueryService initialized")
 
-    def _get_embedder(self) -> SentenceTransformersProvider:
+    def _get_embedder(self) -> EmbeddingProvider:
         """
         Get or initialize the cached embedder.
-        Pre-Phase 7 B4: Uses provider abstraction with dimension validation.
+        Phase 7C Task 7C.1: Uses ProviderFactory for ENV-selectable providers.
         """
         if self._embedder is None:
-            model_name = self.config.embedding.embedding_model
             expected_dims = self.config.embedding.dims
 
             logger.info(
-                f"Loading embedding provider: {model_name}, dims={expected_dims}"
+                f"Loading embedding provider from config: provider={self.config.embedding.provider}, "
+                f"model={self.config.embedding.embedding_model}, dims={expected_dims}"
             )
 
-            # Pre-Phase 7: Use provider abstraction
-            self._embedder = SentenceTransformersProvider(
-                model_name=model_name, expected_dims=expected_dims
-            )
+            # Phase 7C: Use provider factory for ENV-based selection
+            factory = ProviderFactory()
+            self._embedder = factory.create_embedding_provider()
 
             # Validate dimensions match configuration
             if self._embedder.dims != expected_dims:
@@ -70,7 +74,9 @@ class QueryService:
 
             logger.info(
                 f"Embedding provider loaded successfully: "
-                f"dims={self._embedder.dims}, model_id={self._embedder.model_id}"
+                f"provider={self._embedder.provider_name}, "
+                f"model={self._embedder.model_id}, "
+                f"dims={self._embedder.dims}"
             )
         return self._embedder
 
@@ -145,6 +151,18 @@ class QueryService:
             logger.info("Query planner initialized")
         return self._planner
 
+    def _get_session_tracker(self) -> SessionTracker:
+        """
+        Get or initialize the session tracker.
+        Task 7C.8: Manages multi-turn conversation sessions.
+        """
+        if self._session_tracker is None:
+            manager = get_connection_manager()
+            neo4j_driver = manager.get_neo4j_driver()
+            self._session_tracker = SessionTracker(neo4j_driver)
+            logger.info("Session tracker initialized")
+        return self._session_tracker
+
     def search(
         self,
         query: str,
@@ -153,6 +171,8 @@ class QueryService:
         expand_graph: bool = True,
         find_paths: bool = False,
         verbosity: str = "graph",
+        session_id: Optional[str] = None,  # Task 7C.8: Multi-turn session ID
+        turn: Optional[int] = None,  # Task 7C.8: Turn number within session
     ) -> Response:
         """
         Execute a search query and return formatted response.
@@ -164,6 +184,8 @@ class QueryService:
             expand_graph: Whether to expand from seeds via graph
             find_paths: Whether to find connecting paths
             verbosity: Response detail level (full=text only, graph=text+relationships, default=graph)
+            session_id: Optional session ID for multi-turn tracking (Task 7C.8)
+            turn: Optional turn number within session (Task 7C.8)
 
         Returns:
             Response with Markdown and JSON including evidence and confidence
@@ -189,6 +211,39 @@ class QueryService:
             intent = query_plan.intent
             logger.info(f"Query intent classified: {intent}")
 
+            # Task 7C.8: Multi-turn session tracking
+            query_id = None
+            focused_entity_ids: List[str] = []
+
+            if session_id:
+                tracker = self._get_session_tracker()
+
+                # Create query node
+                query_id = tracker.create_query(session_id, query, turn or 1)
+                logger.info(
+                    f"Created query {query_id} for session {session_id}, turn {turn}"
+                )
+
+                # Extract focused entities from current query
+                focused_entities_current = tracker.extract_focused_entities(
+                    query_id, query
+                )
+                logger.debug(
+                    f"Extracted {len(focused_entities_current)} entities from current query"
+                )
+
+                # Get focused entities from recent session history (last 3 turns)
+                session_focus = tracker.get_session_focused_entities(
+                    session_id, last_n_turns=3
+                )
+                focused_entity_ids = [e["entity_id"] for e in session_focus]
+
+                if focused_entity_ids:
+                    logger.info(
+                        f"Entity focus bias active: {len(focused_entity_ids)} entities from "
+                        f"last 3 turns will boost retrieval"
+                    )
+
             # Pre-Phase 7 B4: Add embedding_version filter to ensure version consistency
             # This ensures we only retrieve vectors created with the current embedding model
             if filters is None:
@@ -209,12 +264,35 @@ class QueryService:
                 filters=filters,
                 expand_graph=expand_graph,
                 find_paths=find_paths,
+                focused_entity_ids=(
+                    focused_entity_ids if focused_entity_ids else None
+                ),  # Task 7C.8
             )
             search_time = time.time() - search_start
 
             logger.info(
                 f"Search completed: {search_results.total_found} results in {search_time*1000:.1f}ms"
             )
+
+            # Task 7C.8: Track retrieval if session tracking is active
+            if session_id and query_id:
+                tracker = self._get_session_tracker()
+                retrieved_sections = [
+                    {
+                        "section_id": result.node_id,
+                        "rank": idx + 1,
+                        "score_vec": getattr(result, "vector_score", 0.0),
+                        "score_text": getattr(result, "text_score", 0.0),
+                        "score_graph": getattr(result, "graph_score", 0.0),
+                        "score_combined": result.score,
+                        "retrieval_method": "hybrid",
+                    }
+                    for idx, result in enumerate(search_results.results)
+                ]
+                tracker.track_retrieval(query_id, retrieved_sections)
+                logger.debug(
+                    f"Tracked {len(retrieved_sections)} retrieved sections for query {query_id}"
+                )
 
             # Rank results
             rank_start = time.time()
@@ -237,6 +315,7 @@ class QueryService:
             manager = get_connection_manager()
             neo4j_driver = manager.get_neo4j_driver()
 
+            # Task 7C.8: Pass session tracking info to response builder
             response = build_response(
                 query=query,
                 intent=intent,
@@ -245,6 +324,10 @@ class QueryService:
                 filters=filters,
                 verbosity=verb_enum,
                 neo4j_driver=neo4j_driver,
+                query_id=query_id if session_id else None,  # Task 7C.8
+                session_tracker=(
+                    self._get_session_tracker() if session_id else None
+                ),  # Task 7C.8
             )
 
             # Instrument metrics (E5)
