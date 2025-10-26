@@ -63,10 +63,16 @@ sentence-transformers==2.7.0
 beautifulsoup4==4.12.2
 html2text==2024.2.26
 markdown==3.5.1
-tiktoken==0.5.2
 lxml==4.9.3
 mcp[cli]>=1.8.0  # MCP SDK with CLI tools for STDIO transport (requires FastMCP)
 
 # Phase 7C: Additional provider dependencies
 # Note: Jina AI uses REST API (httpx already included above)
 # Ollama uses REST API (httpx already included above)
+
+# Phase 7C Hotfix: Tokenizer service for accurate token counting
+# CRITICAL: Use jina-embeddings-v3 tokenizer (XLM-RoBERTa), NOT tiktoken (OpenAI)
+transformers>=4.43.0  # HuggingFace tokenizer (primary backend)
+tokenizers>=0.15.0    # Fast Rust backend for transformers
+sentencepiece>=0.2.0  # Required by XLM-RoBERTa tokenizer
+huggingface_hub>=0.23.0  # For model/tokenizer downloads

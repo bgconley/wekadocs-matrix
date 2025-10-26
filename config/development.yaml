@@ -10,17 +10,17 @@ app:
   version: "2.0.0"
 
 # Embedding configuration - critical for vector operations
-# Phase 7C: Updated to Jina v4 @ 1024-D by default
+# Phase 7C: Updated to Jina v3 @ 1024-D by default
 embedding:
   # Model configuration (ENV overrideable via EMBEDDINGS_MODEL)
-  model_name: "jina-embeddings-v4"  # Phase 7C: Upgraded from MiniLM
-  dims: 1024  # Phase 7C: Upgraded from 384-D
+  model_name: "jina-embeddings-v3"  # Phase 7C: Stable v3 model
+  dims: 1024  # Phase 7C: v3 defaults to 1024-D
   similarity: "cosine"  # Options: cosine, dot, euclidean
 
   # Version tracking for provenance
   # This ensures we can filter vectors by the model version used
   # For Jina models, the model name IS the version (they don't use dated tags)
-  version: "jina-embeddings-v4"  # Phase 7C: Actual Jina model identifier
+  version: "jina-embeddings-v3"  # Phase 7C: Actual Jina model identifier
 
   # Provider configuration (ENV overrideable via EMBEDDINGS_PROVIDER)
   provider: "jina-ai"  # Phase 7C: Changed from sentence-transformers
@@ -30,7 +30,7 @@ embedding:
 
   # Performance settings
   batch_size: 32
-  max_sequence_length: 8192  # Jina v4 supports longer sequences
+  max_sequence_length: 8192  # Jina v3 supports longer sequences
 
 # Search configuration
 search:

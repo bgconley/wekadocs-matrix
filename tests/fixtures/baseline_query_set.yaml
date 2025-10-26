@@ -1,0 +1,178 @@
+# Phase 7E.0 - Task 0.4: Baseline Query Set
+# Real queries for baseline retrieval metrics before chunking implementation
+#
+# Format:
+#   - id: Unique query identifier
+#   - text: The actual query text
+#   - category: Type of query (config, procedure, troubleshooting, complex)
+#   - token_estimate: Approximate token count (for expansion logic)
+#   - judgments: Graded relevance (section_id -> 0/1/2) for nDCG
+#     - 2 = highly relevant (complete answer)
+#     - 1 = partially relevant (related content)
+#     - 0 = not relevant
+#   - gold_section_ids: Binary relevance for Hit@k (will map to chunk_ids post-Phase 2)
+
+# Configuration Queries (short, 5-7 tokens)
+- id: q01_config_mtu
+  text: "How to set MTU?"
+  category: config
+  token_estimate: 5
+  judgments: {}  # Will be populated after baseline run
+  gold_section_ids: []
+
+- id: q02_config_network
+  text: "Configure network settings for cluster"
+  category: config
+  token_estimate: 6
+  judgments: {}
+  gold_section_ids: []
+
+- id: q03_config_ssd
+  text: "SSD tier configuration options"
+  category: config
+  token_estimate: 5
+  judgments: {}
+  gold_section_ids: []
+
+- id: q04_config_quota
+  text: "Set filesystem quota limits"
+  category: config
+  token_estimate: 5
+  judgments: {}
+  gold_section_ids: []
+
+- id: q05_config_snapshot
+  text: "Configure snapshot scheduling"
+  category: config
+  token_estimate: 4
+  judgments: {}
+  gold_section_ids: []
+
+# Procedure Queries (medium, 7-10 tokens)
+- id: q06_proc_add_node
+  text: "Steps to add node to cluster"
+  category: procedure
+  token_estimate: 7
+  judgments: {}
+  gold_section_ids: []
+
+- id: q07_proc_replace_drive
+  text: "How to replace failed drive in storage"
+  category: procedure
+  token_estimate: 8
+  judgments: {}
+  gold_section_ids: []
+
+- id: q08_proc_upgrade
+  text: "Upgrade Weka cluster to new version"
+  category: procedure
+  token_estimate: 7
+  judgments: {}
+  gold_section_ids: []
+
+- id: q09_proc_create_fs
+  text: "Create new filesystem with tiering enabled"
+  category: procedure
+  token_estimate: 7
+  judgments: {}
+  gold_section_ids: []
+
+- id: q10_proc_backup
+  text: "Setup automated backup for filesystem"
+  category: procedure
+  token_estimate: 6
+  judgments: {}
+  gold_section_ids: []
+
+# Troubleshooting Queries (short, 5-8 tokens)
+- id: q11_trouble_timeout
+  text: "Fix connection timeout error"
+  category: troubleshooting
+  token_estimate: 5
+  judgments: {}
+  gold_section_ids: []
+
+- id: q12_trouble_performance
+  text: "Diagnose slow filesystem performance"
+  category: troubleshooting
+  token_estimate: 5
+  judgments: {}
+  gold_section_ids: []
+
+- id: q13_trouble_capacity
+  text: "Resolve capacity warning alerts"
+  category: troubleshooting
+  token_estimate: 5
+  judgments: {}
+  gold_section_ids: []
+
+- id: q14_trouble_licensing
+  text: "License validation failed"
+  category: troubleshooting
+  token_estimate: 4
+  judgments: {}
+  gold_section_ids: []
+
+# Complex Queries (long, 11-15 tokens)
+- id: q15_complex_multisite
+  text: "Configure network settings for multi-site deployment with custom routing"
+  category: complex
+  token_estimate: 11
+  judgments: {}
+  gold_section_ids: []
+
+- id: q16_complex_tiering
+  text: "Best practices for configuring SSD and object storage tiering with automatic data lifecycle policies"
+  category: complex
+  token_estimate: 15
+  judgments: {}
+  gold_section_ids: []
+
+- id: q17_complex_ha
+  text: "Setup high availability cluster with hot standby nodes and failover automation"
+  category: complex
+  token_estimate: 13
+  judgments: {}
+  gold_section_ids: []
+
+- id: q18_complex_monitoring
+  text: "Integrate Weka monitoring with Prometheus Grafana for alerting and performance tracking"
+  category: complex
+  token_estimate: 13
+  judgments: {}
+  gold_section_ids: []
+
+- id: q19_complex_migration
+  text: "Plan and execute migration from existing storage to Weka with minimal downtime"
+  category: complex
+  token_estimate: 14
+  judgments: {}
+  gold_section_ids: []
+
+- id: q20_complex_security
+  text: "Configure LDAP authentication encryption and role-based access control for filesystem security"
+  category: complex
+  token_estimate: 13
+  judgments: {}
+  gold_section_ids: []
+
+# Edge Cases
+- id: q21_edge_acronym
+  text: "NFS"
+  category: edge
+  token_estimate: 1
+  judgments: {}
+  gold_section_ids: []
+
+- id: q22_edge_version
+  text: "What's new in version 4.2?"
+  category: edge
+  token_estimate: 6
+  judgments: {}
+  gold_section_ids: []
+
+# Notes:
+# - judgments and gold_section_ids will be populated during baseline run
+# - After Phase 2, gold_section_ids will map to gold_chunk_ids
+# - Token estimates guide expansion logic (>12 tokens triggers expansion)
+# - Categories help analyze performance by query type

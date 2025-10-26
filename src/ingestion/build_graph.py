@@ -12,6 +12,11 @@ from typing import Dict, List, Optional
 from neo4j import Driver
 
 from src.shared.config import Config
+from src.shared.embedding_fields import (
+    canonicalize_embedding_metadata,
+    ensure_no_embedding_model_in_payload,
+    validate_embedding_metadata,
+)
 from src.shared.observability import get_logger
 
 logger = get_logger(__name__)
@@ -200,21 +205,108 @@ class GraphBuilder:
     def _remove_missing_sections(
         self, session, document_id: str, valid_section_ids: List[str]
     ) -> int:
-        """Remove sections that are no longer present in the latest ingestion."""
-        query = """
+        """
+        Hybrid orphan section cleanup strategy.
+
+        For sections no longer in the document:
+        1. DELETE sections with NO Query/Answer provenance (truly orphaned)
+        2. MARK sections with provenance as stale (preserve citation chains)
+
+        This prevents breaking historical query/answer references while
+        cleaning up sections that are genuinely no longer needed.
+
+        Returns:
+            Count of sections removed (deleted + marked stale)
+        """
+        # Step 1: Find orphaned sections (not in current document version)
+        find_orphans_query = """
         MATCH (d:Document {id: $document_id})-[r:HAS_SECTION]->(s:Section)
         WHERE NOT s.id IN $section_ids
-        WITH s
-        DETACH DELETE s
-        RETURN count(s) AS removed
+
+        // Check for provenance: RETRIEVED or SUPPORTED_BY relationships
+        OPTIONAL MATCH (s)<-[:RETRIEVED]-(q:Query)
+        OPTIONAL MATCH (s)<-[:SUPPORTED_BY]-(a:Answer)
+
+        WITH s,
+             count(DISTINCT q) + count(DISTINCT a) as provenance_count
+
+        RETURN s.id as section_id,
+               provenance_count,
+               CASE
+                   WHEN provenance_count = 0 THEN 'delete'
+                   ELSE 'mark_stale'
+               END as action
         """
-        result = session.run(
-            query,
+
+        orphans_result = session.run(
+            find_orphans_query,
             document_id=document_id,
             section_ids=valid_section_ids or [],
         )
-        record = result.single()
-        return record["removed"] if record else 0
+
+        orphans = list(orphans_result)
+
+        if not orphans:
+            return 0
+
+        # Step 2: Separate orphans by action
+        to_delete = [o["section_id"] for o in orphans if o["action"] == "delete"]
+        to_mark_stale = [
+            o["section_id"] for o in orphans if o["action"] == "mark_stale"
+        ]
+
+        deleted_count = 0
+        marked_stale_count = 0
+
+        # Step 3: DELETE orphans with no provenance
+        if to_delete:
+            delete_query = """
+            MATCH (s:Section)
+            WHERE s.id IN $section_ids
+            DETACH DELETE s
+            RETURN count(s) as deleted
+            """
+            delete_result = session.run(delete_query, section_ids=to_delete)
+            deleted_count = delete_result.single()["deleted"] or 0
+
+            logger.debug(
+                "Deleted orphaned sections with no provenance",
+                document_id=document_id,
+                deleted_count=deleted_count,
+            )
+
+        # Step 4: MARK orphans with provenance as stale
+        if to_mark_stale:
+            mark_stale_query = """
+            MATCH (s:Section)
+            WHERE s.id IN $section_ids
+            SET s.is_stale = true,
+                s.stale_since = datetime(),
+                s.stale_reason = 'Section removed from document but has query/answer provenance'
+            RETURN count(s) as marked
+            """
+            mark_result = session.run(mark_stale_query, section_ids=to_mark_stale)
+            marked_stale_count = mark_result.single()["marked"] or 0
+
+            logger.info(
+                "Marked orphaned sections as stale (preserving provenance)",
+                document_id=document_id,
+                marked_stale_count=marked_stale_count,
+                section_ids=to_mark_stale[:5],  # Log first 5 for debugging
+            )
+
+        total_removed = deleted_count + marked_stale_count
+
+        if total_removed > 0:
+            logger.info(
+                "Orphan section cleanup complete",
+                document_id=document_id,
+                deleted=deleted_count,
+                marked_stale=marked_stale_count,
+                total=total_removed,
+            )
+
+        return total_removed
 
     def _upsert_entities(self, session, entities: Dict[str, Dict]) -> int:
         """Upsert Entity nodes in batches."""
@@ -516,18 +608,18 @@ class GraphBuilder:
                     stats["upserted"] += 1
 
                     # Phase 7C.7: Update Neo4j with required embedding metadata
+                    # Use canonicalization helper to ensure consistent field naming
+                    embedding_metadata = canonicalize_embedding_metadata(
+                        embedding_model=self.config.embedding.version,  # Maps to embedding_version
+                        dimensions=len(embedding),
+                        provider=self.embedder.provider_name,
+                        task=getattr(self.embedder, "task", "retrieval.passage"),
+                        timestamp=datetime.utcnow(),
+                    )
                     self._upsert_section_embedding_metadata(
                         section["id"],
                         embedding,
-                        {
-                            "embedding_version": self.config.embedding.version,
-                            "embedding_provider": self.embedder.provider_name,
-                            "embedding_dimensions": len(embedding),
-                            "embedding_task": getattr(
-                                self.embedder, "task", "retrieval.passage"
-                            ),
-                            "embedding_timestamp": datetime.utcnow(),
-                        },
+                        embedding_metadata,
                     )
 
                 else:  # neo4j primary
@@ -635,40 +727,45 @@ class GraphBuilder:
         # Use UUID5 with a namespace to ensure deterministic mapping
         point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, node_id))
 
-        # Phase 7C.7: Get embedding metadata from provider
-        emb_version = self.config.embedding.version
-        emb_provider = self.embedder.provider_name
-        emb_dimensions = len(embedding)
-        emb_task = getattr(self.embedder, "task", "retrieval.passage")
+        # Phase 7C.7: Create canonical embedding metadata
+        embedding_metadata = canonicalize_embedding_metadata(
+            embedding_model=self.config.embedding.version,  # Maps to embedding_version
+            dimensions=len(embedding),
+            provider=self.embedder.provider_name,
+            task=getattr(self.embedder, "task", "retrieval.passage"),
+            timestamp=datetime.utcnow(),
+        )
+
+        # Build payload with canonical fields
+        payload = {
+            "node_id": node_id,  # Original section_id for matching
+            "node_label": label,
+            "document_id": document_id,
+            "document_uri": document_uri,
+            "source_uri": source_uri,
+            "title": section.get("title"),
+            "anchor": section.get("anchor"),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            # Add all canonical embedding fields
+            **embedding_metadata,
+        }
+
+        # Ensure no legacy embedding_model field in payload
+        payload = ensure_no_embedding_model_in_payload(payload)
 
         # CRITICAL: Store original node_id in payload for reconciliation
         # Parity checks will use payload.node_id to match with Neo4j
         point = PointStruct(
             id=point_uuid,  # UUID compatible with Qdrant
             vector=embedding,
-            payload={
-                "node_id": node_id,  # Original section_id for matching
-                "node_label": label,
-                "document_id": document_id,
-                "document_uri": document_uri,
-                "source_uri": source_uri,
-                "title": section.get("title"),
-                "anchor": section.get("anchor"),
-                # Phase 7C.7: Embedding metadata for provenance tracking
-                "embedding_version": emb_version,
-                "embedding_provider": emb_provider,
-                "embedding_dimensions": emb_dimensions,
-                "embedding_task": emb_task,
-                "embedding_timestamp": datetime.utcnow().isoformat() + "Z",
-                "updated_at": datetime.utcnow().isoformat() + "Z",
-            },
+            payload=payload,
         )
 
         # Use validated upsert with dimension checking
         self.qdrant_client.upsert_validated(
             collection_name=collection,
             points=[point],
-            expected_dim=emb_dimensions,
+            expected_dim=embedding_metadata["embedding_dimensions"],
         )
 
         logger.debug(
@@ -676,8 +773,8 @@ class GraphBuilder:
             node_id=node_id,
             point_uuid=point_uuid,
             collection=collection,
-            provider=emb_provider,
-            dimensions=emb_dimensions,
+            provider=embedding_metadata["embedding_provider"],
+            dimensions=embedding_metadata["embedding_dimensions"],
         )
 
     def _upsert_to_neo4j_vector(self, node_id: str, embedding: List[float], label: str):
@@ -738,19 +835,15 @@ class GraphBuilder:
             embedding: Embedding vector (stored in Neo4j for tracking)
             metadata: Dict with embedding metadata fields (all required)
         """
-        # Phase 7C.7: Validate all required fields are present
-        required_fields = [
-            "embedding_version",
-            "embedding_provider",
-            "embedding_dimensions",
-            "embedding_timestamp",
-        ]
-        missing_fields = [f for f in required_fields if f not in metadata]
-        if missing_fields:
+        # Validate metadata using canonicalization helper
+        if not validate_embedding_metadata(metadata):
             raise ValueError(
-                f"Section {node_id} missing REQUIRED embedding metadata fields: {missing_fields}. "
-                "Ingestion blocked - all embedding metadata is mandatory."
+                f"Section {node_id} has invalid embedding metadata. "
+                "Ingestion blocked - metadata validation failed."
             )
+
+        # Ensure no legacy embedding_model field in metadata
+        metadata = ensure_no_embedding_model_in_payload(metadata)
 
         query = """
         MATCH (s:Section {id: $node_id})

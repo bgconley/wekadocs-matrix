@@ -51,7 +51,7 @@ class IndexRegistry:
             name: Index identifier (e.g., "weka_sections_v2")
             dims: Vector dimensions
             provider: Provider name (e.g., "jina-ai", "ollama")
-            model: Model identifier (e.g., "jina-embeddings-v4")
+            model: Model identifier (e.g., "jina-embeddings-v3", "ollama/nomic-embed")
             version: Model version for provenance
             collection_name: Qdrant collection name (defaults to name)
             is_active: Whether this is the active index for queries

@@ -145,7 +145,7 @@ class ProviderFactory:
         """
         # Get config from parameters or ENV
         provider = provider or os.getenv("RERANK_PROVIDER", "jina-ai")
-        model = model or os.getenv("RERANK_MODEL", "jina-reranker-v3")
+        model = model or os.getenv("RERANK_MODEL", "jina-reranker-v2-base-multilingual")
 
         logger.info(f"Creating rerank provider: provider={provider}, model={model}")
 
@@ -202,7 +202,7 @@ class ProviderFactory:
         embedding_dims = int(os.getenv("EMBEDDINGS_DIM", str(config.embedding.dims)))
 
         rerank_provider = os.getenv("RERANK_PROVIDER", "jina-ai")
-        rerank_model = os.getenv("RERANK_MODEL", "jina-reranker-v3")
+        rerank_model = os.getenv("RERANK_MODEL", "jina-reranker-v2-base-multilingual")
 
         logger.info(
             "=" * 60 + "\n"

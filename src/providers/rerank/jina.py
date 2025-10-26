@@ -1,9 +1,10 @@
 """
 Jina AI rerank provider implementation.
-Phase 7C: Remote API provider for jina-reranker-v3.
+Phase 7C: Remote API provider for jina-reranker-v2-base-multilingual.
 
 Features:
 - Cross-attention based reranking for high precision
+- Rate limiting (500 RPM, 1M TPM - standard API tier)
 - Exponential backoff with jitter
 - Circuit breaker for API failures
 - Comprehensive error handling
@@ -22,17 +23,27 @@ logger = logging.getLogger(__name__)
 
 class JinaRerankProvider:
     """
-    Jina AI rerank provider using jina-reranker-v3.
+    Jina AI rerank provider using jina-reranker-v2-base-multilingual.
 
     Applies cross-attention scoring to refine candidate ordering
     after initial ANN retrieval.
+
+    Key features:
+    - Rate limiting: 500 RPM, 1M TPM (Jina API limits - standard tier)
+    - Exponential backoff on errors
+    - Circuit breaker for resilience
+    - Shared rate limiter across all rerank calls
     """
 
     API_URL = "https://api.jina.ai/v1/rerank"
 
+    # Rate limit constants (Jina rerank API limits - standard tier, same as embeddings)
+    MAX_REQUESTS_PER_MINUTE = 500
+    MAX_TOKENS_PER_MINUTE = 1_000_000
+
     def __init__(
         self,
-        model: str = "jina-reranker-v3",
+        model: str = "jina-reranker-v2-base-multilingual",
         api_key: Optional[str] = None,
         timeout: int = 30,
     ):
@@ -69,9 +80,15 @@ class JinaRerankProvider:
         )
 
         # Initialize circuit breaker (shared with embedding provider)
-        from src.providers.embeddings.jina import CircuitBreaker
+        from src.providers.embeddings.jina import CircuitBreaker, RateLimiter
 
         self._circuit_breaker = CircuitBreaker(failure_threshold=5, timeout=300)
+
+        # Initialize rate limiter for rerank API (500 RPM, 1M TPM - standard tier)
+        self._rate_limiter = RateLimiter(
+            max_requests_per_minute=self.MAX_REQUESTS_PER_MINUTE,
+            max_tokens_per_minute=self.MAX_TOKENS_PER_MINUTE,
+        )
 
         logger.info(f"JinaRerankProvider initialized: model={model}")
 
@@ -158,7 +175,7 @@ class JinaRerankProvider:
 
     def _call_api(self, query: str, candidates: List[Dict], top_k: int) -> List[Dict]:
         """
-        Call Jina rerank API with exponential backoff.
+        Call Jina rerank API with rate limiting and exponential backoff.
 
         Args:
             query: Query text
@@ -176,6 +193,15 @@ class JinaRerankProvider:
 
         # Prepare documents for API
         documents = [cand["text"] for cand in candidates]
+
+        # Estimate tokens for rate limiting
+        # Query + all documents (conservative: 4 chars per token)
+        query_chars = len(query)
+        doc_chars = sum(len(doc) for doc in documents)
+        estimated_tokens = (query_chars + doc_chars) // 4
+
+        # Rate limiting - wait if needed
+        self._rate_limiter.wait_if_needed(estimated_tokens)
 
         for attempt in range(max_retries):
             try:
