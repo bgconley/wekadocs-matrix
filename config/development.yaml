@@ -19,7 +19,8 @@ embedding:
 
   # Version tracking for provenance
   # This ensures we can filter vectors by the model version used
-  version: "jina-v4-2025-01-23"  # Phase 7C: Updated version string
+  # For Jina models, the model name IS the version (they don't use dated tags)
+  version: "jina-embeddings-v4"  # Phase 7C: Actual Jina model identifier
 
   # Provider configuration (ENV overrideable via EMBEDDINGS_PROVIDER)
   provider: "jina-ai"  # Phase 7C: Changed from sentence-transformers

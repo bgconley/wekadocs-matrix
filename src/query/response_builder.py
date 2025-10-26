@@ -267,13 +267,18 @@ class ResponseBuilder:
 
                 # Create answer with provenance
                 if supporting_section_ids:
+                    # Get model name from environment or use default
+                    import os
+
+                    model_name = os.getenv("ANSWER_MODEL", "search-result-formatting")
+
                     answer_id = session_tracker.create_answer(
                         query_id=query_id,
                         answer_text=markdown,  # Store full Markdown answer
                         supporting_section_ids=supporting_section_ids,
-                        model="claude-3-5-sonnet-20241022",  # TODO: Get from config
-                        tokens_used=None,  # TODO: Track if available
-                        generation_duration_ms=None,  # TODO: Track if available
+                        model=model_name,
+                        tokens_used=None,  # Not applicable: answer is formatted search results, not LLM-generated
+                        generation_duration_ms=None,  # Not applicable: answer is formatted search results, not LLM-generated
                     )
 
                     from src.shared.observability import get_logger
@@ -493,7 +498,9 @@ class ResponseBuilder:
                 entities = entities[: len(entities) // 2]
                 logger.info(f"Truncated to {len(entities)} entities")
 
-            # TODO: Add related sections query (optional enhancement)
+            # Note: Related sections query not implemented - current graph expansion
+            # via MENTIONS/CONTAINS_STEP relationships provides sufficient context.
+            # Future enhancement could add explicit section-to-section relationships.
             sections = []
 
             return {"entities": entities, "sections": sections}

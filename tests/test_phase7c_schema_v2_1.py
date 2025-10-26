@@ -385,7 +385,7 @@ class TestSchemaV21Integration:
                     s.tokens = 10,
                     s.checksum = 'test',
                     s.vector_embedding = $vector,
-                    s.embedding_version = 'jina-v4-2025-01-23',
+                    s.embedding_version = 'jina-embeddings-v4',
                     s.embedding_provider = 'jina-ai',
                     s.embedding_timestamp = datetime(),
                     s.embedding_dimensions = 1024
