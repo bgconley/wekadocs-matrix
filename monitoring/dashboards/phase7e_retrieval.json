@@ -1,0 +1,155 @@
+{
+  "dashboard": {
+    "title": "Phase 7E: Hybrid Retrieval Performance",
+    "tags": ["phase7e", "retrieval", "performance"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 0,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Retrieval Latency (p50/p95/p99)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(hybrid_search_duration_seconds_bucket[5m]))",
+            "legendFormat": "p50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(hybrid_search_duration_seconds_bucket[5m]))",
+            "legendFormat": "p95 (SLO ≤500ms)",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(hybrid_search_duration_seconds_bucket[5m]))",
+            "legendFormat": "p99",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ms",
+            "label": "Latency"
+          }
+        ],
+        "thresholds": [
+          {
+            "value": 500,
+            "colorMode": "critical",
+            "op": "gt",
+            "fill": true,
+            "line": true
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Expansion Rate (10-40% target)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(graph_expansion_duration_seconds_count[5m])) / sum(rate(hybrid_search_duration_seconds_count[5m]))",
+            "legendFormat": "Expansion Rate",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "percentunit",
+            "label": "Rate",
+            "min": 0,
+            "max": 1
+          }
+        ],
+        "thresholds": [
+          {
+            "value": 0.10,
+            "colorMode": "custom",
+            "op": "lt",
+            "line": true
+          },
+          {
+            "value": 0.40,
+            "colorMode": "critical",
+            "op": "gt",
+            "line": true
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Fusion Method Usage",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "sum by (fusion_method) (rate(mcp_search_verbosity_total[5m]))",
+            "legendFormat": "{{fusion_method}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Cache Hit Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(cache_operations_total{result=\"hit\"}[5m])) / sum(rate(cache_operations_total[5m]))",
+            "legendFormat": "Hit Rate",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "percentunit",
+            "label": "Hit Rate",
+            "min": 0,
+            "max": 1
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Vector Search Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(vector_search_duration_seconds_bucket{store=\"qdrant\"}[5m]))",
+            "legendFormat": "Qdrant p95",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(qdrant_operation_latency_ms_bucket{operation=\"search\"}[5m]))",
+            "legendFormat": "Qdrant Search p95",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ms",
+            "label": "Latency"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Chunks Returned per Query",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "avg(mcp_traverse_nodes_found)",
+            "legendFormat": "Avg Chunks",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(mcp_traverse_nodes_found_bucket[5m]))",
+            "legendFormat": "p95 Chunks",
+            "refId": "B"
+          }
+        ]
+      }
+    ]
+  }
+}

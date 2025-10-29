@@ -1,0 +1,121 @@
+{
+  "dashboard": {
+    "title": "Phase 7E: SLO Monitoring",
+    "tags": ["phase7e", "slo", "alerts"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 0,
+    "refresh": "10s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Retrieval p95 Latency SLO (≤500ms)",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(hybrid_search_duration_seconds_bucket[5m])) * 1000",
+            "refId": "A"
+          }
+        ],
+        "format": "ms",
+        "thresholds": "500,600",
+        "colors": ["#299c46", "#e5ac0e", "#e24d42"],
+        "valueName": "current"
+      },
+      {
+        "id": 2,
+        "title": "Oversized Chunk Rate SLO (ZERO-tolerance)",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "sum(chunks_oversized_total) / sum(chunks_created_total)",
+            "refId": "A"
+          }
+        ],
+        "format": "percentunit",
+        "thresholds": "0,0.0001",
+        "colors": ["#299c46", "#e24d42", "#e24d42"],
+        "valueName": "current",
+        "colorBackground": true
+      },
+      {
+        "id": 3,
+        "title": "Integrity Failure Rate SLO (ZERO-tolerance)",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "sum(integrity_failures_total) / sum(integrity_checks_total)",
+            "refId": "A"
+          }
+        ],
+        "format": "percentunit",
+        "thresholds": "0,0.0001",
+        "colors": ["#299c46", "#e24d42", "#e24d42"],
+        "valueName": "current",
+        "colorBackground": true
+      },
+      {
+        "id": 4,
+        "title": "Expansion Rate SLO (10-40%)",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "sum(rate(graph_expansion_duration_seconds_count[5m])) / sum(rate(hybrid_search_duration_seconds_count[5m]))",
+            "refId": "A"
+          }
+        ],
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {
+              "value": 0,
+              "color": "red"
+            },
+            {
+              "value": 0.10,
+              "color": "green"
+            },
+            {
+              "value": 0.40,
+              "color": "yellow"
+            },
+            {
+              "value": 0.50,
+              "color": "red"
+            }
+          ]
+        },
+        "unit": "percentunit",
+        "min": 0,
+        "max": 0.6
+      },
+      {
+        "id": 5,
+        "title": "Ingestion Duration SLO (≤10s target)",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(ingestion_duration_seconds_bucket[5m]))",
+            "refId": "A"
+          }
+        ],
+        "format": "s",
+        "thresholds": "10,15",
+        "colors": ["#299c46", "#e5ac0e", "#e24d42"],
+        "valueName": "current"
+      },
+      {
+        "id": 6,
+        "title": "SLO Violations (Last Hour)",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "ALERTS{alertname=~\".*SLO.*\", alertstate=\"firing\"}",
+            "refId": "A",
+            "format": "table"
+          }
+        ]
+      }
+    ]
+  }
+}

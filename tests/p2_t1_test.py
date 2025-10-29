@@ -3,8 +3,12 @@ Phase 2, Task 2.1 Tests: NL→Cypher Planner
 Tests templates-first query planning with NO MOCKS.
 """
 
-from src.query.planner import (EntityLinker, IntentClassifier, QueryPlanner,
-                               TemplateLibrary)
+from src.query.planner import (
+    EntityLinker,
+    IntentClassifier,
+    QueryPlanner,
+    TemplateLibrary,
+)
 
 
 class TestIntentClassifier:

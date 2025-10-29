@@ -86,15 +86,55 @@ class VectorSearchConfig(BaseModel):
     neo4j: Neo4jVectorConfig
 
 
+class BM25Config(BaseModel):
+    """BM25/keyword retrieval configuration"""
+
+    enabled: bool = True
+    top_k: int = 50
+
+
+class ExpansionConfig(BaseModel):
+    """Bounded adjacency expansion configuration for Phase 7E"""
+
+    enabled: bool = True
+    max_neighbors: int = 1
+    query_min_tokens: int = 12
+    score_delta_max: float = 0.02
+
+
 class HybridSearchConfig(BaseModel):
-    vector_weight: float = 0.7
-    graph_weight: float = 0.3
+    enabled: bool = True
+    method: str = "rrf"  # Phase 7E: rrf or weighted
+    rrf_k: int = 60  # Phase 7E: RRF constant
+    fusion_alpha: float = 0.6  # Phase 7E: Vector weight for weighted fusion
+    vector_weight: float = 0.7  # Legacy
+    graph_weight: float = 0.3  # Legacy
     top_k: int = 20
+    bm25: BM25Config = Field(default_factory=BM25Config)  # Phase 7E
+    expansion: ExpansionConfig = Field(default_factory=ExpansionConfig)  # Phase 7E
+
+
+class ResponseConfig(BaseModel):
+    """Response building configuration for Phase 7E"""
+
+    max_bytes_full: int = 32768  # 32KB limit for FULL mode
+    max_sections: int = 10
+    include_citations: bool = True
+    answer_context_max_tokens: int = 4500  # Phase 7E: Max tokens for LLM context window
+
+
+class GraphSearchConfig(BaseModel):
+    """Graph search configuration"""
+
+    max_depth: int = 3
+    max_related_per_seed: int = 20
 
 
 class SearchConfig(BaseModel):
     vector: VectorSearchConfig
     hybrid: HybridSearchConfig
+    graph: GraphSearchConfig = Field(default_factory=GraphSearchConfig)
+    response: ResponseConfig = Field(default_factory=ResponseConfig)  # Phase 7E-2
 
 
 class RateLimitConfig(BaseModel):
@@ -162,9 +202,82 @@ class L2CacheConfig(BaseModel):
     key_prefix: str = "weka:cache:v1"
 
 
+class CacheInvalidationConfig(BaseModel):
+    """
+    Cache invalidation configuration for Phase 7E-3.
+
+    Epoch-based invalidation (preferred): O(1) invalidation by bumping epoch counters.
+    Pattern-scan (fallback): Scans and deletes keys matching patterns.
+
+    Reference: Canonical Spec L3184-3281 (epoch), L3116-3183 (scan)
+    """
+
+    mode: str = Field(
+        default="epoch",
+        description="Invalidation mode: 'epoch' (preferred O(1)) or 'scan' (fallback)",
+    )
+    namespace: str = Field(
+        default="rag:v1", description="Cache namespace for epoch/pattern keys"
+    )
+    redis_uri: Optional[str] = Field(
+        default=None,
+        description="Redis URI for invalidation (falls back to CACHE_REDIS_URI or REDIS_URL env)",
+    )
+
+    @validator("mode")
+    def validate_mode(cls, v):
+        """Validate invalidation mode"""
+        valid_modes = {"epoch", "scan"}
+        if v not in valid_modes:
+            raise ValueError(f"mode must be one of {valid_modes}, got {v}")
+        return v
+
+
 class CacheConfig(BaseModel):
     l1: L1CacheConfig
     l2: L2CacheConfig
+    invalidation: CacheInvalidationConfig
+
+
+class MonitoringConfig(BaseModel):
+    """
+    Monitoring and observability configuration for Phase 7E-4.
+
+    Reference: Canonical Spec L4916-4976, L3513-3528
+    """
+
+    # Health checks
+    health_checks_enabled: bool = Field(
+        default=True, description="Enable health checks at startup"
+    )
+    health_check_fail_fast: bool = Field(
+        default=True, description="Fail startup if health checks fail"
+    )
+
+    # SLO monitoring
+    slo_monitoring_enabled: bool = Field(
+        default=True, description="Enable SLO monitoring and alerting"
+    )
+
+    # SLO thresholds (from canonical spec)
+    retrieval_p95_target_ms: int = Field(
+        default=500, description="Retrieval p95 latency target in milliseconds"
+    )
+    ingestion_target_seconds: int = Field(
+        default=10, description="Ingestion duration target in seconds"
+    )
+    expansion_rate_min: float = Field(
+        default=0.10, description="Minimum expansion rate (10%)"
+    )
+    expansion_rate_max: float = Field(
+        default=0.40, description="Maximum expansion rate (40%)"
+    )
+
+    # Metrics collection
+    metrics_enabled: bool = Field(default=True, description="Enable metrics collection")
+    metrics_aggregation_enabled: bool = Field(
+        default=True, description="Enable metrics aggregation for dashboards"
+    )
 
 
 class AppConfig(BaseModel):
@@ -216,6 +329,7 @@ class Config(WekaBaseModel):
     feature_flags: FeatureFlagsConfig = Field(
         default_factory=FeatureFlagsConfig
     )  # Phase 7C
+    monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)  # Phase 7E-4
 
     class Config:
         populate_by_name = True  # Allow both graph_schema and schema

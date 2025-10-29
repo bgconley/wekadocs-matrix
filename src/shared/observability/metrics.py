@@ -245,6 +245,63 @@ ingestion_duration_seconds = Histogram(
     buckets=(0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0),
 )
 
+# ===== Phase 7E-4: Chunk quality metrics =====
+chunk_token_distribution = Histogram(
+    "chunk_token_distribution",
+    "Token count distribution for chunks",
+    buckets=(50, 100, 200, 300, 500, 700, 1000, 1500, 2000, 3000, 5000, 7900),
+)
+
+chunks_created_total = Counter(
+    "chunks_created_total",
+    "Total chunks created during ingestion",
+    ["document_id"],
+)
+
+chunks_oversized_total = Counter(
+    "chunks_oversized_total",
+    "Total oversized chunks (ZERO tolerance SLO)",
+    ["document_id"],
+)
+
+chunk_quality_score = Histogram(
+    "chunk_quality_score",
+    "Chunk quality scores (token count distribution)",
+    ["quality_band"],  # under_min, optimal, over_max
+    buckets=(0, 200, 500, 1000, 2000, 5000, 7900, 10000),
+)
+
+# ===== Phase 7E-4: Integrity check metrics =====
+integrity_checks_total = Counter(
+    "integrity_checks_total",
+    "Total integrity checks performed",
+    ["check_type"],  # sha256, dimension, schema
+)
+
+integrity_failures_total = Counter(
+    "integrity_failures_total",
+    "Total integrity check failures (ZERO tolerance SLO)",
+    ["check_type", "failure_reason"],
+)
+
+# ===== Phase 7E-4: Retrieval expansion metrics =====
+retrieval_expansion_total = Counter(
+    "retrieval_expansion_total",
+    "Total retrieval expansion events",
+    ["expansion_reason"],  # query_long, scores_close, forced, disabled
+)
+
+retrieval_expansion_chunks_added = Histogram(
+    "retrieval_expansion_chunks_added",
+    "Number of chunks added via expansion",
+    buckets=(0, 1, 2, 3, 5, 10, 20),
+)
+
+retrieval_expansion_rate_current = Gauge(
+    "retrieval_expansion_rate_current",
+    "Current expansion rate (rolling window)",
+)
+
 # ===== Reconciliation metrics =====
 reconciliation_drift_percentage = Gauge(
     "reconciliation_drift_percentage",

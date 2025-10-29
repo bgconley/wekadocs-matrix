@@ -4,13 +4,23 @@
 # See: /docs/pseudocode-reference.md → Task 3.3
 # Pre-Phase 7 B3: Modified to use embedding provider abstraction
 
+import os
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import redis
 from neo4j import Driver
 
+# Phase 7E-4: Monitoring imports
+from src.monitoring.metrics import MetricsCollector
+from src.monitoring.slos import check_slos_and_log
+from src.shared.chunk_utils import (
+    create_chunk_metadata,
+    generate_chunk_id,
+    validate_chunk_schema,
+)
 from src.shared.config import Config
 from src.shared.embedding_fields import (
     canonicalize_embedding_metadata,
@@ -18,6 +28,12 @@ from src.shared.embedding_fields import (
     validate_embedding_metadata,
 )
 from src.shared.observability import get_logger
+from src.shared.observability.metrics import (
+    chunk_token_distribution,
+    chunks_created_total,
+    chunks_oversized_total,
+    ingestion_duration_seconds,
+)
 
 logger = get_logger(__name__)
 
@@ -68,6 +84,8 @@ class GraphBuilder:
         Upsert document, sections, entities, and mentions to graph.
         Idempotent - can be run multiple times safely.
 
+        Phase 7E-4: Now collects comprehensive metrics and monitors SLOs.
+
         Args:
             document: Document metadata
             sections: List of sections
@@ -75,7 +93,7 @@ class GraphBuilder:
             mentions: List of MENTIONS relationships
 
         Returns:
-            Stats dict
+            Stats dict with metrics and SLO violation information
         """
         start_time = time.time()
         stats = {
@@ -94,21 +112,17 @@ class GraphBuilder:
             # Step 1: Upsert Document node
             self._upsert_document_node(session, document)
 
-            # Step 2: Upsert Sections in batches
+            # Step 2a: Phase 7E-1 Replace-by-set GC - Delete stale chunks BEFORE upsert
+            # This ensures idempotency: only current chunks remain after ingestion
+            self._delete_stale_chunks_neo4j(session, document["id"], sections)
+
+            # Step 2b: Upsert Sections in batches (with chunk schema)
             stats["sections_upserted"] = self._upsert_sections(
                 session, document["id"], sections
             )
 
-            # Step 2b: Remove stale sections no longer present
-            removed = self._remove_missing_sections(
-                session, document["id"], [s["id"] for s in sections]
-            )
-            if removed:
-                logger.debug(
-                    "Removed stale sections",
-                    document_id=document["id"],
-                    removed_count=removed,
-                )
+            # Step 2c: Create NEXT_CHUNK relationships for adjacency
+            self._create_next_chunk_relationships(session, document["id"], sections)
 
             # Step 3: Upsert Entities in batches
             stats["entities_upserted"] = self._upsert_entities(session, entities)
@@ -120,6 +134,14 @@ class GraphBuilder:
         embedding_stats = self._process_embeddings(document, sections, entities)
         stats["embeddings_computed"] = embedding_stats["computed"]
         stats["vectors_upserted"] = embedding_stats["upserted"]
+
+        # Step 6: Phase 7E-3 - Invalidate caches AFTER Neo4j and Qdrant commits
+        # Reference: Canonical Spec L3313-3336 (invalidate post-commit)
+        chunk_ids = [s["id"] for s in sections if "id" in s]
+        invalidation_stats = self._invalidate_caches_post_ingest(
+            document["id"], chunk_ids
+        )
+        stats["cache_invalidation"] = invalidation_stats
 
         # Optional reconciliation step to repair drift for legacy data
         if (
@@ -135,7 +157,70 @@ class GraphBuilder:
             except Exception as exc:
                 logger.warning("Reconciliation after upsert failed", error=str(exc))
 
-        stats["duration_ms"] = int((time.time() - start_time) * 1000)
+        # Phase 7E-4: Collect metrics and monitor SLOs
+        duration_seconds = time.time() - start_time
+        stats["duration_ms"] = int(duration_seconds * 1000)
+
+        if self.config.monitoring.metrics_enabled:
+            # Collect chunk metrics with canonical spec defaults
+            # Reference: Canonical Spec - TARGET_MIN=200, ABSOLUTE_MAX=7900
+            collector = MetricsCollector(
+                target_min=200,
+                absolute_max=7900,
+            )
+            chunk_metrics = collector.collect_chunk_metrics(sections)
+            ingestion_metrics = collector.collect_ingestion_metrics(
+                document_id=document["id"],
+                chunks=sections,
+                duration_seconds=duration_seconds,
+            )
+
+            # Emit Prometheus metrics for each chunk
+            for section in sections:
+                token_count = section.get("token_count", 0)
+                chunk_token_distribution.observe(token_count)
+                chunks_created_total.labels(document_id=document["id"]).inc()
+
+                # Track oversized chunks (ZERO tolerance SLO)
+                # Reference: Canonical Spec ABSOLUTE_MAX=7900
+                if token_count > 7900:
+                    chunks_oversized_total.labels(document_id=document["id"]).inc()
+
+            # Record ingestion duration
+            ingestion_duration_seconds.observe(duration_seconds)
+
+            # Store metrics in stats for response
+            stats["chunk_metrics"] = chunk_metrics.to_dict()
+            stats["ingestion_metrics"] = ingestion_metrics.to_dict()
+
+            # Phase 7E-4: Check SLOs if monitoring enabled
+            if self.config.monitoring.slo_monitoring_enabled:
+                slo_metrics = collector.compute_slo_metrics(chunk_metrics)
+                violations = check_slos_and_log(slo_metrics, logger)
+
+                stats["slo_metrics"] = slo_metrics
+                stats["slo_violations"] = [
+                    {
+                        "slo": v.slo_name,
+                        "level": v.level.value,
+                        "message": v.message,
+                        "value": v.value,
+                        "threshold": v.threshold,
+                    }
+                    for v in violations
+                ]
+
+                # Log critical violations
+                for v in violations:
+                    if v.level.value == "page":
+                        logger.error(
+                            "CRITICAL SLO violation",
+                            slo=v.slo_name,
+                            value=v.value,
+                            threshold=v.threshold,
+                            document_id=document["id"],
+                        )
+
         logger.info("Graph upsert complete", stats=stats)
 
         return stats
@@ -160,47 +245,197 @@ class GraphBuilder:
         """
         Upsert Section nodes with dual-labeling and HAS_SECTION relationships in batches.
 
-        Phase 7C.7: Dual-label as Section:Chunk for v3 compatibility (Session 06-08).
+        Phase 7E-1: Creates :Section:Chunk nodes with full canonical chunk schema.
+        Each section becomes a single-section chunk with deterministic ID generation.
         Embedding metadata will be set later in _process_embeddings after vectors are generated.
         """
         batch_size = self.config.ingestion.batch_size
         total_sections = 0
 
-        for i in range(0, len(sections), batch_size):
-            batch = sections[i : i + batch_size]
+        # Phase 7E-1: Enrich sections with chunk metadata IN-PLACE
+        # This ensures chunk metadata is available to _process_embeddings later
+        for section in sections:
+            # CRITICAL: Preserve original section ID before generating chunk ID
+            # Store original ID in original_section_ids if not already set
+            if "original_section_ids" not in section:
+                original_section_id = section["id"]
 
-            # Phase 7C.7: MERGE with dual-label :Section:Chunk
+                # Create chunk metadata (single-section chunks for Phase 7E-1)
+                chunk_meta = create_chunk_metadata(
+                    section_id=original_section_id,  # Use preserved original ID
+                    document_id=document_id,
+                    level=section.get("level", 3),
+                    order=section.get("order", 0),
+                    heading=section.get("title"),
+                    parent_section_id=None,  # Could derive from hierarchy if needed
+                    is_combined=False,  # Single-section chunks
+                    is_split=False,
+                    boundaries_json="{}",
+                    token_count=section.get("tokens", 0),
+                )
+
+                # Update section in-place with chunk metadata
+                # This overwrites section["id"] with chunk ID, but we've saved original
+                section.update(chunk_meta)
+
+                # Validate chunk schema
+                if not validate_chunk_schema(section):
+                    raise ValueError(
+                        f"Invalid chunk schema for section {section['id']}. "
+                        "Ingestion blocked - schema validation failed."
+                    )
+
+        # Use enriched sections for batch processing
+        chunks = sections
+
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i : i + batch_size]
+
+            # Phase 7E-1: MERGE with dual-label :Section:Chunk + canonical chunk fields
             query = """
-            UNWIND $sections as sec
-            MERGE (s:Section:Chunk {id: sec.id})
-            SET s.document_id = sec.document_id,
-                s.level = sec.level,
-                s.title = sec.title,
-                s.anchor = sec.anchor,
-                s.order = sec.order,
-                s.text = sec.text,
-                s.tokens = sec.tokens,
-                s.checksum = sec.checksum,
+            UNWIND $chunks as chunk
+            MERGE (s:Section:Chunk {id: chunk.id})
+            SET s.document_id = chunk.document_id,
+                s.level = chunk.level,
+                s.title = chunk.heading,
+                s.anchor = chunk.anchor,
+                s.order = chunk.order,
+                s.heading = chunk.heading,
+                s.parent_section_id = chunk.parent_section_id,
+                s.text = chunk.text,
+                s.tokens = chunk.tokens,
+                s.token_count = chunk.token_count,
+                s.checksum = chunk.checksum,
+                s.original_section_ids = chunk.original_section_ids,
+                s.is_combined = chunk.is_combined,
+                s.is_split = chunk.is_split,
+                s.boundaries_json = chunk.boundaries_json,
                 s.updated_at = datetime()
-            WITH s, sec
+            WITH s, chunk
             MATCH (d:Document {id: $document_id})
             MERGE (d)-[r:HAS_SECTION]->(s)
-            SET r.order = sec.order,
+            SET r.order = chunk.order,
                 r.updated_at = datetime()
             RETURN count(s) as count
             """
 
-            result = session.run(query, sections=batch, document_id=document_id)
+            result = session.run(query, chunks=batch, document_id=document_id)
             count = result.single()["count"]
             total_sections += count
 
             logger.debug(
-                "Section batch upserted (dual-labeled)",
+                "Chunk batch upserted (dual-labeled with canonical schema)",
                 batch_num=i // batch_size + 1,
                 count=count,
             )
 
         return total_sections
+
+    def _delete_stale_chunks_neo4j(
+        self, session, document_id: str, current_sections: List[Dict]
+    ):
+        """
+        Phase 7E-1: Replace-by-set GC for Neo4j chunks.
+
+        Delete all chunks for this document that are NOT in the current set.
+        This ensures idempotency - re-ingesting produces exactly the current chunks.
+
+        Args:
+            session: Neo4j session
+            document_id: Document identifier
+            current_sections: List of current sections (will become chunks)
+        """
+        # Generate chunk IDs for current sections
+        current_chunk_ids = []
+        for section in current_sections:
+            chunk_id = generate_chunk_id(document_id, [section["id"]])
+            current_chunk_ids.append(chunk_id)
+
+        # Delete chunks not in current set
+        delete_query = """
+        MATCH (d:Document {id: $document_id})-[:HAS_SECTION]->(c:Chunk)
+        WHERE NOT c.id IN $current_chunk_ids
+        DETACH DELETE c
+        RETURN count(c) as deleted
+        """
+
+        result = session.run(
+            delete_query,
+            document_id=document_id,
+            current_chunk_ids=current_chunk_ids,
+        )
+
+        deleted = result.single()["deleted"] or 0
+
+        if deleted > 0:
+            logger.info(
+                "Deleted stale chunks (replace-by-set GC)",
+                document_id=document_id,
+                deleted_count=deleted,
+            )
+
+    def _create_next_chunk_relationships(
+        self, session, document_id: str, sections: List[Dict]
+    ):
+        """
+        Phase 7E-1: Create NEXT_CHUNK relationships for adjacency traversal.
+
+        Links chunks by order within the same parent_section_id (or document if no parent).
+        Enables bounded expansion (±1 neighbor) in retrieval.
+
+        Args:
+            session: Neo4j session
+            document_id: Document identifier
+            sections: List of sections (ordered)
+        """
+        # Generate chunk data with IDs
+        chunk_data = []
+        for section in sections:
+            chunk_id = generate_chunk_id(document_id, [section["id"]])
+            chunk_data.append(
+                {
+                    "id": chunk_id,
+                    "order": section.get("order", 0),
+                    "parent_section_id": section.get("parent_section_id"),
+                }
+            )
+
+        # Sort by order to ensure correct adjacency
+        chunk_data.sort(key=lambda x: x["order"])
+
+        # Create NEXT_CHUNK edges between adjacent chunks
+        if len(chunk_data) < 2:
+            return  # Need at least 2 chunks for relationships
+
+        query = """
+        UNWIND $pairs AS pair
+        MATCH (c1:Chunk {id: pair.from_id})
+        MATCH (c2:Chunk {id: pair.to_id})
+        MERGE (c1)-[r:NEXT_CHUNK]->(c2)
+        SET r.parent_section_id = pair.parent_section_id,
+            r.updated_at = datetime()
+        RETURN count(r) as count
+        """
+
+        pairs = []
+        for i in range(len(chunk_data) - 1):
+            pairs.append(
+                {
+                    "from_id": chunk_data[i]["id"],
+                    "to_id": chunk_data[i + 1]["id"],
+                    "parent_section_id": chunk_data[i]["parent_section_id"],
+                }
+            )
+
+        if pairs:
+            result = session.run(query, pairs=pairs)
+            count = result.single()["count"] or 0
+
+            logger.debug(
+                "NEXT_CHUNK relationships created",
+                document_id=document_id,
+                count=count,
+            )
 
     def _remove_missing_sections(
         self, session, document_id: str, valid_section_ids: List[str]
@@ -522,50 +757,54 @@ class GraphBuilder:
                 actual_dims=self.embedder.dims,
             )
 
-        # Purge existing vectors for this document BEFORE upserting to prevent drift
-        source_uri = document.get("source_uri", "")
-        document_uri = Path(source_uri).name if source_uri else source_uri
+        # Phase 7E-1: Replace-by-set GC for Qdrant chunks
+        # Delete all chunks for this document BEFORE upserting current set
+        document_id = document.get("id") or (
+            sections[0].get("document_id") if sections else None
+        )
 
-        if sections and self.vector_primary == "qdrant" and self.qdrant_client:
+        if (
+            sections
+            and self.vector_primary == "qdrant"
+            and self.qdrant_client
+            and document_id
+        ):
             collection_name = self.config.search.vector.qdrant.collection_name
+
+            # Delete all chunks for this document (replace-by-set)
             filter_must = [
-                {"key": "node_label", "match": {"value": "Section"}},
                 {
-                    "key": "embedding_version",
-                    "match": {"value": self.embedding_version},
-                },
+                    "key": "node_label",
+                    "match": {"value": "Section"},
+                },  # Dual-labeled as Chunk
+                {"key": "document_id", "match": {"value": document_id}},
             ]
-            if source_uri:
-                filter_must.append(
-                    {"key": "document_uri", "match": {"value": source_uri}}
-                )
-            else:
-                document_id = document.get("id") or sections[0].get("document_id")
-                if document_id:
-                    filter_must.append(
-                        {"key": "document_id", "match": {"value": document_id}}
-                    )
+
             try:
                 self.qdrant_client.delete_compat(
                     collection_name=collection_name,
                     points_selector={"filter": {"must": filter_must}},
                     wait=True,
                 )
-                logger.debug(
-                    "Purged existing vectors for document",
+                logger.info(
+                    "Deleted stale Qdrant chunks (replace-by-set GC)",
                     collection=collection_name,
-                    document_uri=source_uri or document.get("id"),
+                    document_id=document_id,
                 )
             except Exception as exc:
                 logger.warning(
-                    "Failed to purge existing vectors before upsert",
+                    "Failed to delete stale Qdrant chunks",
                     error=str(exc),
                     collection=collection_name,
-                    document_uri=source_uri or document.get("id"),
+                    document_id=document_id,
                 )
 
         # Phase 7C.7: Process sections with 1024-D embeddings (simplified, fresh start)
         # Batch process embeddings for efficiency
+        # Extract document metadata for sections
+        source_uri = document.get("source_uri", "")
+        document_uri = document.get("source_uri", "")  # Use source_uri as document_uri
+
         sections_to_embed = []
         for section in sections:
             section.setdefault("source_uri", source_uri)
@@ -577,12 +816,14 @@ class GraphBuilder:
         if sections_to_embed:
             texts = [text for _, text in sections_to_embed]
 
-            # Generate embeddings using configured provider (Jina v4 @ 1024-D by default)
+            # Generate embeddings using configured provider (Jina v3 @ 1024-D)
             embeddings = self.embedder.embed_documents(texts)
 
             # Process each section with its embedding
             for (section, _), embedding in zip(sections_to_embed, embeddings):
-                # Phase 7C.7: CRITICAL - Validate dimension before upsert
+                # Phase 7E-1: CRITICAL - Comprehensive validation layer
+
+                # Validate 1: Dimension check (1024-D for Jina v3)
                 if len(embedding) != self.config.embedding.dims:
                     raise ValueError(
                         f"Embedding dimension mismatch for section {section['id']}: "
@@ -590,12 +831,33 @@ class GraphBuilder:
                         "Ingestion blocked - dimension safety enforced."
                     )
 
-                # Phase 7C.7: CRITICAL - Validate required embedding fields present
-                # This enforces schema v2.1 required fields at application layer
+                # Validate 2: Non-empty embedding
                 if not embedding or len(embedding) == 0:
                     raise ValueError(
                         f"Section {section['id']} missing REQUIRED vector_embedding. "
                         "Ingestion blocked - embeddings are mandatory in hybrid system."
+                    )
+
+                # Validate 3: Chunk schema completeness
+                if not validate_chunk_schema(section):
+                    raise ValueError(
+                        f"Section {section['id']} missing required chunk fields. "
+                        "Ingestion blocked - chunk schema validation failed."
+                    )
+
+                # Validate 4: Embedding metadata completeness
+                test_metadata = canonicalize_embedding_metadata(
+                    embedding_model=self.config.embedding.version,
+                    dimensions=len(embedding),
+                    provider=self.embedder.provider_name,
+                    task=getattr(self.embedder, "task", "retrieval.passage"),
+                    timestamp=datetime.utcnow(),
+                )
+
+                if not validate_embedding_metadata(test_metadata):
+                    raise ValueError(
+                        f"Section {section['id']} has invalid embedding metadata. "
+                        "Ingestion blocked - metadata validation failed."
                     )
 
                 stats["computed"] += 1
@@ -700,14 +962,14 @@ class GraphBuilder:
         """
         Upsert embedding to Qdrant with deterministic UUID mapping.
 
-        Phase 7C.7: Simplified for fresh start - uses configured collection and provider metadata.
+        Phase 7E-1: Enhanced with chunk-specific payload fields from canonical schema.
 
         Args:
-            node_id: Node identifier
-            embedding: Embedding vector
-            section: Section data
+            node_id: Chunk identifier (deterministic)
+            embedding: Embedding vector (1024-D)
+            section: Section/Chunk data
             document: Document data
-            label: Node label
+            label: Node label (Section/Chunk)
         """
         if not self.qdrant_client:
             logger.warning("Qdrant client not available")
@@ -723,11 +985,11 @@ class GraphBuilder:
         document_uri = Path(source_uri).name if source_uri else source_uri
         document_id = document.get("id") or section.get("document_id")
 
-        # Convert section_id (SHA-256 hex string) to UUID for Qdrant compatibility
+        # Convert chunk_id to UUID for Qdrant compatibility
         # Use UUID5 with a namespace to ensure deterministic mapping
         point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, node_id))
 
-        # Phase 7C.7: Create canonical embedding metadata
+        # Phase 7E-1: Create canonical embedding metadata
         embedding_metadata = canonicalize_embedding_metadata(
             embedding_model=self.config.embedding.version,  # Maps to embedding_version
             dimensions=len(embedding),
@@ -736,17 +998,34 @@ class GraphBuilder:
             timestamp=datetime.utcnow(),
         )
 
-        # Build payload with canonical fields
+        # Phase 7E-1: Build payload with canonical chunk fields
         payload = {
-            "node_id": node_id,  # Original section_id for matching
+            # Core identifiers
+            "node_id": node_id,  # Chunk ID for matching
             "node_label": label,
             "document_id": document_id,
             "document_uri": document_uri,
             "source_uri": source_uri,
+            # Chunk-specific fields (Phase 7E-1)
+            "id": node_id,
+            "parent_section_id": section.get("parent_section_id"),
+            "level": section.get("level", 3),
+            "order": section.get("order", 0),
+            "heading": section.get("title") or section.get("heading", ""),
+            "text": section.get("text", ""),
+            "token_count": section.get("token_count") or section.get("tokens", 0),
+            "is_combined": section.get("is_combined", False),
+            "is_split": section.get("is_split", False),
+            "original_section_ids": section.get(
+                "original_section_ids", [section.get("id")]
+            ),
+            "boundaries_json": section.get("boundaries_json", "{}"),
+            # Legacy fields (for compatibility)
             "title": section.get("title"),
             "anchor": section.get("anchor"),
+            # Timestamps
             "updated_at": datetime.utcnow().isoformat() + "Z",
-            # Add all canonical embedding fields
+            # Canonical embedding fields
             **embedding_metadata,
         }
 
@@ -769,12 +1048,14 @@ class GraphBuilder:
         )
 
         logger.debug(
-            "Vector upserted to Qdrant",
+            "Chunk vector upserted to Qdrant with canonical schema",
             node_id=node_id,
             point_uuid=point_uuid,
             collection=collection,
             provider=embedding_metadata["embedding_provider"],
             dimensions=embedding_metadata["embedding_dimensions"],
+            is_combined=payload["is_combined"],
+            original_section_count=len(payload["original_section_ids"]),
         )
 
     def _upsert_to_neo4j_vector(self, node_id: str, embedding: List[float], label: str):
@@ -875,6 +1156,99 @@ class GraphBuilder:
             dimensions=metadata["embedding_dimensions"],
             vector_stored=True,
         )
+
+    def _invalidate_caches_post_ingest(
+        self, document_id: str, chunk_ids: List[str]
+    ) -> Dict[str, any]:
+        """
+        Invalidate caches after successful Neo4j + Qdrant commits.
+
+        Phase 7E-3: Cache invalidation MUST happen AFTER both stores commit
+        to avoid race conditions where stale cache is repopulated before
+        epoch bump.
+
+        Supports two modes:
+        - epoch (preferred): O(1) invalidation by bumping epoch counters
+        - scan (fallback): Pattern-scan deletion
+
+        Args:
+            document_id: Document identifier
+            chunk_ids: List of chunk identifiers that were upserted
+
+        Returns:
+            Dict with invalidation stats
+
+        Reference: Canonical Spec L3313-3336, L4506-4539
+        """
+        cache_mode = os.getenv("CACHE_MODE", "epoch")
+        redis_url = os.getenv(
+            "CACHE_REDIS_URI", os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        )
+        namespace = os.getenv("CACHE_NS", "rag:v1")
+
+        stats = {
+            "mode": cache_mode,
+            "document_id": document_id,
+            "chunk_count": len(chunk_ids),
+            "success": False,
+            "keys_deleted": 0,
+            "epoch_bumped": False,
+        }
+
+        try:
+            if cache_mode == "epoch":
+                # Preferred: O(1) epoch bump
+                from tools.redis_epoch_bump import (
+                    bump_chunk_epochs,
+                    bump_doc_epoch,
+                )
+
+                r = redis.Redis.from_url(redis_url, decode_responses=True)
+
+                # Bump document epoch
+                doc_epoch = bump_doc_epoch(r, namespace, document_id)
+                stats["doc_epoch"] = doc_epoch
+
+                # Bump chunk epochs
+                if chunk_ids:
+                    chunk_total = bump_chunk_epochs(r, namespace, chunk_ids)
+                    stats["chunk_epoch_total"] = chunk_total
+
+                stats["epoch_bumped"] = True
+                stats["success"] = True
+
+                logger.info(
+                    "Cache invalidation (epoch) complete",
+                    document_id=document_id,
+                    doc_epoch=doc_epoch,
+                    chunks=len(chunk_ids),
+                )
+
+            else:
+                # Fallback: pattern-scan deletion
+                from tools.redis_invalidation import invalidate
+
+                deleted = invalidate(redis_url, namespace, document_id, chunk_ids)
+                stats["keys_deleted"] = deleted
+                stats["success"] = True
+
+                logger.info(
+                    "Cache invalidation (scan) complete",
+                    document_id=document_id,
+                    keys_deleted=deleted,
+                    chunks=len(chunk_ids),
+                )
+
+        except Exception as e:
+            logger.warning(
+                "Cache invalidation failed (non-fatal)",
+                document_id=document_id,
+                mode=cache_mode,
+                error=str(e),
+            )
+            stats["error"] = str(e)
+
+        return stats
 
 
 # Integration test wrapper

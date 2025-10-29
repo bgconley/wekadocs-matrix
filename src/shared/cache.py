@@ -282,6 +282,10 @@ class TieredCache:
 
         self.key_prefix_base = l2_config.key_prefix
 
+        # Phase 7E-3: Epoch invalidation namespace (separate from cache key prefix)
+        # Epochs are stored in simple HASHes: {namespace}:doc_epoch, {namespace}:chunk_epoch
+        self.epoch_namespace = config.cache.invalidation.namespace
+
     def _make_cache_key(self, key_prefix: str, params: Dict[str, Any]) -> str:
         """
         Generate cache key with version prefixes.
@@ -431,3 +435,221 @@ class TieredCache:
             )
 
         return stats
+
+    def get_doc_epoch(self, document_id: str) -> str:
+        """
+        Get current document epoch from Redis (returns "0" if not set).
+
+        Epoch-based invalidation (Phase 7E-3): Document epochs are stored in
+        Redis hash {namespace}:doc_epoch with document_id as key.
+
+        Args:
+            document_id: Document identifier
+
+        Returns:
+            Current epoch as string (default "0")
+
+        Reference: Canonical Spec L3230-3233
+        """
+        if not self.l2 or not self.l2.redis:
+            return "0"
+
+        try:
+            epoch_key = f"{self.epoch_namespace}:doc_epoch"
+            value = self.l2.redis.hget(epoch_key, document_id)
+            if value is None:
+                return "0"
+            # Handle both bytes and str (depends on decode_responses setting)
+            return value.decode() if isinstance(value, bytes) else str(value)
+        except Exception:
+            return "0"
+
+    def get_chunk_epoch(self, chunk_id: str) -> str:
+        """
+        Get current chunk epoch from Redis (returns "0" if not set).
+
+        Args:
+            chunk_id: Chunk identifier
+
+        Returns:
+            Current epoch as string (default "0")
+
+        Reference: Canonical Spec L3230-3233
+        """
+        if not self.l2 or not self.l2.redis:
+            return "0"
+
+        try:
+            epoch_key = f"{self.epoch_namespace}:chunk_epoch"
+            value = self.l2.redis.hget(epoch_key, chunk_id)
+            if value is None:
+                return "0"
+            # Handle both bytes and str (depends on decode_responses setting)
+            return value.decode() if isinstance(value, bytes) else str(value)
+        except Exception:
+            return "0"
+
+    def make_fusion_cache_key(self, document_id: str, query_text: str) -> str:
+        """
+        Generate epoch-aware fusion cache key.
+
+        Format: {ns}:fusion:doc:{document_id}:epoch:{doc_epoch}:q:{sha1}
+
+        Args:
+            document_id: Document identifier
+            query_text: Query text
+
+        Returns:
+            Epoch-aware cache key
+
+        Reference: Canonical Spec L3198, L3234-3237
+        """
+        import hashlib
+
+        epoch = self.get_doc_epoch(document_id)
+        query_hash = hashlib.sha1(query_text.encode("utf-8")).hexdigest()[:16]
+
+        return f"{self.key_prefix_base}:fusion:doc:{document_id}:epoch:{epoch}:q:{query_hash}"
+
+    def make_answer_cache_key(self, document_id: str, query_text: str) -> str:
+        """
+        Generate epoch-aware answer cache key.
+
+        Format: {ns}:answer:doc:{document_id}:epoch:{doc_epoch}:q:{sha1}
+
+        Args:
+            document_id: Document identifier
+            query_text: Query text
+
+        Returns:
+            Epoch-aware cache key
+
+        Reference: Canonical Spec L3295
+        """
+        import hashlib
+
+        epoch = self.get_doc_epoch(document_id)
+        query_hash = hashlib.sha1(query_text.encode("utf-8")).hexdigest()[:16]
+
+        return f"{self.key_prefix_base}:answer:doc:{document_id}:epoch:{epoch}:q:{query_hash}"
+
+    def make_vector_cache_key(self, chunk_id: str) -> str:
+        """
+        Generate epoch-aware vector cache key.
+
+        Format: {ns}:vector:chunk:{id}:epoch:{chunk_epoch}
+
+        Args:
+            chunk_id: Chunk identifier
+
+        Returns:
+            Epoch-aware cache key
+
+        Reference: Canonical Spec L3207, L3298
+        """
+        epoch = self.get_chunk_epoch(chunk_id)
+        return f"{self.key_prefix_base}:vector:chunk:{chunk_id}:epoch:{epoch}"
+
+    def make_bm25_cache_key(self, document_id: str, query_text: str) -> str:
+        """
+        Generate epoch-aware BM25 cache key.
+
+        Format: {ns}:bm25:doc:{document_id}:epoch:{doc_epoch}:q:{sha1}
+
+        Args:
+            document_id: Document identifier
+            query_text: Query text
+
+        Returns:
+            Epoch-aware cache key
+        """
+        import hashlib
+
+        epoch = self.get_doc_epoch(document_id)
+        query_hash = hashlib.sha1(query_text.encode("utf-8")).hexdigest()[:16]
+
+        return f"{self.key_prefix_base}:bm25:doc:{document_id}:epoch:{epoch}:q:{query_hash}"
+
+    def get_fusion_cached(self, document_id: str, query_text: str) -> Optional[Any]:
+        """
+        Get fusion results from epoch-aware cache.
+
+        NOTE: Bypasses L1 cache to avoid stale reads. L1 (in-memory) cache
+        cannot efficiently track epoch changes across distributed processes.
+        L2 (Redis) is the source of truth for epoch-based invalidation.
+
+        Args:
+            document_id: Document identifier
+            query_text: Query text
+
+        Returns:
+            Cached fusion results or None
+        """
+        cache_key = self.make_fusion_cache_key(document_id, query_text)
+
+        # Skip L1 for epoch-based keys - epoch changes can't be efficiently
+        # tracked in L1 across distributed processes
+        if self.l2:
+            return self.l2.get(cache_key)
+
+        return None
+
+    def put_fusion_cached(self, document_id: str, query_text: str, value: Any) -> None:
+        """
+        Put fusion results in epoch-aware cache.
+
+        NOTE: Bypasses L1 cache to avoid stale reads. L1 (in-memory) cache
+        cannot efficiently track epoch changes across distributed processes.
+        L2 (Redis) is the source of truth for epoch-based invalidation.
+
+        Args:
+            document_id: Document identifier
+            query_text: Query text
+            value: Fusion results to cache
+        """
+        cache_key = self.make_fusion_cache_key(document_id, query_text)
+
+        # Skip L1 for epoch-based keys - use L2 (Redis) only
+        if self.l2:
+            self.l2.put(cache_key, value)
+
+    def get_vector_cached(self, chunk_id: str) -> Optional[Any]:
+        """
+        Get vector/embedding from epoch-aware cache.
+
+        NOTE: Bypasses L1 cache to avoid stale reads. L1 (in-memory) cache
+        cannot efficiently track epoch changes across distributed processes.
+        L2 (Redis) is the source of truth for epoch-based invalidation.
+
+        Args:
+            chunk_id: Chunk identifier
+
+        Returns:
+            Cached vector or None
+        """
+        cache_key = self.make_vector_cache_key(chunk_id)
+
+        # Skip L1 for epoch-based keys - epoch changes can't be efficiently
+        # tracked in L1 across distributed processes
+        if self.l2:
+            return self.l2.get(cache_key)
+
+        return None
+
+    def put_vector_cached(self, chunk_id: str, value: Any) -> None:
+        """
+        Put vector/embedding in epoch-aware cache.
+
+        NOTE: Bypasses L1 cache to avoid stale reads. L1 (in-memory) cache
+        cannot efficiently track epoch changes across distributed processes.
+        L2 (Redis) is the source of truth for epoch-based invalidation.
+
+        Args:
+            chunk_id: Chunk identifier
+            value: Vector to cache
+        """
+        cache_key = self.make_vector_cache_key(chunk_id)
+
+        # Skip L1 for epoch-based keys - use L2 (Redis) only
+        if self.l2:
+            self.l2.put(cache_key, value)

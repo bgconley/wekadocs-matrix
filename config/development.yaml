@@ -39,7 +39,7 @@ search:
     primary: "qdrant"
     dual_write: false  # Phase 7C: Set to true during migration
     qdrant:
-      collection_name: "weka_sections_v2"  # Phase 7C: New 1024-D collection
+      collection_name: "chunks"  # Phase 7E-1: New chunks collection for dual-label schema
       use_grpc: false
       timeout: 30
     neo4j:
@@ -186,12 +186,8 @@ validator:
 telemetry:
   enabled: true
 
-# Cache configuration (Phase 7E: Epoch-based invalidation)
+# Cache configuration (Phase 7E-3: Epoch-based invalidation)
 cache:
-  # Phase 7E: Cache invalidation mode
-  mode: "epoch"  # Options: epoch (O(1) invalidation), pattern (scan-based fallback)
-  namespace: "rag:v1"  # Cache key namespace
-
   l1:
     enabled: true
     ttl_seconds: 300
@@ -201,10 +197,16 @@ cache:
     ttl_seconds: 3600
     key_prefix: "weka:cache:v1"
 
-  # Phase 7E: Epoch counters for O(1) invalidation
-  epoch:
-    doc_epoch_key: "rag:v1:doc_epoch"  # Per-document epoch counter
-    chunk_epoch_key: "rag:v1:chunk_epoch"  # Per-chunk epoch counter
+  # Phase 7E-3: Cache invalidation configuration
+  # Reference: Canonical Spec L3184-3281 (epoch), L3116-3183 (scan)
+  invalidation:
+    mode: "epoch"  # Options: epoch (O(1) preferred), scan (fallback)
+    namespace: "rag:v1"  # Cache namespace for epoch/pattern keys
+    redis_uri: null  # Falls back to CACHE_REDIS_URI or REDIS_URL env vars
+
+  # Note: Epoch counters are stored in Redis:
+  #   - {namespace}:doc_epoch -> HSET {document_id} -> epoch_int
+  #   - {namespace}:chunk_epoch -> HSET {chunk_id} -> epoch_int
 
 # Feature flags for gradual rollout
 feature_flags:
@@ -214,6 +216,26 @@ feature_flags:
   byte_cap_responses: true       # New in pre-phase7
   schema_v2_1_dev: true         # Dev only for pre-phase7
   dual_write_1024d: false       # Phase 7C.4: Enable dual-write to both 384-D and 1024-D indices
+
+# Phase 7E-4: Monitoring and observability configuration
+# Reference: Canonical Spec L4916-4976, L3513-3528
+monitoring:
+  # Health checks
+  health_checks_enabled: true  # Run health checks at startup
+  health_check_fail_fast: true  # Fail startup if critical checks fail
+
+  # SLO monitoring
+  slo_monitoring_enabled: true  # Enable SLO tracking and alerting
+
+  # SLO thresholds (from canonical spec)
+  retrieval_p95_target_ms: 500  # Retrieval p95 latency target (ms)
+  ingestion_target_seconds: 10  # Ingestion duration target (seconds)
+  expansion_rate_min: 0.10  # Minimum expansion rate (10%)
+  expansion_rate_max: 0.40  # Maximum expansion rate (40%)
+
+  # Metrics collection
+  metrics_enabled: true  # Enable Prometheus metrics collection
+  metrics_aggregation_enabled: true  # Enable metrics aggregation for dashboards
 
 # Performance tuning
 performance:

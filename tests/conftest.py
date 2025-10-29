@@ -14,15 +14,34 @@ from fastapi.testclient import TestClient
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-# Set test environment
+# Set test environment - FORCE override of .env file values
 os.environ["ENV"] = "development"
-os.environ.setdefault("NEO4J_PASSWORD", "testpassword123")
-os.environ.setdefault("REDIS_PASSWORD", "testredis123")
-os.environ.setdefault("JWT_SECRET", "test-secret-key-change-in-production-min-32-chars")
+
+# Connection URIs - MUST use localhost for testing from host machine
+# Force override to prevent .env Docker hostnames from being used
+os.environ["NEO4J_URI"] = "bolt://localhost:7687"
+os.environ["NEO4J_PASSWORD"] = "testpassword123"  # pragma: allowlist secret
+os.environ["QDRANT_HOST"] = "localhost"
+os.environ["QDRANT_PORT"] = "6333"
+os.environ["REDIS_HOST"] = "localhost"
+os.environ["REDIS_PORT"] = "6379"
+os.environ["REDIS_PASSWORD"] = "testredis123"  # pragma: allowlist secret
+os.environ["JWT_SECRET"] = (
+    "test-secret-key-change-in-production-min-32-chars"  # pragma: allowlist secret
+)
 
 # Set Redis URI with password for cache tests
-redis_password = os.environ.get("REDIS_PASSWORD", "testredis123")
-os.environ.setdefault("CACHE_REDIS_URI", f"redis://:{redis_password}@localhost:6379/0")
+os.environ["CACHE_REDIS_URI"] = (
+    "redis://:testredis123@localhost:6379/0"  # pragma: allowlist secret
+)
+
+# HuggingFace configuration for host machine
+# Use local cache and allow downloads if needed (production scenario)
+os.environ["TRANSFORMERS_OFFLINE"] = (
+    "false"  # Allow downloads - production must handle this
+)
+os.environ["HF_CACHE"] = str(Path.home() / ".cache" / "huggingface")  # Use host cache
+os.environ["HF_TOKENIZER_ID"] = "jinaai/jina-embeddings-v3"
 
 
 @pytest.fixture(scope="session")
