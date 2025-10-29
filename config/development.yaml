@@ -45,22 +45,48 @@ search:
     neo4j:
       index_name: "section_embeddings_v2"  # Phase 7C: New 1024-D index
 
-  # Hybrid search settings
+  # Hybrid search settings (Phase 7E: RRF + BM25)
   hybrid:
+    enabled: true  # Phase 7E: Enable hybrid retrieval
+    method: "rrf"  # Phase 7E: Options: rrf (default), weighted
+
+    # RRF (Reciprocal Rank Fusion) settings
+    rrf_k: 60  # Phase 7E: RRF constant (default: 60)
+
+    # Weighted fusion settings (alternative to RRF)
+    fusion_alpha: 0.6  # Phase 7E: Vector weight (0.0-1.0), BM25 weight = 1-alpha
+
+    # Legacy weights (for backward compatibility)
     vector_weight: 0.7  # Weight for vector similarity (0.0-1.0)
     graph_weight: 0.3   # Weight for graph/text match
+
     top_k: 20  # Number of candidates to retrieve
+
+    # BM25/keyword retrieval settings
+    bm25:
+      enabled: true  # Phase 7E: Enable BM25 full-text search
+      top_k: 50  # Retrieve more candidates for fusion
+
+    # Bounded adjacency expansion (Phase 7E)
+    expansion:
+      enabled: true  # Enable neighbor expansion
+      max_neighbors: 1  # ±1 NEXT_CHUNK neighbor
+      query_min_tokens: 12  # Expand if query >= 12 tokens
+      score_delta_max: 0.02  # Expand if top score delta <= 0.02
 
   # Graph search settings
   graph:
     max_depth: 3
     max_related_per_seed: 20
 
-  # Response building
+  # Response building (Phase 7E: Context budget enforcement)
   response:
     max_bytes_full: 32768  # 32KB limit for FULL mode
     max_sections: 10
     include_citations: true
+
+    # Phase 7E: Answer context budget (tokens)
+    answer_context_max_tokens: 4500  # Max tokens for LLM context window
 
 # Database connections
 databases:
@@ -160,8 +186,12 @@ validator:
 telemetry:
   enabled: true
 
-# Cache configuration
+# Cache configuration (Phase 7E: Epoch-based invalidation)
 cache:
+  # Phase 7E: Cache invalidation mode
+  mode: "epoch"  # Options: epoch (O(1) invalidation), pattern (scan-based fallback)
+  namespace: "rag:v1"  # Cache key namespace
+
   l1:
     enabled: true
     ttl_seconds: 300
@@ -170,6 +200,11 @@ cache:
     enabled: true
     ttl_seconds: 3600
     key_prefix: "weka:cache:v1"
+
+  # Phase 7E: Epoch counters for O(1) invalidation
+  epoch:
+    doc_epoch_key: "rag:v1:doc_epoch"  # Per-document epoch counter
+    chunk_epoch_key: "rag:v1:chunk_epoch"  # Per-chunk epoch counter
 
 # Feature flags for gradual rollout
 feature_flags:
