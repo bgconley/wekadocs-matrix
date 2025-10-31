@@ -149,3 +149,58 @@ def validate_chunk_schema(chunk: Dict) -> bool:
         return False
 
     return True
+
+
+def create_combined_chunk_metadata(
+    document_id: str,
+    original_section_ids: List[str],
+    level: int,
+    order: int,
+    heading: Optional[str] = None,
+    parent_section_id: Optional[str] = None,
+    token_count: Optional[int] = None,
+    boundaries: Optional[Dict] = None,
+) -> Dict:
+    """
+    Create chunk metadata dict for a combined chunk (multiple sections).
+
+    Phase 7E-2: Used when combining multiple small sections into a single chunk
+    to achieve target token counts (800-1500).
+
+    Args:
+        document_id: Parent document identifier
+        original_section_ids: List of section IDs combined (in order)
+        level: Minimum heading depth across combined sections
+        order: Position within document
+        heading: Heading from first section
+        parent_section_id: Logical parent (typically first section's ID)
+        token_count: Total token count of combined text
+        boundaries: Optional dict with section boundaries metadata
+
+    Returns:
+        Dict with chunk metadata fields
+    """
+    import json
+
+    # Generate deterministic chunk ID from all combined sections
+    chunk_id = generate_chunk_id(document_id, original_section_ids)
+
+    # Serialize boundaries if provided
+    boundaries_json = (
+        json.dumps(boundaries, separators=(",", ":")) if boundaries else "{}"
+    )
+
+    return {
+        "id": chunk_id,
+        "document_id": document_id,
+        "level": level,
+        "order": order,
+        "heading": heading or "",
+        "parent_section_id": parent_section_id,
+        "original_section_ids": original_section_ids,
+        "is_combined": True,  # ALWAYS TRUE for combined chunks
+        "is_split": False,  # Combined chunks start unsplit (may be split later if too large)
+        "boundaries_json": boundaries_json,
+        "token_count": token_count or 0,
+        "updated_at": datetime.utcnow(),
+    }

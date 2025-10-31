@@ -13,12 +13,13 @@ from typing import Dict, List, Optional
 import redis
 from neo4j import Driver
 
+from src.ingestion.chunk_assembler import get_chunk_assembler
+
 # Phase 7E-4: Monitoring imports
 from src.monitoring.metrics import MetricsCollector
 from src.monitoring.slos import check_slos_and_log
 from src.shared.chunk_utils import (
     create_chunk_metadata,
-    generate_chunk_id,
     validate_chunk_schema,
 )
 from src.shared.config import Config
@@ -108,6 +109,10 @@ class GraphBuilder:
 
         logger.info("Starting graph upsert", document_id=document["id"])
 
+        # Phase 7E-2: Combine small sections, then split if still too large
+        assembler = get_chunk_assembler()
+        sections = assembler.assemble(document["id"], sections)
+
         with self.driver.session() as session:
             # Step 1: Upsert Document node
             self._upsert_document_node(session, document)
@@ -123,6 +128,15 @@ class GraphBuilder:
 
             # Step 2c: Create NEXT_CHUNK relationships for adjacency
             self._create_next_chunk_relationships(session, document["id"], sections)
+
+            # Optional Phase 7E repair: correct legacy combined flags
+            repaired = self._repair_incorrect_combined_flags(session, document["id"])
+            if repaired:
+                logger.info(
+                    "Repaired incorrect combined flag assignments",
+                    document_id=document["id"],
+                    repaired_count=repaired,
+                )
 
             # Step 3: Upsert Entities in batches
             stats["entities_upserted"] = self._upsert_entities(session, entities)
@@ -345,11 +359,8 @@ class GraphBuilder:
             document_id: Document identifier
             current_sections: List of current sections (will become chunks)
         """
-        # Generate chunk IDs for current sections
-        current_chunk_ids = []
-        for section in current_sections:
-            chunk_id = generate_chunk_id(document_id, [section["id"]])
-            current_chunk_ids.append(chunk_id)
+        # Current sections are already chunks (post-assembler). Use their IDs directly.
+        current_chunk_ids = [s.get("id") for s in current_sections if s.get("id")]
 
         # Delete chunks not in current set
         delete_query = """
@@ -378,64 +389,57 @@ class GraphBuilder:
         self, session, document_id: str, sections: List[Dict]
     ):
         """
-        Phase 7E-1: Create NEXT_CHUNK relationships for adjacency traversal.
+        Phase 7E-2: Create NEXT_CHUNK relationships for adjacency traversal.
 
-        Links chunks by order within the same parent_section_id (or document if no parent).
-        Enables bounded expansion (±1 neighbor) in retrieval.
+        Links consecutive chunks by document order (not parent grouping).
+        This enables bounded expansion (±1 neighbor) in retrieval and works
+        correctly with combined chunks.
 
         Args:
             session: Neo4j session
             document_id: Document identifier
-            sections: List of sections (ordered)
+            sections: List of chunks (already ordered by assembler)
         """
-        # Generate chunk data with IDs
-        chunk_data = []
-        for section in sections:
-            chunk_id = generate_chunk_id(document_id, [section["id"]])
-            chunk_data.append(
-                {
-                    "id": chunk_id,
-                    "order": section.get("order", 0),
-                    "parent_section_id": section.get("parent_section_id"),
-                }
-            )
-
-        # Sort by order to ensure correct adjacency
-        chunk_data.sort(key=lambda x: x["order"])
-
-        # Create NEXT_CHUNK edges between adjacent chunks
-        if len(chunk_data) < 2:
-            return  # Need at least 2 chunks for relationships
-
-        query = """
-        UNWIND $pairs AS pair
-        MATCH (c1:Chunk {id: pair.from_id})
-        MATCH (c2:Chunk {id: pair.to_id})
-        MERGE (c1)-[r:NEXT_CHUNK]->(c2)
-        SET r.parent_section_id = pair.parent_section_id,
-            r.updated_at = datetime()
+        # Use Cypher to link chunks by order within document
+        # This handles combined chunks correctly since they have proper IDs
+        cypher = """
+        MATCH (d:Document {id:$doc_id})-[:HAS_SECTION]->(c:Chunk)
+        WITH c ORDER BY c.order, c.id
+        WITH collect(c) AS cs
+        UNWIND range(0, size(cs)-2) AS i
+        WITH cs[i] AS c1, cs[i+1] AS c2
+        MERGE (c1)-[r:NEXT_CHUNK {doc_id:$doc_id}]->(c2)
+        SET r.updated_at = datetime()
         RETURN count(r) as count
         """
 
-        pairs = []
-        for i in range(len(chunk_data) - 1):
-            pairs.append(
-                {
-                    "from_id": chunk_data[i]["id"],
-                    "to_id": chunk_data[i + 1]["id"],
-                    "parent_section_id": chunk_data[i]["parent_section_id"],
-                }
-            )
+        result = session.run(cypher, doc_id=document_id)
+        count = result.single()["count"] or 0
 
-        if pairs:
-            result = session.run(query, pairs=pairs)
-            count = result.single()["count"] or 0
+        logger.debug(
+            "NEXT_CHUNK relationships created (document-ordered)",
+            document_id=document_id,
+            count=count,
+        )
 
-            logger.debug(
-                "NEXT_CHUNK relationships created",
-                document_id=document_id,
-                count=count,
-            )
+    def _repair_incorrect_combined_flags(self, session, document_id: str) -> int:
+        """
+        Optional repair step: ensure chunks marked as combined truly reference >1 section.
+
+        This implements the guidance to flip stray `is_combined` flags that lingered
+        from earlier ingestion bugs while scoping the fix to the current document.
+        """
+
+        query = """
+        MATCH (d:Document {id: $document_id})-[:HAS_SECTION]->(c:Chunk)
+        WHERE c.is_combined = true AND (c.original_section_ids IS NULL OR size(c.original_section_ids) <= 1)
+        SET c.is_combined = false
+        RETURN count(c) as repaired
+        """
+
+        result = session.run(query, document_id=document_id)
+        repaired = result.single()["repaired"] or 0
+        return repaired
 
     def _remove_missing_sections(
         self, session, document_id: str, valid_section_ids: List[str]
@@ -1181,8 +1185,11 @@ class GraphBuilder:
         Reference: Canonical Spec L3313-3336, L4506-4539
         """
         cache_mode = os.getenv("CACHE_MODE", "epoch")
-        redis_url = os.getenv(
-            "CACHE_REDIS_URI", os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        redis_url = (
+            os.getenv("CACHE_REDIS_URI")
+            or os.getenv("REDIS_URL")
+            or os.getenv("REDIS_URI")
+            or "redis://localhost:6379/0"
         )
         namespace = os.getenv("CACHE_NS", "rag:v1")
 

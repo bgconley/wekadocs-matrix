@@ -177,11 +177,22 @@ class ReconciliationConfig(BaseModel):
     drift_threshold: float = 0.01
 
 
+class QueueRecoveryConfig(BaseModel):
+    """Queue recovery configuration for Phase 6 job reaper"""
+
+    enabled: bool = True
+    job_timeout_seconds: int = 600
+    reaper_interval_seconds: int = 30
+    max_retries: int = 3
+    stale_job_action: str = "requeue"
+
+
 class IngestionConfig(BaseModel):
     batch_size: int = 500
     max_section_tokens: int = 1000
     timeout_seconds: int = 300
     workers: int = 2
+    queue_recovery: QueueRecoveryConfig = Field(default_factory=QueueRecoveryConfig)
     reconciliation: ReconciliationConfig
 
 

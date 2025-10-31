@@ -119,6 +119,33 @@ ingestion:
   timeout_seconds: 300
   workers: 2
 
+  # Phase 7E-2: Chunk assembly configuration
+  # Controls intelligent combining and splitting for optimal retrieval quality
+  chunk_assembly:
+    # Assembler strategy: "greedy" (default) or "pipeline"
+    assembler: "greedy"
+
+    # Greedy combiner settings
+    combine_min_tokens: 800      # Minimum tokens before stopping combine
+    combine_target_tokens: 1500  # Target chunk size for optimal retrieval
+    combine_max_tokens: 7900     # Provider hard maximum (don't exceed)
+    combine_max_sections: 8      # Max sections to combine into one chunk
+
+    # Semantic boundary respect
+    respect_major_levels: true   # Don't cross H1/H2 boundaries
+    stop_at_level: 2             # Don't combine across this heading level
+
+    # Section types that should not be combined (regex pattern)
+    break_keywords: "faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting"
+
+  # Queue recovery (Phase 6: job reaper)
+  queue_recovery:
+    enabled: true
+    job_timeout_seconds: 600
+    reaper_interval_seconds: 30
+    max_retries: 3
+    stale_job_action: requeue
+
   # Reconciliation (for drift detection)
   reconciliation:
     enabled: true
