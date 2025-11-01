@@ -1,0 +1,68 @@
+{
+  "timestamp": "2025-10-30T14:35:49.923023",
+  "dry_run": false,
+  "options": {
+    "dry_run": false,
+    "redis_db": 1,
+    "skip_neo4j": false,
+    "skip_qdrant": false,
+    "skip_redis": false,
+    "report_dir": "reports/cleanup",
+    "quiet": false
+  },
+  "before": {
+    "redis": {
+      "db": 1,
+      "key_count": 0,
+      "sample_keys": []
+    }
+  },
+  "after": {
+    "redis": {
+      "db": 1,
+      "key_count": 0
+    }
+  },
+  "actions": [
+    {
+      "timestamp": "2025-10-30T14:35:50.118243",
+      "action": "redis_flushdb",
+      "details": {
+        "db": 1,
+        "keys_deleted": 0
+      }
+    }
+  ],
+  "errors": [
+    {
+      "timestamp": "2025-10-30T14:35:50.015774",
+      "message": "Neo4j cleanup failed: Cannot resolve address weka-neo4j:7687"
+    },
+    {
+      "timestamp": "2025-10-30T14:35:50.111457",
+      "message": "Qdrant cleanup failed: [Errno 8] nodename nor servname provided, or not known"
+    }
+  ],
+  "summary": {
+    "dry_run": false,
+    "success": false,
+    "databases_cleaned": [
+      {
+        "database": "neo4j",
+        "nodes_deleted": 0,
+        "relationships_deleted": 0,
+        "schema_preserved": true
+      },
+      {
+        "database": "qdrant",
+        "collections_deleted": 0,
+        "total_vectors_deleted": 0
+      },
+      {
+        "database": "redis",
+        "db": 1,
+        "keys_deleted": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "job_id": "97998428-8d7e-4a1d-92ed-ff5c90280577",
+  "tag": "test",
+  "source_uri": "file:///private/var/folders/ly/5hgrbf0n3rz7hlqwlt1xn9mr0000gn/T/pytest-of-brennanconley/pytest-55/test_deterministic_ids0/watch/deterministic_test.md",
+  "checksum": "det123",
+  "document_id": "b32b25b34931e5596f0f9c241506aa3ff1a943dee7fdd521af6c8cd5d110336c",
+  "sections": 2,
+  "entities": 0,
+  "mentions": 0,
+  "drift_pct": 0.0,
+  "ready_for_queries": true,
+  "timings_ms": {
+    "parsing": {
+      "duration_ms": 0,
+      "sections_parsed": 2
+    },
+    "extracting": {
+      "duration_ms": 0,
+      "entities_extracted": 0,
+      "mentions_created": 0
+    },
+    "graphing": {
+      "duration_ms": 1553,
+      "sections_upserted": 2,
+      "entities_upserted": 0,
+      "mentions_created": 0,
+      "incremental": false,
+      "changes": 2
+    },
+    "embedding": {
+      "duration_ms": 803,
+      "embeddings_computed": 2
+    },
+    "vectors": {
+      "duration_ms": 10,
+      "vectors_upserted": 2,
+      "primary_store": "qdrant",
+      "dual_write": false
+    },
+    "postchecks": {
+      "duration_ms": 38,
+      "reconciliation": {
+        "drift_pct": 0.0,
+        "repaired": 0,
+        "removed_orphans": 0,
+        "graph_sections_count": 610,
+        "total_in_vector_store": 610,
+        "duration_ms": 38
+      }
+    }
+  },
+  "total_duration_ms": 2404,
+  "started_at": 1760647888.0228648,
+  "completed_at": null
+}

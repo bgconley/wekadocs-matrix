@@ -1,0 +1,55 @@
+{
+  "job_id": "d827dca8-9c86-444f-b2a0-34e7960c4ad1",
+  "tag": "test",
+  "source_uri": "file:///private/var/folders/ly/5hgrbf0n3rz7hlqwlt1xn9mr0000gn/T/pytest-of-brennanconley/pytest-55/test_calls_existing_parsers0/watch/parser_test.md",
+  "checksum": "parser123",
+  "document_id": "0ce5c24dfe6b1593028c925a4b51af2ee9834d8df5d3a2302b85d7482714f9d1",
+  "sections": 2,
+  "entities": 0,
+  "mentions": 0,
+  "drift_pct": 0.0,
+  "ready_for_queries": true,
+  "timings_ms": {
+    "parsing": {
+      "duration_ms": 0,
+      "sections_parsed": 2
+    },
+    "extracting": {
+      "duration_ms": 0,
+      "entities_extracted": 0,
+      "mentions_created": 0
+    },
+    "graphing": {
+      "duration_ms": 899,
+      "sections_upserted": 2,
+      "entities_upserted": 0,
+      "mentions_created": 0,
+      "incremental": false,
+      "changes": 2
+    },
+    "embedding": {
+      "duration_ms": 814,
+      "embeddings_computed": 2
+    },
+    "vectors": {
+      "duration_ms": 9,
+      "vectors_upserted": 2,
+      "primary_store": "qdrant",
+      "dual_write": false
+    },
+    "postchecks": {
+      "duration_ms": 41,
+      "reconciliation": {
+        "drift_pct": 0.0,
+        "repaired": 0,
+        "removed_orphans": 0,
+        "graph_sections_count": 615,
+        "total_in_vector_store": 615,
+        "duration_ms": 41
+      }
+    }
+  },
+  "total_duration_ms": 1763,
+  "started_at": 1760647895.417672,
+  "completed_at": null
+}

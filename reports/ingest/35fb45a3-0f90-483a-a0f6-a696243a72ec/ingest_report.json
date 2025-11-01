@@ -1,0 +1,32 @@
+{
+  "job_id": "35fb45a3-0f90-483a-a0f6-a696243a72ec",
+  "tag": "test",
+  "timestamp_utc": "2025-10-18T23:01:32.048173Z",
+  "doc": {
+    "source_uri": "file:///private/var/folders/ly/5hgrbf0n3rz7hlqwlt1xn9mr0000gn/T/pytest-of-brennanconley/pytest-79/test_resume_from_parsing0/watch/resume_test.md",
+    "checksum": "7939f3f0d78e2a21993b66a1c0620954ea4d333b234276ae877bf4a5775c3a7f",
+    "sections": 1,
+    "title": "Resume Test"
+  },
+  "graph": {
+    "nodes_total": 703,
+    "rels_total": 0,
+    "sections_total": 0,
+    "documents_total": 0
+  },
+  "vector": {
+    "sot": "qdrant",
+    "sections_indexed": 695,
+    "embedding_version": "v1"
+  },
+  "drift_pct": 0.0,
+  "sample_queries": [],
+  "ready_for_queries": true,
+  "timings_ms": {
+    "parse": 0,
+    "extract": 0,
+    "graph": 1458,
+    "embed": 1413
+  },
+  "errors": []
+}

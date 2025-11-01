@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wekadocs": {
+      "command": "docker",
+      "args": ["exec", "-i", "weka-mcp-server", "python", "-m", "src.mcp_server.stdio_server"]
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "test_run": {
+    "timestamp": "2025-10-20T22:06:38.957048",
+    "total_queries": 20,
+    "successful_queries": 20,
+    "failed_queries": 0
+  },
+  "latency_metrics": {
+    "p50_ms": 27.82,
+    "p95_ms": 163.91,
+    "p99_ms": 163.91,
+    "min_ms": 23.59,
+    "max_ms": 163.91,
+    "mean_ms": 45.3
+  },
+  "completeness_metrics": {
+    "in_expected_range": 0,
+    "below_expected": 0,
+    "above_expected": 20
+  },
+  "by_category": {
+    "installation": {
+      "queries": 4,
+      "successful": 4,
+      "mean_latency_ms": 93.5,
+      "mean_sections_found": 8.0
+    },
+    "configuration": {
+      "queries": 4,
+      "successful": 4,
+      "mean_latency_ms": 40.1,
+      "mean_sections_found": 8.0
+    },
+    "operations": {
+      "queries": 4,
+      "successful": 4,
+      "mean_latency_ms": 24.9,
+      "mean_sections_found": 8.0
+    },
+    "performance": {
+      "queries": 4,
+      "successful": 4,
+      "mean_latency_ms": 43.08,
+      "mean_sections_found": 8.0
+    },
+    "advanced": {
+      "queries": 4,
+      "successful": 4,
+      "mean_latency_ms": 24.9,
+      "mean_sections_found": 8.0
+    }
+  }
+}

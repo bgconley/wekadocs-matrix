@@ -199,6 +199,7 @@ class ResponseBuilder:
         verbosity: Verbosity = Verbosity.GRAPH,
         query_id: Optional[str] = None,  # Task 7C.8: For answer provenance
         session_tracker: Optional["SessionTracker"] = None,  # Task 7C.8
+        assembled_context: Optional[str] = None,
     ) -> Response:
         """
         Build complete response from ranked results.
@@ -215,6 +216,7 @@ class ResponseBuilder:
             verbosity: Response detail level (full=text only, graph=text+relationships, default=graph)
             query_id: Optional query ID for answer provenance tracking (Task 7C.8)
             session_tracker: Optional SessionTracker instance for provenance (Task 7C.8)
+            assembled_context: Optional stitched context to append for LLM consumption (Phase 7E-3)
 
         Returns:
             Response with Markdown and JSON (includes answer_id if provenance tracked)
@@ -241,6 +243,10 @@ class ResponseBuilder:
         markdown = self._render_markdown(
             query, intent, ranked_results, evidence, confidence
         )
+
+        if assembled_context:
+            markdown += "\n\n---\n### Context (chunk-stitched, budget-bounded)\n"
+            markdown += assembled_context
 
         # Build structured answer
         answer_text = self._extract_answer_text(intent, ranked_results)
@@ -766,6 +772,7 @@ def build_response(
     neo4j_driver=None,
     query_id: Optional[str] = None,  # Task 7C.8
     session_tracker: Optional["SessionTracker"] = None,  # Task 7C.8
+    assembled_context: Optional[str] = None,
 ) -> Response:
     """
     Convenience function to build a response.
@@ -782,6 +789,7 @@ def build_response(
         neo4j_driver: Optional Neo4j driver for graph mode
         query_id: Optional query ID for answer provenance tracking (Task 7C.8)
         session_tracker: Optional SessionTracker instance for provenance (Task 7C.8)
+        assembled_context: Optional stitched context to append for LLM consumption (Phase 7E-3)
 
     Returns:
         Response with Markdown and JSON
@@ -796,4 +804,5 @@ def build_response(
         verbosity,
         query_id=query_id,
         session_tracker=session_tracker,
+        assembled_context=assembled_context,
     )

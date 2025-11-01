@@ -1,0 +1,43 @@
+{
+  "success": true,
+  "dry_run": false,
+  "documents_updated": 5,
+  "updated_documents": [
+    {
+      "doc_id": null,
+      "new_token_count": 0
+    },
+    {
+      "doc_id": null,
+      "new_token_count": 0
+    },
+    {
+      "doc_id": null,
+      "new_token_count": 0
+    },
+    {
+      "doc_id": null,
+      "new_token_count": 0
+    },
+    {
+      "doc_id": null,
+      "new_token_count": 0
+    }
+  ],
+  "before_stats": {
+    "total_documents": 5,
+    "missing_count": 5,
+    "has_count": 0,
+    "avg_current_tokens": null,
+    "avg_calculated_tokens": 0.0
+  },
+  "after_stats": {
+    "total_documents": 5,
+    "missing_count": 5,
+    "has_count": 0,
+    "avg_current_tokens": 0.0,
+    "avg_calculated_tokens": 0.0
+  },
+  "remaining_missing": 5,
+  "duration_seconds": 0.142542
+}

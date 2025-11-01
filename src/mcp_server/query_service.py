@@ -14,9 +14,12 @@ from typing import Any, Dict, List, Optional
 from src.providers.embeddings.base import EmbeddingProvider
 from src.providers.factory import ProviderFactory
 from src.providers.rerank.base import RerankProvider
-from src.query.hybrid_search import HybridSearchEngine, QdrantVectorStore
+from src.providers.tokenizer_service import TokenizerService
+from src.query.context_assembly import ContextAssembler
+from src.query.hybrid_retrieval import ChunkResult, HybridRetriever
+from src.query.hybrid_search import HybridSearchEngine, QdrantVectorStore, SearchResult
 from src.query.planner import QueryPlanner
-from src.query.ranking import rank_results
+from src.query.ranking import RankingFeatures, RankedResult, rank_results
 from src.query.response_builder import Response, Verbosity, build_response
 from src.query.session_tracker import SessionTracker
 from src.shared.config import get_config
@@ -41,6 +44,8 @@ class QueryService:
         self._embedder: Optional[EmbeddingProvider] = None
         self._reranker: Optional[RerankProvider] = None  # Phase 7C: Reranker cache
         self._search_engine: Optional[HybridSearchEngine] = None
+        self._hybrid_retriever: Optional[HybridRetriever] = None
+        self._context_assembler: Optional[ContextAssembler] = None
         self._planner: Optional[QueryPlanner] = None
         self._session_tracker: Optional[SessionTracker] = (
             None  # Task 7C.8: Session tracking
@@ -144,6 +149,93 @@ class QueryService:
 
         return self._search_engine
 
+    def _get_7e_retriever(self) -> HybridRetriever:
+        """Get or initialize the Phase 7E hybrid retriever."""
+        if self._hybrid_retriever is None:
+            manager = get_connection_manager()
+            neo4j_driver = manager.get_neo4j_driver()
+            qdrant_client = manager.get_qdrant_client()
+            embedder = self._get_embedder()
+
+            self._hybrid_retriever = HybridRetriever(
+                neo4j_driver=neo4j_driver,
+                qdrant_client=qdrant_client,
+                embedder=embedder,
+                tokenizer=TokenizerService(),
+            )
+
+            logger.info("Phase 7E HybridRetriever initialized")
+
+        return self._hybrid_retriever
+
+    def _get_context_assembler(self) -> ContextAssembler:
+        """Get or initialize the context assembler for stitched responses."""
+        if self._context_assembler is None:
+            self._context_assembler = ContextAssembler()
+            logger.info("ContextAssembler initialized for stitched responses")
+        return self._context_assembler
+
+    def _wrap_chunks_as_ranked(
+        self, chunks: List[ChunkResult]
+    ) -> List[RankedResult]:
+        """Adapt ChunkResult objects to RankedResult instances for response building."""
+
+        ranked: List[RankedResult] = []
+        for index, chunk in enumerate(chunks):
+            score = float(
+                chunk.fused_score
+                if chunk.fused_score is not None
+                else chunk.vector_score
+                if chunk.vector_score is not None
+                else chunk.bm25_score
+                if chunk.bm25_score is not None
+                else 0.0
+            )
+
+            metadata: Dict[str, Any] = {
+                "chunk_id": chunk.chunk_id,
+                "document_id": chunk.document_id,
+                "document_uri": getattr(chunk, "document_uri", None),
+                "parent_section_id": chunk.parent_section_id,
+                "heading": chunk.heading,
+                "text": chunk.text,
+                "token_count": chunk.token_count,
+                "level": chunk.level,
+                "is_combined": chunk.is_combined,
+                "is_split": chunk.is_split,
+                "boundaries_json": chunk.boundaries_json,
+                "score_kind": "similarity",
+                "fusion_method": chunk.fusion_method,
+                "bm25_score": chunk.bm25_score,
+                "vector_score": chunk.vector_score,
+                "vec_score": chunk.vector_score,
+                "bm25_rank": chunk.bm25_rank,
+                "vector_rank": chunk.vector_rank,
+            }
+
+            metadata["anchor"] = getattr(chunk, "anchor", None)
+
+            search_result = SearchResult(
+                node_id=chunk.chunk_id,
+                node_label="Chunk",
+                score=score,
+                distance=0,
+                metadata=metadata,
+            )
+
+            features = RankingFeatures(
+                semantic_score=float(chunk.vector_score or chunk.fused_score or 0.0),
+                graph_distance_score=0.0,
+                recency_score=0.0,
+                entity_priority_score=1.0,
+                coverage_score=0.0,
+                final_score=score,
+            )
+
+            ranked.append(RankedResult(result=search_result, features=features, rank=index + 1))
+
+        return ranked
+
     def _get_planner(self) -> QueryPlanner:
         """Get or initialize the query planner."""
         if self._planner is None:
@@ -246,38 +338,95 @@ class QueryService:
 
             # Pre-Phase 7 B4: Add embedding_version filter to ensure version consistency
             # This ensures we only retrieve vectors created with the current embedding model
-            if filters is None:
-                filters = {}
+            filters = dict(filters or {})
 
             # Add embedding_version to filters
-            filters["embedding_version"] = self.config.embedding.version
+            filters.setdefault("embedding_version", self.config.embedding.version)
             logger.debug(
                 f"Added embedding_version filter: {self.config.embedding.version}"
             )
 
-            # Execute hybrid search
-            search_start = time.time()
-            search_engine = self._get_search_engine()
-            search_results = search_engine.search(
-                query_text=query,
-                k=top_k,
-                filters=filters,
-                expand_graph=expand_graph,
-                find_paths=find_paths,
-                focused_entity_ids=(
-                    focused_entity_ids if focused_entity_ids else None
-                ),  # Task 7C.8
-            )
-            search_time = time.time() - search_start
-
-            logger.info(
-                f"Search completed: {search_results.total_found} results in {search_time*1000:.1f}ms"
+            use_phase7e = bool(getattr(self.config.search.hybrid, "enabled", True)) and bool(
+                getattr(getattr(self.config.search.hybrid, "bm25", None), "enabled", False)
             )
 
-            # Task 7C.8: Track retrieval if session tracking is active
-            if session_id and query_id:
-                tracker = self._get_session_tracker()
-                retrieved_sections = [
+            assembled_md: Optional[str] = None
+            ranked_results: List[RankedResult]
+            retrieval_sections: List[Dict[str, Any]] = []
+            timing: Dict[str, float]
+
+            if use_phase7e:
+                retriever = self._get_7e_retriever()
+                top_k_value = top_k or getattr(self.config.search.hybrid, "top_k", 20)
+                chunks, metrics = retriever.retrieve(
+                    query=query,
+                    top_k=top_k_value,
+                    filters=filters,
+                    expand=expand_graph,
+                )
+
+                assembler = self._get_context_assembler()
+                assembled_context = assembler.assemble(chunks, query=query)
+                assembled_md = assembler.format_with_citations(assembled_context)
+
+                ranked_results = self._wrap_chunks_as_ranked(chunks)
+
+                retrieval_sections = [
+                    {
+                        "section_id": chunk.chunk_id,
+                        "rank": idx + 1,
+                        "score_vec": float(chunk.vector_score or 0.0),
+                        "score_text": float(chunk.bm25_score or 0.0),
+                        "score_graph": 0.0,
+                        "score_combined": float(
+                            chunk.fused_score
+                            or chunk.vector_score
+                            or chunk.bm25_score
+                            or 0.0
+                        ),
+                        "retrieval_method": "hybrid_phase7e",
+                    }
+                    for idx, chunk in enumerate(chunks)
+                ]
+
+                timing = {
+                    "bm25_ms": metrics.get("bm25_time_ms", 0.0),
+                    "vector_search_ms": metrics.get("vec_time_ms", 0.0),
+                    "fusion_ms": metrics.get("fusion_time_ms", 0.0),
+                    "expansion_ms": metrics.get("expansion_time_ms", 0.0),
+                    "context_assembly_ms": metrics.get("context_assembly_ms", 0.0),
+                    "ranking_ms": 0.0,
+                    "total_ms": metrics.get(
+                        "total_time_ms", (time.time() - start_time) * 1000
+                    ),
+                }
+
+                logger.info(
+                    "Phase 7E hybrid retrieval completed: results=%d, time=%.1fms",
+                    len(chunks),
+                    timing["total_ms"],
+                )
+
+            else:
+                search_start = time.time()
+                search_engine = self._get_search_engine()
+                search_results = search_engine.search(
+                    query_text=query,
+                    k=top_k,
+                    filters=filters,
+                    expand_graph=expand_graph,
+                    find_paths=find_paths,
+                    focused_entity_ids=(
+                        focused_entity_ids if focused_entity_ids else None
+                    ),
+                )
+                search_time = time.time() - search_start
+
+                logger.info(
+                    f"Search completed: {search_results.total_found} results in {search_time*1000:.1f}ms"
+                )
+
+                retrieval_sections = [
                     {
                         "section_id": result.node_id,
                         "rank": idx + 1,
@@ -289,27 +438,30 @@ class QueryService:
                     }
                     for idx, result in enumerate(search_results.results)
                 ]
-                tracker.track_retrieval(query_id, retrieved_sections)
-                logger.debug(
-                    f"Tracked {len(retrieved_sections)} retrieved sections for query {query_id}"
+
+                rank_start = time.time()
+                ranked_results = rank_results(search_results.results)
+                rank_time = time.time() - rank_start
+
+                logger.info(
+                    f"Ranking completed: {len(ranked_results)} results in {rank_time*1000:.1f}ms"
                 )
 
-            # Rank results
-            rank_start = time.time()
-            ranked_results = rank_results(search_results.results)
-            rank_time = time.time() - rank_start
+                timing = {
+                    "vector_search_ms": search_results.vector_time_ms,
+                    "graph_expansion_ms": search_results.graph_time_ms,
+                    "ranking_ms": rank_time * 1000,
+                    "total_ms": (time.time() - start_time) * 1000,
+                }
+                assembled_md = None
 
-            logger.info(
-                f"Ranking completed: {len(ranked_results)} results in {rank_time*1000:.1f}ms"
-            )
-
-            # Build timing info
-            timing = {
-                "vector_search_ms": search_results.vector_time_ms,
-                "graph_expansion_ms": search_results.graph_time_ms,
-                "ranking_ms": rank_time * 1000,
-                "total_ms": (time.time() - start_time) * 1000,
-            }
+            # Task 7C.8: Track retrieval if session tracking is active
+            if session_id and query_id and retrieval_sections:
+                tracker = self._get_session_tracker()
+                tracker.track_retrieval(query_id, retrieval_sections)
+                logger.debug(
+                    f"Tracked {len(retrieval_sections)} retrieved sections for query {query_id}"
+                )
 
             # Build response with verbosity mode
             manager = get_connection_manager()
@@ -328,6 +480,7 @@ class QueryService:
                 session_tracker=(
                     self._get_session_tracker() if session_id else None
                 ),  # Task 7C.8
+                assembled_context=assembled_md,
             )
 
             # Instrument metrics (E5)

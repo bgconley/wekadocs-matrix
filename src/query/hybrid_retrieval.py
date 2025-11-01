@@ -8,12 +8,14 @@ Phase 7E-4: Enhanced with comprehensive metrics collection and SLO monitoring
 Reference: Phase 7E Canonical Spec L1421-1444, L3781-3788
 """
 
+import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from neo4j import Driver
+from neo4j.exceptions import Neo4jError
 from qdrant_client import QdrantClient
 
 # Phase 7E-4: Monitoring imports
@@ -28,6 +30,12 @@ from src.shared.observability.metrics import (
 )
 
 logger = get_logger(__name__)
+
+
+try:
+    CITATIONUNIT_BOOST = float(os.getenv("BM25_CITATIONUNIT_BOOST", "1.25"))
+except ValueError:
+    CITATIONUNIT_BOOST = 1.25
 
 
 class FusionMethod(str, Enum):
@@ -59,12 +67,6 @@ class ChunkResult:
     text: str
     token_count: int
 
-    # Scoring information
-    vec_score: Optional[float] = None  # Vector similarity score
-    bm25_score: Optional[float] = None  # BM25/keyword score
-    fused_score: Optional[float] = None  # Final fused score
-    fusion_method: Optional[str] = None  # Method used for fusion
-
     # Metadata
     is_combined: bool = False
     is_split: bool = False
@@ -74,6 +76,17 @@ class ChunkResult:
     # Expansion tracking
     is_expanded: bool = False  # Was this chunk added via expansion?
     expansion_source: Optional[str] = None  # Which chunk triggered expansion
+
+    # Scoring metadata
+    fusion_method: Optional[str] = None  # Method used for fusion
+    bm25_rank: Optional[int] = None
+    bm25_score: Optional[float] = None  # BM25/keyword score
+    vector_rank: Optional[int] = None
+    vector_score: Optional[float] = None  # Vector similarity score
+    fused_score: Optional[float] = None  # Final fused score
+
+    # Citation labels (order, title) derived from CitationUnits
+    citation_labels: List[Tuple[int, str]] = field(default_factory=list)
 
     def __post_init__(self):
         """Ensure required fields are populated."""
@@ -87,114 +100,262 @@ class BM25Retriever:
     Neo4j's full-text search uses Lucene under the hood, providing BM25 scoring.
     """
 
-    def __init__(self, neo4j_driver: Driver, index_name: str = "chunk_text_index"):
+    def __init__(self, neo4j_driver: Driver, index_name: Optional[str] = None):
         self.driver = neo4j_driver
-        self.index_name = index_name
+        self.index_name = index_name or os.getenv("BM25_INDEX_NAME", "chunk_text_index_v2")
         self._ensure_fulltext_index()
 
-    def _ensure_fulltext_index(self):
-        """Create full-text index if it doesn't exist."""
-        create_index_query = """
-        CREATE FULLTEXT INDEX chunk_text_index IF NOT EXISTS
-        FOR (c:Chunk) ON EACH [c.text, c.heading]
+    def _list_indexes(self, session) -> List[Dict[str, Any]]:
         """
+        Return index metadata across Neo4j 4.x and 5.x.
+        """
+        try:
+            query = """
+            SHOW INDEXES
+            YIELD name, type, entityType, labelsOrTypes, properties, state, options
+            RETURN name, type, entityType, labelsOrTypes, properties, state, options
+            """
+            return session.run(query).data()
+        except Neo4jError:
+            query = """
+            CALL db.indexes()
+            YIELD name, type, entityType, labelsOrTypes, properties, state, options
+            RETURN name, type, entityType, labelsOrTypes, properties, state, options
+            """
+            return session.run(query).data()
+
+    def _await_index_online(self, session) -> None:
+        """
+        Await index readiness using whichever procedure is available.
+        """
+        try:
+            session.run("CALL db.index.awaitIndex($name)", name=self.index_name)
+            return
+        except Exception:
+            pass
+
+        try:
+            session.run("CALL db.awaitIndexes()")
+        except Exception:
+            pass
+
+    def _ensure_fulltext_index(self):
+        """
+        Ensure the full-text index targets both Chunk and CitationUnit nodes with text and heading fields.
+        If an index with the same name exists but uses a different definition, drop and recreate it.
+        """
+        desired_labels = {"Chunk", "CitationUnit"}
+        desired_props = {"text", "heading"}
 
         with self.driver.session() as session:
-            try:
-                session.run(create_index_query)
-                logger.info(f"Full-text index '{self.index_name}' ensured")
-            except Exception as e:
-                # Index might already exist with different config
-                logger.warning(f"Could not create full-text index: {e}")
+            rows = self._list_indexes(session)
+
+            exists = False
+            needs_recreate = False
+            current_row = None
+
+            for row in rows:
+                if row.get("name") == self.index_name:
+                    exists = True
+                    current_row = row
+                    labels = set(row.get("labelsOrTypes") or [])
+                    props = set(row.get("properties") or [])
+                    is_fulltext = (row.get("type") or "").upper() == "FULLTEXT"
+                    definition_ok = (
+                        is_fulltext
+                        and desired_labels.issubset(labels)
+                        and desired_props.issubset(props)
+                    )
+                    if not definition_ok:
+                        needs_recreate = True
+                    break
+
+            if exists and needs_recreate:
+                logger.warning(
+                    "Dropping stale full-text index with wrong definition",
+                    extra={"name": self.index_name, "current": current_row},
+                )
+                try:
+                    session.run(f"DROP INDEX {self.index_name} IF EXISTS")
+                except Exception:
+                    session.run(f"DROP INDEX {self.index_name}")
+
+            if (not exists) or needs_recreate:
+                logger.info(
+                    "Creating full-text index",
+                    extra={"name": self.index_name, "labels": list(desired_labels), "props": list(desired_props)},
+                )
+                session.run(
+                    f"""
+                    CREATE FULLTEXT INDEX {self.index_name}
+                    IF NOT EXISTS
+                    FOR (n:Chunk|CitationUnit) ON EACH [n.text, n.heading]
+                    """
+                )
+                self._await_index_online(session)
+
+            logger.info("Full-text index ensured", extra={"name": self.index_name})
 
     def search(
-        self, query: str, top_k: int = 50, filters: Optional[Dict[str, Any]] = None
+        self, query: str, top_k: int = 20, filters: Optional[Dict[str, Any]] = None
     ) -> List[ChunkResult]:
         """
-        Perform BM25 search on Chunk.text using Neo4j full-text search.
-
-        Args:
-            query: Search query text
-            top_k: Number of results to return
-            filters: Optional filters (e.g., document_id)
-
-        Returns:
-            List of ChunkResult objects with BM25 scores
+        Perform citation-aware BM25 search using Neo4j full-text search.
         """
         start_time = time.time()
 
-        # Build WHERE clause for filters
+        # Build WHERE clause for filters (apply to resolved chunk)
         where_clauses = []
-        params = {"query": query, "limit": top_k}
+        params: Dict[str, Any] = {
+            "query": query,
+            "limit": max(top_k, 1),
+            "index_name": self.index_name,
+        }
 
         if filters:
             for key, value in filters.items():
                 param_name = f"filter_{key}"
-                where_clauses.append(f"c.{key} = ${param_name}")
+                where_clauses.append(f"chunk.{key} = ${param_name}")
                 params[param_name] = value
 
         where_clause = " AND " + " AND ".join(where_clauses) if where_clauses else ""
 
-        # Full-text search query with BM25 scoring
         search_query = f"""
         CALL db.index.fulltext.queryNodes($index_name, $query)
-        YIELD node AS c, score
-        WHERE (c:Chunk){where_clause}
+        YIELD node, score
+        OPTIONAL MATCH (node)-[:IN_CHUNK]->(parent:Chunk)
+        WITH
+          CASE WHEN node:Chunk THEN node ELSE parent END AS chunk,
+          CASE WHEN node:CitationUnit THEN node ELSE NULL END AS citation,
+          score
+        WHERE chunk IS NOT NULL{where_clause}
         RETURN
-            c.id AS chunk_id,
-            c.document_id AS document_id,
-            c.parent_section_id AS parent_section_id,
-            c.order AS `order`,
-            c.level AS level,
-            c.heading AS heading,
-            c.text AS text,
-            c.token_count AS token_count,
-            c.is_combined AS is_combined,
-            c.is_split AS is_split,
-            c.original_section_ids AS original_section_ids,
-            c.boundaries_json AS boundaries_json,
-            score AS bm25_score
+          chunk.id AS chunk_id,
+          chunk.document_id AS document_id,
+          chunk.parent_section_id AS parent_section_id,
+          chunk.order AS `order`,
+          chunk.level AS level,
+          chunk.heading AS chunk_heading,
+          chunk.text AS chunk_text,
+          chunk.token_count AS token_count,
+          chunk.is_combined AS is_combined,
+          chunk.is_split AS is_split,
+          chunk.original_section_ids AS original_section_ids,
+          chunk.boundaries_json AS boundaries_json,
+          score AS score,
+          (citation IS NOT NULL) AS is_citation,
+          citation.order AS citation_order,
+          citation.heading AS citation_heading
         ORDER BY score DESC
         LIMIT $limit
         """
 
-        params["index_name"] = self.index_name
+        aggregates: Dict[str, Dict[str, Any]] = {}
 
-        results = []
         try:
             with self.driver.session() as session:
-                result = session.run(search_query, params)
+                records = session.run(search_query, params)
+                for record in records:
+                    chunk_id = record["chunk_id"]
+                    entry = aggregates.get(chunk_id)
+                    if not entry:
+                        entry = {
+                            "chunk_id": chunk_id,
+                            "document_id": record["document_id"],
+                            "parent_section_id": record["parent_section_id"],
+                            "order": int(record["order"]),
+                            "level": int(record["level"]),
+                            "heading": record["chunk_heading"] or "",
+                            "text": record["chunk_text"] or "",
+                            "token_count": int(record["token_count"] or 0),
+                            "is_combined": bool(record["is_combined"]),
+                            "is_split": bool(record["is_split"]),
+                            "original_section_ids": record["original_section_ids"] or [],
+                            "boundaries_json": record["boundaries_json"] or "{}",
+                            "best_chunk_score": 0.0,
+                            "best_cu_score": 0.0,
+                            "citations": [],
+                        }
+                        aggregates[chunk_id] = entry
 
-                for record in result:
-                    results.append(
-                        ChunkResult(
-                            chunk_id=record["chunk_id"],
-                            document_id=record["document_id"],
-                            parent_section_id=record["parent_section_id"],
-                            order=record["order"],
-                            level=record["level"],
-                            heading=record["heading"] or "",
-                            text=record["text"],
-                            token_count=record["token_count"],
-                            bm25_score=record["bm25_score"],
-                            is_combined=record["is_combined"],
-                            is_split=record["is_split"],
-                            original_section_ids=record["original_section_ids"] or [],
-                            boundaries_json=record["boundaries_json"] or "{}",
-                        )
-                    )
+                    score = float(record.get("score") or 0.0)
+                    is_citation = bool(record.get("is_citation"))
+                    citation_heading = record.get("citation_heading")
+                    citation_order = record.get("citation_order")
+
+                    if is_citation:
+                        entry["best_cu_score"] = max(entry["best_cu_score"], score)
+                        if citation_heading:
+                            order_value = int(citation_order) if citation_order is not None else entry["order"]
+                            entry["citations"].append((order_value, citation_heading))
+                    else:
+                        entry["best_chunk_score"] = max(entry["best_chunk_score"], score)
 
                 elapsed_ms = (time.time() - start_time) * 1000
                 logger.info(
-                    f"BM25 search completed: query='{query[:50]}...', "
-                    f"results={len(results)}, time={elapsed_ms:.2f}ms"
+                    "BM25 search completed",
+                    extra={
+                        "query_preview": query[:50],
+                        "unique_chunks": len(aggregates),
+                        "elapsed_ms": f"{elapsed_ms:.2f}",
+                    },
                 )
-
-        except Exception as e:
-            logger.error(f"BM25 search failed: {e}")
+        except Exception as exc:
+            logger.error("BM25 search failed", extra={"error": str(exc)})
             raise
 
-        return results
+        results: List[ChunkResult] = []
+        for entry in aggregates.values():
+            best_chunk_score = entry["best_chunk_score"]
+            best_cu_score = entry["best_cu_score"]
+            final_score = (
+                best_cu_score * CITATIONUNIT_BOOST if best_cu_score > 0.0 else best_chunk_score
+            )
+
+            raw_labels = entry["citations"]
+            deduped: List[Tuple[int, str]] = []
+            seen: Set[Tuple[int, str]] = set()
+            for order_val, title in raw_labels:
+                normalized_order = int(order_val if order_val is not None else entry["order"])
+                normalized_title = title or entry["heading"] or "Section"
+                key = (normalized_order, normalized_title)
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(key)
+
+            deduped.sort(key=lambda item: (item[0], item[1]))
+
+            results.append(
+                ChunkResult(
+                    chunk_id=entry["chunk_id"],
+                    document_id=entry["document_id"],
+                    parent_section_id=entry["parent_section_id"],
+                    order=entry["order"],
+                    level=entry["level"],
+                    heading=entry["heading"],
+                    text=entry["text"],
+                    token_count=entry["token_count"],
+                    is_combined=entry["is_combined"],
+                    is_split=entry["is_split"],
+                    original_section_ids=list(entry["original_section_ids"] or []),
+                    boundaries_json=entry["boundaries_json"],
+                    bm25_score=final_score,
+                    citation_labels=deduped,
+                )
+            )
+
+        results.sort(
+            key=lambda chunk: (
+                len(chunk.citation_labels or []),
+                chunk.bm25_score or 0.0,
+            ),
+            reverse=True,
+        )
+        for idx, chunk in enumerate(results, start=1):
+            chunk.bm25_rank = idx
+
+        return results[:top_k]
 
 
 class VectorRetriever:
@@ -250,7 +411,7 @@ class VectorRetriever:
                 with_payload=True,
             )
 
-            for hit in search_results:
+            for rank, hit in enumerate(search_results, start=1):
                 payload = hit.payload
                 results.append(
                     ChunkResult(
@@ -262,11 +423,13 @@ class VectorRetriever:
                         heading=payload.get("heading", ""),
                         text=payload.get("text", ""),
                         token_count=payload.get("token_count", 0),
-                        vec_score=hit.score,
+                        vector_rank=rank,
+                        vector_score=hit.score,
                         is_combined=payload.get("is_combined", False),
                         is_split=payload.get("is_split", False),
                         original_section_ids=payload.get("original_section_ids", []),
                         boundaries_json=payload.get("boundaries_json", "{}"),
+                        citation_labels=[],
                     )
                 )
 
@@ -404,6 +567,18 @@ class HybridRetriever:
         seeds = fused_results[:top_k]
         metrics["seed_count"] = len(seeds)
 
+        # Hydrate vector-only winners with citation labels
+        self._hydrate_missing_citations(seeds)
+
+        # Prefer chunks that carry richer citation labels
+        seeds.sort(
+            key=lambda chunk: (
+                len(chunk.citation_labels or []),
+                chunk.fused_score or 0.0,
+            ),
+            reverse=True,
+        )
+
         # Step 4: Gating decision for expansion
         when = ExpandWhen(expand_when)
         triggered, reason, score_delta, query_tokens = self._should_expand(
@@ -432,7 +607,13 @@ class HybridRetriever:
 
         # Step 6: Dedup and final sort (no top_k cap - budget enforces limit)
         all_results = self._dedup_results(all_results)
-        all_results.sort(key=lambda x: x.fused_score or 0, reverse=True)
+        all_results.sort(
+            key=lambda chunk: (
+                len(chunk.citation_labels or []),
+                chunk.fused_score or 0.0,
+            ),
+            reverse=True,
+        )
         final_results = all_results
 
         # Step 6: Context assembly with budget enforcement
@@ -521,8 +702,19 @@ class HybridRetriever:
         Reference: Cormack et al. "Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods"
         """
         # Build rank dictionaries
-        bm25_ranks = {r.chunk_id: i + 1 for i, r in enumerate(bm25_results)}
-        vec_ranks = {r.chunk_id: i + 1 for i, r in enumerate(vec_results)}
+        bm25_ranks: Dict[str, int] = {}
+        for i, r in enumerate(bm25_results):
+            rank = i + 1
+            bm25_ranks[r.chunk_id] = rank
+            if r.bm25_rank is None:
+                r.bm25_rank = rank
+
+        vec_ranks: Dict[str, int] = {}
+        for i, r in enumerate(vec_results):
+            rank = i + 1
+            vec_ranks[r.chunk_id] = rank
+            if r.vector_rank is None:
+                r.vector_rank = rank
 
         # Build combined result map
         all_chunks = {}
@@ -551,7 +743,7 @@ class HybridRetriever:
             if chunk_id in bm25_ranks:
                 chunk.bm25_score = chunk.bm25_score or 0
             if chunk_id in vec_ranks:
-                chunk.vec_score = chunk.vec_score or 0
+                chunk.vector_score = chunk.vector_score or 0
 
         return list(all_chunks.values())
 
@@ -561,7 +753,7 @@ class HybridRetriever:
         """
         Weighted linear combination fusion.
 
-        score = α * vec_score + (1-α) * bm25_score
+        score = α * vector_score + (1-α) * bm25_score
         where α is the vector weight (default 0.6)
 
         Note: Requires score normalization since BM25 and vector scores have different ranges.
@@ -586,7 +778,7 @@ class HybridRetriever:
                     setattr(r, f"norm_{score_attr}", normalized)
 
         normalize_scores(bm25_results, "bm25_score")
-        normalize_scores(vec_results, "vec_score")
+        normalize_scores(vec_results, "vector_score")
 
         # Build combined result map
         all_chunks = {}
@@ -598,12 +790,14 @@ class HybridRetriever:
                 all_chunks[r.chunk_id] = r
             else:
                 # Update vector score if already exists
-                all_chunks[r.chunk_id].vec_score = r.vec_score
-                all_chunks[r.chunk_id].norm_vec_score = getattr(r, "norm_vec_score", 0)
+                all_chunks[r.chunk_id].vector_score = r.vector_score
+                all_chunks[r.chunk_id].norm_vector_score = getattr(
+                    r, "norm_vector_score", 0
+                )
 
         # Calculate weighted scores
         for chunk in all_chunks.values():
-            norm_vec = getattr(chunk, "norm_vec_score", 0)
+            norm_vec = getattr(chunk, "norm_vector_score", 0)
             norm_bm25 = getattr(chunk, "norm_bm25_score", 0)
 
             chunk.fused_score = (
@@ -612,6 +806,59 @@ class HybridRetriever:
             chunk.fusion_method = "weighted"
 
         return list(all_chunks.values())
+
+    def _hydrate_missing_citations(self, chunks: List[ChunkResult]) -> None:
+        """
+        Ensure chunks surfaced by vectors also emit citation labels by fetching their CitationUnit headings.
+        """
+        missing = [
+            chunk.chunk_id
+            for chunk in chunks
+            if not (getattr(chunk, "citation_labels", None) or [])
+        ]
+        if not missing:
+            return
+
+        query = """
+        UNWIND $ids AS cid
+        MATCH (c:Chunk {id: cid})
+        OPTIONAL MATCH (u:CitationUnit)-[:IN_CHUNK]->(c)
+        WITH c, u ORDER BY u.order ASC
+        RETURN c.id AS chunk_id, collect([u.order, u.heading]) AS labels
+        """
+
+        with self.neo4j_driver.session() as session:
+            rows = session.run(query, ids=missing).data()
+
+        by_id: Dict[str, List[Tuple[int, str]]] = {
+            row["chunk_id"]: [
+                (int(order or 0), heading)
+                for order, heading in (row.get("labels") or [])
+                if heading
+            ]
+            for row in rows
+        }
+
+        for chunk in chunks:
+            if getattr(chunk, "citation_labels", None):
+                continue
+
+            labels = by_id.get(chunk.chunk_id) or []
+            if not labels:
+                continue
+
+            seen: Set[Tuple[int, str]] = set()
+            out: List[Tuple[int, str]] = []
+            for pair in labels:
+                key = tuple(pair)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append((pair[0], pair[1]))
+
+            out.sort(key=lambda x: (x[0], x[1]))
+            if out:
+                chunk.citation_labels = out
 
     def _should_expand(
         self, query: str, seeds: List[ChunkResult], when: ExpandWhen
@@ -762,6 +1009,7 @@ class HybridRetriever:
                             is_expanded=True,
                             expansion_source=source_chunk_id,
                             fused_score=neighbor_score,
+                            citation_labels=[],
                         )
                     )
 

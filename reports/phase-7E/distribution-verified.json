@@ -1,0 +1,165 @@
+{
+  "success": true,
+  "timestamp": "2025-10-28T00:32:50.183614",
+  "duration_seconds": 0.033081,
+  "overall": {
+    "total_sections": 371,
+    "total_tokens": 48091,
+    "min": 9,
+    "max": 297,
+    "avg": 129.6253369272237,
+    "median": 74,
+    "percentiles": {
+      "50": 74,
+      "75": 262,
+      "90": 262,
+      "95": 262,
+      "99": 296
+    },
+    "distribution": {
+      "under_200": 260,
+      "range_200_800": 111,
+      "range_800_1500": 0,
+      "range_1500_7900": 0,
+      "over_7900": 0
+    },
+    "distribution_percentages": {
+      "under_200": 70.08086253369272,
+      "range_200_800": 29.919137466307276,
+      "range_800_1500": 0.0,
+      "range_1500_7900": 0.0,
+      "over_7900": 0.0
+    }
+  },
+  "by_document": [
+    {
+      "doc_id": "ad685d7ad69fe8a20fbbdc340219872c2fface0bfe9b0626b8c10230fde1fc7b",
+      "section_count": 262,
+      "total_tokens": 40194,
+      "min": 11,
+      "max": 297,
+      "avg": 153.41221374045801,
+      "p50": 74,
+      "p75": 262,
+      "p90": 262,
+      "p95": 262
+    },
+    {
+      "doc_id": "bddeb4f860b99dbaf37a081678927552681a9008b1693356d61df6ede938e32f",
+      "section_count": 35,
+      "total_tokens": 1574,
+      "min": 9,
+      "max": 120,
+      "avg": 44.97142857142857,
+      "p50": 45,
+      "p75": 63,
+      "p90": 72,
+      "p95": 79
+    },
+    {
+      "doc_id": "cdf3dff253f62cf2dd1a3e62dbf440f089ba365ff24b272e823fa82c36662114",
+      "section_count": 34,
+      "total_tokens": 3031,
+      "min": 9,
+      "max": 210,
+      "avg": 89.1470588235294,
+      "p50": 88,
+      "p75": 118,
+      "p90": 161,
+      "p95": 178
+    },
+    {
+      "doc_id": "4ba0ac8c8244f08f4de285bf33431f57eb8afce946e70124e829dc48dc8fc143",
+      "section_count": 24,
+      "total_tokens": 2836,
+      "min": 55,
+      "max": 186,
+      "avg": 118.16666666666667,
+      "p50": 120,
+      "p75": 144,
+      "p90": 175,
+      "p95": 184
+    },
+    {
+      "doc_id": "30a32ba39d73d63cf5af318b5d1ebc7763f8e86c9633338e9f90cbc9801241ae",
+      "section_count": 16,
+      "total_tokens": 456,
+      "min": 15,
+      "max": 50,
+      "avg": 28.5,
+      "p50": 29,
+      "p75": 33,
+      "p90": 42,
+      "p95": 50
+    }
+  ],
+  "h2_groupings": {
+    "total_h2_groups": 10,
+    "avg_tokens_per_group": 4809.1,
+    "avg_sections_per_group": 37.1,
+    "min_tokens": 23,
+    "max_tokens": 26223,
+    "groups": [
+      {
+        "doc_id": "30a32ba39d73d63cf5af318b5d1ebc7763f8e86c9633338e9f90cbc9801241ae",
+        "h2_heading": "Overview",
+        "section_count": 15,
+        "total_tokens": 433
+      },
+      {
+        "doc_id": "30a32ba39d73d63cf5af318b5d1ebc7763f8e86c9633338e9f90cbc9801241ae",
+        "h2_heading": "Conclusion",
+        "section_count": 1,
+        "total_tokens": 23
+      },
+      {
+        "doc_id": "4ba0ac8c8244f08f4de285bf33431f57eb8afce946e70124e829dc48dc8fc143",
+        "h2_heading": "Executive Summary",
+        "section_count": 23,
+        "total_tokens": 2728
+      },
+      {
+        "doc_id": "4ba0ac8c8244f08f4de285bf33431f57eb8afce946e70124e829dc48dc8fc143",
+        "h2_heading": "Conclusion",
+        "section_count": 1,
+        "total_tokens": 108
+      },
+      {
+        "doc_id": "ad685d7ad69fe8a20fbbdc340219872c2fface0bfe9b0626b8c10230fde1fc7b",
+        "h2_heading": null,
+        "section_count": 101,
+        "total_tokens": 26223
+      },
+      {
+        "doc_id": "ad685d7ad69fe8a20fbbdc340219872c2fface0bfe9b0626b8c10230fde1fc7b",
+        "h2_heading": "Section 2: System Configuration Parameters",
+        "section_count": 161,
+        "total_tokens": 13971
+      },
+      {
+        "doc_id": "bddeb4f860b99dbaf37a081678927552681a9008b1693356d61df6ede938e32f",
+        "h2_heading": "Executive Summary",
+        "section_count": 34,
+        "total_tokens": 1504
+      },
+      {
+        "doc_id": "bddeb4f860b99dbaf37a081678927552681a9008b1693356d61df6ede938e32f",
+        "h2_heading": "Conclusion",
+        "section_count": 1,
+        "total_tokens": 70
+      },
+      {
+        "doc_id": "cdf3dff253f62cf2dd1a3e62dbf440f089ba365ff24b272e823fa82c36662114",
+        "h2_heading": null,
+        "section_count": 33,
+        "total_tokens": 2953
+      },
+      {
+        "doc_id": "cdf3dff253f62cf2dd1a3e62dbf440f089ba365ff24b272e823fa82c36662114",
+        "h2_heading": "Conclusion",
+        "section_count": 1,
+        "total_tokens": 78
+      }
+    ]
+  }
+}

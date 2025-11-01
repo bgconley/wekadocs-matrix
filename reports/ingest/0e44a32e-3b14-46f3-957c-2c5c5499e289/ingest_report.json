@@ -1,0 +1,32 @@
+{
+  "job_id": "0e44a32e-3b14-46f3-957c-2c5c5499e289",
+  "tag": "test",
+  "timestamp_utc": "2025-10-18T23:19:50.877631Z",
+  "doc": {
+    "source_uri": "file:///private/var/folders/ly/5hgrbf0n3rz7hlqwlt1xn9mr0000gn/T/pytest-of-brennanconley/pytest-80/test_calls_existing_parsers0/watch/parser_test.md",
+    "checksum": "b1d5fa3e5fc47ed8e6b7eaedf51c711ef313af9d2e52738417f46b17cf50aba8",
+    "sections": 2,
+    "title": "Parser Test Document"
+  },
+  "graph": {
+    "nodes_total": 124,
+    "rels_total": 0,
+    "sections_total": 0,
+    "documents_total": 0
+  },
+  "vector": {
+    "sot": "qdrant",
+    "sections_indexed": 552,
+    "embedding_version": "v1"
+  },
+  "drift_pct": 0.0,
+  "sample_queries": [],
+  "ready_for_queries": true,
+  "timings_ms": {
+    "parse": 0,
+    "extract": 0,
+    "graph": 1064,
+    "embed": 995
+  },
+  "errors": []
+}

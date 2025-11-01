@@ -371,13 +371,13 @@ class TestHybridRetrievalIntegration:
 
         # Check scores
         first = results[0]
-        assert first.vec_score is not None, "Vector score must be present"
-        assert 0 <= first.vec_score <= 1, "Cosine similarity should be in [0,1]"
+        assert first.vector_score is not None, "Vector score must be present"
+        assert 0 <= first.vector_score <= 1, "Cosine similarity should be in [0,1]"
 
         # Verify descending scores
         for i in range(len(results) - 1):
             assert (
-                results[i].vec_score >= results[i + 1].vec_score
+                results[i].vector_score >= results[i + 1].vector_score
             ), "Results should be sorted by score"
 
     @pytest.mark.integration
@@ -412,7 +412,7 @@ class TestHybridRetrievalIntegration:
 
             # At least one of the component scores should be present
             has_score = (result.bm25_score is not None) or (
-                result.vec_score is not None
+                result.vector_score is not None
             )
             assert has_score, "Result must have at least one component score"
 

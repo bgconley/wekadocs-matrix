@@ -124,6 +124,25 @@ class GreedyCombinerV2:
             block_ids.append(current_block)
         return block_ids
 
+    def _build_citation_units(
+        self, document_id: str, chunk_id: str, sections: List[Dict]
+    ) -> List[Dict]:
+        units: List[Dict] = []
+        for section in sections:
+            units.append(
+                {
+                    "id": section.get("id"),
+                    "document_id": document_id,
+                    "parent_chunk_id": chunk_id,
+                    "heading": section.get("title", ""),
+                    "text": section.get("body", ""),
+                    "level": int(section.get("level", 3)),
+                    "order": int(section.get("order", 0)),
+                    "token_count": int(section.get("tokens", 0)),
+                }
+            )
+        return units
+
     # ---------- main assemble ----------
 
     def assemble(self, document_id: str, sections: List[Dict]) -> List[Dict]:
@@ -251,9 +270,11 @@ class GreedyCombinerV2:
                 boundaries["sections"].append(
                     {
                         "id": s["id"],
-                        "order": s.get("order", 0),
-                        "level": s.get("level", 3),
-                        "tokens": tt,
+                        "order": int(s.get("order", 0)),
+                        "level": int(s.get("level", 3)),
+                        "tokens": int(tt),
+                        "title": h or "",
+                        "body": t,
                     }
                 )
             # record first section too
@@ -261,9 +282,11 @@ class GreedyCombinerV2:
                 0,
                 {
                     "id": group[0]["id"],
-                    "order": group[0].get("order", 0),
-                    "level": group[0].get("level", 3),
-                    "tokens": toks[0],
+                    "order": int(group[0].get("order", 0)),
+                    "level": int(group[0].get("level", 3)),
+                    "tokens": int(toks[0]),
+                    "title": first_heading or "",
+                    "body": texts[0],
                 },
             )
 
@@ -275,6 +298,23 @@ class GreedyCombinerV2:
             order = int(group[0].get("order", 0))
             heading = first_heading
             parent_section_id = group[0]["id"]
+
+            raw_sections = list(boundaries["sections"])
+            clean_sections = [
+                {
+                    "id": sec["id"],
+                    "order": sec["order"],
+                    "level": sec["level"],
+                    "tokens": sec["tokens"],
+                }
+                for sec in raw_sections
+            ]
+            clean_boundaries = {
+                "combined": boundaries["combined"],
+                "sections": clean_sections,
+            }
+
+            boundaries = clean_boundaries
 
             if len(group) == 1:
                 # Single-section chunk (truthful metadata)
@@ -288,7 +328,7 @@ class GreedyCombinerV2:
                     is_combined=False,
                     is_split=False,
                     boundaries_json=json.dumps(
-                        {"combined": False, "sections": [boundaries["sections"][0]]},
+                        {"combined": False, "sections": [clean_sections[0]]},
                         separators=(",", ":"),
                     ),
                     token_count=c_tokens,
@@ -297,6 +337,11 @@ class GreedyCombinerV2:
                 meta["tokens"] = c_tokens
                 meta["text"] = combined
                 meta["checksum"] = hashlib.sha256(combined.encode("utf-8")).hexdigest()
+                meta["_citation_units"] = self._build_citation_units(
+                    document_id=document_id,
+                    chunk_id=meta["id"],
+                    sections=raw_sections,
+                )
                 chunks.append(meta)
             else:
                 if c_tokens <= self.hard_max:
@@ -308,7 +353,7 @@ class GreedyCombinerV2:
                         heading=heading,
                         parent_section_id=parent_section_id,
                         token_count=c_tokens,
-                        boundaries=boundaries,
+                        boundaries=clean_boundaries,
                     )
                     meta["anchor"] = group[0].get("anchor", "")
                     meta["tokens"] = c_tokens
@@ -316,6 +361,11 @@ class GreedyCombinerV2:
                     meta["checksum"] = hashlib.sha256(
                         combined.encode("utf-8")
                     ).hexdigest()
+                    meta["_citation_units"] = self._build_citation_units(
+                        document_id=document_id,
+                        chunk_id=meta["id"],
+                        sections=raw_sections,
+                    )
                     chunks.append(meta)
                 else:
                     # Split combined unit (rare here because hard_max is high)
@@ -334,28 +384,32 @@ class GreedyCombinerV2:
                         )
                         bhash = hashlib.sha256(pj.encode("utf-8")).hexdigest()[:12]
                         sub_id = generate_chunk_id(document_id, orig_ids + [bhash])
-                        chunks.append(
-                            {
-                                "id": sub_id,
-                                "document_id": document_id,
-                                "level": level,
-                                "order": order * 100000 + part["chunk_index"],
-                                "heading": heading,
-                                "parent_section_id": parent_section_id,
-                                "original_section_ids": orig_ids,
-                                "is_combined": True,
-                                "is_split": True,
-                                "boundaries_json": pj,
-                                "token_count": int(part["token_count"]),
-                                "updated_at": datetime.utcnow(),
-                                "text": part["text"],
-                                "checksum": hashlib.sha256(
-                                    part["text"].encode("utf-8")
-                                ).hexdigest(),
-                                "anchor": group[0].get("anchor", ""),
-                                "tokens": int(part["token_count"]),
-                            }
+                        sub_chunk = {
+                            "id": sub_id,
+                            "document_id": document_id,
+                            "level": level,
+                            "order": order * 100000 + part["chunk_index"],
+                            "heading": heading,
+                            "parent_section_id": parent_section_id,
+                            "original_section_ids": orig_ids,
+                            "is_combined": True,
+                            "is_split": True,
+                            "boundaries_json": pj,
+                            "token_count": int(part["token_count"]),
+                            "updated_at": datetime.utcnow(),
+                            "text": part["text"],
+                            "checksum": hashlib.sha256(
+                                part["text"].encode("utf-8")
+                            ).hexdigest(),
+                            "anchor": group[0].get("anchor", ""),
+                            "tokens": int(part["token_count"]),
+                        }
+                        sub_chunk["_citation_units"] = self._build_citation_units(
+                            document_id=document_id,
+                            chunk_id=sub_id,
+                            sections=raw_sections,
                         )
+                        chunks.append(sub_chunk)
 
             if self.debug:
                 log.debug(

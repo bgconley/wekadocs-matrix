@@ -197,15 +197,18 @@ class ContextAssembler:
         self, grouped: Dict[str, List[ChunkResult]]
     ) -> List[Tuple[str, List[ChunkResult]]]:
         """Order groups by best chunk score in each group."""
-        # Calculate best score per group
-        group_scores = {}
+        # Calculate prioritization metrics per group
+        group_metrics = {}
         for parent_id, chunks in grouped.items():
-            best_score = max((c.fused_score or 0) for c in chunks)
-            group_scores[parent_id] = best_score
+            best_score = max((c.fused_score or 0.0) for c in chunks)
+            richest_citations = max(len(c.citation_labels or []) for c in chunks)
+            group_metrics[parent_id] = (richest_citations, best_score)
 
-        # Sort groups by best score
+        # Sort groups by citation richness first, then best score
         ordered = sorted(
-            grouped.items(), key=lambda x: group_scores[x[0]], reverse=True
+            grouped.items(),
+            key=lambda item: group_metrics[item[0]],
+            reverse=True,
         )
         return ordered
 
@@ -315,25 +318,44 @@ class ContextAssembler:
         if not self.include_citations or not context.chunks:
             return context.text
 
-        # Build citation map
-        citations = {}
-        for i, chunk in enumerate(context.chunks, 1):
-            # Use chunk_id for citation
-            citations[chunk.chunk_id] = f"[{i}]"
-
-        # Add citation references at the end
         parts = [context.text]
-
         parts.append("\n\n---\n### Citations\n")
+
+        citation_index = 1
         for chunk in context.chunks:
-            citation = citations[chunk.chunk_id]
-            parts.append(
-                f"{citation} {chunk.heading or 'Section'} "
-                f"(Doc: {chunk.document_id[:20]}..., "
-                f"Tokens: {chunk.token_count})"
-            )
-            if chunk.is_expanded:
-                parts.append(" [expanded]")
-            parts.append("\n")
+            labels = getattr(chunk, "citation_labels", None) or []
+            lines_emitted = 0
+
+            if labels:
+                labels = sorted(labels, key=lambda x: (x[0], x[1]))
+                seen_titles = set()
+                for order_val, title in labels:
+                    cleaned_title = title or (chunk.heading or "Section")
+                    key = (order_val, cleaned_title)
+                    if key in seen_titles:
+                        continue
+                    seen_titles.add(key)
+                    parts.append(
+                        f"[{citation_index}] {cleaned_title} "
+                        f"(Doc: {chunk.document_id[:20]}..., "
+                        f"Tokens: {chunk.token_count})"
+                    )
+                    if chunk.is_expanded and lines_emitted == 0:
+                        parts.append(" [expanded]")
+                    parts.append("\n")
+                    citation_index += 1
+                    lines_emitted += 1
+
+            if lines_emitted == 0:
+                fallback_title = chunk.heading or "Section"
+                parts.append(
+                    f"[{citation_index}] {fallback_title} "
+                    f"(Doc: {chunk.document_id[:20]}..., "
+                    f"Tokens: {chunk.token_count})"
+                )
+                if chunk.is_expanded:
+                    parts.append(" [expanded]")
+                parts.append("\n")
+                citation_index += 1
 
         return "".join(parts)

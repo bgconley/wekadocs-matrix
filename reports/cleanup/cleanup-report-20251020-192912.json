@@ -1,0 +1,99 @@
+{
+  "timestamp": "2025-10-20T19:29:12.117355",
+  "dry_run": false,
+  "options": {
+    "dry_run": false,
+    "redis_db": 1,
+    "skip_neo4j": false,
+    "skip_qdrant": false,
+    "skip_redis": false,
+    "report_dir": "reports/cleanup",
+    "quiet": false
+  },
+  "before": {
+    "neo4j": {
+      "nodes": 0,
+      "relationships": 0,
+      "constraints": 13,
+      "indexes": 35
+    },
+    "qdrant": {
+      "weka_sections": {
+        "vector_count": 268,
+        "config": "size=384 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=None"
+      }
+    },
+    "redis": {
+      "db": 1,
+      "key_count": 0,
+      "sample_keys": []
+    }
+  },
+  "after": {
+    "neo4j": {
+      "nodes": 0,
+      "relationships": 0,
+      "constraints": 13,
+      "indexes": 35
+    },
+    "qdrant": {
+      "weka_sections": {
+        "vector_count": 0,
+        "deleted": true
+      }
+    },
+    "redis": {
+      "db": 1,
+      "key_count": 0
+    }
+  },
+  "actions": [
+    {
+      "timestamp": "2025-10-20T19:29:12.184407",
+      "action": "neo4j_delete_all",
+      "details": {
+        "nodes_deleted": 0,
+        "rels_deleted": 0
+      }
+    },
+    {
+      "timestamp": "2025-10-20T19:29:12.293739",
+      "action": "qdrant_delete_collection",
+      "details": {
+        "collection": "weka_sections",
+        "vectors_deleted": 268
+      }
+    },
+    {
+      "timestamp": "2025-10-20T19:29:12.299432",
+      "action": "redis_flushdb",
+      "details": {
+        "db": 1,
+        "keys_deleted": 0
+      }
+    }
+  ],
+  "errors": [],
+  "summary": {
+    "dry_run": false,
+    "success": true,
+    "databases_cleaned": [
+      {
+        "database": "neo4j",
+        "nodes_deleted": 0,
+        "relationships_deleted": 0,
+        "schema_preserved": true
+      },
+      {
+        "database": "qdrant",
+        "collections_deleted": 1,
+        "total_vectors_deleted": 268
+      },
+      {
+        "database": "redis",
+        "db": 1,
+        "keys_deleted": 0
+      }
+    ]
+  }
+}

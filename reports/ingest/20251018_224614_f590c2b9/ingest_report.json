@@ -1,0 +1,32 @@
+{
+  "job_id": "f590c2b9-5ab5-4ee7-ab9b-7e18a0d5c020",
+  "tag": "e2e-test",
+  "timestamp_utc": "2025-10-18T22:46:14.559977Z",
+  "doc": {
+    "source_uri": "file:///private/var/folders/ly/5hgrbf0n3rz7hlqwlt1xn9mr0000gn/T/pytest-of-brennanconley/pytest-77/test_complete_watcher_flow0/watch/e2e_test_dfbc2f58-1990-465d-b65e-b2c8a00b8ed7.md",
+    "checksum": "d0c6420a1cc8d0f3345193dae5d4936ef40f5dc25cdbb515bb16cfe16d95b87e",
+    "sections": 2,
+    "title": "End-to-End Test Document dfbc2f58-1990-465d-b65e-b2c8a00b8ed7"
+  },
+  "graph": {
+    "nodes_total": 701,
+    "rels_total": 0,
+    "sections_total": 0,
+    "documents_total": 0
+  },
+  "vector": {
+    "sot": "qdrant",
+    "sections_indexed": 688,
+    "embedding_version": "v1"
+  },
+  "drift_pct": 0.0,
+  "sample_queries": [],
+  "ready_for_queries": true,
+  "timings_ms": {
+    "parse": 10,
+    "extract": 1,
+    "graph": 1591,
+    "embed": 1115
+  },
+  "errors": []
+}

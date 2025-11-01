@@ -1,0 +1,32 @@
+{
+  "job_id": "9c0ef841-7bc5-46c0-8ecf-6ab99fe30b4a",
+  "tag": "test",
+  "timestamp_utc": "2025-10-18T23:01:33.317224Z",
+  "doc": {
+    "source_uri": "N/A",
+    "checksum": "N/A",
+    "sections": 0,
+    "title": "Untitled"
+  },
+  "graph": {
+    "nodes_total": 703,
+    "rels_total": 0,
+    "sections_total": 0,
+    "documents_total": 0
+  },
+  "vector": {
+    "sot": "qdrant",
+    "sections_indexed": 695,
+    "embedding_version": "v1"
+  },
+  "drift_pct": 0.0,
+  "sample_queries": [],
+  "ready_for_queries": true,
+  "timings_ms": {
+    "parse": 0,
+    "extract": 0,
+    "graph": 0,
+    "embed": 1201
+  },
+  "errors": []
+}

@@ -1,0 +1,64 @@
+{
+  "timestamp": "2025-10-18T19:31:59.150715",
+  "dry_run": true,
+  "options": {
+    "dry_run": true,
+    "redis_db": 1,
+    "skip_neo4j": false,
+    "skip_qdrant": false,
+    "skip_redis": false,
+    "report_dir": "reports/cleanup",
+    "quiet": false
+  },
+  "before": {
+    "neo4j": {
+      "nodes": 0,
+      "relationships": 0,
+      "constraints": 13,
+      "indexes": 35
+    },
+    "qdrant": {},
+    "redis": {
+      "db": 1,
+      "key_count": 0,
+      "sample_keys": []
+    }
+  },
+  "after": {
+    "neo4j": {
+      "nodes": 0,
+      "relationships": 0,
+      "constraints": 13,
+      "indexes": 35
+    },
+    "qdrant": {},
+    "redis": {
+      "db": 1,
+      "key_count": 0
+    }
+  },
+  "actions": [],
+  "errors": [],
+  "summary": {
+    "dry_run": true,
+    "success": true,
+    "databases_cleaned": [
+      {
+        "database": "neo4j",
+        "nodes_deleted": 0,
+        "relationships_deleted": 0,
+        "schema_preserved": true
+      },
+      {
+        "database": "qdrant",
+        "collections_deleted": 0,
+        "total_vectors_deleted": 0
+      },
+      {
+        "database": "redis",
+        "db": 1,
+        "keys_deleted": 0
+      }
+    ]
+  }
+}

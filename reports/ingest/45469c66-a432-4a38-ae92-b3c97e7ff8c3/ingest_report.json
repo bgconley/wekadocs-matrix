@@ -1,0 +1,32 @@
+{
+  "job_id": "45469c66-a432-4a38-ae92-b3c97e7ff8c3",
+  "tag": "test",
+  "timestamp_utc": "2025-10-18T23:01:57.239468Z",
+  "doc": {
+    "source_uri": "file:///private/var/folders/ly/5hgrbf0n3rz7hlqwlt1xn9mr0000gn/T/pytest-of-brennanconley/pytest-79/test_calls_build_graph0/watch/graph_test.md",
+    "checksum": "1be08bf2c3a939916fac467612ea4fcadc373c392d620bffecc371a8ffaccc9b",
+    "sections": 1,
+    "title": "Graph Build Test"
+  },
+  "graph": {
+    "nodes_total": 704,
+    "rels_total": 0,
+    "sections_total": 0,
+    "documents_total": 0
+  },
+  "vector": {
+    "sot": "qdrant",
+    "sections_indexed": 708,
+    "embedding_version": "v1"
+  },
+  "drift_pct": 0.0,
+  "sample_queries": [],
+  "ready_for_queries": true,
+  "timings_ms": {
+    "parse": 0,
+    "extract": 0,
+    "graph": 1577,
+    "embed": 1363
+  },
+  "errors": []
+}

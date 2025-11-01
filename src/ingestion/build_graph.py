@@ -126,6 +126,15 @@ class GraphBuilder:
                 session, document["id"], sections
             )
 
+            citation_units_upserted = self._upsert_citation_units(
+                session, document["id"], sections
+            )
+            stats["citation_units_upserted"] = citation_units_upserted
+
+            # remove transient citation payloads before further processing
+            for section in sections:
+                section.pop("_citation_units", None)
+
             # Step 2c: Create NEXT_CHUNK relationships for adjacency
             self._create_next_chunk_relationships(session, document["id"], sections)
 
@@ -345,6 +354,70 @@ class GraphBuilder:
 
         return total_sections
 
+    def _upsert_citation_units(
+        self, session, document_id: str, chunks: List[Dict]
+    ) -> int:
+        """Upsert lightweight CitationUnit nodes for subsection-level citations."""
+
+        unit_map: Dict[str, Dict] = {}
+        rels: List[Dict] = []
+
+        for chunk in chunks:
+            for unit in chunk.get("_citation_units", []) or []:
+                if not unit.get("id"):
+                    continue
+                existing = unit_map.get(unit["id"])
+                if existing is None or unit.get("order", 0) < existing.get("order", 0):
+                    unit_map[unit["id"]] = unit
+                rels.append({
+                    "unit_id": unit["id"],
+                    "chunk_id": unit["parent_chunk_id"],
+                })
+
+        units = list(unit_map.values())
+
+        if not units:
+            return 0
+
+        session.run(
+            """
+            UNWIND $rows AS r
+            MERGE (u:CitationUnit {id: r.id})
+              ON CREATE SET u.created_at = timestamp()
+            SET u.document_id     = r.document_id,
+                u.heading         = r.heading,
+                u.text            = r.text,
+                u.level           = r.level,
+                u.order           = r.order,
+                u.token_count     = r.token_count,
+                u.parent_chunk_id = r.parent_chunk_id,
+                u.updated_at      = timestamp()
+            """,
+            rows=units,
+        )
+
+        if rels:
+            session.run(
+                """
+                UNWIND $pairs AS p
+                MATCH (u:CitationUnit {id: p.unit_id})
+                MATCH (c:Chunk {id: p.chunk_id})
+                MERGE (u)-[:IN_CHUNK]->(c)
+                """,
+                pairs=rels,
+            )
+
+        session.run(
+            """
+            MATCH (d:Document {id: $doc_id})
+            MATCH (u:CitationUnit {document_id: $doc_id})
+            MERGE (d)-[:HAS_CITATION]->(u)
+            """,
+            doc_id=document_id,
+        )
+
+        return len(units)
+
     def _delete_stale_chunks_neo4j(
         self, session, document_id: str, current_sections: List[Dict]
     ):
@@ -361,6 +434,12 @@ class GraphBuilder:
         """
         # Current sections are already chunks (post-assembler). Use their IDs directly.
         current_chunk_ids = [s.get("id") for s in current_sections if s.get("id")]
+        current_citation_ids: List[str] = []
+        for section in current_sections:
+            for unit in section.get("_citation_units", []) or []:
+                if unit.get("id"):
+                    current_citation_ids.append(unit["id"])
+        current_citation_ids = list(dict.fromkeys(current_citation_ids))
 
         # Delete chunks not in current set
         delete_query = """
@@ -384,6 +463,16 @@ class GraphBuilder:
                 document_id=document_id,
                 deleted_count=deleted,
             )
+
+        session.run(
+            """
+            MATCH (d:Document {id: $document_id})-[:HAS_CITATION]->(u:CitationUnit)
+            WHERE NOT u.id IN $current_citation_ids
+            DETACH DELETE u
+            """,
+            document_id=document_id,
+            current_citation_ids=current_citation_ids,
+        )
 
     def _create_next_chunk_relationships(
         self, session, document_id: str, sections: List[Dict]

@@ -1,0 +1,12 @@
+{
+  "constraints_only_in_backup": [],
+  "constraints_only_in_generated": [
+    "and",
+    "schema_version_singleton"
+  ],
+  "indexes_only_in_backup": [],
+  "indexes_only_in_generated": [
+    "chunk_text_fulltext",
+    "document_title_fulltext"
+  ]
+}
