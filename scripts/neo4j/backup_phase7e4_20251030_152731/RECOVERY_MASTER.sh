@@ -78,17 +78,17 @@ execute() {
 if [ "$SKIP_BACKUP" = false ]; then
     echo -e "${BLUE}Step 1: Backing up current state...${NC}"
     execute mkdir -p "$BACKUP_DIR"
-    
+
     # Neo4j backup
     execute docker exec weka-neo4j cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" \
         "SHOW CONSTRAINTS; SHOW INDEXES;" > "$BACKUP_DIR/neo4j_schema_before.txt" 2>/dev/null || true
-    
+
     # Qdrant backup
     execute curl -sS "$QDRANT/collections" > "$BACKUP_DIR/qdrant_collections_before.json" 2>/dev/null || true
-    
+
     # Redis info
     execute docker exec weka-redis redis-cli -a "$REDIS_PASSWORD" INFO keyspace > "$BACKUP_DIR/redis_keyspace_before.txt" 2>/dev/null || true
-    
+
     echo -e "${GREEN}✓ Backup completed${NC}"
 else
     echo -e "${YELLOW}Step 1: Skipping backup (--skip-backup flag)${NC}"
@@ -104,14 +104,14 @@ echo -e "\n${BLUE}Step 3: Applying Neo4j schema...${NC}"
 if [ "$DRY_RUN" = false ]; then
     # Copy DDL to container
     docker cp "$SCRIPT_DIR/neo4j_complete_ddl.cypher" weka-neo4j:/tmp/recovery_ddl.cypher
-    
+
     # Execute DDL
     docker exec weka-neo4j cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" -f /tmp/recovery_ddl.cypher
-    
+
     # Verify
     SCHEMA_VERSION=$(docker exec weka-neo4j cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" \
         "MATCH (sv:SchemaVersion {id: 'singleton'}) RETURN sv.version" --format plain 2>/dev/null | tail -1)
-    
+
     if [ "$SCHEMA_VERSION" = "v2.1" ]; then
         echo -e "${GREEN}✓ Neo4j schema applied successfully (v2.1)${NC}"
     else
@@ -146,13 +146,13 @@ for i in {1..30}; do
     if [ "$DRY_RUN" = false ]; then
         sleep 2
         echo -n "."
-        
+
         # Check MCP health
         if curl -sS http://localhost:8000/health 2>/dev/null | grep -q "healthy"; then
             echo -e "\n${GREEN}✓ Services are healthy${NC}"
             break
         fi
-        
+
         if [ $i -eq 30 ]; then
             echo -e "\n${RED}✗ Services failed to become healthy${NC}"
             exit 1
@@ -171,21 +171,21 @@ if [ "$DRY_RUN" = false ]; then
         "SHOW CONSTRAINTS YIELD name RETURN count(*) as count" --format plain 2>/dev/null | tail -1)
     INDEXES=$(docker exec weka-neo4j cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" \
         "SHOW INDEXES YIELD name RETURN count(*) as count" --format plain 2>/dev/null | tail -1)
-    
+
     echo "  Neo4j: $CONSTRAINTS constraints, $INDEXES indexes"
-    
+
     # Qdrant checks
     COLLECTIONS=$(curl -sS "$QDRANT/collections" 2>/dev/null | grep -c '"name"' || echo "0")
     echo "  Qdrant: $COLLECTIONS collections"
-    
+
     # Redis check
     REDIS_PING=$(docker exec weka-redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null)
     echo "  Redis: $REDIS_PING"
-    
+
     # MCP health
     MCP_STATUS=$(curl -sS http://localhost:8000/health 2>/dev/null | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || echo "failed")
     echo "  MCP Server: $MCP_STATUS"
-    
+
     echo -e "${GREEN}✓ All verification checks passed${NC}"
 else
     echo -e "${YELLOW}[DRY RUN] Would run verification checks${NC}"

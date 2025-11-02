@@ -448,7 +448,7 @@
 | info | tests/p3_t4_integration_test.py | 375 | Use of canonical 'embedding_version' | `embedding_version` |
 | info | tests/p3_t4_test.py | 54 | Presence of :Section label | `:Section` |
 | info | tests/p3_t4_test.py | 140 | Presence of :Section label | `:Section` |
-| info | tests/p4_t2_perf_test.py | 42 | MERGE Document by id (canonical) | `MERGE (d:Document {id: ` |       
+| info | tests/p4_t2_perf_test.py | 42 | MERGE Document by id (canonical) | `MERGE (d:Document {id: ` |
 | info | tests/p4_t2_perf_test.py | 51 | Presence of :Section label | `:Section` |
 | info | tests/p4_t2_perf_test.py | 232 | Presence of :Section label | `:Section` |
 | info | tests/p4_t2_perf_test.py | 289 | Presence of :Section label | `:Section` |
@@ -854,7 +854,7 @@
     55 |         logger.info(f"Embedding provider: {self.config.embedding.provider}")
     56 |         logger.info(f"Embedding model: {self.config.embedding.embedding_model}")
     57 |         logger.info(f"Embedding dimensions: {self.config.embedding.dims}")
-    58 | 
+    58 |
 ```
 
 ### scripts/eval/run_eval.py:468 — Use of deprecated property name 'embedding_model' (use 'embedding_version') (error)
@@ -953,7 +953,7 @@
     26 |     config.embedding.provider = "jina-ai"
     27 |     config.embedding.embedding_model = "jina-embeddings-v4"
     28 |     config.embedding.dims = 1024
-    29 | 
+    29 |
 ```
 
 ### scripts/test_jina_integration.py:27 — Use of deprecated property name 'embedding_model' (use 'embedding_version') (error)
@@ -962,7 +962,7 @@
     26 |     config.embedding.provider = "jina-ai"
     27 |     config.embedding.embedding_model = "jina-embeddings-v4"
     28 |     config.embedding.dims = 1024
-    29 | 
+    29 |
 ```
 
 ### src/ingestion/api.py:11 — Use of deprecated property name 'embedding_model' (use 'embedding_version') (error)
@@ -1006,7 +1006,7 @@
    433 |                 "Loading embedding model", model=self.config.embedding.embedding_model
    434 |             )
    435 |             self.embedder = SentenceTransformer(self.config.embedding.embedding_model)
-   436 | 
+   436 |
    437 |         # Compute embeddings for sections
 ```
 
@@ -1030,7 +1030,7 @@
 
 ### src/ingestion/build_graph.py:905 — Use of deprecated property name 'embedding_model' (use 'embedding_version') (error)
 ```text
-   903 | 
+   903 |
    904 |     # Allow optional overrides prior to ingestion
    905 |     if embedding_model:
    906 |         try:
@@ -1061,7 +1061,7 @@
     60 |                 f"Loading embedding provider from config: provider={self.config.embedding.provider}, "
     61 |                 f"model={self.config.embedding.embedding_model}, dims={expected_dims}"
     62 |             )
-    63 | 
+    63 |
 ```
 
 ### src/mcp_server/query_service.py:364 — Use of deprecated property name 'embedding_model' (use 'embedding_version') (error)
@@ -1075,7 +1075,7 @@
 
 ### src/providers/embeddings/sentence_transformers.py:47 — Use of deprecated property name 'embedding_model' (use 'embedding_version') (error)
 ```text
-    45 | 
+    45 |
     46 |         # Use provided values or fall back to config
     47 |         self._model_name = model_name or config.embedding.embedding_model
     48 |         self._expected_dims = expected_dims or config.embedding.dims
@@ -1129,7 +1129,7 @@
 
 ### src/shared/config.py:26 — Use of deprecated property name 'embedding_model' (use 'embedding_version') (error)
 ```text
-    24 | 
+    24 |
     25 |     # Model configuration
     26 |     embedding_model: str = Field(
     27 |         alias="model_name"
@@ -1138,11 +1138,11 @@
 
 ### src/shared/config.py:69 — Use of deprecated property name 'embedding_model' (use 'embedding_version') (error)
 ```text
-    67 | 
+    67 |
     68 |     class Config:
     69 |         populate_by_name = True  # Allow both embedding_model and model_name
-    70 | 
-    71 | 
+    70 |
+    71 |
 ```
 
 ### src/shared/config.py:324 — Use of deprecated property name 'embedding_model' (use 'embedding_version') (error)
@@ -1156,19 +1156,19 @@
 
 ### tests/e2e/test_golden_set.py:189 — Use of deprecated property name 'embedding_model' (use 'embedding_version') (error)
 ```text
-   187 | 
+   187 |
    188 |         # Initialize embedder
    189 |         embedder = SentenceTransformer(config.embedding.embedding_model)
-   190 | 
+   190 |
    191 |         # Initialize vector store
 ```
 
 ### tests/e2e/test_golden_set.py:398 — Use of deprecated property name 'embedding_model' (use 'embedding_version') (error)
 ```text
-   396 | 
+   396 |
    397 |         # Initialize embedder
    398 |         embedder = SentenceTransformer(config.embedding.embedding_model)
-   399 | 
+   399 |
    400 |         # Initialize vector store
 ```
 
@@ -1178,7 +1178,7 @@
     68 |     """Create embedder for encoding queries."""
     69 |     model_name = config.embedding.embedding_model
     70 |     return SentenceTransformer(model_name)
-    71 | 
+    71 |
 ```
 
 ### tests/test_integration_prephase7.py:47 — Use of deprecated property name 'embedding_model' (use 'embedding_version') (error)
@@ -1219,11 +1219,11 @@
 
 ### tests/test_phase1_foundation.py:57 — Use of deprecated property name 'embedding_model' (use 'embedding_version') (error)
 ```text
-    55 | 
+    55 |
     56 |         # Initialize provider
     57 |         print(f"Initializing provider with model: {config.embedding.embedding_model}")
     58 |         provider = SentenceTransformersProvider()
-    59 | 
+    59 |
 ```
 
 ### tests/test_phase7c_index_registry.py:31 — Found reference to deprecated model v4 (should be v3) (error)
@@ -1241,24 +1241,24 @@
     40 |         assert index["provider"] == "jina-ai"
     41 |         assert index["model"] == "jina-embeddings-v4"
     42 |         assert index["is_active"] is True
-    43 | 
+    43 |
 ```
 
 ### tests/test_phase7c_index_registry.py:149 — Found reference to deprecated model v4 (should be v3) (error)
 ```text
    147 |         )
-   148 | 
+   148 |
    149 |         provider = MockProvider("jina-ai", "jina-embeddings-v4", 1024)
-   150 | 
+   150 |
    151 |         # Should not raise
 ```
 
 ### tests/test_phase7c_index_registry.py:215 — Found reference to deprecated model v4 (should be v3) (error)
 ```text
-   213 | 
+   213 |
    214 |         # Provider with 1024-D
    215 |         provider = MockProvider("jina-ai", "jina-embeddings-v4", 1024)
-   216 | 
+   216 |
    217 |         index = registry.get_index_for_provider(provider)
 ```
 
@@ -1286,7 +1286,7 @@
     32 |             assert provider.provider_name == "jina-ai"
     33 |             assert provider.model_id == "jina-embeddings-v4"
     34 |             assert provider.dims == 1024
-    35 | 
+    35 |
 ```
 
 ### tests/test_phase7c_provider_factory.py:111 — Found reference to deprecated model v4 (should be v3) (error)
@@ -1295,7 +1295,7 @@
    110 |                 ProviderFactory.create_embedding_provider(
    111 |                     provider="jina-ai", model="jina-embeddings-v4", dims=1024
    112 |                 )
-   113 | 
+   113 |
 ```
 
 ### tests/test_phase7c_provider_factory.py:118 — Found reference to deprecated model v4 (should be v3) (error)
@@ -1309,11 +1309,11 @@
 
 ### tests/test_phase7c_provider_factory.py:128 — Found reference to deprecated model v4 (should be v3) (error)
 ```text
-   126 | 
+   126 |
    127 |             assert provider.provider_name == "jina-ai"
    128 |             assert provider.model_id == "jina-embeddings-v4"
    129 |             assert provider.dims == 1024
-   130 | 
+   130 |
 ```
 
 ### tests/test_phase7c_provider_factory.py:135 — Found reference to deprecated model v4 (should be v3) (error)
@@ -1322,16 +1322,16 @@
    134 |             provider = ProviderFactory.create_embedding_provider(
    135 |                 provider="jina-ai", model="jina-embeddings-v4", dims=1024
    136 |             )
-   137 | 
+   137 |
 ```
 
 ### tests/test_phase7c_provider_factory.py:141 — Found reference to deprecated model v4 (should be v3) (error)
 ```text
-   139 | 
+   139 |
    140 |             assert info["provider"] == "jina-ai"
    141 |             assert info["model"] == "jina-embeddings-v4"
    142 |             assert info["dims"] == 1024
-   143 | 
+   143 |
 ```
 
 ### tests/test_phase7c_provider_factory.py:152 — Found reference to deprecated model v4 (should be v3) (error)
@@ -1375,7 +1375,7 @@
     21 |   # This ensures we can filter vectors by the model version used
     22 |   # For Jina models, the model name IS the version (they don't use dated tags)
     23 |   version: "jina-embeddings-v3"  # Phase 7C: Actual Jina model identifier
-    24 | 
+    24 |
     25 |   # Provider configuration (ENV overrideable via EMBEDDINGS_PROVIDER)
 ```
 
@@ -1436,7 +1436,7 @@
 ### docker/ingestion-service.Dockerfile:20 — Reference to canonical model v3 (info)
 ```text
     18 | RUN pip install --no-cache-dir -r requirements.txt
-    19 | 
+    19 |
     20 | # Prefetch jina-embeddings-v3 tokenizer during build (Phase 7C hotfix)
     21 | # This eliminates runtime downloads and enables offline operation
     22 | ENV HF_HOME=/opt/hf-cache
@@ -1448,7 +1448,7 @@
     23 | RUN mkdir -p /opt/hf-cache && \
     24 |     python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('jinaai/jina-embeddings-v3', cache_dir='/opt/hf-cache')" && \
     25 |     echo "Tokenizer prefetched successfully"
-    26 | 
+    26 |
 ```
 
 ### docker/ingestion-service.Dockerfile:24 — HF tokenizer for Jina v3 (info)
@@ -1457,13 +1457,13 @@
     23 | RUN mkdir -p /opt/hf-cache && \
     24 |     python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('jinaai/jina-embeddings-v3', cache_dir='/opt/hf-cache')" && \
     25 |     echo "Tokenizer prefetched successfully"
-    26 | 
+    26 |
 ```
 
 ### docker/ingestion-worker.Dockerfile:19 — Reference to canonical model v3 (info)
 ```text
     17 | RUN pip install --no-cache-dir -r requirements.txt
-    18 | 
+    18 |
     19 | # Prefetch jina-embeddings-v3 tokenizer during build (Phase 7C hotfix)
     20 | # This eliminates runtime downloads and enables offline operation
     21 | ENV HF_HOME=/opt/hf-cache
@@ -1475,7 +1475,7 @@
     22 | RUN mkdir -p /opt/hf-cache && \
     23 |     python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('jinaai/jina-embeddings-v3', cache_dir='/opt/hf-cache')" && \
     24 |     echo "Tokenizer prefetched successfully"
-    25 | 
+    25 |
 ```
 
 ### docker/ingestion-worker.Dockerfile:23 — HF tokenizer for Jina v3 (info)
@@ -1484,13 +1484,13 @@
     22 | RUN mkdir -p /opt/hf-cache && \
     23 |     python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('jinaai/jina-embeddings-v3', cache_dir='/opt/hf-cache')" && \
     24 |     echo "Tokenizer prefetched successfully"
-    25 | 
+    25 |
 ```
 
 ### docker/mcp-server.Dockerfile:19 — Reference to canonical model v3 (info)
 ```text
     17 | RUN pip install --no-cache-dir -r requirements.txt
-    18 | 
+    18 |
     19 | # Prefetch jina-embeddings-v3 tokenizer during build (Phase 7C hotfix)
     20 | # This eliminates runtime downloads and enables offline operation
     21 | ENV HF_HOME=/opt/hf-cache
@@ -1502,7 +1502,7 @@
     22 | RUN mkdir -p /opt/hf-cache && \
     23 |     python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('jinaai/jina-embeddings-v3', cache_dir='/opt/hf-cache')" && \
     24 |     echo "Tokenizer prefetched successfully"
-    25 | 
+    25 |
 ```
 
 ### docker/mcp-server.Dockerfile:23 — HF tokenizer for Jina v3 (info)
@@ -1511,12 +1511,12 @@
     22 | RUN mkdir -p /opt/hf-cache && \
     23 |     python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('jinaai/jina-embeddings-v3', cache_dir='/opt/hf-cache')" && \
     24 |     echo "Tokenizer prefetched successfully"
-    25 | 
+    25 |
 ```
 
 ### requirements.txt:74 — Reference to canonical model v3 (info)
 ```text
-    72 | 
+    72 |
     73 | # Phase 7C Hotfix: Tokenizer service for accurate token counting
     74 | # CRITICAL: Use jina-embeddings-v3 tokenizer (XLM-RoBERTa), NOT tiktoken (OpenAI)
     75 | transformers>=4.43.0  # HuggingFace tokenizer (primary backend)
@@ -1574,7 +1574,7 @@
     59 |             collection_name=collection_name,
     60 |             vectors_config=VectorParams(size=embedding_dims, distance=Distance.COSINE),
     61 |         )
-    62 | 
+    62 |
 ```
 
 ### scripts/dev/seed_minimal_graph.py:66 — Use of canonical 'embedding_version' (info)
@@ -1582,7 +1582,7 @@
     64 |     model_name = config.embedding.model_name
     65 |     embedder = SentenceTransformer(model_name)
     66 |     embedding_version = config.embedding.version
-    67 | 
+    67 |
     68 |     print("🌱 Seeding minimal graph...")
 ```
 
@@ -1610,7 +1610,7 @@
    198 |                 props["vector_embedding"] = vector
    199 |                 props["embedding_version"] = embedding_version
    200 |             props["checksum"] = hashlib.md5(section["text"].encode()).hexdigest()
-   201 | 
+   201 |
 ```
 
 ### scripts/dev/seed_minimal_graph.py:199 — Use of canonical 'embedding_version' (info)
@@ -1619,7 +1619,7 @@
    198 |                 props["vector_embedding"] = vector
    199 |                 props["embedding_version"] = embedding_version
    200 |             props["checksum"] = hashlib.md5(section["text"].encode()).hexdigest()
-   201 | 
+   201 |
 ```
 
 ### scripts/dev/seed_minimal_graph.py:204 — Presence of :Section label (info)
@@ -1708,7 +1708,7 @@
     17 | // Section constraints
     18 | CREATE CONSTRAINT section_id_unique IF NOT EXISTS
     19 | FOR (s:Section) REQUIRE s.id IS UNIQUE;
-    20 | 
+    20 |
     21 | // Domain entity constraints
 ```
 
@@ -1717,31 +1717,31 @@
     63 | // Section indexes
     64 | CREATE INDEX section_document_id IF NOT EXISTS
     65 | FOR (s:Section) ON (s.document_id);
-    66 | 
+    66 |
     67 | CREATE INDEX section_level IF NOT EXISTS
 ```
 
 ### scripts/neo4j/create_schema.cypher:68 — Presence of :Section label (info)
 ```text
-    66 | 
+    66 |
     67 | CREATE INDEX section_level IF NOT EXISTS
     68 | FOR (s:Section) ON (s.level);
-    69 | 
+    69 |
     70 | CREATE INDEX section_order IF NOT EXISTS
 ```
 
 ### scripts/neo4j/create_schema.cypher:71 — Presence of :Section label (info)
 ```text
-    69 | 
+    69 |
     70 | CREATE INDEX section_order IF NOT EXISTS
     71 | FOR (s:Section) ON (s.order);
-    72 | 
+    72 |
     73 | // Domain entity indexes (common properties)
 ```
 
 ### scripts/neo4j/create_schema.cypher:100 — Use of canonical 'vector_embedding' (Neo4j) (info)
 ```text
-    98 | 
+    98 |
     99 | // The following indexes will be created by src/shared/schema.py:
    100 | // - section_embeddings (on Section.vector_embedding)
    101 | // - command_embeddings (on Command.vector_embedding)
@@ -1781,7 +1781,7 @@
    103 | // - procedure_embeddings (on Procedure.vector_embedding)
    104 | // - error_embeddings (on Error.vector_embedding)
    105 | // - concept_embeddings (on Concept.vector_embedding)
-   106 | 
+   106 |
 ```
 
 ### scripts/neo4j/create_schema.cypher:105 — Use of canonical 'vector_embedding' (Neo4j) (info)
@@ -1789,13 +1789,13 @@
    103 | // - procedure_embeddings (on Procedure.vector_embedding)
    104 | // - error_embeddings (on Error.vector_embedding)
    105 | // - concept_embeddings (on Concept.vector_embedding)
-   106 | 
+   106 |
    107 | // ============================================================================
 ```
 
 ### scripts/neo4j/create_schema_v2_1.cypher:21 — Presence of :Chunk label (dual-label support) (info)
 ```text
-    19 | 
+    19 |
     20 | // ============================================================================
     21 | // Part 1: Dual-label existing Sections as :Chunk
     22 | // ============================================================================
@@ -1805,7 +1805,7 @@
 ### scripts/neo4j/create_schema_v2_1.cypher:27 — Presence of :Section label (info)
 ```text
     25 | // Idempotent: SET is idempotent (no-op if label already exists)
-    26 | 
+    26 |
     27 | MATCH (s:Section)
     28 | WHERE NOT s:Chunk
     29 | SET s:Chunk;
@@ -1813,11 +1813,11 @@
 
 ### scripts/neo4j/create_schema_v2_1.cypher:28 — Presence of :Chunk label (dual-label support) (info)
 ```text
-    26 | 
+    26 |
     27 | MATCH (s:Section)
     28 | WHERE NOT s:Chunk
     29 | SET s:Chunk;
-    30 | 
+    30 |
 ```
 
 ### scripts/neo4j/create_schema_v2_1.cypher:29 — Presence of :Chunk label (dual-label support) (info)
@@ -1825,13 +1825,13 @@
     27 | MATCH (s:Section)
     28 | WHERE NOT s:Chunk
     29 | SET s:Chunk;
-    30 | 
+    30 |
     31 | // ============================================================================
 ```
 
 ### scripts/neo4j/create_schema_v2_1.cypher:64 — Vector index creation (info)
 ```text
-    62 | 
+    62 |
     63 | // Section vector index (primary retrieval)
     64 | CREATE VECTOR INDEX section_embeddings_v2 IF NOT EXISTS
     65 | FOR (s:Section)
@@ -1858,7 +1858,7 @@
 
 ### scripts/neo4j/create_schema_v2_1.cypher:75 — Vector index creation (info)
 ```text
-    73 | 
+    73 |
     74 | // Chunk vector index (v3 compatibility - same data, dual-labeled)
     75 | CREATE VECTOR INDEX chunk_embeddings_v2 IF NOT EXISTS
     76 | FOR (c:Chunk)
@@ -1888,40 +1888,40 @@
    124 | // Chunk-specific indices (mirror Section indices for v3 compatibility)
    125 | CREATE INDEX chunk_document_id IF NOT EXISTS
    126 | FOR (c:Chunk) ON (c.document_id);
-   127 | 
+   127 |
    128 | CREATE INDEX chunk_level IF NOT EXISTS
 ```
 
 ### scripts/neo4j/create_schema_v2_1.cypher:129 — Presence of :Chunk label (dual-label support) (info)
 ```text
-   127 | 
+   127 |
    128 | CREATE INDEX chunk_level IF NOT EXISTS
    129 | FOR (c:Chunk) ON (c.level);
-   130 | 
+   130 |
    131 | CREATE INDEX chunk_embedding_version IF NOT EXISTS
 ```
 
 ### scripts/neo4j/create_schema_v2_1.cypher:132 — Use of canonical 'embedding_version' (info)
 ```text
-   130 | 
+   130 |
    131 | CREATE INDEX chunk_embedding_version IF NOT EXISTS
    132 | FOR (c:Chunk) ON (c.embedding_version);
-   133 | 
+   133 |
    134 | // ============================================================================
 ```
 
 ### scripts/neo4j/create_schema_v2_1.cypher:132 — Presence of :Chunk label (dual-label support) (info)
 ```text
-   130 | 
+   130 |
    131 | CREATE INDEX chunk_embedding_version IF NOT EXISTS
    132 | FOR (c:Chunk) ON (c.embedding_version);
-   133 | 
+   133 |
    134 | // ============================================================================
 ```
 
 ### scripts/neo4j/create_schema_v2_1.cypher:157 — Presence of :Section label (info)
 ```text
-   155 | 
+   155 |
    156 | // -- 1. Verify dual-labeling (Section and Chunk counts should match)
    157 | // MATCH (s:Section)
    158 | // WITH count(s) as section_count
@@ -1939,7 +1939,7 @@
 
 ### scripts/neo4j/create_schema_v2_1.cypher:188 — Presence of :Section label (info)
 ```text
-   186 | 
+   186 |
    187 | // -- 5. Count Sections with missing embedding fields (should be 0)
    188 | // MATCH (s:Section)
    189 | // WHERE s.vector_embedding IS NULL
@@ -1979,7 +1979,7 @@
    192 | //    OR s.embedding_timestamp IS NULL
    193 | //    OR s.embedding_dimensions IS NULL
    194 | // RETURN count(s) as sections_missing_embeddings;
-   195 | 
+   195 |
 ```
 
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:28 — Presence of :Chunk label (dual-label support) (info)
@@ -1993,7 +1993,7 @@
 
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:49 — Presence of :Chunk label (dual-label support) (info)
 ```text
-    47 | 
+    47 |
     48 | // Section constraints
     49 | // NOTE: Sections are dual-labeled as :Chunk for v3 compatibility
     50 | // Both labels share the same uniqueness constraint
@@ -2005,7 +2005,7 @@
     50 | // Both labels share the same uniqueness constraint
     51 | CREATE CONSTRAINT section_id_unique IF NOT EXISTS
     52 | FOR (s:Section) REQUIRE s.id IS UNIQUE;
-    53 | 
+    53 |
     54 | // Domain entity constraints (12 types preserved from v2.0)
 ```
 
@@ -2050,25 +2050,25 @@
    145 | // Section indexes (primary retrieval path)
    146 | CREATE INDEX section_document_id IF NOT EXISTS
    147 | FOR (s:Section) ON (s.document_id);
-   148 | 
+   148 |
    149 | CREATE INDEX section_level IF NOT EXISTS
 ```
 
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:150 — Presence of :Section label (info)
 ```text
-   148 | 
+   148 |
    149 | CREATE INDEX section_level IF NOT EXISTS
    150 | FOR (s:Section) ON (s.level);
-   151 | 
+   151 |
    152 | CREATE INDEX section_order IF NOT EXISTS
 ```
 
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:153 — Presence of :Section label (info)
 ```text
-   151 | 
+   151 |
    152 | CREATE INDEX section_order IF NOT EXISTS
    153 | FOR (s:Section) ON (s.order);
-   154 | 
+   154 |
    155 | // Domain entity indexes (for entity-specific queries)
 ```
 
@@ -2096,42 +2096,42 @@
    212 | // Impact: Queries using :Chunk label perform equally well
    213 | // Note: Same physical nodes as Section, just accessible via :Chunk label
    214 | // Idempotent: IF NOT EXISTS
-   215 | 
+   215 |
 ```
 
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:217 — Presence of :Chunk label (dual-label support) (info)
 ```text
-   215 | 
+   215 |
    216 | CREATE INDEX chunk_document_id IF NOT EXISTS
    217 | FOR (c:Chunk) ON (c.document_id);
-   218 | 
+   218 |
    219 | CREATE INDEX chunk_level IF NOT EXISTS
 ```
 
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:220 — Presence of :Chunk label (dual-label support) (info)
 ```text
-   218 | 
+   218 |
    219 | CREATE INDEX chunk_level IF NOT EXISTS
    220 | FOR (c:Chunk) ON (c.level);
-   221 | 
+   221 |
    222 | CREATE INDEX chunk_embedding_version IF NOT EXISTS
 ```
 
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:223 — Use of canonical 'embedding_version' (info)
 ```text
-   221 | 
+   221 |
    222 | CREATE INDEX chunk_embedding_version IF NOT EXISTS
    223 | FOR (c:Chunk) ON (c.embedding_version);
-   224 | 
+   224 |
    225 | // ============================================================================
 ```
 
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:223 — Presence of :Chunk label (dual-label support) (info)
 ```text
-   221 | 
+   221 |
    222 | CREATE INDEX chunk_embedding_version IF NOT EXISTS
    223 | FOR (c:Chunk) ON (c.embedding_version);
-   224 | 
+   224 |
    225 | // ============================================================================
 ```
 
@@ -2146,7 +2146,7 @@
 
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:252 — Vector index creation (info)
 ```text
-   250 | 
+   250 |
    251 | // Section vector index (primary retrieval path)
    252 | CREATE VECTOR INDEX section_embeddings_v2 IF NOT EXISTS
    253 | FOR (s:Section)
@@ -2173,7 +2173,7 @@
 
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:263 — Vector index creation (info)
 ```text
-   261 | 
+   261 |
    262 | // Chunk vector index (v3 compatibility - same data, dual-labeled)
    263 | CREATE VECTOR INDEX chunk_embeddings_v2 IF NOT EXISTS
    264 | FOR (c:Chunk)
@@ -2273,7 +2273,7 @@
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:292 — Presence of :Section label (info)
 ```text
    290 | // This is safe to run even on fresh installations (no harm, just no effect).
-   291 | 
+   291 |
    292 | MATCH (s:Section)
    293 | WHERE NOT s:Chunk
    294 | SET s:Chunk;
@@ -2281,11 +2281,11 @@
 
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:293 — Presence of :Chunk label (dual-label support) (info)
 ```text
-   291 | 
+   291 |
    292 | MATCH (s:Section)
    293 | WHERE NOT s:Chunk
    294 | SET s:Chunk;
-   295 | 
+   295 |
 ```
 
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:294 — Presence of :Chunk label (dual-label support) (info)
@@ -2293,13 +2293,13 @@
    292 | MATCH (s:Section)
    293 | WHERE NOT s:Chunk
    294 | SET s:Chunk;
-   295 | 
+   295 |
    296 | // ============================================================================
 ```
 
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:331 — Presence of :Section label (info)
 ```text
-   329 | 
+   329 |
    330 | // -- 1. Verify dual-labeling (Section and Chunk counts should match)
    331 | // MATCH (s:Section)
    332 | // WITH count(s) as section_count
@@ -2317,7 +2317,7 @@
 
 ### scripts/neo4j/create_schema_v2_1_complete.cypher:379 — Presence of :Section label (info)
 ```text
-   377 | 
+   377 |
    378 | // -- 7. Validate Section embedding completeness (should return 0)
    379 | // MATCH (s:Section)
    380 | // WHERE s.vector_embedding IS NULL
@@ -2371,7 +2371,7 @@
 
 ### scripts/test/debug_explain.py:26 — Presence of :Section label (info)
 ```text
-    24 | 
+    24 |
     25 |             # Run EXPLAIN
     26 |             result = session.run("EXPLAIN MATCH (s:Section) RETURN s LIMIT 5")
     27 |             summary = result.consume()
@@ -2380,7 +2380,7 @@
 
 ### scripts/test_jina_payload_limits.py:30 — Reference to canonical model v3 (info)
 ```text
-    28 | 
+    28 |
     29 |     payload = {
     30 |         "model": "jina-embeddings-v3",
     31 |         "task": "retrieval.passage",
@@ -2389,7 +2389,7 @@
 
 ### scripts/test_jina_payload_limits.py:85 — Reference to canonical model v3 (info)
 ```text
-    83 | 
+    83 |
     84 |     payload = {
     85 |         "model": "jina-embeddings-v3",
     86 |         "task": "retrieval.passage",
@@ -2398,7 +2398,7 @@
 
 ### scripts/test_jina_payload_limits.py:146 — Reference to canonical model v3 (info)
 ```text
-   144 | 
+   144 |
    145 |     payload = {
    146 |         "model": "jina-embeddings-v3",
    147 |         "task": "retrieval.passage",
@@ -2462,7 +2462,7 @@
    826 |             vectors = report.get("vector", {})
    827 |             print(f"  Sections indexed: {vectors.get('sections_indexed', 0)}")
    828 |             print(f"  Embedding version: {vectors.get('embedding_version', 'N/A')}")
-   829 | 
+   829 |
    830 |             print(f"\nDrift: {report.get('drift_pct', 0):.2f}%")
 ```
 
@@ -2472,12 +2472,12 @@
    349 |             collection_name=self.config.search.vector.qdrant.collection_name,
    350 |             embedding_version=self.config.embedding.version,
    351 |         )
-   352 | 
+   352 |
 ```
 
 ### src/ingestion/auto/orchestrator.py:449 — Use of canonical 'vector_embedding' (Neo4j) (info)
 ```text
-   447 | 
+   447 |
    448 |             # Store in section (not yet persisted to vector store)
    449 |             section["vector_embedding"] = embedding
    450 |             section["embedding_version"] = self.config.embedding.version
@@ -2490,7 +2490,7 @@
    449 |             section["vector_embedding"] = embedding
    450 |             section["embedding_version"] = self.config.embedding.version
    451 |             embeddings_computed += 1
-   452 | 
+   452 |
 ```
 
 ### src/ingestion/auto/orchestrator.py:794 — Use of canonical 'embedding_version' (info)
@@ -2531,7 +2531,7 @@
 
 ### src/ingestion/auto/orchestrator.py:874 — Presence of :Section label (info)
 ```text
-   872 | 
+   872 |
    873 |                 query = """
    874 |                 MATCH (s:Section {id: $section_id})
    875 |                 SET s.vector_embedding = $embedding,
@@ -2559,15 +2559,15 @@
 ### src/ingestion/auto/orchestrator.py:885 — Use of canonical 'vector_embedding' (Neo4j) (info)
 ```text
    883 |                 )
-   884 | 
+   884 |
    885 |         return len([s for s in sections if s.get("vector_embedding")])
-   886 | 
+   886 |
    887 |     def _set_embedding_metadata_in_neo4j(self, sections: List[Dict]):
 ```
 
 ### src/ingestion/auto/orchestrator.py:888 — Use of canonical 'embedding_version' (info)
 ```text
-   886 | 
+   886 |
    887 |     def _set_embedding_metadata_in_neo4j(self, sections: List[Dict]):
    888 |         """Set embedding_version metadata in Neo4j without storing vectors."""
    889 |         with self.neo4j.session() as session:
@@ -2598,7 +2598,7 @@
     31 |         self.qdrant_client = qdrant_client
     32 |         self.embedding_version = config.embedding.version
     33 |         self.vector_primary = config.search.vector.primary
-    34 | 
+    34 |
 ```
 
 ### src/ingestion/auto/report.py:137 — Presence of :Section label (info)
@@ -2616,7 +2616,7 @@
    169 |                     "sections_indexed": coll_info.points_count,
    170 |                     "embedding_version": self.embedding_version,
    171 |                 }
-   172 | 
+   172 |
 ```
 
 ### src/ingestion/auto/report.py:170 — Use of canonical 'embedding_version' (info)
@@ -2625,7 +2625,7 @@
    169 |                     "sections_indexed": coll_info.points_count,
    170 |                     "embedding_version": self.embedding_version,
    171 |                 }
-   172 | 
+   172 |
 ```
 
 ### src/ingestion/auto/report.py:177 — Presence of :Section label (info)
@@ -2670,7 +2670,7 @@
    189 |                     "sections_indexed": count,
    190 |                     "embedding_version": self.embedding_version,
    191 |                 }
-   192 | 
+   192 |
 ```
 
 ### src/ingestion/auto/report.py:190 — Use of canonical 'embedding_version' (info)
@@ -2679,7 +2679,7 @@
    189 |                     "sections_indexed": count,
    190 |                     "embedding_version": self.embedding_version,
    191 |                 }
-   192 | 
+   192 |
 ```
 
 ### src/ingestion/auto/report.py:199 — Use of canonical 'embedding_version' (info)
@@ -2688,7 +2688,7 @@
    198 |             "sections_indexed": 0,
    199 |             "embedding_version": self.embedding_version,
    200 |         }
-   201 | 
+   201 |
 ```
 
 ### src/ingestion/auto/report.py:199 — Use of canonical 'embedding_version' (info)
@@ -2697,7 +2697,7 @@
    198 |             "sections_indexed": 0,
    199 |             "embedding_version": self.embedding_version,
    200 |         }
-   201 | 
+   201 |
 ```
 
 ### src/ingestion/auto/report.py:230 — Use of canonical 'embedding_version' (info)
@@ -2715,7 +2715,7 @@
     42 |         self.search_engine = search_engine
     43 |         self.embedding_version = config.embedding.version
     44 |         self.vector_primary = config.search.vector.primary
-    45 | 
+    45 |
 ```
 
 ### src/ingestion/auto/verification.py:99 — Presence of :Section label (info)
@@ -2783,7 +2783,7 @@
 
 ### src/ingestion/build_graph.py:44 — Use of canonical 'embedding_version' (info)
 ```text
-    42 | 
+    42 |
     43 |         self.embedder = None
     44 |         self.embedding_version = config.embedding.version
     45 |         self.vector_primary = config.search.vector.primary
@@ -2802,7 +2802,7 @@
 ### src/ingestion/build_graph.py:158 — Presence of :Chunk label (dual-label support) (info)
 ```text
    156 |         Upsert Section nodes with dual-labeling and HAS_SECTION relationships in batches.
-   157 | 
+   157 |
    158 |         Phase 7C.7: Dual-label as Section:Chunk for v3 compatibility (Session 06-08).
    159 |         Embedding metadata will be set later in _process_embeddings after vectors are generated.
    160 |         """
@@ -2811,7 +2811,7 @@
 ### src/ingestion/build_graph.py:167 — Presence of :Chunk label (dual-label support) (info)
 ```text
    165 |             batch = sections[i : i + batch_size]
-   166 | 
+   166 |
    167 |             # Phase 7C.7: MERGE with dual-label :Section:Chunk
    168 |             query = """
    169 |             UNWIND $sections as sec
@@ -2820,7 +2820,7 @@
 ### src/ingestion/build_graph.py:167 — Presence of :Section label (info)
 ```text
    165 |             batch = sections[i : i + batch_size]
-   166 | 
+   166 |
    167 |             # Phase 7C.7: MERGE with dual-label :Section:Chunk
    168 |             query = """
    169 |             UNWIND $sections as sec
@@ -2850,7 +2850,7 @@
    217 |         find_orphans_query = """
    218 |         MATCH (d:Document {id: $document_id})-[r:HAS_SECTION]->(s:Section)
    219 |         WHERE NOT s.id IN $section_ids
-   220 | 
+   220 |
 ```
 
 ### src/ingestion/build_graph.py:259 — Presence of :Section label (info)
@@ -2994,12 +2994,12 @@
    783 |                 embedding=embedding,
    784 |                 version=self.embedding_version,
    785 |             )
-   786 | 
+   786 |
 ```
 
 ### src/ingestion/build_graph.py:794 — Use of canonical 'embedding_version' (info)
 ```text
-   792 | 
+   792 |
    793 |     def _set_embedding_version_in_neo4j(self, node_id: str, label: str):
    794 |         """Set embedding_version metadata in Neo4j without storing vector."""
    795 |         query = f"""
@@ -3021,7 +3021,7 @@
    804 |                 node_id=node_id,
    805 |                 version=self.embedding_version,
    806 |             )
-   807 | 
+   807 |
 ```
 
 ### src/ingestion/build_graph.py:830 — Use of canonical 'embedding_version' (info)
@@ -3053,7 +3053,7 @@
 
 ### src/ingestion/build_graph.py:843 — Presence of :Section label (info)
 ```text
-   841 | 
+   841 |
    842 |         query = """
    843 |         MATCH (s:Section {id: $node_id})
    844 |         SET s.vector_embedding = $vector_embedding,
@@ -3237,7 +3237,7 @@
    918 |                 "Failed to override embedding version via ingest_document",
    919 |                 requested_version=embedding_version,
    920 |             )
-   921 | 
+   921 |
 ```
 
 ### src/ingestion/extract/commands.py:257 — Use of canonical 'vector_embedding' (Neo4j) (info)
@@ -3255,7 +3255,7 @@
    257 |         "vector_embedding": None,
    258 |         "embedding_version": None,
    259 |     }
-   260 | 
+   260 |
 ```
 
 ### src/ingestion/extract/configs.py:252 — Use of canonical 'vector_embedding' (Neo4j) (info)
@@ -3273,7 +3273,7 @@
    252 |         "vector_embedding": None,
    253 |         "embedding_version": None,
    254 |     }
-   255 | 
+   255 |
 ```
 
 ### src/ingestion/incremental.py:28 — Presence of :Section label (info)
@@ -3372,7 +3372,7 @@
    219 |         "vector_embedding": None,
    220 |         "embedding_version": None,
    221 |     }
-   222 | 
+   222 |
 ```
 
 ### src/ingestion/parsers/markdown.py:252 — Use of canonical 'vector_embedding' (Neo4j) (info)
@@ -3390,7 +3390,7 @@
    252 |         "vector_embedding": None,
    253 |         "embedding_version": None,
    254 |     }
-   255 | 
+   255 |
 ```
 
 ### src/ingestion/parsers/notion.py:211 — Use of canonical 'vector_embedding' (Neo4j) (info)
@@ -3408,7 +3408,7 @@
    211 |         "vector_embedding": None,
    212 |         "embedding_version": None,
    213 |     }
-   214 | 
+   214 |
 ```
 
 ### src/ingestion/reconcile.py:17 — Use of canonical 'embedding_version' (info)
@@ -3426,7 +3426,7 @@
     26 |     """
     27 |     Keeps Qdrant strictly in sync with graph Section nodes for a given embedding_version.
     28 |     """
-    29 | 
+    29 |
 ```
 
 ### src/ingestion/reconcile.py:36 — Use of canonical 'embedding_version' (info)
@@ -3452,13 +3452,13 @@
     62 |             self.qdrant = qdrant_client or config_or_qdrant
     63 |             self.collection = collection_name
     64 |             self.version = embedding_version
-    65 | 
+    65 |
     66 |     def _graph_section_ids(self) -> Set[str]:
 ```
 
 ### src/ingestion/reconcile.py:67 — Use of canonical 'embedding_version' (info)
 ```text
-    65 | 
+    65 |
     66 |     def _graph_section_ids(self) -> Set[str]:
     67 |         """Get all Section IDs from Neo4j with matching embedding_version (synchronous)."""
     68 |         cypher = """
@@ -3530,7 +3530,7 @@
 
 ### src/ingestion/reconcile.py:260 — Use of canonical 'embedding_version' (info)
 ```text
-   258 | 
+   258 |
    259 |         return DriftStats(
    260 |             embedding_version=self.version,
    261 |             graph_count=graph_count,
@@ -3540,7 +3540,7 @@
 ### src/mcp_server/query_service.py:247 — Use of canonical 'embedding_version' (info)
 ```text
    245 |                     )
-   246 | 
+   246 |
    247 |             # Pre-Phase 7 B4: Add embedding_version filter to ensure version consistency
    248 |             # This ensures we only retrieve vectors created with the current embedding model
    249 |             if filters is None:
@@ -3549,7 +3549,7 @@
 ### src/mcp_server/query_service.py:252 — Use of canonical 'embedding_version' (info)
 ```text
    250 |                 filters = {}
-   251 | 
+   251 |
    252 |             # Add embedding_version to filters
    253 |             filters["embedding_version"] = self.config.embedding.version
    254 |             logger.debug(
@@ -3557,7 +3557,7 @@
 
 ### src/mcp_server/query_service.py:253 — Use of canonical 'embedding_version' (info)
 ```text
-   251 | 
+   251 |
    252 |             # Add embedding_version to filters
    253 |             filters["embedding_version"] = self.config.embedding.version
    254 |             logger.debug(
@@ -3570,12 +3570,12 @@
    254 |             logger.debug(
    255 |                 f"Added embedding_version filter: {self.config.embedding.version}"
    256 |             )
-   257 | 
+   257 |
 ```
 
 ### src/providers/embeddings/base.py:42 — Reference to canonical model v3 (info)
 ```text
-    40 | 
+    40 |
     41 |         Returns:
     42 |             str: Model identifier (e.g., "all-MiniLM-L6-v2", "jina-embeddings-v3")
     43 |         """
@@ -3587,7 +3587,7 @@
      1 | """
      2 | Jina AI embedding provider implementation.
      3 | Phase 7C: Remote API provider for jina-embeddings-v3 @ 1024-D.
-     4 | 
+     4 |
      5 | Features:
 ```
 
@@ -3596,7 +3596,7 @@
    148 | class JinaEmbeddingProvider:
    149 |     """
    150 |     Jina AI embedding provider using jina-embeddings-v3.
-   151 | 
+   151 |
    152 |     Supports task-specific embeddings:
 ```
 
@@ -3612,16 +3612,16 @@
 ### src/providers/tokenizer_service.py:4 — Reference to canonical model v3 (info)
 ```text
      2 | Tokenizer service for accurate token counting and text splitting.
-     3 | 
+     3 |
      4 | CRITICAL: This module uses the EXACT tokenizer for jina-embeddings-v3 (XLM-RoBERTa family).
      5 | DO NOT use tiktoken or cl100k_base - those are for OpenAI models and will give wrong counts.
-     6 | 
+     6 |
 ```
 
 ### src/providers/tokenizer_service.py:87 — Reference to canonical model v3 (info)
 ```text
     85 |     HuggingFace local tokenizer backend (PRIMARY).
-    86 | 
+    86 |
     87 |     Uses the exact tokenizer for jina-embeddings-v3.
     88 |     Fast (<5ms per section), deterministic, works offline.
     89 |     """
@@ -3630,16 +3630,16 @@
 ### src/providers/tokenizer_service.py:95 — Reference to canonical model v3 (info)
 ```text
     93 |         Initialize HuggingFace tokenizer.
-    94 | 
+    94 |
     95 |         Loads jinaai/jina-embeddings-v3 tokenizer from cache.
     96 |         Expects tokenizer to be prefetched during Docker build.
-    97 | 
+    97 |
 ```
 
 ### src/providers/tokenizer_service.py:104 — Reference to canonical model v3 (info)
 ```text
    102 |             from transformers import AutoTokenizer
-   103 | 
+   103 |
    104 |             model_id = os.getenv("HF_TOKENIZER_ID", "jinaai/jina-embeddings-v3")
    105 |             cache_dir = os.getenv("HF_CACHE", "/opt/hf-cache")
    106 |             offline = os.getenv("TRANSFORMERS_OFFLINE", "true").lower() == "true"
@@ -3647,10 +3647,10 @@
 
 ### src/providers/tokenizer_service.py:286 — Reference to canonical model v3 (info)
 ```text
-   284 | 
+   284 |
    285 |     Provides accurate token counting and lossless text splitting
    286 |     for jina-embeddings-v3 (XLM-RoBERTa tokenizer).
-   287 | 
+   287 |
    288 |     Features:
 ```
 
@@ -3728,7 +3728,7 @@
 
 ### src/query/session_tracker.py:489 — Presence of :Section label (info)
 ```text
-   487 | 
+   487 |
    488 |         // Collect retrieved sections
    489 |         OPTIONAL MATCH (q)-[r:RETRIEVED]->(sec:Section)
    490 |         WITH q, s, focused_entities, collect(DISTINCT {
@@ -3773,7 +3773,7 @@
 
 ### src/query/templates/search.cypher:6 — Presence of :Section label (info)
 ```text
-     4 | 
+     4 |
      5 | -- Version 1: Basic section search
      6 | MATCH (s:Section)
      7 | WHERE s.id IN $section_ids
@@ -3782,7 +3782,7 @@
 
 ### src/query/templates/search.cypher:15 — Presence of :Section label (info)
 ```text
-    13 | 
+    13 |
     14 | -- Version 2: Search with document context
     15 | MATCH (d:Document)-[:HAS_SECTION]->(s:Section)
     16 | WHERE s.id IN $section_ids
@@ -3791,7 +3791,7 @@
 
 ### src/query/templates/search.cypher:28 — Presence of :Section label (info)
 ```text
-    26 | 
+    26 |
     27 | -- Version 3: Search with controlled expansion
     28 | MATCH (s:Section)
     29 | WHERE s.id IN $section_ids
@@ -3819,7 +3819,7 @@
 ### src/shared/cache.py:9 — Use of canonical 'embedding_version' (info)
 ```text
      7 | See: /docs/pseudocode-reference.md → Phase 4, Task 4.3
-     8 | 
+     8 |
      9 | Cache keys are prefixed with {schema_version}:{embedding_version} to ensure
     10 | automatic invalidation when the model or schema changes.
     11 | """
@@ -3837,7 +3837,7 @@
 ### src/shared/cache.py:246 — Use of canonical 'embedding_version' (info)
 ```text
    244 |     Two-tier cache: L1 (in-process) + L2 (Redis).
-   245 | 
+   245 |
    246 |     Keys are automatically prefixed with {schema_version}:{embedding_version}
    247 |     to ensure cache invalidation when versions change.
    248 |     """
@@ -3857,7 +3857,7 @@
    257 |         self.config = config
    258 |         self.schema_version = schema_version
    259 |         self.embedding_version = embedding_version
-   260 | 
+   260 |
    261 |         # Initialize L1 cache
 ```
 
@@ -3866,14 +3866,14 @@
    257 |         self.config = config
    258 |         self.schema_version = schema_version
    259 |         self.embedding_version = embedding_version
-   260 | 
+   260 |
    261 |         # Initialize L1 cache
 ```
 
 ### src/shared/cache.py:289 — Use of canonical 'embedding_version' (info)
 ```text
    287 |         Generate cache key with version prefixes.
-   288 | 
+   288 |
    289 |         Format: {base_prefix}:{schema_version}:{embedding_version}:{key_prefix}:{params_hash}
    290 |         """
    291 |         params_hash = hashlib.sha256(
@@ -3882,9 +3882,9 @@
 ### src/shared/cache.py:295 — Use of canonical 'embedding_version' (info)
 ```text
    293 |         ).hexdigest()[:16]
-   294 | 
+   294 |
    295 |         return f"{self.key_prefix_base}:{self.schema_version}:{self.embedding_version}:{key_prefix}:{params_hash}"
-   296 | 
+   296 |
    297 |     def get(self, key_prefix: str, params: Dict[str, Any]) -> Optional[Any]:
 ```
 
@@ -3902,7 +3902,7 @@
    382 |         Args:
    383 |             schema_version: Schema version to invalidate (or None for current)
    384 |             embedding_version: Embedding version to invalidate (or None for current)
-   385 | 
+   385 |
    386 |         Returns:
 ```
 
@@ -3911,7 +3911,7 @@
    388 |         """
    389 |         sv = schema_version or self.schema_version
    390 |         ev = embedding_version or self.embedding_version
-   391 | 
+   391 |
    392 |         prefix = f"{self.key_prefix_base}:{sv}:{ev}"
 ```
 
@@ -3920,7 +3920,7 @@
    388 |         """
    389 |         sv = schema_version or self.schema_version
    390 |         ev = embedding_version or self.embedding_version
-   391 | 
+   391 |
    392 |         prefix = f"{self.key_prefix_base}:{sv}:{ev}"
 ```
 
@@ -3930,7 +3930,7 @@
    415 |             "schema_version": self.schema_version,
    416 |             "embedding_version": self.embedding_version,
    417 |         }
-   418 | 
+   418 |
 ```
 
 ### src/shared/cache.py:416 — Use of canonical 'embedding_version' (info)
@@ -3939,7 +3939,7 @@
    415 |             "schema_version": self.schema_version,
    416 |             "embedding_version": self.embedding_version,
    417 |         }
-   418 | 
+   418 |
 ```
 
 ### src/shared/connections.py:237 — Qdrant cosine distance (info)
@@ -3956,7 +3956,7 @@
    239 |             "dot": Distance.DOT,
    240 |         }
    241 |         distance_enum = distance_map.get(distance.lower(), Distance.COSINE)
-   242 | 
+   242 |
    243 |         # Check if collection already exists
 ```
 
@@ -3971,7 +3971,7 @@
 
 ### src/shared/schema.py:237 — Presence of :Chunk label (dual-label support) (info)
 ```text
-   235 | 
+   235 |
    236 |                 # Track dual-labeling
    237 |                 if "SET s:Chunk" in stmt:
    238 |                     # Get count from execution result
@@ -4029,7 +4029,7 @@
    306 |         ("error_embeddings", "Error", "vector_embedding"),
    307 |         ("concept_embeddings", "Concept", "vector_embedding"),
    308 |     ]
-   309 | 
+   309 |
 ```
 
 ### tests/integration/test_jina_large_batches.py:31 — Reference to canonical model v3 (info)
@@ -4064,7 +4064,7 @@
    355 |         # Required fields
    356 |         assert "model" in request
    357 |         assert request["model"] == "jina-embeddings-v3"
-   358 | 
+   358 |
    359 |         assert "task" in request
 ```
 
@@ -4502,7 +4502,7 @@
 
 ### tests/p1_t3_test.py:172 — Presence of :Section label (info)
 ```text
-   170 | 
+   170 |
    171 |         # Cleanup
    172 |         session.run("MATCH (s:Section {id: $id}) DELETE s", id=section_id)
 ```
@@ -4519,7 +4519,7 @@
 ### tests/p2_t2_test.py:145 — Presence of :Section label (info)
 ```text
    143 |         validator.enforce_limits = True
-   144 | 
+   144 |
    145 |         result = validator.validate("MATCH (n:Section) RETURN n", {"limit": 50})
    146 |         assert result.valid
    147 |         assert "LIMIT" in result.query.upper()
@@ -4528,7 +4528,7 @@
 ### tests/p2_t2_test.py:154 — Presence of :Section label (info)
 ```text
    152 |         validator.enforce_limits = True
-   153 | 
+   153 |
    154 |         result = validator.validate("MATCH (n:Section) RETURN n LIMIT 20", {})
    155 |         assert result.valid
    156 |         assert "LIMIT" in result.query.upper()
@@ -4609,7 +4609,7 @@
 ### tests/p3_t3_integration_test.py:240 — Use of canonical 'embedding_version' (info)
 ```text
    238 |         time.sleep(1)
-   239 | 
+   239 |
    240 |         # Count Sections in Neo4j with embedding_version
    241 |         with neo4j_driver.session() as session:
    242 |             result = session.run(
@@ -4827,7 +4827,7 @@
    230 |         template_name = "search_sections"
    231 |         param_names = ["section_ids", "limit"]
    232 |         query = "MATCH (s:Section) WHERE s.id IN $section_ids RETURN s LIMIT $limit"
-   233 | 
+   233 |
    234 |         # Measure without cache
 ```
 
@@ -4869,29 +4869,29 @@
 
 ### tests/p4_t2_test.py:139 — Presence of :Section label (info)
 ```text
-   137 | 
+   137 |
    138 |     def test_records_slow_queries_above_threshold(self, optimizer):
    139 |         query = "MATCH (n:Section) RETURN n LIMIT 10"
    140 |         params = {"limit": 10}
-   141 | 
+   141 |
 ```
 
 ### tests/p4_t2_test.py:149 — Presence of :Section label (info)
 ```text
-   147 | 
+   147 |
    148 |     def test_ignores_fast_queries_below_threshold(self, optimizer):
    149 |         query = "MATCH (n:Section) RETURN n LIMIT 10"
    150 |         params = {"limit": 10}
-   151 | 
+   151 |
 ```
 
 ### tests/p4_t2_test.py:158 — Presence of :Section label (info)
 ```text
-   156 | 
+   156 |
    157 |     def test_computes_query_fingerprint(self, optimizer):
    158 |         query1 = "MATCH (n:Section {id: $id}) RETURN n"
    159 |         query2 = "MATCH (n:Section {id: $id})  RETURN  n"  # Different whitespace
-   160 | 
+   160 |
 ```
 
 ### tests/p4_t2_test.py:159 — Presence of :Section label (info)
@@ -4899,7 +4899,7 @@
    157 |     def test_computes_query_fingerprint(self, optimizer):
    158 |         query1 = "MATCH (n:Section {id: $id}) RETURN n"
    159 |         query2 = "MATCH (n:Section {id: $id})  RETURN  n"  # Different whitespace
-   160 | 
+   160 |
    161 |         fp1 = optimizer._compute_query_fingerprint(query1)
 ```
 
@@ -4909,16 +4909,16 @@
    186 |         """Test operator extraction from EXPLAIN plan."""
    187 |         query = "MATCH (s:Section) RETURN s LIMIT 5"
    188 |         params = {}
-   189 | 
+   189 |
 ```
 
 ### tests/p4_t2_test.py:256 — Presence of :Section label (info)
 ```text
-   254 | 
+   254 |
    255 |         assert "CREATE INDEX" in cypher
    256 |         assert "FOR (n:Section)" in cypher
    257 |         assert "FOR (n:Command)" in cypher
-   258 | 
+   258 |
 ```
 
 ### tests/p4_t2_test.py:282 — Presence of :Section label (info)
@@ -4954,7 +4954,7 @@
    218 |             schema_version="v1",
    219 |             embedding_version="v1",
    220 |         )
-   221 | 
+   221 |
 ```
 
 ### tests/p4_t4_test.py:27 — Presence of :Section label (info)
@@ -4977,19 +4977,19 @@
 
 ### tests/p4_t4_test.py:261 — Presence of :Section label (info)
 ```text
-   259 | 
+   259 |
    260 |         # Create similar queries (same pattern)
    261 |         base_query = "MATCH (s:Section {document_id: $doc_id}) RETURN s LIMIT 10"
-   262 | 
+   262 |
    263 |         for i in range(8):
 ```
 
 ### tests/p4_t4_test.py:317 — Presence of :Section label (info)
 ```text
-   315 | 
+   315 |
    316 |         # Create slow queries accessing unindexed properties
    317 |         slow_query = "MATCH (s:Section) WHERE s.checksum = $cs RETURN s LIMIT 10"
-   318 | 
+   318 |
    319 |         for i in range(12):
 ```
 
@@ -5022,11 +5022,11 @@
 
 ### tests/p5_t3_test.py:48 — Presence of :Section label (info)
 ```text
-    46 | 
+    46 |
     47 |         validator = CypherValidator()
     48 |         query = "MATCH (n:Section {id: $sid}) RETURN n LIMIT 10"
     49 |         result = validator.validate(query, {"sid": "test-id"})
-    50 | 
+    50 |
 ```
 
 ### tests/p5_t3_test.py:83 — Presence of :Section label (info)
@@ -5035,25 +5035,25 @@
     82 |             session.run(
     83 |                 "CREATE CONSTRAINT IF NOT EXISTS FOR (s:Section) REQUIRE s.id IS UNIQUE"
     84 |             )
-    85 | 
+    85 |
 ```
 
 ### tests/p6_t1_test.py:66 — Pattern-scan deletion (fallback) (info)
 ```text
-    64 | 
+    64 |
     65 |     # Clear checksum sets (all tags)
     66 |     for key in redis_sync_client.scan_iter("ingest:checksums:*", count=100):
     67 |         redis_sync_client.delete(key)
-    68 | 
+    68 |
 ```
 
 ### tests/p6_t1_test.py:70 — Pattern-scan deletion (fallback) (info)
 ```text
-    68 | 
+    68 |
     69 |     # Clean up any old state keys (from orchestrator)
     70 |     for key in redis_sync_client.scan_iter("ingest:state:*", count=100):
     71 |         redis_sync_client.delete(key)
-    72 | 
+    72 |
 ```
 
 ### tests/p6_t1_test.py:616 — Presence of :Section label (info)
@@ -5071,7 +5071,7 @@
    342 |         with neo4j_driver.session() as session:
    343 |             result = session.run("MATCH (s:Section) RETURN count(s) as count")
    344 |             sections_count = result.single()["count"]
-   345 | 
+   345 |
 ```
 
 ### tests/p6_t2_test.py:361 — Presence of :Section label (info)
@@ -5080,7 +5080,7 @@
    360 |         with neo4j_driver.session() as session:
    361 |             result = session.run("MATCH (s:Section) RETURN count(s) as count")
    362 |             sections_count_after = result.single()["count"]
-   363 | 
+   363 |
 ```
 
 ### tests/p6_t2_test.py:436 — Presence of :Section label (info)
@@ -5170,16 +5170,16 @@
     63 |     # Clear ingestion-related keys before each test to avoid duplicate detection
     64 |     for key in client.scan_iter("ingest:*", count=1000):
     65 |         client.delete(key)
-    66 | 
+    66 |
 ```
 
 ### tests/p6_t3_test.py:68 — Pattern-scan deletion (fallback) (info)
 ```text
-    66 | 
+    66 |
     67 |     # Also clear checksum sets
     68 |     for key in client.scan_iter("ingest:checksums:*", count=1000):
     69 |         client.delete(key)
-    70 | 
+    70 |
 ```
 
 ### tests/p6_t3_test.py:265 — Pattern-scan deletion (fallback) (info)
@@ -5187,16 +5187,16 @@
    263 |         """
    264 |         # Count jobs before
    265 |         keys_before = list(redis_client.scan_iter("ingest:state:*", count=1000))
-   266 | 
+   266 |
    267 |         result = run_cli(["ingest", str(sample_markdown), "--dry-run"])
 ```
 
 ### tests/p6_t3_test.py:274 — Pattern-scan deletion (fallback) (info)
 ```text
-   272 | 
+   272 |
    273 |         # Count jobs after
    274 |         keys_after = list(redis_client.scan_iter("ingest:state:*", count=1000))
-   275 | 
+   275 |
    276 |         # No new jobs should be created
 ```
 
@@ -5206,7 +5206,7 @@
    523 |         assert "sections_indexed" in stats
    524 |         assert "embedding_version" in stats
    525 |         assert isinstance(stats["sections_indexed"], int)
-   526 | 
+   526 |
 ```
 
 ### tests/p6_t4_test.py:542 — Use of canonical 'embedding_version' (info)
@@ -5214,7 +5214,7 @@
    540 |         assert stats["sot"] == "neo4j"
    541 |         assert "sections_indexed" in stats
    542 |         assert "embedding_version" in stats
-   543 | 
+   543 |
    544 |     def test_render_markdown_format(self, report_gen, sample_parsed_doc):
 ```
 
@@ -5242,7 +5242,7 @@
    294 |             "embedding_task": config.embedding.task,
    295 |             "embedding_timestamp": "2025-01-23T00:00:00Z",
    296 |         }
-   297 | 
+   297 |
 ```
 
 ### tests/test_integration_prephase7.py:300 — Use of canonical 'embedding_version' (info)
@@ -5269,7 +5269,7 @@
    359 |             with neo4j.session() as session:
    360 |                 result = session.run("MATCH (s:Section) RETURN count(s) as count")
    361 |                 section_count = result.single()["count"]
-   362 | 
+   362 |
 ```
 
 ### tests/test_integration_prephase7.py:379 — Presence of :Section label (info)
@@ -5278,7 +5278,7 @@
    378 |         with neo4j.session() as session:
    379 |             result = session.run("MATCH (s:Section) RETURN s.id as id LIMIT 3")
    380 |             test_node_ids = [record["id"] for record in result]
-   381 | 
+   381 |
 ```
 
 ### tests/test_integration_prephase7.py:389 — Presence of :Section label (info)
@@ -5293,7 +5293,7 @@
 ### tests/test_integration_prephase7.py:449 — Use of canonical 'embedding_version' (info)
 ```text
    447 |         print("Test 4: Embedding version filter...")
-   448 | 
+   448 |
    449 |         # Check that embedding_version field exists on sections
    450 |         with neo4j.session() as session:
    451 |             result = session.run(
@@ -5319,7 +5319,7 @@
 
 ### tests/test_integration_prephase7.py:461 — Use of canonical 'embedding_version' (info)
 ```text
-   459 | 
+   459 |
    460 |         if sections_with_version > 0:
    461 |             print(f"  ✓ {sections_with_version} sections have embedding_version field")
    462 |         else:
@@ -5331,7 +5331,7 @@
    461 |             print(f"  ✓ {sections_with_version} sections have embedding_version field")
    462 |         else:
    463 |             print("  ⚠️  No sections have embedding_version (legacy data?)")
-   464 | 
+   464 |
    465 |         print("✓ H4: All search with coverage tests passed")
 ```
 
@@ -5373,7 +5373,7 @@
 
 ### tests/test_jina_adaptive_batching.py:155 — Reference to canonical model v3 (info)
 ```text
-   153 | 
+   153 |
    154 |         provider = JinaEmbeddingProvider(
    155 |             model="jina-embeddings-v3",
    156 |             dims=1024,
@@ -5382,7 +5382,7 @@
 
 ### tests/test_jina_adaptive_batching.py:190 — Reference to canonical model v3 (info)
 ```text
-   188 | 
+   188 |
    189 |         provider = JinaEmbeddingProvider(
    190 |             model="jina-embeddings-v3",
    191 |             dims=1024,
@@ -5391,7 +5391,7 @@
 
 ### tests/test_jina_adaptive_batching.py:236 — Reference to canonical model v3 (info)
 ```text
-   234 | 
+   234 |
    235 |         provider = JinaEmbeddingProvider(
    236 |             model="jina-embeddings-v3",
    237 |             dims=1024,
@@ -5400,7 +5400,7 @@
 
 ### tests/test_jina_adaptive_batching.py:390 — Reference to canonical model v3 (info)
 ```text
-   388 | 
+   388 |
    389 |         provider = JinaEmbeddingProvider(
    390 |             model="jina-embeddings-v3",
    391 |             dims=1024,
@@ -5413,12 +5413,12 @@
    404 |             assert request_body["task"] == "retrieval.query"
    405 |             assert request_body["model"] == "jina-embeddings-v3"
    406 |             assert request_body["truncate"] is False
-   407 | 
+   407 |
 ```
 
 ### tests/test_jina_adaptive_batching.py:422 — Reference to canonical model v3 (info)
 ```text
-   420 | 
+   420 |
    421 |         provider = JinaEmbeddingProvider(
    422 |             model="jina-embeddings-v3",
    423 |             dims=1024,
@@ -5427,7 +5427,7 @@
 
 ### tests/test_jina_adaptive_batching.py:467 — Reference to canonical model v3 (info)
 ```text
-   465 | 
+   465 |
    466 |         provider = JinaEmbeddingProvider(
    467 |             model="jina-embeddings-v3",
    468 |             dims=1024,
@@ -5436,7 +5436,7 @@
 
 ### tests/test_jina_adaptive_batching.py:499 — Reference to canonical model v3 (info)
 ```text
-   497 | 
+   497 |
    498 |         provider = JinaEmbeddingProvider(
    499 |             model="jina-embeddings-v3",
    500 |             dims=1024,
@@ -5467,7 +5467,7 @@
    141 |             "embedding_task": "retrieval.passage",
    142 |             "embedding_timestamp": datetime.utcnow().isoformat() + "Z",
    143 |         }
-   144 | 
+   144 |
 ```
 
 ### tests/test_phase2_provider_wiring.py:147 — Use of canonical 'embedding_version' (info)
@@ -5494,12 +5494,12 @@
    150 |             "embedding_task",
    151 |             "embedding_timestamp",
    152 |         ]
-   153 | 
+   153 |
 ```
 
 ### tests/test_phase2_provider_wiring.py:158 — Use of canonical 'embedding_timestamp' (info)
 ```text
-   156 | 
+   156 |
    157 |         # Verify timestamp format
    158 |         assert metadata["embedding_timestamp"].endswith(
    159 |             "Z"
@@ -5508,7 +5508,7 @@
 
 ### tests/test_phase2_provider_wiring.py:163 — Use of canonical 'embedding_version' (info)
 ```text
-   161 | 
+   161 |
    162 |         print("✓ Embedding metadata structure correct")
    163 |         print(f"  - Version: {metadata['embedding_version']}")
    164 |         print(f"  - Provider: {metadata['embedding_provider']}")
@@ -5521,12 +5521,12 @@
    164 |         print(f"  - Provider: {metadata['embedding_provider']}")
    165 |         print(f"  - Dimensions: {metadata['embedding_dimensions']}")
    166 |         print(f"  - Task: {metadata['embedding_task']}")
-   167 | 
+   167 |
 ```
 
 ### tests/test_phase5_response_schema.py:103 — Presence of :Chunk label (dual-label support) (info)
 ```text
-   101 | 
+   101 |
    102 |         content = ddl_path.read_text()
    103 |         assert "SET s:Chunk" in content
    104 |         assert "session_id_unique" in content
@@ -5539,7 +5539,7 @@
    207 |         assert legacy_point[0].payload["node_id"] == section_id
    208 |         assert legacy_point[0].payload["embedding_dimensions"] == 384
    209 |         assert legacy_point[0].payload["embedding_provider"] == "sentence-transformers"
-   210 | 
+   210 |
 ```
 
 ### tests/test_phase7c_dual_write.py:220 — Use of canonical 'embedding_dimensions' (info)
@@ -5590,15 +5590,15 @@
 ### tests/test_phase7c_index_registry.py:179 — Reference to canonical model v3 (info)
 ```text
    177 |         )
-   178 | 
+   178 |
    179 |         provider = MockProvider("jina-ai", "jina-embeddings-v3", 1024)
-   180 | 
+   180 |
    181 |         # Should not raise but should warn
 ```
 
 ### tests/test_phase7c_ingestion.py:5 — Presence of :Chunk label (dual-label support) (info)
 ```text
-     3 | 
+     3 |
      4 | Validates:
      5 | - Sections are dual-labeled as Section:Chunk
      6 | - All required embedding fields are present and validated
@@ -5628,7 +5628,7 @@
    118 |                 assert (
    119 |                     "Chunk" in labels
    120 |                 ), f"Section {section['id']} missing :Chunk label (v3 compat)"
-   121 | 
+   121 |
    122 |     def test_required_embedding_fields_present(
 ```
 
@@ -5709,7 +5709,7 @@
    162 |                 assert (
    163 |                     record["timestamp"] is not None
    164 |                 ), f"Section {section['id']} missing REQUIRED embedding_timestamp"
-   165 | 
+   165 |
    166 |                 # Validate dimensions match config
 ```
 
@@ -5773,12 +5773,12 @@
    279 |                 "embedding_dimensions" in payload
    280 |             ), "Missing embedding_dimensions in payload"
    281 |             assert "embedding_task" in payload, "Missing embedding_task in payload"
-   282 | 
+   282 |
 ```
 
 ### tests/test_phase7c_ingestion.py:284 — Use of canonical 'embedding_dimensions' (info)
 ```text
-   282 | 
+   282 |
    283 |             # Verify dimensions
    284 |             assert payload["embedding_dimensions"] == config.embedding.dims, (
    285 |                 f"Point {payload['node_id']} has wrong dimension metadata: "
@@ -5791,7 +5791,7 @@
    285 |                 f"Point {payload['node_id']} has wrong dimension metadata: "
    286 |                 f"{payload['embedding_dimensions']}"
    287 |             )
-   288 | 
+   288 |
 ```
 
 ### tests/test_phase7c_ingestion.py:328 — Presence of :Section label (info)
@@ -5860,10 +5860,10 @@
 ### tests/test_phase7c_schema_v2_1.py:67 — Presence of :Chunk label (dual-label support) (info)
 ```text
     65 |             section_count = section_count_result.single()["count"]
-    66 | 
+    66 |
     67 |             chunk_count_result = session.run("MATCH (c:Chunk) RETURN count(c) as count")
     68 |             chunk_count = chunk_count_result.single()["count"]
-    69 | 
+    69 |
 ```
 
 ### tests/test_phase7c_schema_v2_1.py:75 — MERGE Document by id (canonical) (info)
@@ -6034,7 +6034,7 @@
    192 |             session.run(
    193 |                 "MATCH (s:Section {id: 'test-validation-complete'}) DETACH DELETE s"
    194 |             )
-   195 | 
+   195 |
 ```
 
 ### tests/test_phase7c_schema_v2_1.py:378 — Presence of :Chunk label (dual-label support) (info)
@@ -6138,11 +6138,11 @@
 
 ### tests/test_phase7c_schema_v2_1.py:438 — Presence of :Section label (info)
 ```text
-   436 | 
+   436 |
    437 |             # Verify this incomplete section exists (DB allowed it)
    438 |             result = session.run("MATCH (s:Section {id: $id}) RETURN s", id=test_id)
    439 |             assert result.single() is not None, "Incomplete section should exist in DB"
-   440 | 
+   440 |
 ```
 
 ### tests/test_phase7c_schema_v2_1.py:445 — Presence of :Section label (info)
@@ -6174,11 +6174,11 @@
 
 ### tests/test_phase7c_schema_v2_1.py:462 — Presence of :Section label (info)
 ```text
-   460 | 
+   460 |
    461 |             # Cleanup test data
    462 |             session.run("MATCH (s:Section {id: $id}) DETACH DELETE s", id=test_id)
-   463 | 
-   464 | 
+   463 |
+   464 |
 ```
 
 ### tests/test_phase7e_phase0.py:511 — Presence of :Section label (info)
@@ -6201,7 +6201,7 @@
 
 ### requirements.txt:74 — Use of tiktoken (NON-canonical for Jina v3) (warn)
 ```text
-    72 | 
+    72 |
     73 | # Phase 7C Hotfix: Tokenizer service for accurate token counting
     74 | # CRITICAL: Use jina-embeddings-v3 tokenizer (XLM-RoBERTa), NOT tiktoken (OpenAI)
     75 | transformers>=4.43.0  # HuggingFace tokenizer (primary backend)
@@ -6223,7 +6223,7 @@
     55 |                section_count
     56 |         ORDER BY doc_id
     57 |         """
-    58 | 
+    58 |
 ```
 
 ### scripts/backfill_document_tokens.py:120 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
@@ -6264,25 +6264,25 @@
 
 ### scripts/baseline_distribution_analysis.py:131 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
 ```text
-   129 | 
+   129 |
    130 |         for section in sections:
    131 |             by_doc[section['doc_id']].append(section)
-   132 | 
+   132 |
    133 |         doc_stats = []
 ```
 
 ### scripts/baseline_distribution_analysis.py:134 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
 ```text
-   132 | 
+   132 |
    133 |         doc_stats = []
    134 |         for doc_id, doc_sections in by_doc.items():
    135 |             token_counts = [s['token_count'] for s in doc_sections if s['token_count']]
-   136 | 
+   136 |
 ```
 
 ### scripts/baseline_distribution_analysis.py:143 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
 ```text
-   141 | 
+   141 |
    142 |             doc_stats.append({
    143 |                 'doc_id': doc_id,
    144 |                 'section_count': len(doc_sections),
@@ -6291,7 +6291,7 @@
 
 ### scripts/baseline_distribution_analysis.py:143 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
 ```text
-   141 | 
+   141 |
    142 |             doc_stats.append({
    143 |                 'doc_id': doc_id,
    144 |                 'section_count': len(doc_sections),
@@ -6300,17 +6300,17 @@
 
 ### scripts/baseline_distribution_analysis.py:162 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
 ```text
-   160 | 
+   160 |
    161 |         for section in sections:
    162 |             by_doc[section['doc_id']].append(section)
-   163 | 
+   163 |
    164 |         h2_groups = []
 ```
 
 ### scripts/baseline_distribution_analysis.py:166 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
 ```text
    164 |         h2_groups = []
-   165 | 
+   165 |
    166 |         for doc_id, doc_sections in by_doc.items():
    167 |             # Sort by position
    168 |             sorted_sections = sorted(doc_sections, key=lambda s: s.get('position', 0))
@@ -6493,7 +6493,7 @@
    184 |                count(s) as section_count
    185 |         ORDER BY doc_id
    186 |         """
-   187 | 
+   187 |
 ```
 
 ### scripts/validate_token_accounting.py:248 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
@@ -6508,15 +6508,15 @@
 ### src/ingestion/auto/orchestrator.py:836 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
    834 |                 continue
-   835 | 
+   835 |
    836 |             # Convert section_id to UUID
    837 |             point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, section["id"]))
-   838 | 
+   838 |
 ```
 
 ### src/ingestion/auto/orchestrator.py:874 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   872 | 
+   872 |
    873 |                 query = """
    874 |                 MATCH (s:Section {id: $section_id})
    875 |                 SET s.vector_embedding = $embedding,
@@ -6553,7 +6553,7 @@
 ### src/ingestion/build_graph.py:228 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
    226 |              count(DISTINCT q) + count(DISTINCT a) as provenance_count
-   227 | 
+   227 |
    228 |         RETURN s.id as section_id,
    229 |                provenance_count,
    230 |                CASE
@@ -6561,7 +6561,7 @@
 
 ### src/ingestion/build_graph.py:248 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   246 | 
+   246 |
    247 |         # Step 2: Separate orphans by action
    248 |         to_delete = [o["section_id"] for o in orphans if o["action"] == "delete"]
    249 |         to_mark_stale = [
@@ -6574,12 +6574,12 @@
    249 |         to_mark_stale = [
    250 |             o["section_id"] for o in orphans if o["action"] == "mark_stale"
    251 |         ]
-   252 | 
+   252 |
 ```
 
 ### src/ingestion/build_graph.py:362 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   360 | 
+   360 |
    361 |         for m in mentions:
    362 |             if "section_id" in m and "entity_id" in m:
    363 |                 # Standard Section→Entity MENTIONS relationship
@@ -6598,7 +6598,7 @@
 ### src/ingestion/build_graph.py:721 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
    719 |         document_id = document.get("id") or section.get("document_id")
-   720 | 
+   720 |
    721 |         # Convert section_id (SHA-256 hex string) to UUID for Qdrant compatibility
    722 |         # Use UUID5 with a namespace to ensure deterministic mapping
    723 |         point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, node_id))
@@ -6615,19 +6615,19 @@
 
 ### src/ingestion/extract/__init__.py:33 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-    31 | 
+    31 |
     32 |     for section in sections:
     33 |         logger.debug("Extracting entities from section", section_id=section["id"])
-    34 | 
+    34 |
     35 |         # Extract commands
 ```
 
 ### src/ingestion/extract/commands.py:28 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-    26 | 
+    26 |
     27 |     text = section["text"]
     28 |     section_id = section["id"]
-    29 | 
+    29 |
     30 |     # Pattern 1: CLI commands in code blocks
 ```
 
@@ -6642,7 +6642,7 @@
 
 ### src/ingestion/extract/commands.py:39 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-    37 | 
+    37 |
     38 |     # Pattern 2: Inline code with command-like patterns
     39 |     inline_commands, inline_mentions = _extract_inline_commands(text, section_id)
     40 |     commands.extend(inline_commands)
@@ -6651,7 +6651,7 @@
 
 ### src/ingestion/extract/commands.py:44 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-    42 | 
+    42 |
     43 |     # Pattern 3: Command documentation patterns (e.g., "The `weka` command...")
     44 |     doc_commands, doc_mentions = _extract_documented_commands(text, section_id)
     45 |     commands.extend(doc_commands)
@@ -6678,7 +6678,7 @@
 
 ### src/ingestion/extract/commands.py:63 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-    61 | 
+    61 |
     62 | def _extract_from_code_block(
     63 |     code_block: str, section_id: str, full_text: str
     64 | ) -> Tuple[List[Dict], List[Dict]]:
@@ -6705,7 +6705,7 @@
 
 ### src/ingestion/extract/commands.py:103 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   101 | 
+   101 |
    102 | def _extract_inline_commands(
    103 |     text: str, section_id: str
    104 | ) -> Tuple[List[Dict], List[Dict]]:
@@ -6732,7 +6732,7 @@
 
 ### src/ingestion/extract/commands.py:137 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   135 | 
+   135 |
    136 | def _extract_documented_commands(
    137 |     text: str, section_id: str
    138 | ) -> Tuple[List[Dict], List[Dict]]:
@@ -6759,7 +6759,7 @@
 
 ### src/ingestion/extract/commands.py:263 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   261 | 
+   261 |
    262 | def _create_mention(
    263 |     section_id: str, entity_id: str, span: Tuple[int, int], confidence: float
    264 | ) -> Dict:
@@ -6790,21 +6790,21 @@
    271 |         "end": span[1],
    272 |         "source_section_id": section_id,
    273 |     }
-   274 | 
+   274 |
 ```
 
 ### src/ingestion/extract/configs.py:26 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-    24 | 
+    24 |
     25 |     text = section["text"]
     26 |     section_id = section["id"]
-    27 | 
+    27 |
     28 |     # Pattern 1: Configuration file patterns
 ```
 
 ### src/ingestion/extract/configs.py:29 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-    27 | 
+    27 |
     28 |     # Pattern 1: Configuration file patterns
     29 |     file_configs, file_mentions = _extract_config_files(text, section_id)
     30 |     configurations.extend(file_configs)
@@ -6813,7 +6813,7 @@
 
 ### src/ingestion/extract/configs.py:34 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-    32 | 
+    32 |
     33 |     # Pattern 2: Configuration parameters (key=value, key: value)
     34 |     param_configs, param_mentions = _extract_config_parameters(text, section_id)
     35 |     configurations.extend(param_configs)
@@ -6822,7 +6822,7 @@
 
 ### src/ingestion/extract/configs.py:39 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-    37 | 
+    37 |
     38 |     # Pattern 3: Environment variables
     39 |     env_configs, env_mentions = _extract_env_variables(text, section_id)
     40 |     configurations.extend(env_configs)
@@ -6858,8 +6858,8 @@
 
 ### src/ingestion/extract/configs.py:65 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-    63 | 
-    64 | 
+    63 |
+    64 |
     65 | def _extract_config_files(text: str, section_id: str) -> Tuple[List[Dict], List[Dict]]:
     66 |     """Extract configuration file references."""
     67 |     configurations = []
@@ -6867,16 +6867,16 @@
 
 ### src/ingestion/extract/configs.py:95 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-    93 | 
+    93 |
     94 |                 span = (match.start(1), match.end(1))
     95 |                 mention = _create_mention(section_id, config_entity["id"], span, 0.85)
     96 |                 mentions.append(mention)
-    97 | 
+    97 |
 ```
 
 ### src/ingestion/extract/configs.py:102 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   100 | 
+   100 |
    101 | def _extract_config_parameters(
    102 |     text: str, section_id: str
    103 | ) -> Tuple[List[Dict], List[Dict]]:
@@ -6885,17 +6885,17 @@
 
 ### src/ingestion/extract/configs.py:128 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   126 | 
+   126 |
    127 |                 span = (match.start(1), match.end(1))
    128 |                 mention = _create_mention(section_id, config_entity["id"], span, 0.75)
    129 |                 mentions.append(mention)
-   130 | 
+   130 |
 ```
 
 ### src/ingestion/extract/configs.py:134 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   132 | 
-   133 | 
+   132 |
+   133 |
    134 | def _extract_env_variables(text: str, section_id: str) -> Tuple[List[Dict], List[Dict]]:
    135 |     """Extract environment variables."""
    136 |     configurations = []
@@ -6903,16 +6903,16 @@
 
 ### src/ingestion/extract/configs.py:158 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   156 | 
+   156 |
    157 |                 span = (match.start(1), match.end(1))
    158 |                 mention = _create_mention(section_id, config_entity["id"], span, 0.9)
    159 |                 mentions.append(mention)
-   160 | 
+   160 |
 ```
 
 ### src/ingestion/extract/configs.py:165 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   163 | 
+   163 |
    164 | def _extract_from_config_code(
    165 |     code_block: str, section_id: str, full_text: str
    166 | ) -> Tuple[List[Dict], List[Dict]]:
@@ -6939,7 +6939,7 @@
 
 ### src/ingestion/extract/configs.py:258 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   256 | 
+   256 |
    257 | def _create_mention(
    258 |     section_id: str, entity_id: str, span: Tuple[int, int], confidence: float
    259 | ) -> Dict:
@@ -6970,7 +6970,7 @@
    266 |         "end": span[1],
    267 |         "source_section_id": section_id,
    268 |     }
-   269 | 
+   269 |
 ```
 
 ### src/ingestion/extract/procedures.py:103 — Use of non-canonical 'section_id' (should be 'id') (warn)
@@ -7011,7 +7011,7 @@
 
 ### src/ingestion/parsers/html.py:208 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   206 | 
+   206 |
    207 |     return {
    208 |         "id": section_id,
    209 |         "document_id": _compute_document_id(source_uri),
@@ -7020,16 +7020,16 @@
 
 ### src/ingestion/parsers/markdown.py:234 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   232 | 
+   232 |
    233 |     # Compute deterministic section ID using content-coupled approach
    234 |     section_id = _section_id(source_uri, anchor, checksum)
-   235 | 
+   235 |
    236 |     # Count tokens (simple whitespace split for now)
 ```
 
 ### src/ingestion/parsers/markdown.py:240 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   238 | 
+   238 |
    239 |     return {
    240 |         "id": section_id,
    241 |         "document_id": _compute_document_id(source_uri),
@@ -7047,7 +7047,7 @@
 
 ### src/ingestion/parsers/notion.py:200 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   198 | 
+   198 |
    199 |     return {
    200 |         "id": section_id,
    201 |         "document_id": _compute_document_id(source_uri),
@@ -7065,10 +7065,10 @@
 
 ### src/providers/tokenizer_service.py:5 — Use of tiktoken (NON-canonical for Jina v3) (warn)
 ```text
-     3 | 
+     3 |
      4 | CRITICAL: This module uses the EXACT tokenizer for jina-embeddings-v3 (XLM-RoBERTa family).
      5 | DO NOT use tiktoken or cl100k_base - those are for OpenAI models and will give wrong counts.
-     6 | 
+     6 |
      7 | Dual-backend architecture:
 ```
 
@@ -7086,7 +7086,7 @@
    395 |         Args:
    396 |             text: Text to split (may be large)
    397 |             section_id: Optional parent section identifier
-   398 | 
+   398 |
    399 |         Returns:
 ```
 
@@ -7122,7 +7122,7 @@
    454 |         chunks = []
    455 |         start_idx = 0
    456 |         chunk_index = 0
-   457 | 
+   457 |
    458 |         while start_idx < total_tokens:
 ```
 
@@ -7150,15 +7150,15 @@
    477 |                 "integrity_hash": self.compute_integrity_hash(chunk_text),
    478 |                 "parent_section_id": section_id,
    479 |             }
-   480 | 
+   480 |
 ```
 
 ### src/providers/tokenizer_service.py:489 — Use of non-canonical 'chunk_index' (should be 'order') (warn)
 ```text
    487 |                 start_idx = end_idx
-   488 | 
+   488 |
    489 |             chunk_index += 1
-   490 | 
+   490 |
    491 |         # Update total_chunks in all chunks
 ```
 
@@ -7186,12 +7186,12 @@
    616 |         WHERE e.id IN $focused_entity_ids
    617 |         RETURN s.id AS section_id, count(DISTINCT e) AS focus_hits, collect(DISTINCT e.id) AS matched_entities
    618 |         """
-   619 | 
+   619 |
 ```
 
 ### src/query/hybrid_search.py:632 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   630 | 
+   630 |
    631 |                 for record in result:
    632 |                     focus_counts[record["section_id"]] = record["focus_hits"]
    633 |                     matched_entities_map[record["section_id"]] = record[
@@ -7210,7 +7210,7 @@
 ### src/query/response_builder.py:39 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
     37 |     """Evidence supporting an answer."""
-    38 | 
+    38 |
     39 |     section_id: Optional[str] = None
     40 |     node_id: Optional[str] = None
     41 |     node_label: Optional[str] = None
@@ -7246,7 +7246,7 @@
 ### src/query/response_builder.py:339 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
    337 |             metadata = result.metadata
-   338 | 
+   338 |
    339 |             # Determine section_id and node_id
    340 |             section_id = None
    341 |             node_id = result.node_id
@@ -7254,16 +7254,16 @@
 
 ### src/query/response_builder.py:340 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   338 | 
+   338 |
    339 |             # Determine section_id and node_id
    340 |             section_id = None
    341 |             node_id = result.node_id
-   342 | 
+   342 |
 ```
 
 ### src/query/response_builder.py:344 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   342 | 
+   342 |
    343 |             if result.node_label == "Section":
    344 |                 section_id = result.node_id
    345 |             else:
@@ -7275,7 +7275,7 @@
    345 |             else:
    346 |                 # For non-sections, try to get section from metadata
    347 |                 section_id = metadata.get("section_id")
-   348 | 
+   348 |
    349 |             # Mode-specific evidence extraction
 ```
 
@@ -7284,7 +7284,7 @@
    345 |             else:
    346 |                 # For non-sections, try to get section from metadata
    347 |                 section_id = metadata.get("section_id")
-   348 | 
+   348 |
    349 |             # Mode-specific evidence extraction
 ```
 
@@ -7371,7 +7371,7 @@
 
 ### src/query/session_tracker.py:438 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   436 | 
+   436 |
    437 |                 citations = [
    438 |                     {"section_id": sec_id, "rank": idx + 1}
    439 |                     for idx, sec_id in enumerate(supporting_section_ids)
@@ -7456,7 +7456,7 @@
    607 |                 assert citations[1]["rank"] == 2
    608 |                 assert citations[0]["section_id"] == test_section_ids[0]
    609 |                 assert citations[1]["section_id"] == test_section_ids[1]
-   610 | 
+   610 |
 ```
 
 ### tests/integration/test_phase7c_integration.py:609 — Use of non-canonical 'section_id' (should be 'id') (warn)
@@ -7464,7 +7464,7 @@
    607 |                 assert citations[1]["rank"] == 2
    608 |                 assert citations[0]["section_id"] == test_section_ids[0]
    609 |                 assert citations[1]["section_id"] == test_section_ids[1]
-   610 | 
+   610 |
    611 |             print("\n✅ Answer created with citations")
 ```
 
@@ -7483,7 +7483,7 @@
    718 |                 """,
    719 |                 doc_id=test_doc_id,
    720 |             )
-   721 | 
+   721 |
 ```
 
 ### tests/integration/test_phase7c_integration.py:735 — Use of non-canonical 'section_id' (should be 'id') (warn)
@@ -7492,7 +7492,7 @@
    734 |             for i in range(3):
    735 |                 section_id = f"test-section-nfs-{i}-{uuid.uuid4()}"
    736 |                 test_section_ids.append(section_id)
-   737 | 
+   737 |
 ```
 
 ### tests/integration/test_phase7c_integration.py:736 — Use of non-canonical 'section_id' (should be 'id') (warn)
@@ -7500,7 +7500,7 @@
    734 |             for i in range(3):
    735 |                 section_id = f"test-section-nfs-{i}-{uuid.uuid4()}"
    736 |                 test_section_ids.append(section_id)
-   737 | 
+   737 |
    738 |                 test_vector = [0.1 + i * 0.01] * 1024  # Slightly different vectors
 ```
 
@@ -7569,7 +7569,7 @@
 
 ### tests/integration/test_phase7c_integration.py:775 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
 ```text
-   773 | 
+   773 |
    774 |         yield {
    775 |             "doc_id": test_doc_id,
    776 |             "entity_id": test_entity_id,
@@ -7609,16 +7609,16 @@
    912 |                 """,
    913 |                 doc_id=test_doc_id,
    914 |             )
-   915 | 
+   915 |
 ```
 
 ### tests/integration/test_phase7c_integration.py:917 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   915 | 
+   915 |
    916 |             for i in range(3):
    917 |                 section_id = f"test-orphan-section-{i}-{uuid.uuid4()}"
    918 |                 test_vector = [0.1] * 1024
-   919 | 
+   919 |
 ```
 
 ### tests/integration/test_phase7c_integration.py:922 — Use of non-canonical 'section_id' (should be 'id') (warn)
@@ -7708,7 +7708,7 @@
    999 |                     """,
   1000 |                     doc_id=test_doc_id,
   1001 |                 )
-  1002 | 
+  1002 |
 ```
 
 ### tests/integration/test_phase7c_integration.py:1015 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
@@ -7726,12 +7726,12 @@
   1017 |                 """,
   1018 |                 doc_id=test_doc_id,
   1019 |             )
-  1020 | 
+  1020 |
 ```
 
 ### tests/integration/test_phase7c_integration.py:1022 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-  1020 | 
+  1020 |
   1021 |             for i in range(2):
   1022 |                 section_id = f"test-stale-section-{i}-{uuid.uuid4()}"
   1023 |                 section_ids.append(section_id)
@@ -7744,7 +7744,7 @@
   1022 |                 section_id = f"test-stale-section-{i}-{uuid.uuid4()}"
   1023 |                 section_ids.append(section_id)
   1024 |                 test_vector = [0.1] * 1024
-  1025 | 
+  1025 |
 ```
 
 ### tests/integration/test_phase7c_integration.py:1028 — Use of non-canonical 'section_id' (should be 'id') (warn)
@@ -7816,7 +7816,7 @@
   1079 |                     session_id=test_session_id,
   1080 |                     section_id=section_ids[1],  # Section 1 has provenance
   1081 |                 )
-  1082 | 
+  1082 |
 ```
 
 ### tests/integration/test_phase7c_integration.py:1129 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
@@ -7884,11 +7884,11 @@
 
 ### tests/p1_t3_test.py:144 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
 ```text
-   142 | 
+   142 |
    143 |         # Cleanup
    144 |         session.run("MATCH (d:Document {id: $id}) DELETE d", id=doc_id)
-   145 | 
-   146 | 
+   145 |
+   146 |
 ```
 
 ### tests/p1_t3_test.py:153 — Use of non-canonical 'section_id' (should be 'id') (warn)
@@ -7929,7 +7929,7 @@
 
 ### tests/p1_t3_test.py:172 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   170 | 
+   170 |
    171 |         # Cleanup
    172 |         session.run("MATCH (s:Section {id: $id}) DELETE s", id=section_id)
 ```
@@ -7946,7 +7946,7 @@
 ### tests/p2_t3_test.py:340 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
 ```text
    338 |         )[0].get("document_id")
-   339 | 
+   339 |
    340 |         if doc_id:
    341 |             results = search_engine.search(
    342 |                 "configuration", k=5, filters={"document_id": doc_id}
@@ -7958,7 +7958,7 @@
    341 |             results = search_engine.search(
    342 |                 "configuration", k=5, filters={"document_id": doc_id}
    343 |             )
-   344 | 
+   344 |
 ```
 
 ### tests/p2_t3_test.py:347 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
@@ -7981,7 +7981,7 @@
 
 ### tests/p2_t4_test.py:87 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-    85 | 
+    85 |
     86 |     def test_evidence_has_section_id(self, sample_ranked_results):
     87 |         """Test that section evidence includes section_id."""
     88 |         builder = ResponseBuilder()
@@ -7990,11 +7990,11 @@
 
 ### tests/p2_t4_test.py:92 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-    90 | 
+    90 |
     91 |         # First result is a Section
     92 |         assert evidence[0].section_id == "section-1"
     93 |         assert evidence[0].node_label == "Section"
-    94 | 
+    94 |
 ```
 
 ### tests/p3_t2_test.py:54 — Use of non-canonical 'section_id' (should be 'id') (warn)
@@ -8011,7 +8011,7 @@
    261 |         for mention in mentions:
    262 |             assert mention["source_section_id"]
    263 |             assert mention["source_section_id"] == mention["section_id"]
-   264 | 
+   264 |
    265 |         # All mentions must have valid spans
 ```
 
@@ -8066,7 +8066,7 @@
    173 |                 """,
    174 |                 doc_id=sample_document["document"]["id"],
    175 |             )
-   176 | 
+   176 |
 ```
 
 ### tests/p3_t3_test.py:217 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
@@ -8155,7 +8155,7 @@
    311 |                 emb_version=config.embedding.version,
    312 |             )
    313 |             section_ids = [r["section_id"] for r in result]
-   314 | 
+   314 |
    315 |         total_sections = len(section_ids)
 ```
 
@@ -8197,28 +8197,28 @@
 
 ### tests/p4_t4_test.py:261 — Use of non-canonical 'doc_id' (should be 'document_id') (warn)
 ```text
-   259 | 
+   259 |
    260 |         # Create similar queries (same pattern)
    261 |         base_query = "MATCH (s:Section {document_id: $doc_id}) RETURN s LIMIT 10"
-   262 | 
+   262 |
    263 |         for i in range(8):
 ```
 
 ### tests/test_phase7c_dual_write.py:195 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
    193 |         import uuid
-   194 | 
+   194 |
    195 |         section_id = "test-dual-write-section-1"
    196 |         point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, section_id))
-   197 | 
+   197 |
 ```
 
 ### tests/test_phase7c_dual_write.py:196 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   194 | 
+   194 |
    195 |         section_id = "test-dual-write-section-1"
    196 |         point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, section_id))
-   197 | 
+   197 |
    198 |         legacy_point = qdrant_client.retrieve(
 ```
 
@@ -8255,7 +8255,7 @@
    273 |                 """,
    274 |                 section_id="test-metadata-section",
    275 |             )
-   276 | 
+   276 |
 ```
 
 ### tests/test_phase7c_ingestion.py:106 — Use of non-canonical 'section_id' (should be 'id') (warn)
@@ -8296,7 +8296,7 @@
 
 ### tests/test_phase7c_schema_v2_1.py:234 — Use of non-canonical 'chunk_index' (should be 'order') (warn)
 ```text
-   232 | 
+   232 |
    233 |             # Check for chunk_embeddings_v2 (Chunk label, 1024-D)
    234 |             chunk_index = next(
    235 |                 (
@@ -8309,7 +8309,7 @@
    241 |             )
    242 |             assert chunk_index is not None, "chunk_embeddings_v2 index not found"
    243 |             assert "Chunk" in chunk_index["labels"]
-   244 | 
+   244 |
 ```
 
 ### tests/test_phase7c_schema_v2_1.py:243 — Use of non-canonical 'chunk_index' (should be 'order') (warn)
@@ -8317,7 +8317,7 @@
    241 |             )
    242 |             assert chunk_index is not None, "chunk_embeddings_v2 index not found"
    243 |             assert "Chunk" in chunk_index["labels"]
-   244 | 
+   244 |
    245 |             # Note: Actual dimension validation requires inspecting index config
 ```
 
@@ -8344,7 +8344,7 @@
    272 |         """Test splitting when text is under limit."""
    273 |         text = "Short text that doesn't need splitting."
    274 |         chunks = service.split_to_chunks(text, section_id="test_section")
-   275 | 
+   275 |
    276 |         assert len(chunks) == 1
 ```
 
@@ -8360,9 +8360,9 @@
 ### tests/test_tokenizer_service.py:293 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
    291 |         assert token_count > service.target_tokens, f"Text has {token_count} tokens, need >{service.target_tokens} for splitting"
-   292 | 
+   292 |
    293 |         chunks = service.split_to_chunks(text, section_id="large_section")
-   294 | 
+   294 |
    295 |         # Should create multiple chunks
 ```
 
@@ -8377,9 +8377,9 @@
 
 ### tests/test_tokenizer_service.py:494 — Use of non-canonical 'section_id' (should be 'id') (warn)
 ```text
-   492 | 
+   492 |
    493 |         # Split it
    494 |         chunks = service.split_to_chunks(large_text, section_id="cli_ref")
-   495 | 
+   495 |
    496 |         # Should create multiple chunks
 ```

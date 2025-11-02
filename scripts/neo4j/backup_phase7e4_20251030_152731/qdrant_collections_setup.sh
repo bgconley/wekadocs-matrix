@@ -29,17 +29,17 @@ create_collection() {
     local COLLECTION_NAME=$1
     echo ""
     echo "Setting up collection: $COLLECTION_NAME"
-    
+
     # First check if collection exists
     RESPONSE=$(curl -sS "$QDRANT/collections/$COLLECTION_NAME" 2>/dev/null || echo '{"status":"error"}')
-    
+
     if echo "$RESPONSE" | grep -q '"status":"ok"'; then
         echo "  Collection exists, verifying configuration..."
-        
+
         # Extract current config
         CURRENT_DIM=$(echo "$RESPONSE" | grep -o '"size":[0-9]*' | cut -d: -f2 || echo "0")
         CURRENT_DISTANCE=$(echo "$RESPONSE" | grep -o '"distance":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
-        
+
         if [ "$CURRENT_DIM" = "1024" ] && [ "${CURRENT_DISTANCE^^}" = "COSINE" ]; then
             echo "  ✅ Collection correctly configured (1024-D, Cosine)"
         else
@@ -48,7 +48,7 @@ create_collection() {
         fi
     else
         echo "  Creating new collection..."
-        
+
         RESPONSE=$(curl -sS -X PUT "$QDRANT/collections/$COLLECTION_NAME" \
           -H 'Content-Type: application/json' \
           -d '{
@@ -76,7 +76,7 @@ create_collection() {
             "write_consistency_factor": 1,
             "on_disk_payload": true
           }')
-        
+
         if echo "$RESPONSE" | grep -q '"status":"ok"'; then
             echo "  ✅ Collection created successfully"
         else

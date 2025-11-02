@@ -1,5 +1,5 @@
 # Redis Configuration - Phase 7E-4 Production Ready
-**Generated:** 2025-10-30 15:27:31  
+**Generated:** 2025-10-30 15:27:31
 **Redis Version:** 7.2-alpine
 
 ## Database Allocation
@@ -19,7 +19,7 @@
 doc:cache:{doc_id}                  TTL: 3600s (1 hour)
 doc:embeddings:{doc_id}:{chunk_id}  TTL: 86400s (24 hours)
 
-# Query cache  
+# Query cache
 query:cache:{query_hash}             TTL: 1800s (30 minutes)
 query:results:{query_hash}           TTL: 1800s (30 minutes)
 
@@ -73,7 +73,7 @@ ratelimit:global:{endpoint}          TTL: 60s
 maxmemory 256mb
 maxmemory-policy allkeys-lru
 
-# Persistence  
+# Persistence
 appendonly yes
 appendfsync everysec
 save 900 1    # Save after 900 sec if at least 1 key changed
@@ -161,7 +161,7 @@ docker exec weka-redis redis-cli -a $REDIS_PASSWORD CLIENT LIST
 ## Integration Notes
 
 - **Cache Invalidation:** Handled by `tools/redis_invalidation.py`
-- **Epoch Management:** Managed by `tools/redis_epoch_bump.py`  
+- **Epoch Management:** Managed by `tools/redis_epoch_bump.py`
 - **Connection Pooling:** Max 50 connections per service
 - **Retry Policy:** Exponential backoff with max 3 retries
 - **Circuit Breaker:** Opens after 5 consecutive failures

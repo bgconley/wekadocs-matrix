@@ -369,10 +369,12 @@ class GraphBuilder:
                 existing = unit_map.get(unit["id"])
                 if existing is None or unit.get("order", 0) < existing.get("order", 0):
                     unit_map[unit["id"]] = unit
-                rels.append({
-                    "unit_id": unit["id"],
-                    "chunk_id": unit["parent_chunk_id"],
-                })
+                rels.append(
+                    {
+                        "unit_id": unit["id"],
+                        "chunk_id": unit["parent_chunk_id"],
+                    }
+                )
 
         units = list(unit_map.values())
 

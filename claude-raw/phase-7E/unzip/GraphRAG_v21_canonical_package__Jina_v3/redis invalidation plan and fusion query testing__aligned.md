@@ -2,20 +2,20 @@
 Absolutely—here are both deliverables, ready to drop into your repo:
 
 - **A tiny fusion A/B harness** that compares **RRF vs. weighted fusion** (vector + BM25), computes **Hit@k, MRR@k, nDCG@k**, and emits a Markdown + CSV report.
-    
+
 - **A Redis invalidation pack** with two options:
-    
+
     - **Pattern-scan deletes** (works with any existing keys).
-        
+
     - **Epoch-based keys** (preferred, O(1) invalidation by bumping a counter—no scans).
-        
-    
+
+
 
 ---
 
 ## **1) Fusion A/B Harness (RRF vs. Weighted)**
 
-  
+
 
 > **Path:** tools/fusion_ab.py
 
@@ -349,16 +349,16 @@ if __name__ == "__main__":
 
 ### **Minimal JSONL generators (optional)**
 
-  
+
 
 If you need to dump results for the harness:
 
 - **Vector via Qdrant** → tools/dump_qdrant_vector_jsonl.py (10–15 lines; similar to the live adapter).
-    
-- **BM25 via your HTTP search** → tools/dump_bm25_jsonl.py.
-    
 
-  
+- **BM25 via your HTTP search** → tools/dump_bm25_jsonl.py.
+
+
+
 
 _(Ask if you want me to add them; the harness already supports live modes.)_
 
@@ -366,15 +366,15 @@ _(Ask if you want me to add them; the harness already supports live modes.)_
 
 ## **2) Redis Invalidation Pack**
 
-  
+
 
 Two patterns:
 
-  
+
 
 ### **A) Pattern‑scan deletes (works with any keys)**
 
-  
+
 
 > **Path:** tools/redis_invalidation.py
 
@@ -450,42 +450,42 @@ if __name__ == "__main__":
 
 ### **B) Epoch‑based keys (preferred; O(1) invalidation)**
 
-  
+
 
 Instead of deleting old keys, **bake an epoch** into every cache key. Invalidate by bumping a counter—no scans, no deletes.
 
-  
+
 
 **Key scheme (examples):**
 
 - Search/fusion cache key:
-    
+
 
 ```
 {ns}:fusion:doc:{document_id}:epoch:{doc_epoch}:q:{sha1(query_text)}
 ```
 
--   
-    
+-
+
 - Chunk cache key:
-    
+
 
 ```
 {ns}:vector:chunk:{id}:epoch:{chunk_epoch}
 ```
 
-  
 
-  
+
+
 
 **Epoch store:**
 
 - HSET {ns}:doc_epoch {document_id} <int>
-    
-- HSET {ns}:chunk_epoch {id} <int>
-    
 
-  
+- HSET {ns}:chunk_epoch {id} <int>
+
+
+
 
 **Lookup when caching:**
 
@@ -506,7 +506,7 @@ def fusion_cache_key(document_id: str, query_text: str) -> str:
 
 **Invalidate after re‑ingest (bump epoch):**
 
-  
+
 
 > **Path:** tools/redis_epoch_bump.py
 
@@ -548,7 +548,7 @@ if __name__ == "__main__":
 
 ## **3) Recommended Minimal Key Namespace (so both snippets “just work”)**
 
-  
+
 
 If you don’t already have a scheme, adopt this (or map your keys to it):
 
@@ -571,15 +571,15 @@ If you don’t already have a scheme, adopt this (or map your keys to it):
 ```
 
 - **Pattern-scan deletes** will target the search, fusion, answer, and vector spaces for a doc/chunk.
-    
+
 - **Epoch-based** will just **bump** doc_epoch and/or chunk_epoch.
-    
+
 
 ---
 
 ## **4) Wire-up: where to call invalidation**
 
-  
+
 
 After your **Neo4j + Qdrant upserts** complete for a document:
 
@@ -621,7 +621,7 @@ qdrant-client>=1.8.2  # only if you plan to use live vector mode in the harness
 
 ## **6) Example commands**
 
-  
+
 
 **RRF run (offline files):**
 
@@ -650,15 +650,15 @@ python tools/fusion_ab.py \
 
 ### **That’s it**
 
-  
+
 
 This gives you:
 
 - A **repeatable A/B harness** to validate RRF vs weighted fusion on your query set (and to tune alpha, rrf_k, and topk).
-    
-- A **robust cache invalidation** strategy you can adopt immediately (pattern‑scan) and a **future‑proof epoch scheme** you can migrate to with minimal code changes.
-    
 
-  
+- A **robust cache invalidation** strategy you can adopt immediately (pattern‑scan) and a **future‑proof epoch scheme** you can migrate to with minimal code changes.
+
+
+
 
 If you want me to also add the **Qdrant/BM25 JSONL dumpers**, I can include those next so your team can produce offline inputs with one command.

@@ -368,7 +368,7 @@ handlers:
     level: INFO
     formatter: detailed
     stream: ext://sys.stdout
-  
+
   file:
     class: logging.handlers.RotatingFileHandler
     level: DEBUG
@@ -376,7 +376,7 @@ handlers:
     filename: /opt/graphrag-v2/logs/graphrag.log
     maxBytes: 10485760
     backupCount: 5
-  
+
   error_file:
     class: logging.handlers.RotatingFileHandler
     level: ERROR
@@ -390,12 +390,12 @@ loggers:
     level: DEBUG
     handlers: [console, file, error_file]
     propagate: false
-  
+
   neo4j:
     level: INFO
     handlers: [file]
     propagate: false
-  
+
   qdrant:
     level: INFO
     handlers: [file]
@@ -449,7 +449,7 @@ def safe_execute(
     log_errors: bool = True
 ) -> Callable:
     """Decorator for safe function execution with error handling"""
-    
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         try:
@@ -458,12 +458,12 @@ def safe_execute(
             if log_errors:
                 logger.error(f"Error in {func.__name__}: {str(e)}")
                 logger.debug(traceback.format_exc())
-            
+
             if isinstance(e, GraphRAGError):
                 raise
-            
+
             raise error_class(f"Failed in {func.__name__}: {str(e)}") from e
-    
+
     return wrapper
 
 def retry_on_failure(
@@ -472,7 +472,7 @@ def retry_on_failure(
     max_wait: int = 10
 ):
     """Decorator for retrying failed operations"""
-    
+
     return retry(
         stop=stop_after_attempt(max_attempts),
         wait=wait_exponential(multiplier=wait_seconds, max=max_wait),
@@ -481,7 +481,7 @@ def retry_on_failure(
 
 class CircuitBreaker:
     """Circuit breaker for preventing cascading failures"""
-    
+
     def __init__(
         self,
         failure_threshold: int = 5,
@@ -494,16 +494,16 @@ class CircuitBreaker:
         self.failure_count = 0
         self.last_failure_time = None
         self.state = 'CLOSED'  # CLOSED, OPEN, HALF_OPEN
-    
+
     def call(self, func: Callable, *args, **kwargs):
         """Execute function with circuit breaker protection"""
-        
+
         if self.state == 'OPEN':
             if self._should_attempt_reset():
                 self.state = 'HALF_OPEN'
             else:
                 raise GraphRAGError("Circuit breaker is OPEN")
-        
+
         try:
             result = func(*args, **kwargs)
             self._on_success()
@@ -511,21 +511,21 @@ class CircuitBreaker:
         except self.expected_exception as e:
             self._on_failure()
             raise
-    
+
     def _on_success(self):
         """Handle successful execution"""
         self.failure_count = 0
         self.state = 'CLOSED'
-    
+
     def _on_failure(self):
         """Handle failed execution"""
         self.failure_count += 1
         self.last_failure_time = time.time()
-        
+
         if self.failure_count >= self.failure_threshold:
             self.state = 'OPEN'
             logger.warning(f"Circuit breaker opened after {self.failure_count} failures")
-    
+
     def _should_attempt_reset(self) -> bool:
         """Check if circuit breaker should attempt reset"""
         return (
@@ -604,23 +604,23 @@ load_dotenv()
 
 def create_collection():
     """Create and configure Qdrant collection"""
-    
+
     # Initialize client
     client = QdrantClient(
         url=os.getenv('QDRANT_URL', 'http://localhost:6333'),
         api_key=os.getenv('QDRANT_API_KEY')
     )
-    
+
     collection_name = os.getenv('QDRANT_COLLECTION', 'chunks')
     embed_dim = int(os.getenv('EMBED_DIM', 1024))
-    
+
     # Check if collection exists
     collections = [c.name for c in client.get_collections().collections]
-    
+
     if collection_name in collections:
         print(f"Collection '{collection_name}' already exists. Recreating...")
         client.delete_collection(collection_name)
-    
+
     # Create collection with vector configuration
     client.create_collection(
         collection_name=collection_name,
@@ -642,9 +642,9 @@ def create_collection():
             full_scan_threshold=10000
         )
     )
-    
+
     print(f"Collection '{collection_name}' created successfully")
-    
+
     # Create payload indexes for efficient filtering
     indexes = [
         ("document_id", qm.PayloadSchemaType.KEYWORD),
@@ -658,7 +658,7 @@ def create_collection():
         ("embedding_version", qm.PayloadSchemaType.KEYWORD),
         ("embedding_provider", qm.PayloadSchemaType.KEYWORD)
     ]
-    
+
     for field_name, field_type in indexes:
         try:
             client.create_payload_index(
@@ -669,14 +669,14 @@ def create_collection():
             print(f"Created index for '{field_name}'")
         except Exception as e:
             print(f"Warning: Could not create index for '{field_name}': {e}")
-    
+
     # Verify collection
     collection_info = client.get_collection(collection_name)
     print(f"\nCollection info:")
     print(f"  Points count: {collection_info.points_count}")
     print(f"  Vectors config: {collection_info.config.params.vectors}")
     print(f"  Status: {collection_info.status}")
-    
+
     return client, collection_name
 
 if __name__ == "__main__":
@@ -714,14 +714,14 @@ load_dotenv()
 
 def validate_neo4j():
     """Validate Neo4j schema"""
-    
+
     driver = GraphDatabase.driver(
         os.getenv('NEO4J_URI'),
         auth=(os.getenv('NEO4J_USER'), os.getenv('NEO4J_PASSWORD'))
     )
-    
+
     validations = []
-    
+
     with driver.session() as session:
         # Check constraints
         constraints = session.run("SHOW CONSTRAINTS").data()
@@ -732,14 +732,14 @@ def validate_neo4j():
             'query_id_unique',
             'answer_id_unique'
         ]
-        
+
         constraint_names = [c['name'] for c in constraints]
         for req in required_constraints:
             if req in constraint_names:
                 validations.append((req, True, "Constraint exists"))
             else:
                 validations.append((req, False, "Constraint missing"))
-        
+
         # Check indexes
         indexes = session.run("SHOW INDEXES").data()
         required_indexes = [
@@ -748,70 +748,70 @@ def validate_neo4j():
             'section_document_id',
             'chunk_document_id'
         ]
-        
+
         index_names = [idx['name'] for idx in indexes]
         for req in required_indexes:
             if req in index_names:
                 validations.append((req, True, "Index exists"))
             else:
                 validations.append((req, False, "Index missing"))
-        
+
         # Check schema version
         result = session.run(
             "MATCH (sv:SchemaVersion {id: 'singleton'}) RETURN sv"
         ).single()
-        
+
         if result and result['sv']['version'] == 'v2.1':
             validations.append(("Schema version", True, "v2.1"))
         else:
             validations.append(("Schema version", False, "Not v2.1"))
-    
+
     driver.close()
     return validations
 
 def validate_qdrant():
     """Validate Qdrant collection"""
-    
+
     client = QdrantClient(
         url=os.getenv('QDRANT_URL'),
         api_key=os.getenv('QDRANT_API_KEY')
     )
-    
+
     validations = []
     collection_name = os.getenv('QDRANT_COLLECTION', 'chunks')
-    
+
     try:
         info = client.get_collection(collection_name)
-        
+
         # Check vector dimensions
         vector_config = info.config.params.vectors['content']
         if vector_config.size == 1024:
             validations.append(("Vector dimensions", True, "1024"))
         else:
             validations.append(("Vector dimensions", False, f"{vector_config.size}"))
-        
+
         # Check distance metric
         if vector_config.distance == 'Cosine':
             validations.append(("Distance metric", True, "Cosine"))
         else:
             validations.append(("Distance metric", False, f"{vector_config.distance}"))
-        
+
         # Check status
         if info.status == 'green':
             validations.append(("Collection status", True, "Green"))
         else:
             validations.append(("Collection status", False, f"{info.status}"))
-            
+
     except Exception as e:
         validations.append(("Collection exists", False, str(e)))
-    
+
     return validations
 
 def validate_redis():
     """Validate Redis connection"""
-    
+
     validations = []
-    
+
     try:
         r = redis.Redis(
             host=os.getenv('REDIS_HOST', 'localhost'),
@@ -819,47 +819,47 @@ def validate_redis():
             db=int(os.getenv('REDIS_DB', 0)),
             decode_responses=True
         )
-        
+
         # Test connection
         if r.ping():
             validations.append(("Redis connection", True, "Connected"))
         else:
             validations.append(("Redis connection", False, "Cannot ping"))
-        
+
         # Check memory
         info = r.info('memory')
         used_memory = info['used_memory_human']
         validations.append(("Redis memory", True, f"Using {used_memory}"))
-        
+
     except Exception as e:
         validations.append(("Redis connection", False, str(e)))
-    
+
     return validations
 
 def print_results(component, validations):
     """Print validation results"""
-    
+
     print(f"\n{component} Validation Results:")
     print("-" * 50)
-    
+
     all_passed = True
     for name, passed, details in validations:
         status = "✓" if passed else "✗"
         print(f"  {status} {name}: {details}")
         if not passed:
             all_passed = False
-    
+
     return all_passed
 
 if __name__ == "__main__":
     print("GraphRAG v2.1 Schema Validation")
     print("=" * 50)
-    
+
     # Run validations
     neo4j_valid = print_results("Neo4j", validate_neo4j())
     qdrant_valid = print_results("Qdrant", validate_qdrant())
     redis_valid = print_results("Redis", validate_redis())
-    
+
     # Summary
     print("\n" + "=" * 50)
     if neo4j_valid and qdrant_valid and redis_valid:
@@ -906,7 +906,7 @@ class DocumentMetadata:
     last_edited: Optional[datetime] = None
     path: Optional[str] = None
     source_url: Optional[str] = None
-    
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for storage"""
         return {
@@ -932,7 +932,7 @@ class Section:
     start_offset: int
     end_offset: int
     metadata: Dict = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for storage"""
         return {
@@ -950,24 +950,24 @@ class Section:
 
 class DocumentParser:
     """Parse documents into hierarchical sections"""
-    
+
     def __init__(self):
         self.md_parser = markdown.Markdown(extensions=['extra', 'toc'])
         self.section_counter = 0
-    
+
     def parse(self, content: str, metadata: DocumentMetadata) -> Tuple[str, List[Section]]:
         """Parse document content into sections
-        
+
         Args:
             content: Raw document content
             metadata: Document metadata
-            
+
         Returns:
             Tuple of (document_id, list of sections)
         """
         # Generate document ID
         doc_id = self._generate_document_id(metadata.source_uri)
-        
+
         # Parse based on format
         if metadata.source_type == "markdown":
             sections = self._parse_markdown(content, doc_id)
@@ -976,34 +976,34 @@ class DocumentParser:
         else:
             # Default to plain text
             sections = self._parse_plain_text(content, doc_id)
-        
+
         # Add hierarchy relationships
         sections = self._establish_hierarchy(sections)
-        
+
         return doc_id, sections
-    
+
     def _generate_document_id(self, source_uri: str) -> str:
         """Generate stable document ID from URI"""
         return hashlib.sha256(source_uri.encode()).hexdigest()[:24]
-    
+
     def _generate_section_id(self, doc_id: str, content: str, order: int) -> str:
         """Generate stable section ID"""
         unique_str = f"{doc_id}|{order}|{content[:100]}"
         return hashlib.sha256(unique_str.encode()).hexdigest()[:24]
-    
+
     def _parse_markdown(self, content: str, doc_id: str) -> List[Section]:
         """Parse Markdown content into sections"""
-        
+
         sections = []
         lines = content.split('\n')
         current_section = None
         current_text = []
         current_offset = 0
-        
+
         for i, line in enumerate(lines):
             # Check for heading
             heading_match = re.match(r'^(#{1,6})\s+(.+)$', line)
-            
+
             if heading_match:
                 # Save previous section if exists
                 if current_section:
@@ -1011,15 +1011,15 @@ class DocumentParser:
                     current_section.end_offset = current_offset
                     sections.append(current_section)
                     current_text = []
-                
+
                 # Create new section
                 level = len(heading_match.group(1))
                 heading = heading_match.group(2).strip()
-                
+
                 section_id = self._generate_section_id(
                     doc_id, heading, len(sections)
                 )
-                
+
                 current_section = Section(
                     id=section_id,
                     document_id=doc_id,
@@ -1034,9 +1034,9 @@ class DocumentParser:
             else:
                 # Add to current section text
                 current_text.append(line)
-            
+
             current_offset += len(line) + 1  # +1 for newline
-        
+
         # Save final section
         if current_section:
             current_section.text = '\n'.join(current_text).strip()
@@ -1056,38 +1056,38 @@ class DocumentParser:
                 start_offset=0,
                 end_offset=len(content)
             ))
-        
+
         return sections
-    
+
     def _parse_html(self, content: str, doc_id: str) -> List[Section]:
         """Parse HTML content into sections"""
-        
+
         soup = BeautifulSoup(content, 'lxml')
         sections = []
-        
+
         # Find all heading elements
         headings = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
-        
+
         for i, heading in enumerate(headings):
             level = int(heading.name[1])
             heading_text = heading.get_text().strip()
-            
+
             # Get content between this heading and next
             next_heading = headings[i + 1] if i + 1 < len(headings) else None
-            
+
             content_elements = []
             for sibling in heading.find_next_siblings():
                 if sibling == next_heading:
                     break
                 if sibling.name not in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
                     content_elements.append(sibling.get_text().strip())
-            
+
             section_text = '\n'.join(content_elements)
-            
+
             section_id = self._generate_section_id(
                 doc_id, heading_text, len(sections)
             )
-            
+
             sections.append(Section(
                 id=section_id,
                 document_id=doc_id,
@@ -1099,21 +1099,21 @@ class DocumentParser:
                 start_offset=0,  # HTML offsets are approximate
                 end_offset=0
             ))
-        
+
         return sections
-    
+
     def _parse_plain_text(self, content: str, doc_id: str) -> List[Section]:
         """Parse plain text into sections (fallback)"""
-        
+
         # Simple paragraph-based splitting
         paragraphs = content.split('\n\n')
         sections = []
         current_offset = 0
-        
+
         for i, para in enumerate(paragraphs):
             if para.strip():
                 section_id = self._generate_section_id(doc_id, para[:100], i)
-                
+
                 sections.append(Section(
                     id=section_id,
                     document_id=doc_id,
@@ -1125,38 +1125,38 @@ class DocumentParser:
                     start_offset=current_offset,
                     end_offset=current_offset + len(para)
                 ))
-            
+
             current_offset += len(para) + 2  # +2 for double newline
-        
+
         return sections
-    
+
     def _establish_hierarchy(self, sections: List[Section]) -> List[Section]:
         """Establish parent-child relationships between sections"""
-        
+
         if not sections:
             return sections
-        
+
         # Stack to track parent sections at each level
         parent_stack = [None] * 7  # Levels 0-6
-        
+
         for section in sections:
             level = section.level
-            
+
             # Find parent (closest section with lower level)
             parent = None
             for l in range(level - 1, 0, -1):
                 if parent_stack[l]:
                     parent = parent_stack[l]
                     break
-            
+
             section.parent_id = parent.id if parent else None
-            
+
             # Update stack
             parent_stack[level] = section
             # Clear higher levels
             for l in range(level + 1, 7):
                 parent_stack[l] = None
-        
+
         return sections
 EOF
 ```
@@ -1183,32 +1183,32 @@ logger = logging.getLogger(__name__)
 
 class TokenCounter:
     """Token counter with HuggingFace and Jina Segmenter backends"""
-    
+
     def __init__(self):
         self.backend = os.getenv('TOKENIZER_BACKEND', 'hf')
         self.max_tokens = int(os.getenv('EMBED_MAX_TOKENS', 8192))
         self.target_tokens = int(os.getenv('EMBED_TARGET_TOKENS', 7900))
-        
+
         if self.backend == 'hf':
             self._init_huggingface()
         else:
             self._init_segmenter()
-    
+
     def _init_huggingface(self):
         """Initialize HuggingFace tokenizer"""
         tokenizer_id = os.getenv('HF_TOKENIZER_ID', 'jinaai/jina-embeddings-v3')
         cache_dir = os.getenv('HF_CACHE', '/opt/graphrag-v2/models')
-        
+
         logger.info(f"Loading HuggingFace tokenizer: {tokenizer_id}")
-        
+
         self.tokenizer = AutoTokenizer.from_pretrained(
             tokenizer_id,
             cache_dir=cache_dir,
             use_fast=True  # Use Rust-based fast tokenizer
         )
-        
+
         logger.info("HuggingFace tokenizer loaded successfully")
-    
+
     def _init_segmenter(self):
         """Initialize Jina Segmenter API client"""
         self.segmenter_url = os.getenv(
@@ -1217,15 +1217,15 @@ class TokenCounter:
         )
         self.api_key = os.getenv('JINA_API_KEY')
         self.timeout = int(os.getenv('SEGMENTER_TIMEOUT_MS', 3000)) / 1000
-        
+
         logger.info("Jina Segmenter API client initialized")
-    
+
     def count_tokens(self, text: str) -> int:
         """Count tokens in text using configured backend
-        
+
         Args:
             text: Input text
-            
+
         Returns:
             Number of tokens
         """
@@ -1233,38 +1233,38 @@ class TokenCounter:
             return self._count_hf(text)
         else:
             return self._count_segmenter(text)
-    
+
     def _count_hf(self, text: str) -> int:
         """Count tokens using HuggingFace tokenizer"""
-        
+
         # Encode without special tokens
         tokens = self.tokenizer.encode(
             text,
             add_special_tokens=False,
             truncation=False
         )
-        
+
         return len(tokens)
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, max=10)
     )
     def _count_segmenter(self, text: str) -> int:
         """Count tokens using Jina Segmenter API"""
-        
+
         headers = {
             'Content-Type': 'application/json'
         }
-        
+
         if self.api_key:
             headers['Authorization'] = f'Bearer {self.api_key}'
-        
+
         payload = {
             'text': text,
             'tokenizer': 'xlm-roberta-base'  # Jina v3 uses XLM-RoBERTa
         }
-        
+
         try:
             response = httpx.post(
                 self.segmenter_url,
@@ -1273,33 +1273,33 @@ class TokenCounter:
                 timeout=self.timeout
             )
             response.raise_for_status()
-            
+
             data = response.json()
             return data.get('num_tokens', 0)
-            
+
         except Exception as e:
             logger.error(f"Segmenter API error: {e}")
             # Fall back to estimation
             return len(text.split()) * 1.3  # Conservative estimate
-    
+
     def needs_splitting(self, text: str) -> bool:
         """Check if text exceeds token limit
-        
+
         Args:
             text: Input text
-            
+
         Returns:
             True if text needs splitting
         """
         return self.count_tokens(text) > self.max_tokens
-    
+
     def truncate_to_token_limit(self, text: str, max_tokens: int) -> str:
         """Truncate text to exact token count
-        
+
         Args:
             text: Input text
             max_tokens: Maximum token count
-            
+
         Returns:
             Truncated text
         """
@@ -1307,21 +1307,21 @@ class TokenCounter:
             return self._truncate_hf(text, max_tokens)
         else:
             return self._truncate_segmenter(text, max_tokens)
-    
+
     def _truncate_hf(self, text: str, max_tokens: int) -> str:
         """Truncate using HuggingFace tokenizer"""
-        
+
         # Encode
         tokens = self.tokenizer.encode(
             text,
             add_special_tokens=False,
             truncation=False
         )
-        
+
         # Check if truncation needed
         if len(tokens) <= max_tokens:
             return text
-        
+
         # Truncate and decode
         truncated_tokens = tokens[:max_tokens]
         truncated_text = self.tokenizer.decode(
@@ -1329,30 +1329,30 @@ class TokenCounter:
             skip_special_tokens=True,
             clean_up_tokenization_spaces=True
         )
-        
+
         return truncated_text
-    
+
     def _truncate_segmenter(self, text: str, max_tokens: int) -> str:
         """Truncate using segmenter (approximate)"""
-        
+
         # Use word-based approximation
         words = text.split()
         estimated_ratio = max_tokens / self.count_tokens(text)
         target_words = int(len(words) * estimated_ratio * 0.95)  # Conservative
-        
+
         return ' '.join(words[:target_words])
-    
+
     def compute_integrity_hash(self, text: str) -> str:
         """Compute SHA256 hash for integrity verification
-        
+
         Args:
             text: Input text
-            
+
         Returns:
             SHA256 hash hex string
         """
         return hashlib.sha256(text.encode('utf-8')).hexdigest()
-    
+
     def validate_chunk_integrity(
         self,
         original_text: str,
@@ -1360,26 +1360,26 @@ class TokenCounter:
         overlap: int = 0
     ) -> bool:
         """Validate that chunks preserve original content
-        
+
         Args:
             original_text: Original text
             chunks: List of chunk texts
             overlap: Number of overlapping tokens
-            
+
         Returns:
             True if content is preserved
         """
         if not chunks:
             return False
-        
+
         if len(chunks) == 1:
             # Single chunk should match original
             return chunks[0] == original_text
-        
+
         # For multiple chunks with overlap, verify coverage
         # This is approximate due to overlap complexity
         original_hash = self.compute_integrity_hash(original_text)
-        
+
         # Reconstruct text (simplified - doesn't handle overlap perfectly)
         reconstructed = chunks[0]
         for chunk in chunks[1:]:
@@ -1388,7 +1388,7 @@ class TokenCounter:
             overlap_words = int(overlap * 0.7)  # Approximate word count
             if len(words) > overlap_words:
                 reconstructed += ' ' + ' '.join(words[overlap_words:])
-        
+
         # Check if essential content is preserved
         # Allow some differences due to overlap handling
         return len(reconstructed) >= len(original_text) * 0.95
@@ -1434,7 +1434,7 @@ class Chunk:
     boundaries_json: str
     token_count: int
     updated_at: datetime
-    
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for storage"""
         return {
@@ -1455,41 +1455,41 @@ class Chunk:
 
 class ChunkingPipeline:
     """Intelligent chunking with combine and split strategies"""
-    
+
     def __init__(self):
         self.token_counter = TokenCounter()
-        
+
         # Configuration
         self.target_min = int(os.getenv('TARGET_MIN_TOKENS', 800))
         self.target_max = int(os.getenv('TARGET_MAX_TOKENS', 1500))
         self.absolute_max = int(os.getenv('ABSOLUTE_MAX_TOKENS', 7900))
         self.overlap_tokens = int(os.getenv('OVERLAP_TOKENS', 200))
         self.split_min = int(os.getenv('SPLIT_MIN_TOKENS', 1000))
-        
+
         # Feature flags
         self.combine_enabled = os.getenv('COMBINE_SECTIONS', 'true').lower() == 'true'
         self.split_enabled = os.getenv('SPLIT_FALLBACK', 'true').lower() == 'true'
-        
+
         logger.info(f"ChunkingPipeline initialized: combine={self.combine_enabled}, split={self.split_enabled}")
         logger.info(f"Token targets: min={self.target_min}, max={self.target_max}, absolute_max={self.absolute_max}")
-    
+
     def process_sections(self, sections: List[Section]) -> List[Chunk]:
         """Process sections into chunks
-        
+
         Args:
             sections: List of document sections
-            
+
         Returns:
             List of chunks ready for embedding
         """
         if not sections:
             return []
-        
+
         # Group sections by parent (typically H2 level)
         section_groups = self._group_by_parent(sections)
-        
+
         all_chunks = []
-        
+
         for parent_id, group_sections in section_groups.items():
             if self.combine_enabled:
                 # Combine small sections
@@ -1497,7 +1497,7 @@ class ChunkingPipeline:
             else:
                 # Direct conversion (no combining)
                 chunks = self._sections_to_chunks(group_sections, parent_id)
-            
+
             # Handle oversized chunks
             if self.split_enabled:
                 final_chunks = []
@@ -1509,72 +1509,72 @@ class ChunkingPipeline:
                     else:
                         final_chunks.append(chunk)
                 chunks = final_chunks
-            
+
             # Update order within parent group
             for i, chunk in enumerate(chunks):
                 chunk.order = i
-            
+
             all_chunks.extend(chunks)
-        
+
         logger.info(f"Processed {len(sections)} sections into {len(all_chunks)} chunks")
-        
+
         return all_chunks
-    
+
     def _group_by_parent(self, sections: List[Section]) -> Dict[str, List[Section]]:
         """Group sections by parent section ID
-        
+
         Args:
             sections: List of sections
-            
+
         Returns:
             Dictionary mapping parent_id to list of sections
         """
         groups = {}
-        
+
         for section in sections:
             # Use H2 level parent or create virtual parent
             if section.level <= 2:
                 parent_id = section.id  # H1/H2 are their own parent
             else:
                 parent_id = section.parent_id or f"virtual_{section.document_id}"
-            
+
             if parent_id not in groups:
                 groups[parent_id] = []
-            
+
             groups[parent_id].append(section)
-        
+
         return groups
-    
+
     def _combine_sections(
         self,
         sections: List[Section],
         parent_id: str
     ) -> List[Chunk]:
         """Combine adjacent sections into optimal chunks
-        
+
         Args:
             sections: List of sections to combine
             parent_id: Parent section ID
-            
+
         Returns:
             List of combined chunks
         """
         if not sections:
             return []
-        
+
         chunks = []
         current_sections = []
         current_tokens = 0
-        
+
         for section in sections:
             section_tokens = self.token_counter.count_tokens(section.text)
-            
+
             # Check for hard breaks (new H2, special sections)
             is_hard_break = (
                 section.level <= 2 or
                 self._is_special_section(section.heading)
             )
-            
+
             # Flush current chunk if needed
             if is_hard_break and current_sections:
                 chunk = self._create_combined_chunk(
@@ -1583,7 +1583,7 @@ class ChunkingPipeline:
                 chunks.append(chunk)
                 current_sections = []
                 current_tokens = 0
-            
+
             # Check if adding section would exceed limits
             if current_tokens + section_tokens > self.target_max:
                 if current_sections:
@@ -1594,11 +1594,11 @@ class ChunkingPipeline:
                     chunks.append(chunk)
                     current_sections = []
                     current_tokens = 0
-            
+
             # Add section to current chunk
             current_sections.append(section)
             current_tokens += section_tokens
-            
+
             # Check if we've reached target size
             if current_tokens >= self.target_max:
                 chunk = self._create_combined_chunk(
@@ -1607,14 +1607,14 @@ class ChunkingPipeline:
                 chunks.append(chunk)
                 current_sections = []
                 current_tokens = 0
-        
+
         # Handle remaining sections
         if current_sections:
             # Try to merge with previous chunk if small
             if chunks and current_tokens < self.target_min:
                 last_chunk = chunks[-1]
                 combined_tokens = last_chunk.token_count + current_tokens
-                
+
                 if combined_tokens <= self.absolute_max:
                     # Merge with last chunk
                     chunks[-1] = self._merge_chunks(
@@ -1632,31 +1632,31 @@ class ChunkingPipeline:
                     current_sections, parent_id, len(chunks)
                 )
                 chunks.append(chunk)
-        
+
         return chunks
-    
+
     def _sections_to_chunks(
         self,
         sections: List[Section],
         parent_id: str
     ) -> List[Chunk]:
         """Convert sections directly to chunks (no combining)
-        
+
         Args:
             sections: List of sections
             parent_id: Parent section ID
-            
+
         Returns:
             List of chunks
         """
         chunks = []
-        
+
         for i, section in enumerate(sections):
             chunk_id = self._generate_chunk_id(
                 section.document_id,
                 [section.id]
             )
-            
+
             chunk = Chunk(
                 id=chunk_id,
                 document_id=section.document_id,
@@ -1675,11 +1675,11 @@ class ChunkingPipeline:
                 token_count=self.token_counter.count_tokens(section.text),
                 updated_at=datetime.utcnow()
             )
-            
+
             chunks.append(chunk)
-        
+
         return chunks
-    
+
     def _create_combined_chunk(
         self,
         sections: List[Section],
@@ -1687,22 +1687,22 @@ class ChunkingPipeline:
         order: int
     ) -> Chunk:
         """Create a combined chunk from multiple sections
-        
+
         Args:
             sections: List of sections to combine
             parent_id: Parent section ID
             order: Chunk order within parent
-            
+
         Returns:
             Combined chunk
         """
         # Combine text with clear separators
         combined_text = '\n\n'.join(s.text for s in sections)
-        
+
         # Combine headings
         headings = [s.heading for s in sections if s.heading]
         combined_heading = ' | '.join(headings[:3]) if headings else None
-        
+
         # Track boundaries
         boundaries = {
             'sections': len(sections),
@@ -1711,11 +1711,11 @@ class ChunkingPipeline:
             'first_heading': sections[0].heading,
             'last_heading': sections[-1].heading
         }
-        
+
         # Generate stable chunk ID
         section_ids = [s.id for s in sections]
         chunk_id = self._generate_chunk_id(sections[0].document_id, section_ids)
-        
+
         return Chunk(
             id=chunk_id,
             document_id=sections[0].document_id,
@@ -1731,38 +1731,38 @@ class ChunkingPipeline:
             token_count=self.token_counter.count_tokens(combined_text),
             updated_at=datetime.utcnow()
         )
-    
+
     def _split_chunk(self, chunk: Chunk) -> List[Chunk]:
         """Split an oversized chunk into smaller chunks
-        
+
         Args:
             chunk: Oversized chunk to split
-            
+
         Returns:
             List of split chunks
         """
         text = chunk.text
         token_count = chunk.token_count
-        
+
         # Calculate number of splits needed
         num_splits = (token_count // self.absolute_max) + 1
         target_size = token_count // num_splits
-        
+
         # Find split points (prefer paragraph boundaries)
         paragraphs = text.split('\n\n')
-        
+
         splits = []
         current_text = []
         current_tokens = 0
-        
+
         for para in paragraphs:
             para_tokens = self.token_counter.count_tokens(para)
-            
+
             if current_tokens + para_tokens > target_size and current_text:
                 # Create split
                 split_text = '\n\n'.join(current_text)
                 splits.append(split_text)
-                
+
                 # Add overlap from current paragraph
                 if self.overlap_tokens > 0 and para_tokens > self.overlap_tokens:
                     overlap_text = self.token_counter.truncate_to_token_limit(
@@ -1776,17 +1776,17 @@ class ChunkingPipeline:
             else:
                 current_text.append(para)
                 current_tokens += para_tokens
-        
+
         # Add final split
         if current_text:
             splits.append('\n\n'.join(current_text))
-        
+
         # Create chunk objects for splits
         split_chunks = []
-        
+
         for i, split_text in enumerate(splits):
             split_id = f"{chunk.id}_split_{i}"
-            
+
             split_chunk = Chunk(
                 id=split_id,
                 document_id=chunk.document_id,
@@ -1806,13 +1806,13 @@ class ChunkingPipeline:
                 token_count=self.token_counter.count_tokens(split_text),
                 updated_at=datetime.utcnow()
             )
-            
+
             split_chunks.append(split_chunk)
-        
+
         logger.info(f"Split chunk {chunk.id} into {len(split_chunks)} parts")
-        
+
         return split_chunks
-    
+
     def _merge_chunks(
         self,
         chunk: Chunk,
@@ -1820,28 +1820,28 @@ class ChunkingPipeline:
         parent_id: str
     ) -> Chunk:
         """Merge additional sections into existing chunk
-        
+
         Args:
             chunk: Existing chunk
             sections: Sections to merge
             parent_id: Parent section ID
-            
+
         Returns:
             Merged chunk
         """
         # Append new text
         new_text = '\n\n'.join(s.text for s in sections)
         merged_text = chunk.text + '\n\n' + new_text
-        
+
         # Update metadata
         all_section_ids = chunk.original_section_ids + [s.id for s in sections]
-        
+
         # Update boundaries
         boundaries = json.loads(chunk.boundaries_json)
         boundaries['sections'] = boundaries.get('sections', 1) + len(sections)
         boundaries['end_offset'] = sections[-1].end_offset
         boundaries['last_heading'] = sections[-1].heading
-        
+
         return Chunk(
             id=chunk.id,  # Keep same ID
             document_id=chunk.document_id,
@@ -1857,36 +1857,36 @@ class ChunkingPipeline:
             token_count=self.token_counter.count_tokens(merged_text),
             updated_at=datetime.utcnow()
         )
-    
+
     def _generate_chunk_id(
         self,
         document_id: str,
         section_ids: List[str]
     ) -> str:
         """Generate stable chunk ID
-        
+
         Args:
             document_id: Document ID
             section_ids: List of section IDs
-            
+
         Returns:
             Stable chunk ID
         """
         unique_str = f"{document_id}|{'|'.join(sorted(section_ids))}"
         return hashlib.sha256(unique_str.encode()).hexdigest()[:24]
-    
+
     def _is_special_section(self, heading: Optional[str]) -> bool:
         """Check if section is special (FAQ, Glossary, etc.)
-        
+
         Args:
             heading: Section heading
-            
+
         Returns:
             True if special section
         """
         if not heading:
             return False
-        
+
         special_patterns = [
             r'^FAQ',
             r'^Frequently Asked',
@@ -1899,11 +1899,11 @@ class ChunkingPipeline:
             r'^Index',
             r'^Table of Contents'
         ]
-        
+
         for pattern in special_patterns:
             if re.match(pattern, heading, re.IGNORECASE):
                 return True
-        
+
         return False
 EOF
 ```
@@ -1912,7 +1912,7 @@ EOF
 
 This implementation plan continues with detailed instructions for:
 - Phase 7E.4: Embedding Service Implementation
-- Phase 7E.5: Storage Integration 
+- Phase 7E.5: Storage Integration
 - Phase 7E.6: Retrieval Pipeline
 - Phase 7E.7: Session Management
 - Phase 7E.8: Quality Assurance

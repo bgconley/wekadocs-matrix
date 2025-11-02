@@ -26,7 +26,7 @@ CREATE CONSTRAINT document_id_unique IF NOT EXISTS FOR (d:Document) REQUIRE d.id
 CREATE CONSTRAINT document_source_uri_unique IF NOT EXISTS FOR (d:Document) REQUIRE d.source_uri IS UNIQUE;
 CREATE CONSTRAINT section_id_unique IF NOT EXISTS FOR (s:Section) REQUIRE s.id IS UNIQUE;
 
-// Component constraints  
+// Component constraints
 CREATE CONSTRAINT command_id_unique IF NOT EXISTS FOR (c:Command) REQUIRE c.id IS UNIQUE;
 CREATE CONSTRAINT configuration_id_unique IF NOT EXISTS FOR (c:Configuration) REQUIRE c.id IS UNIQUE;
 CREATE CONSTRAINT procedure_id_unique IF NOT EXISTS FOR (p:Procedure) REQUIRE p.id IS UNIQUE;
@@ -95,8 +95,8 @@ CREATE INDEX procedure_category IF NOT EXISTS FOR (p:Procedure) ON (p.category);
 // For semantic similarity search with Jina embeddings (1024-D)
 // ----------------------------------------------------------------------------
 
-CREATE VECTOR INDEX section_embeddings_v2 IF NOT EXISTS 
-FOR (s:Section) 
+CREATE VECTOR INDEX section_embeddings_v2 IF NOT EXISTS
+FOR (s:Section)
 ON s.vector_embedding
 OPTIONS {
   indexConfig: {
@@ -107,7 +107,7 @@ OPTIONS {
 
 CREATE VECTOR INDEX chunk_embeddings_v2 IF NOT EXISTS
 FOR (c:Chunk)
-ON c.vector_embedding  
+ON c.vector_embedding
 OPTIONS {
   indexConfig: {
     `vector.dimensions`: 1024,
@@ -121,8 +121,8 @@ OPTIONS {
 // ----------------------------------------------------------------------------
 
 // Individual field fulltext indexes
-CREATE FULLTEXT INDEX chunk_text_fulltext IF NOT EXISTS 
-FOR (c:Chunk) 
+CREATE FULLTEXT INDEX chunk_text_fulltext IF NOT EXISTS
+FOR (c:Chunk)
 ON EACH [c.text];
 
 CREATE FULLTEXT INDEX document_title_fulltext IF NOT EXISTS
@@ -146,7 +146,7 @@ CALL db.awaitIndexes(300);
 // ----------------------------------------------------------------------------
 
 MERGE (sv:SchemaVersion {id: 'singleton'})
-ON CREATE SET 
+ON CREATE SET
   sv.version = 'v2.1',
   sv.created_at = datetime(),
   sv.description = 'Phase 7E-4 schema with 1024-D Jina vectors, chunk model, integrity tracking',

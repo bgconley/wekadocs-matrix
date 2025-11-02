@@ -176,4 +176,4 @@ with open(output_path, "w") as f:
 print(f"✅ Generated document: {output_path}")
 print(f"   Characters: {len(content):,}")
 print(f"   Estimated tokens: ~{len(content) // 3:,} (if ~3 chars/token)")
-print(f"   Target: Exceed 8192 tokens for truncation testing")
+print("   Target: Exceed 8192 tokens for truncation testing")

@@ -1,7 +1,7 @@
 
 Awesome — here’s a concrete, copy‑pasteable spec for **Neo4j** (nodes/edges, schema, and idempotent upserts) and the **Qdrant** upsert shape for the _combined_ chunks and NEXT_CHUNK edges.
 
-  
+
 
 > **Modeling choice (clear separation):**
 
@@ -11,82 +11,82 @@ Awesome — here’s a concrete, copy‑pasteable spec for **Neo4j** (nodes/edge
 
 ## **1) Neo4j data model**
 
-  
+
 
 ### **Labels**
 
 - **:Document**
-    
-    - document_id : STRING (unique)
-        
-    - Other metadata: title, source_url, path, updated_at…
-        
-    
-- **:Section** _(original parser output; not embedded)_
-    
-    - id : STRING (unique, deterministic)
-        
-    - document_id : STRING (for quick filtering)
-        
-    - heading : STRING
-        
-    - level : INTEGER (2 for H2, 3 for H3, etc.)
-        
-    - text : STRING
-        
-    - token_count : INTEGER
-        
-    - is_original : BOOLEAN = true
-        
-    
-- **:Chunk** _(combined or split units;_ **_this is what you embed_**_)_
-    
-    - id : STRING (unique, deterministic; e.g., sha256(document_id + join(original_section_ids))[:24])
-        
-    - document_id : STRING
-        
-    - parent_section_id : STRING  _(H2 anchor or “logical parent” id)_
-        
-    - order : INTEGER _(0‑based within the parent)_
-        
-    - total_chunks : INTEGER
-        
-    - is_combined : BOOLEAN _(true if produced by combiner)_
-        
-    - is_split : BOOLEAN _(true if a single logical unit was split due to hard cap)_
-        
-    - heading : STRING _(combined heading or roll‑up title)_
-        
-    - text : STRING _(full chunk text; optional if you prefer to store only in Qdrant)_
-        
-    - token_count : INTEGER
-        
-    - embedding_provider : STRING = "jina-ai"
-        
-    - embedding_version : STRING = "jina-embeddings-v3"
-        
-    - original_section_ids : ARRAY<STRING> _(provenance)_
-        
-    - boundaries_json : STRING _(serialize any offsets / boundary metadata as JSON string)_
-        
-    - updated_at : INTEGER _(Unix ms)_
-        
-    
 
-  
+    - document_id : STRING (unique)
+
+    - Other metadata: title, source_url, path, updated_at…
+
+
+- **:Section** _(original parser output; not embedded)_
+
+    - id : STRING (unique, deterministic)
+
+    - document_id : STRING (for quick filtering)
+
+    - heading : STRING
+
+    - level : INTEGER (2 for H2, 3 for H3, etc.)
+
+    - text : STRING
+
+    - token_count : INTEGER
+
+    - is_original : BOOLEAN = true
+
+
+- **:Chunk** _(combined or split units;_ **_this is what you embed_**_)_
+
+    - id : STRING (unique, deterministic; e.g., sha256(document_id + join(original_section_ids))[:24])
+
+    - document_id : STRING
+
+    - parent_section_id : STRING  _(H2 anchor or “logical parent” id)_
+
+    - order : INTEGER _(0‑based within the parent)_
+
+    - total_chunks : INTEGER
+
+    - is_combined : BOOLEAN _(true if produced by combiner)_
+
+    - is_split : BOOLEAN _(true if a single logical unit was split due to hard cap)_
+
+    - heading : STRING _(combined heading or roll‑up title)_
+
+    - text : STRING _(full chunk text; optional if you prefer to store only in Qdrant)_
+
+    - token_count : INTEGER
+
+    - embedding_provider : STRING = "jina-ai"
+
+    - embedding_version : STRING = "jina-embeddings-v3"
+
+    - original_section_ids : ARRAY<STRING> _(provenance)_
+
+    - boundaries_json : STRING _(serialize any offsets / boundary metadata as JSON string)_
+
+    - updated_at : INTEGER _(Unix ms)_
+
+
+
+
 
 ### **Relationships**
 
 - (:Document)-[:HAS_SECTION]->(:Section) _(existing)_
-    
-- (:Document)-[:HAS_CHUNK]->(:Chunk) _(new)_
-    
-- (:Section)-[:PART_OF]->(:Chunk) _(provenance; many :Section → one :Chunk)_
-    
-- (:Chunk)-[:NEXT_CHUNK {parent_section_id}]->(:Chunk) _(ordered adjacency within the same parent)_
-    
 
-  
+- (:Document)-[:HAS_CHUNK]->(:Chunk) _(new)_
+
+- (:Section)-[:PART_OF]->(:Chunk) _(provenance; many :Section → one :Chunk)_
+
+- (:Chunk)-[:NEXT_CHUNK {parent_section_id}]->(:Chunk) _(ordered adjacency within the same parent)_
+
+
+
 
 > You _could_ also keep (:Section)-[:NEXT_SECTION]->(:Section) if you already have it; the :NEXT_CHUNK is the retrieval‑level adjacency.
 
@@ -123,7 +123,7 @@ FOR (c:Chunk) ON (c.parent_section_id, c.order);
 
 ## **3) Idempotent upsert Cypher (Chunks + edges)**
 
-  
+
 
 ### **Parameters you pass from your combiner**
 
@@ -221,7 +221,7 @@ MERGE (c1)-[:NEXT_CHUNK {parent_section_id: pid}]->(c2);
 
 ### **(Optional) Garbage‑collect stale chunks for this document**
 
-  
+
 
 If you’re doing **replace‑by‑set** (recommended for idempotency):
 
@@ -238,11 +238,11 @@ _(This removes old chunks and their_ _NEXT_CHUNK__/__PART_OF_ _edges for the doc
 
 ## **4) Qdrant collection & upsert shape**
 
-  
+
 
 > **Use named vectors** so you can add more modalities (e.g., title or code) later without schema churn.
 
-  
+
 
 ### **Collection creation (one‑time)**
 
@@ -273,7 +273,7 @@ client.create_payload_index(COLLECTION, field_name="order", field_schema=qm.Payl
 
 ### **Point (vector) upsert shape**
 
-  
+
 
 > Use a **stable UUID** for the Qdrant point id; keep id in payload as well.
 
@@ -462,18 +462,18 @@ def upsert_chunks(document_id: str, chunks: list[dict], embeddings: dict[str, li
 
 ##  **gets used)**
 
-  
+
 
 At query time:
 
 1. Vector search top‑k on chunks with an optional filter on document_id/parent_section_id.
-    
-2. **Group by** **parent_section_id** and consider pulling **±1 neighbor by** **NEXT_CHUNK** for any hit that looks borderline (close scores, long query).
-    
-3. Stitch the selected chunks (by order) to form the final context.
-    
 
-  
+2. **Group by** **parent_section_id** and consider pulling **±1 neighbor by** **NEXT_CHUNK** for any hit that looks borderline (close scores, long query).
+
+3. Stitch the selected chunks (by order) to form the final context.
+
+
+
 
 Pseudocode for neighbor expansion:
 
@@ -491,18 +491,18 @@ for hit in hits:
 ## **What to configure**
 
 - TARGET_MIN, TARGET_MAX, and ABSOLUTE_MAX in the combiner (suggested: 800 / 1500 / 7900).
-    
+
 - Whether to store full text in both Neo4j and Qdrant (I recommend **yes** for Qdrant; optional for Neo4j if you want to cut graph storage).
-    
+
 - Whether to GC stale chunks per‑doc on re‑ingest (recommended).
-    
+
 
 ---
 
 If you’d like, I can turn this into a small **migration script** that:
 
 1. creates the Neo4j indexes/constraints,
-    
+
 2. creates the Qdrant collection/indexes, and
-    
+
 3. re‑ingests your 5 test docs using the combiner so you can compare metrics A/B.

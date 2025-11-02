@@ -202,13 +202,21 @@ class ContextAssembler:
         for parent_id, chunks in grouped.items():
             best_score = max((c.fused_score or 0.0) for c in chunks)
             richest_citations = max(len(c.citation_labels or []) for c in chunks)
-            group_metrics[parent_id] = (richest_citations, best_score)
+            min_order = min((c.order or 0) for c in chunks)
+            group_metrics[parent_id] = {
+                "best_score": best_score,
+                "richest_citations": richest_citations,
+                "min_order": min_order,
+            }
 
-        # Sort groups by citation richness first, then best score
+        # Sort groups by document order first, then citation richness, then score
         ordered = sorted(
             grouped.items(),
-            key=lambda item: group_metrics[item[0]],
-            reverse=True,
+            key=lambda item: (
+                group_metrics[item[0]]["min_order"],
+                -group_metrics[item[0]]["richest_citations"],
+                -float(group_metrics[item[0]]["best_score"] or 0.0),
+            ),
         )
         return ordered
 

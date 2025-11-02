@@ -33,7 +33,7 @@ Section {
   text: String
   tokens: Integer
   checksum: String
-  
+
   # Hierarchical metadata
   concept_group: String (for L2 chunks)
   source_sections: String[] (sections this summarizes)
@@ -44,7 +44,7 @@ Section {
     llm_model: String
     confidence_score: Float
   }
-  
+
   # Existing fields
   vector_embedding: Float[]
   embedding_version: String
@@ -139,16 +139,16 @@ Section {
 ```yaml
 hierarchical_chunking:
   enabled: true
-  
+
   # Provider configuration
   llm_provider: "ollama"  # ollama, openai, anthropic
-  
+
   ollama:
     endpoint: "http://localhost:11434"
     model: "gpt-oss:20b"
     timeout: 30
     reasoning_effort: "medium"  # low, medium, high
-    
+
   # Chunking parameters
   levels:
     l1:
@@ -164,13 +164,13 @@ hierarchical_chunking:
     l3:
       max_tokens: 1000
       strategy: "preserve_existing"
-      
+
   # Retrieval configuration
   retrieval:
     default_strategy: "concept_first"
     auto_strategy_selection: true
     include_hierarchy_context: true
-    
+
   # Migration settings
   migration:
     dual_write: true
@@ -439,7 +439,7 @@ async def process_large_document(doc: str, chunk_size: int = 10000):
     for i in range(0, len(doc), chunk_size):
         chunk = doc[i:i + chunk_size]
         await process_chunk(chunk)
-        
+
 # BAD: Full document in memory
 sections = parse_entire_document(massive_doc)
 ```
@@ -453,7 +453,7 @@ class OllamaProvider:
         self.base_url = config.ollama.endpoint
         self.model = config.ollama.model
         self.session = None
-        
+
     async def __aenter__(self):
         self.session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30),
@@ -464,7 +464,7 @@ class OllamaProvider:
         )
         await self._health_check()
         return self
-        
+
     async def _health_check(self):
         """Verify Ollama is running and model is loaded"""
         try:
@@ -481,7 +481,7 @@ class OllamaProvider:
 ```python
 def create_grouping_prompt(sections: List[Dict]) -> str:
     """Optimized prompt for GPT-OSS-20B's reasoning capabilities"""
-    
+
     # Use GPT-OSS's CoT reasoning format
     prompt = """<reasoning_mode>medium</reasoning_mode>
 
@@ -519,7 +519,7 @@ async def call_llm_with_retry(
     max_retries: int = 3
 ) -> Optional[str]:
     """Robust LLM calling with fallback"""
-    
+
     for attempt in range(max_retries):
         try:
             response = await provider.generate(
@@ -528,16 +528,16 @@ async def call_llm_with_retry(
                 max_tokens=2000
             )
             return response.text
-            
+
         except (TimeoutError, ConnectionError) as e:
             wait_time = 2 ** attempt  # Exponential backoff
             logger.warning(f"LLM call failed, retry {attempt + 1} in {wait_time}s")
             await asyncio.sleep(wait_time)
-            
+
         except Exception as e:
             logger.error(f"Unexpected LLM error: {e}")
             break
-            
+
     return None  # Trigger fallback
 ```
 
@@ -548,7 +548,7 @@ async def call_llm_with_retry(
 # GOOD: Batch inserts
 def create_hierarchical_relationships(session, relationships: List[Dict]):
     """Efficient batch relationship creation"""
-    
+
     query = """
     UNWIND $rels AS rel
     MATCH (parent:Section {id: rel.parent_id})
@@ -558,7 +558,7 @@ def create_hierarchical_relationships(session, relationships: List[Dict]):
         hierarchy_distance: rel.distance
     }]->(child)
     """
-    
+
     # Process in chunks to avoid transaction size limits
     BATCH_SIZE = 1000
     for i in range(0, len(relationships), BATCH_SIZE):
@@ -589,9 +589,9 @@ def build_hierarchical_filter(
     concept_group: Optional[str] = None
 ) -> Dict:
     """Build efficient Qdrant filters"""
-    
+
     must_conditions = []
-    
+
     if level is not None:
         must_conditions.append(
             FieldCondition(
@@ -599,15 +599,15 @@ def build_hierarchical_filter(
                 match=MatchValue(value=level)
             )
         )
-    
+
     if parent_id:
         must_conditions.append(
             FieldCondition(
-                key="parent_id", 
+                key="parent_id",
                 match=MatchValue(value=parent_id)
             )
         )
-    
+
     # Use payload indexes for performance
     return Filter(must=must_conditions) if must_conditions else None
 ```
@@ -616,20 +616,20 @@ def build_hierarchical_filter(
 ```python
 def configure_hierarchical_collection(client: QdrantClient, collection: str):
     """Optimize collection for hierarchical search"""
-    
+
     # Create payload indexes for common filters
     client.create_payload_index(
         collection_name=collection,
         field_name="hierarchy_level",
         field_type=PayloadFieldType.INTEGER
     )
-    
+
     client.create_payload_index(
         collection_name=collection,
         field_name="parent_id",
         field_type=PayloadFieldType.KEYWORD
     )
-    
+
     client.create_payload_index(
         collection_name=collection,
         field_name="concept_group",
@@ -643,19 +643,19 @@ def configure_hierarchical_collection(client: QdrantClient, collection: str):
 ```python
 class MockLLMProvider(LLMProvider):
     """Deterministic LLM for testing"""
-    
+
     def __init__(self, responses: Dict[str, str]):
         self.responses = responses
         self.call_count = 0
-        
+
     async def generate(self, prompt: str, **kwargs) -> LLMResponse:
         self.call_count += 1
-        
+
         # Return predetermined response based on prompt pattern
         for pattern, response in self.responses.items():
             if pattern in prompt:
                 return LLMResponse(text=response, model="mock")
-        
+
         # Default response
         return LLMResponse(
             text='{"groups": [{"title": "Test Group", "section_ids": ["1", "2"]}]}',
@@ -667,27 +667,27 @@ class MockLLMProvider(LLMProvider):
 ```python
 def validate_hierarchy(sections: List[Dict]) -> List[str]:
     """Validate hierarchical chunk integrity"""
-    
+
     errors = []
-    
+
     # Check all L3 sections have L2 parents
     l3_sections = [s for s in sections if s["hierarchy_level"] == 3]
     l2_ids = {s["id"] for s in sections if s["hierarchy_level"] == 2}
-    
+
     for section in l3_sections:
         if section.get("parent_id") not in l2_ids:
             errors.append(f"L3 section {section['id']} has invalid parent")
-    
+
     # Check no orphan sections
     all_child_ids = set()
     for section in sections:
         all_child_ids.update(section.get("child_ids", []))
-    
+
     for section in sections:
         if section["hierarchy_level"] > 1:
             if section["id"] not in all_child_ids:
                 errors.append(f"Section {section['id']} is orphaned")
-    
+
     return errors
 ```
 
@@ -707,18 +707,18 @@ chunk_count = Counter('chunks_created_total', 'Total chunks created', ['level'])
 @track_metrics
 async def create_l2_chunks(document: Dict, l3_sections: List[Dict]):
     start = time.time()
-    
+
     # LLM call
     llm_calls.labels(provider='ollama', model='gpt-oss-20b').inc()
-    
+
     result = await llm_provider.generate(prompt)
-    
+
     llm_latency.labels(provider='ollama').observe(time.time() - start)
-    
+
     # Track chunks created
     for chunk in result:
         chunk_count.labels(level='2').inc()
-    
+
     return result
 ```
 
@@ -726,7 +726,7 @@ async def create_l2_chunks(document: Dict, l3_sections: List[Dict]):
 
 ### Pre-Deployment
 - [ ] Ollama server running with GPT-OSS-20B loaded
-- [ ] Graph indexes created for hierarchical queries  
+- [ ] Graph indexes created for hierarchical queries
 - [ ] Vector store payload indexes configured
 - [ ] Feature flags configured and tested
 - [ ] Fallback providers configured and tested
@@ -760,7 +760,7 @@ from cryptography.fernet import Fernet
 class SecureConfig:
     def __init__(self):
         self.cipher = Fernet(os.environ['ENCRYPTION_KEY'].encode())
-        
+
     def get_api_key(self, provider: str) -> str:
         encrypted = os.environ.get(f'{provider.upper()}_API_KEY')
         if encrypted:
@@ -772,7 +772,7 @@ class SecureConfig:
 ```python
 def sanitize_llm_input(text: str) -> str:
     """Remove potential prompt injection attempts"""
-    
+
     # Remove instruction-like patterns
     patterns = [
         r'ignore previous instructions',
@@ -780,11 +780,11 @@ def sanitize_llm_input(text: str) -> str:
         r'assistant:',
         r'<\|.*?\|>',  # Special tokens
     ]
-    
+
     sanitized = text
     for pattern in patterns:
         sanitized = re.sub(pattern, '', sanitized, flags=re.IGNORECASE)
-    
+
     return sanitized.strip()
 ```
 ```
@@ -800,13 +800,13 @@ def sanitize_llm_input(text: str) -> str:
 ABSTRACT CLASS LLMProvider:
     ABSTRACT METHOD generate(prompt, temperature, max_tokens) -> LLMResponse
     ABSTRACT METHOD health_check() -> Boolean
-    
+
 CLASS OllamaProvider EXTENDS LLMProvider:
     CONSTRUCTOR(config):
         base_url = config.ollama.endpoint
         model = config.ollama.model
         timeout = config.ollama.timeout
-        
+
     METHOD generate(prompt, temperature=0.3, max_tokens=2000):
         request = {
             "model": self.model,
@@ -817,7 +817,7 @@ CLASS OllamaProvider EXTENDS LLMProvider:
                 "num_predict": max_tokens
             }
         }
-        
+
         TRY:
             response = HTTP_POST(self.base_url + "/api/generate", request)
             RETURN LLMResponse(text=response.response, model=self.model)
@@ -839,17 +839,17 @@ CLASS ProviderFactory:
                 RETURN AnthropicProvider(config)
             DEFAULT:
                 RAISE ValueError("Unknown provider")
-    
+
     METHOD create_with_fallback(config) -> LLMProvider:
         providers = []
-        
+
         IF config.ollama.enabled:
             providers.APPEND(OllamaProvider(config))
         IF config.openai.api_key:
             providers.APPEND(OpenAIProvider(config))
         IF config.anthropic.api_key:
             providers.APPEND(AnthropicProvider(config))
-        
+
         RETURN FallbackProvider(providers)
 ```
 
@@ -863,21 +863,21 @@ CLASS HierarchicalMarkdownParser:
         self.L1_TOKENS = config.levels.l1.max_tokens
         self.L2_TOKENS = config.levels.l2.max_tokens
         self.L3_TOKENS = config.levels.l3.max_tokens
-        
+
     METHOD parse_hierarchical(source_uri, raw_text) -> ParseResult:
         # Step 1: Create L3 chunks (existing logic)
         document = create_document_metadata(source_uri, raw_text)
         l3_sections = parse_markdown_sections(raw_text)
-        
+
         # Step 2: Create L2 concept groups
         l2_sections = create_l2_chunks(document, l3_sections)
-        
+
         # Step 3: Create L1 summary
         l1_section = create_l1_summary(document, l2_sections, l3_sections)
-        
+
         # Step 4: Build relationships
         all_sections = build_hierarchy(l1_section, l2_sections, l3_sections)
-        
+
         RETURN ParseResult(
             document=document,
             sections=all_sections,
@@ -885,7 +885,7 @@ CLASS HierarchicalMarkdownParser:
                 "hierarchy_levels": {1: [l1_section], 2: l2_sections, 3: l3_sections}
             }
         )
-    
+
     METHOD create_l2_chunks(document, l3_sections) -> List[Section]:
         # Prepare section summaries
         summaries = []
@@ -897,25 +897,25 @@ CLASS HierarchicalMarkdownParser:
                 "tokens": section.tokens
             }
             summaries.APPEND(summary)
-        
+
         # Get LLM grouping
         prompt = build_grouping_prompt(document.title, summaries)
-        
+
         TRY:
             response = self.llm.generate(prompt)
             groups = parse_json_response(response.text)
         CATCH Exception:
             LOG_WARNING("LLM grouping failed, using fallback")
             groups = create_heuristic_groups(l3_sections)
-        
+
         # Create L2 sections
         l2_sections = []
         FOR i, group IN ENUMERATE(groups):
             l2_section = build_l2_section(document, group, l3_sections, order=i)
             l2_sections.APPEND(l2_section)
-        
+
         RETURN l2_sections
-    
+
     METHOD create_l1_summary(document, l2_sections, l3_sections) -> Section:
         # Build summary prompt
         prompt = build_summary_prompt(
@@ -923,14 +923,14 @@ CLASS HierarchicalMarkdownParser:
             concept_groups=[s.title for s in l2_sections],
             key_topics=extract_key_topics(l3_sections)
         )
-        
+
         TRY:
             response = self.llm.generate(prompt, max_tokens=self.L1_TOKENS)
             summary_text = response.text
         CATCH Exception:
             LOG_WARNING("LLM summary failed, using fallback")
             summary_text = create_heuristic_summary(document, l2_sections)
-        
+
         # Create L1 section
         l1_section = Section(
             id=generate_id(document.source_uri, "l1-summary", summary_text),
@@ -942,7 +942,7 @@ CLASS HierarchicalMarkdownParser:
             text=summary_text,
             tokens=COUNT_TOKENS(summary_text)
         )
-        
+
         RETURN l1_section
 ```
 
@@ -952,19 +952,19 @@ CLASS HierarchicalMarkdownParser:
 FUNCTION intelligent_grouping(sections, llm_provider, config) -> List[Group]:
     # Step 1: Prepare section data
     section_data = prepare_section_data(sections)
-    
+
     # Step 2: Create grouping prompt
     prompt = """
     Analyze document sections and create {min_groups} to {max_groups} concept groups.
-    
+
     SECTIONS:
     {section_data}
-    
+
     REQUIREMENTS:
     - Each section belongs to exactly ONE group
     - Groups should be semantically coherent
     - Provide reasoning for grouping decisions
-    
+
     OUTPUT JSON:
     {
         "groups": [
@@ -977,20 +977,20 @@ FUNCTION intelligent_grouping(sections, llm_provider, config) -> List[Group]:
         ]
     }
     """
-    
+
     prompt = prompt.FORMAT(
         min_groups=config.levels.l2.min_groups,
         max_groups=config.levels.l2.max_groups,
         section_data=JSON.stringify(section_data)
     )
-    
+
     # Step 3: Get LLM response with validation
     max_attempts = 3
     FOR attempt IN RANGE(max_attempts):
         TRY:
             response = llm_provider.generate(prompt)
             groups = JSON.parse(response.text)
-            
+
             # Validate response
             validation_errors = validate_grouping(groups, sections)
             IF validation_errors.IS_EMPTY():
@@ -998,46 +998,46 @@ FUNCTION intelligent_grouping(sections, llm_provider, config) -> List[Group]:
             ELSE:
                 LOG_WARNING("Validation failed: " + validation_errors)
                 prompt = add_correction_to_prompt(prompt, validation_errors)
-                
+
         CATCH JSONDecodeError:
             LOG_WARNING("Invalid JSON from LLM")
             IF attempt == max_attempts - 1:
                 RETURN fallback_grouping(sections)
-    
+
     RETURN fallback_grouping(sections)
 
 FUNCTION validate_grouping(groups, sections) -> List[String]:
     errors = []
     all_section_ids = SET([s.id for s in sections])
     grouped_ids = SET()
-    
+
     FOR group IN groups["groups"]:
         # Check for duplicate assignments
         FOR section_id IN group["section_ids"]:
             IF section_id IN grouped_ids:
                 errors.APPEND("Section " + section_id + " assigned multiple times")
             grouped_ids.ADD(section_id)
-        
+
         # Check for invalid IDs
         FOR section_id IN group["section_ids"]:
             IF section_id NOT IN all_section_ids:
                 errors.APPEND("Invalid section ID: " + section_id)
-    
+
     # Check for missing sections
     missing = all_section_ids - grouped_ids
     IF NOT missing.IS_EMPTY():
         errors.APPEND("Missing sections: " + missing)
-    
+
     RETURN errors
 
 FUNCTION fallback_grouping(sections) -> List[Group]:
     # Simple heuristic: group by heading level and proximity
     groups = []
     current_group = Group(title="Main Content", section_ids=[], reasoning="Heuristic")
-    
+
     FOR section IN sections:
         current_group.section_ids.APPEND(section.id)
-        
+
         # Start new group at major headings or size threshold
         IF section.level == 1 OR LEN(current_group.section_ids) >= 5:
             groups.APPEND(current_group)
@@ -1046,10 +1046,10 @@ FUNCTION fallback_grouping(sections) -> List[Group]:
                 section_ids=[],
                 reasoning="Heuristic grouping by structure"
             )
-    
+
     IF NOT current_group.section_ids.IS_EMPTY():
         groups.APPEND(current_group)
-    
+
     RETURN groups
 ```
 
@@ -1060,17 +1060,17 @@ FUNCTION upsert_hierarchical_sections(driver, document, sections):
     WITH driver.session() AS session:
         # Group sections by hierarchy level
         levels = GROUP_BY(sections, lambda s: s.hierarchy_level)
-        
+
         FOR level IN [1, 2, 3]:
             level_sections = levels.GET(level, [])
-            
+
             # Determine node labels based on level
             labels = SWITCH level:
                 CASE 1: "Section:Chunk:Summary"
                 CASE 2: "Section:Chunk:ConceptGroup"
                 CASE 3: "Section:Chunk:Detail"
                 DEFAULT: "Section:Chunk"
-            
+
             # Batch upsert sections
             query = """
             UNWIND $sections AS sec
@@ -1083,16 +1083,16 @@ FUNCTION upsert_hierarchical_sections(driver, document, sections):
                 r.order = sec.order,
                 r.updated_at = datetime()
             """.FORMAT(labels=labels)
-            
+
             session.run(query, sections=level_sections, document_id=document.id)
-        
+
         # Create hierarchical relationships
         create_hierarchy_relationships(session, sections)
 
 FUNCTION create_hierarchy_relationships(session, sections):
     # Build parent-child pairs
     relationships = []
-    
+
     FOR section IN sections:
         IF section.parent_id IS NOT NULL:
             relationships.APPEND({
@@ -1100,7 +1100,7 @@ FUNCTION create_hierarchy_relationships(session, sections):
                 "child": section.id,
                 "level_distance": 1
             })
-    
+
     # Batch create relationships
     query = """
     UNWIND $rels AS rel
@@ -1110,9 +1110,9 @@ FUNCTION create_hierarchy_relationships(session, sections):
     SET r.level_distance = rel.level_distance,
         r.created_at = datetime()
     """
-    
+
     session.run(query, rels=relationships)
-    
+
     # Create concept group relationships for L3 sections
     create_concept_groups(session, sections)
 
@@ -1120,7 +1120,7 @@ FUNCTION create_concept_groups(session, sections):
     # Extract unique concept groups
     concept_groups = SET()
     concept_memberships = []
-    
+
     FOR section IN sections:
         IF section.hierarchy_level == 3 AND section.concept_group:
             concept_groups.ADD(section.concept_group)
@@ -1128,7 +1128,7 @@ FUNCTION create_concept_groups(session, sections):
                 "section_id": section.id,
                 "concept": section.concept_group
             })
-    
+
     # Create ConceptGroup nodes
     query = """
     UNWIND $concepts AS concept
@@ -1136,7 +1136,7 @@ FUNCTION create_concept_groups(session, sections):
     SET c.updated_at = datetime()
     """
     session.run(query, concepts=LIST(concept_groups))
-    
+
     # Create membership relationships
     query = """
     UNWIND $memberships AS m
@@ -1153,13 +1153,13 @@ FUNCTION create_concept_groups(session, sections):
 ```pseudocode
 FUNCTION store_hierarchical_vectors(qdrant, document, sections, embeddings):
     points = []
-    
+
     FOR i, section IN ENUMERATE(sections):
         embedding = embeddings[i]
-        
+
         # Generate UUID for Qdrant
         point_id = UUID_V5(NAMESPACE_DNS, section.id)
-        
+
         # Build enriched payload
         payload = {
             "node_id": section.id,
@@ -1170,26 +1170,26 @@ FUNCTION store_hierarchical_vectors(qdrant, document, sections, embeddings):
             "concept_group": section.concept_group,
             "title": section.title,
             "tokens": section.tokens,
-            
+
             # Hierarchy flags for efficient filtering
             "is_summary": section.hierarchy_level == 1,
             "is_concept_group": section.hierarchy_level == 2,
             "is_detail": section.hierarchy_level == 3,
-            
+
             # Metadata
             "embedding_version": CONFIG.embedding.version,
             "embedding_provider": CONFIG.embedding.provider,
             "created_at": NOW()
         }
-        
+
         point = PointStruct(
             id=point_id,
             vector=embedding,
             payload=payload
         )
-        
+
         points.APPEND(point)
-    
+
     # Batch upsert with validation
     BATCH_SIZE = 100
     FOR i IN RANGE(0, LEN(points), BATCH_SIZE):
@@ -1199,7 +1199,7 @@ FUNCTION store_hierarchical_vectors(qdrant, document, sections, embeddings):
             points=batch,
             expected_dim=CONFIG.embedding.dims
         )
-    
+
     # Create payload indexes for efficient filtering
     create_hierarchical_indexes(qdrant, CONFIG.collection_name)
 
@@ -1212,7 +1212,7 @@ FUNCTION create_hierarchical_indexes(qdrant, collection):
         ("is_concept_group", PayloadFieldType.BOOL),
         ("is_detail", PayloadFieldType.BOOL)
     ]
-    
+
     FOR field_name, field_type IN indexes:
         TRY:
             qdrant.create_payload_index(
@@ -1232,12 +1232,12 @@ CLASS HierarchicalRetriever:
         self.qdrant = qdrant
         self.neo4j = neo4j
         self.config = config
-        
+
     METHOD retrieve(query, strategy="auto", k=5) -> List[Result]:
         # Determine strategy
         IF strategy == "auto":
             strategy = determine_strategy(query)
-        
+
         # Execute strategy
         SWITCH strategy:
             CASE "top_down":
@@ -1248,36 +1248,36 @@ CLASS HierarchicalRetriever:
                 RETURN retrieve_concept_first(query, k)
             DEFAULT:
                 RETURN retrieve_concept_first(query, k)
-    
+
     METHOD determine_strategy(query) -> String:
         query_lower = query.TO_LOWER()
-        
+
         # Check for broad indicators
         broad_keywords = ["overview", "summary", "explain", "what is"]
         FOR keyword IN broad_keywords:
             IF keyword IN query_lower:
                 RETURN "top_down"
-        
+
         # Check for specific indicators
         specific_keywords = ["formula", "calculate", "error", "api", "code"]
         FOR keyword IN specific_keywords:
             IF keyword IN query_lower:
                 RETURN "bottom_up"
-        
+
         # Default strategy
         RETURN "concept_first"
-    
+
     METHOD retrieve_concept_first(query, k) -> List[Result]:
         # Step 1: Get query embedding
         query_embedding = compute_embedding(query)
-        
+
         # Step 2: Search L2 concept groups
         l2_filter = Filter(
             must=[
                 FieldCondition(key="hierarchy_level", match=MatchValue(2))
             ]
         )
-        
+
         l2_results = self.qdrant.search(
             collection=self.config.collection_name,
             query_vector=query_embedding,
@@ -1285,10 +1285,10 @@ CLASS HierarchicalRetriever:
             limit=k,
             with_payload=true
         )
-        
+
         # Step 3: Get child sections of top L2 matches
         top_l2_ids = [r.payload.node_id for r in l2_results[0:3]]
-        
+
         WITH self.neo4j.session() AS session:
             child_query = """
             MATCH (parent:Section)-[:HAS_CHILD]->(child:Section)
@@ -1297,7 +1297,7 @@ CLASS HierarchicalRetriever:
             """
             result = session.run(child_query, parent_ids=top_l2_ids)
             child_ids = result.single().child_ids
-        
+
         # Step 4: Search within child sections
         l3_filter = Filter(
             must=[
@@ -1305,7 +1305,7 @@ CLASS HierarchicalRetriever:
                 FieldCondition(key="node_id", match=MatchAny(child_ids))
             ]
         )
-        
+
         l3_results = self.qdrant.search(
             collection=self.config.collection_name,
             query_vector=query_embedding,
@@ -1313,10 +1313,10 @@ CLASS HierarchicalRetriever:
             limit=k,
             with_payload=true
         )
-        
+
         # Step 5: Combine results
         combined = []
-        
+
         # Add top L2 for context
         IF LEN(l2_results) > 0:
             combined.APPEND({
@@ -1325,7 +1325,7 @@ CLASS HierarchicalRetriever:
                 "content": l2_results[0].payload,
                 "score": l2_results[0].score
             })
-        
+
         # Add relevant L3 for details
         FOR result IN l3_results:
             combined.APPEND({
@@ -1334,7 +1334,7 @@ CLASS HierarchicalRetriever:
                 "content": result.payload,
                 "score": result.score
             })
-        
+
         RETURN combined
 ```
 
@@ -1346,38 +1346,38 @@ CLASS HierarchicalMigration:
         self.config = config
         self.services = services
         self.metrics = MetricsCollector()
-        
+
     METHOD execute_migration() -> MigrationResult:
         # Step 1: Pre-flight checks
         IF NOT pre_flight_checks():
             RETURN MigrationResult(success=false, reason="Pre-flight failed")
-        
+
         # Step 2: Enable feature flag
         set_feature_flag("hierarchical_chunking", enabled=true, percentage=1)
-        
+
         # Step 3: Process test documents
         test_results = process_test_batch()
         IF test_results.accuracy < 0.95:
             rollback()
             RETURN MigrationResult(success=false, reason="Test accuracy too low")
-        
+
         # Step 4: Gradual rollout
         rollout_percentages = [10, 25, 50, 100]
         FOR percentage IN rollout_percentages:
             set_feature_flag("hierarchical_chunking", percentage=percentage)
-            
+
             SLEEP(3600)  # Wait 1 hour
-            
+
             metrics = collect_metrics()
             IF NOT validate_metrics(metrics):
                 rollback()
                 RETURN MigrationResult(success=false, reason="Metrics degraded")
-        
+
         # Step 5: Full migration
         migrate_all_documents()
-        
+
         RETURN MigrationResult(success=true)
-    
+
     METHOD pre_flight_checks() -> Boolean:
         checks = [
             check_ollama_running(),
@@ -1387,70 +1387,70 @@ CLASS HierarchicalMigration:
             check_disk_space(required_gb=50),
             check_memory_available(required_gb=32)
         ]
-        
+
         FOR check IN checks:
             IF NOT check:
                 LOG_ERROR("Pre-flight check failed: " + check.name)
                 RETURN false
-        
+
         RETURN true
-    
+
     METHOD process_test_batch() -> TestResult:
         test_docs = load_test_documents()
         results = []
-        
+
         FOR doc IN test_docs:
             # Process with hierarchy
             hierarchical_result = process_with_hierarchy(doc)
-            
+
             # Process with existing
             baseline_result = process_with_baseline(doc)
-            
+
             # Compare quality
             accuracy = compare_retrieval_quality(
-                hierarchical_result, 
+                hierarchical_result,
                 baseline_result,
                 doc.test_queries
             )
-            
+
             results.APPEND(accuracy)
-        
+
         RETURN TestResult(
             accuracy=MEAN(results),
             latency=MEASURE_LATENCY(),
             memory_usage=MEASURE_MEMORY()
         )
-    
+
     METHOD rollback():
         LOG_WARNING("Executing rollback")
-        
+
         # Disable feature flag
         set_feature_flag("hierarchical_chunking", enabled=false)
-        
+
         # Alert team
         send_alert("Hierarchical chunking rollback executed", severity="WARNING")
-        
+
         # Log metrics for analysis
         self.metrics.export_to_file("rollback_metrics.json")
 
 FUNCTION compare_retrieval_quality(hier_result, base_result, queries) -> Float:
     scores = []
-    
+
     FOR query IN queries:
         # Get results from both systems
         hier_chunks = retrieve_hierarchical(query)
         base_chunks = retrieve_baseline(query)
-        
+
         # Compare relevance
         hier_relevance = calculate_relevance(hier_chunks, query.expected)
         base_relevance = calculate_relevance(base_chunks, query.expected)
-        
+
         # Score: 1.0 if hierarchical is better or equal
         IF hier_relevance >= base_relevance:
             scores.APPEND(1.0)
         ELSE:
             scores.APPEND(hier_relevance / base_relevance)
-    
+
     RETURN MEAN(scores)
 ```
 
@@ -1461,70 +1461,70 @@ CLASS HierarchicalIntegrationTests:
     METHOD test_end_to_end_processing():
         # Setup
         document = load_test_document("weka_cluster_capacity.md")
-        
+
         # Parse with hierarchy
         parser = HierarchicalMarkdownParser(
             llm_provider=OllamaProvider(test_config),
             config=test_config
         )
-        
+
         result = parser.parse_hierarchical(document.uri, document.content)
-        
+
         # Assertions
         ASSERT result.sections IS NOT NULL
         ASSERT COUNT(result.sections) > 0
-        
+
         # Check hierarchy levels
         levels = GROUP_BY(result.sections, lambda s: s.hierarchy_level)
         ASSERT 1 IN levels  # Has L1 summary
         ASSERT 2 IN levels  # Has L2 concept groups
         ASSERT 3 IN levels  # Has L3 details
-        
+
         # Check relationships
         FOR section IN result.sections:
             IF section.hierarchy_level > 1:
                 ASSERT section.parent_id IS NOT NULL
             IF section.hierarchy_level < 3:
                 ASSERT LEN(section.child_ids) > 0
-    
+
     METHOD test_retrieval_strategies():
         # Setup test data
         setup_test_hierarchy()
-        
+
         retriever = HierarchicalRetriever(qdrant, neo4j, config)
-        
+
         # Test broad query (should use top_down)
         broad_results = retriever.retrieve("What is WEKA storage?", k=5)
         ASSERT broad_results[0].level == 1  # L1 summary first
-        
+
         # Test specific query (should use bottom_up)
         specific_results = retriever.retrieve(
-            "Calculate SSD capacity for 3+2 protection", 
+            "Calculate SSD capacity for 3+2 protection",
             k=5
         )
         ASSERT specific_results[0].level == 3  # L3 detail first
-        
+
         # Test balanced query (should use concept_first)
         balanced_results = retriever.retrieve(
             "How does protection level affect capacity?",
             k=5
         )
         ASSERT balanced_results[0].level == 2  # L2 concept first
-    
+
     METHOD test_incremental_updates():
         # Initial ingestion
         v1_sections = parse_and_store(document_v1)
-        
+
         # Modified document
         document_v2 = modify_document(document_v1)
         v2_sections = parse_and_store(document_v2)
-        
+
         # Check hierarchy preserved
         unchanged = find_unchanged_sections(v1_sections, v2_sections)
         FOR section IN unchanged:
             ASSERT section.parent_id == v1_lookup[section.id].parent_id
             ASSERT section.hierarchy_level == v1_lookup[section.id].hierarchy_level
-        
+
         # Check new sections integrated
         new_sections = find_new_sections(v1_sections, v2_sections)
         FOR section IN new_sections:
@@ -1538,7 +1538,7 @@ These four documents provide a complete Phase 7D specification for implementing 
 
 Key highlights:
 - **Ollama-first approach** with fallback to cloud providers
-- **Production-ready** with monitoring, testing, and rollback procedures  
+- **Production-ready** with monitoring, testing, and rollback procedures
 - **Backward compatible** with existing pipeline
 - **Performance optimized** with batching, caching, and streaming
 - **Well-tested** with comprehensive test coverage

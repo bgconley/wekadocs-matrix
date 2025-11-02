@@ -205,7 +205,7 @@ client.recreate_collection(
 )
 
 # Payload indexes for fast filtering
-client.create_payload_index("chunks", field_name="document_id", 
+client.create_payload_index("chunks", field_name="document_id",
                            field_schema=qm.PayloadSchemaType.KEYWORD)
 client.create_payload_index("chunks", field_name="parent_section_id",
                            field_schema=qm.PayloadSchemaType.KEYWORD)
@@ -288,14 +288,14 @@ class Chunk:
     original_section_ids: List[str]  # provenance
     boundaries_json: str  # structured metadata
     updated_at: int  # Unix ms
-    
+
     def to_neo4j_dict(self, include_full_text: bool = True) -> dict:
         """Neo4j representation (always includes full text)."""
         d = asdict(self)
         # Always store full text in Neo4j (our decision)
         d['text'] = self.text
         return d
-    
+
     def to_qdrant_payload(self) -> dict:
         """Qdrant payload (always full text)."""
         return {
@@ -315,7 +315,7 @@ class Chunk:
             'boundaries': self.boundaries_json,
             'updated_at': self.updated_at
         }
-    
+
     @staticmethod
     def generate_id(document_id: str, section_ids: List[str]) -> str:
         """Generate deterministic, ORDER-PRESERVING chunk ID."""
@@ -338,18 +338,18 @@ class IntelligentSectionCombiner:
         self.tokenizer = tokenizer_service
         self.target_min = config.get('target_min', 800)
         self.target_max = config.get('target_max', 1500)
-        
+
         # Conservative max if using fallback tokenizer
         if os.getenv('TOKENIZER_UNSAFE_FALLBACK', 'false').lower() == 'true':
             self.absolute_max = config.get('conservative_absolute_max', 7000)
             logger.warning("Using conservative absolute_max=7000 due to fallback tokenizer")
         else:
             self.absolute_max = config.get('absolute_max', 7900)
-        
+
         self.micro_threshold = config.get('micro_section_threshold', 120)
         self.respect_h2 = config.get('respect_h2', True)
         self.log_decisions = config.get('log_decisions', True)
-        
+
         # Decision counters for observability
         self.stats = {
             'micro_absorbed': 0,
@@ -357,19 +357,19 @@ class IntelligentSectionCombiner:
             'hard_breaks': 0,
             'chunks_created': 0
         }
-    
+
     def _generate_chunk_id(self, document_id: str, section_ids: List[str]) -> str:
         """ORDER-PRESERVING chunk ID generation."""
         # CRITICAL FIX: Do NOT sort section_ids!
         material = f"{document_id}|{'|'.join(section_ids)}"
         return hashlib.sha256(material.encode()).hexdigest()[:24]
-    
+
     def combine_sections(self, document_id: str, sections: List[Section]) -> List[Chunk]:
         """Main combination logic with sophisticated heuristics."""
         chunks = []
         current = []
         current_tokens = 0
-        
+
         for i, section in enumerate(sections):
             # Check for hard semantic breaks
             if self._is_hard_break(section) and current:
@@ -377,7 +377,7 @@ class IntelligentSectionCombiner:
                 current = []
                 current_tokens = 0
                 self.stats['hard_breaks'] += 1
-            
+
             # Micro-section absorption
             if section.token_count < self.micro_threshold:
                 if current:
@@ -390,7 +390,7 @@ class IntelligentSectionCombiner:
                     current = [section]
                     current_tokens = section.token_count
                 continue
-            
+
             # Regular accumulation
             if current_tokens + section.token_count <= self.target_max:
                 current.append(section)
@@ -401,15 +401,15 @@ class IntelligentSectionCombiner:
                     chunks.append(self._create_chunk(document_id, current))
                 current = [section]
                 current_tokens = section.token_count
-        
+
         # Handle remainder with end-of-H2 smoothing
         if current:
             chunks = self._smooth_end_of_h2(chunks, current, document_id)
-        
+
         # Log decision statistics
         if self.log_decisions:
             logger.info(f"Combiner stats for {document_id}: {self.stats}")
-        
+
         return chunks
 ```
 
@@ -438,17 +438,17 @@ def _is_hard_break(self, section: Section) -> bool:
     # H2 boundaries
     if self.respect_h2 and section.level == 2:
         return True
-    
+
     # Special sections act as anchors
     if any(re.match(p, section.heading) for p in SPECIAL_SECTION_PATTERNS):
         return True
-    
+
     return False
 
 def _detect_structured_blocks(self, text: str) -> List[dict]:
     """Detect code blocks, tables, admonitions without parser metadata."""
     blocks = []
-    
+
     # Fenced code blocks (CRITICAL: preserve intact)
     code_pattern = r'```[\s\S]*?```'
     for match in re.finditer(code_pattern, text):
@@ -458,12 +458,12 @@ def _detect_structured_blocks(self, text: str) -> List[dict]:
             'end': match.end(),
             'content': match.group()
         })
-    
+
     # Tables (2+ consecutive lines with |)
     lines = text.split('\n')
     in_table = False
     table_start = 0
-    
+
     for i, line in enumerate(lines):
         if '|' in line and line.count('|') >= 2:
             if not in_table:
@@ -477,7 +477,7 @@ def _detect_structured_blocks(self, text: str) -> List[dict]:
                     'end_line': i-1
                 })
                 in_table = False
-    
+
     # Admonitions (>, !, Note:, Warning:, etc.)
     admonition_pattern = r'^(>|!|Note:|Warning:|Tip:|Important:)'
     for i, line in enumerate(lines):
@@ -487,7 +487,7 @@ def _detect_structured_blocks(self, text: str) -> List[dict]:
                 'line': i,
                 'content': line
             })
-    
+
     return blocks
 ```
 
@@ -496,40 +496,40 @@ def _detect_structured_blocks(self, text: str) -> List[dict]:
 ### Task 2.3: Micro-Section Absorption (1 hour)
 
 ```python
-def _should_absorb_micro(self, section: Section, 
+def _should_absorb_micro(self, section: Section,
                          current: List[Section],
                          current_tokens: int) -> bool:
     """Determine if micro-section should be absorbed."""
     if section.token_count >= self.micro_threshold:
         return False
-    
+
     if not current:
         # Can't absorb if no current chunk
         return False
-    
+
     if self._is_hard_break(section):
         # Never absorb across hard boundaries
         return False
-    
+
     # Check if absorption would exceed absolute max
     if current_tokens + section.token_count > self.absolute_max:
         return False
-    
+
     return True
 
-def _prefer_previous_attachment(self, prev_chunk: Chunk, 
+def _prefer_previous_attachment(self, prev_chunk: Chunk,
                                 next_section: Section) -> bool:
     """Prefer attaching to previous explanatory content."""
     # Heuristics for attachment preference
     if 'example' in next_section.heading.lower():
         return True  # Examples go with preceding explanation
-    
+
     if 'note' in next_section.heading.lower():
         return True  # Notes go with preceding content
-    
+
     if prev_chunk.heading.endswith(':'):
         return True  # Previous chunk expects continuation
-    
+
     return False  # Default: start new chunk
 ```
 
@@ -538,26 +538,26 @@ def _prefer_previous_attachment(self, prev_chunk: Chunk,
 ### Task 2.4: End-of-H2 Smoothing (30 min)
 
 ```python
-def _smooth_end_of_h2(self, chunks: List[Chunk], 
+def _smooth_end_of_h2(self, chunks: List[Chunk],
                       remainder: List[Section],
                       document_id: str) -> List[Chunk]:
     """Merge orphan chunks below target_min."""
     remainder_tokens = sum(s.token_count for s in remainder)
-    
+
     if remainder_tokens >= self.target_min:
         # Large enough, keep as separate chunk
         chunks.append(self._create_chunk(document_id, remainder))
         return chunks
-    
+
     if not chunks:
         # No previous chunk to merge with
         chunks.append(self._create_chunk(document_id, remainder))
         return chunks
-    
+
     # Try to merge with previous
     prev_chunk = chunks[-1]
     combined_tokens = prev_chunk.token_count + remainder_tokens
-    
+
     if combined_tokens <= self.absolute_max:
         # Safe to merge
         merged = self._merge_chunk_with_sections(prev_chunk, remainder)
@@ -567,7 +567,7 @@ def _smooth_end_of_h2(self, chunks: List[Chunk],
     else:
         # Can't merge, keep separate
         chunks.append(self._create_chunk(document_id, remainder))
-    
+
     return chunks
 ```
 
@@ -580,57 +580,57 @@ def _smooth_end_of_h2(self, chunks: List[Chunk],
 ```python
 class MinimalChunkSplitter:
     """Fallback splitter for rare oversized chunks."""
-    
+
     def __init__(self, tokenizer_service, config: dict):
         self.tokenizer = tokenizer_service
         self.max_tokens = config.get('max_tokens', 7900)
         self.overlap_tokens = config.get('overlap_tokens', 100)
         self.log_splits = config.get('log_splits', True)
-    
+
     def split_if_needed(self, chunk: Chunk) -> List[Chunk]:
         """Split only if exceeds max_tokens."""
         if chunk.token_count <= self.max_tokens:
             return [chunk]
-        
+
         if self.log_splits:
             logger.warning(f"Splitting oversized chunk: {chunk.id} "
                          f"({chunk.token_count} tokens)")
-        
+
         # Detect structured blocks to preserve
         blocks = self._detect_structured_blocks(chunk.text)
-        
+
         # Split at boundaries with minimal overlap
         split_points = self._find_split_points(chunk.text, blocks)
         sub_chunks = self._create_sub_chunks(chunk, split_points)
-        
+
         # Update metadata
         for i, sc in enumerate(sub_chunks):
             sc.is_split = True
             sc.order = i
             sc.total_chunks = len(sub_chunks)
-        
+
         return sub_chunks
-    
+
     def _find_split_points(self, text: str, blocks: List[dict]) -> List[int]:
         """Find optimal split points preserving structure."""
         # Priority: sentence > paragraph > line > word
         # Never split inside structured blocks
-        
+
         sentences = self._split_sentences(text)
         points = []
         current_tokens = 0
         current_point = 0
-        
+
         for sent in sentences:
             sent_tokens = self.tokenizer.count_tokens(sent)
-            
+
             # Check if split point is inside a block
             if self._inside_block(current_point, blocks):
                 # Skip this split point
                 current_tokens += sent_tokens
                 current_point += len(sent)
                 continue
-            
+
             if current_tokens + sent_tokens > self.max_tokens:
                 # Split here
                 points.append(current_point)
@@ -638,9 +638,9 @@ class MinimalChunkSplitter:
                 current_tokens = min(self.overlap_tokens, current_tokens)
             else:
                 current_tokens += sent_tokens
-            
+
             current_point += len(sent)
-        
+
         return points
 ```
 
@@ -657,18 +657,18 @@ class Neo4jChunkWriter:
     def __init__(self, neo4j_driver, redis_client=None):
         self.driver = neo4j_driver
         self.redis = redis_client
-    
+
     def upsert_chunks(self, document_id: str, chunks: List[Chunk]) -> None:
         """Idempotent upsert with garbage collection."""
         valid_chunk_ids = [c.id for c in chunks]
-        
+
         with self.driver.session() as session:
             # 1. Upsert Document
             session.run(
                 "MERGE (d:Document {document_id: $document_id})",
                 document_id=document_id
             )
-            
+
             # 2. Upsert Chunks with HAS_CHUNK
             for chunk in chunks:
                 session.run("""
@@ -696,25 +696,25 @@ class Neo4jChunkWriter:
                     MATCH (d:Document {document_id: $document_id})
                     MERGE (d)-[:HAS_CHUNK]->(c)
                 """, **chunk.to_neo4j_dict(include_full_text=True))  # Full text in Neo4j
-            
+
             # 3. Create NEXT_CHUNK relationships
             self._create_adjacency_chains(session, chunks)
-            
+
             # 4. CRITICAL: Garbage collect stale chunks
             session.run("""
                 MATCH (d:Document {document_id: $document_id})-[:HAS_CHUNK]->(c:Chunk)
                 WHERE NOT c.id IN $valid_chunk_ids
                 DETACH DELETE c
             """, document_id=document_id, valid_chunk_ids=valid_chunk_ids)
-            
+
             # 6. Optional: Create PART_OF provenance
             if os.getenv('CREATE_PART_OF', 'false').lower() == 'true':
                 self._create_provenance_links(session, chunks)
-        
+
         # 5. CRITICAL: Invalidate cache
         if self.redis:
             self._invalidate_cache(document_id)
-    
+
     def _invalidate_cache(self, document_id: str):
         """Clear Redis cache for this document."""
         # Implementation options in: planning-docs/gpt5pro/redis invalidation plan
@@ -733,21 +733,21 @@ class Neo4jChunkWriter:
 class QdrantChunkWriter:
     def __init__(self, qdrant_client):
         self.client = qdrant_client
-        
+
     @staticmethod
     def stable_uuid(id: str) -> str:
         """Generate stable UUID from id."""
         ns = uuid.UUID("00000000-0000-0000-0000-000000000000")
         return str(uuid.uuid5(ns, id))
-    
+
     def upsert_chunks(self, chunks: List[Chunk],
                      embeddings: Dict[str, List[float]]) -> None:
         """Replace-by-set upsert for document."""
         if not chunks:
             return
-        
+
         document_id = chunks[0].document_id
-        
+
         # 1. Delete all existing points for this doc
         self.client.delete(
             collection_name="chunks",
@@ -762,14 +762,14 @@ class QdrantChunkWriter:
                 )
             )
         )
-        
+
         # 2. Batch upsert new chunks
         points = []
         for chunk in chunks:
             if chunk.id not in embeddings:
                 logger.error(f"Missing embedding for chunk: {chunk.id}")
                 continue
-            
+
             points.append({
                 "id": self.stable_uuid(chunk.id),
                 "vector": {
@@ -777,7 +777,7 @@ class QdrantChunkWriter:
                 },
                 "payload": chunk.to_qdrant_payload()  # Full text here
             })
-        
+
         # Batch in groups of 100
         for i in range(0, len(points), 100):
             batch = points[i:i+100]
@@ -786,7 +786,7 @@ class QdrantChunkWriter:
                 points=batch,
                 wait=True
             )
-        
+
         logger.info(f"Upserted {len(points)} chunks for {document_id}")
 ```
 
@@ -802,7 +802,7 @@ class QdrantChunkWriter:
 def invalidate_caches_post_ingest(document_id: str, chunk_ids: List[str]):
     """Call after successful chunk upserts."""
     cache_mode = os.getenv('CACHE_MODE', 'epoch')
-    
+
     if cache_mode == 'epoch':
         # Preferred: O(1) invalidation
         import subprocess
@@ -831,10 +831,10 @@ def invalidate_caches_post_ingest(document_id: str, chunk_ids: List[str]):
 ```python
 class BM25Retriever:
     """Lexical retrieval over chunks."""
-    
+
     def __init__(self, neo4j_driver):
         self.driver = neo4j_driver
-        
+
     def search(self, query: str, limit: int = 20) -> List[tuple]:
         """BM25 search using Neo4j full-text index."""
         with self.driver.session() as session:
@@ -842,7 +842,7 @@ class BM25Retriever:
             result = session.run("""
                 CALL db.index.fulltext.queryNodes('chunk_text_index', $query)
                 YIELD node, score
-                RETURN node.id AS id, 
+                RETURN node.id AS id,
                        score,
                        node.document_id AS document_id,
                        node.heading AS heading,
@@ -850,7 +850,7 @@ class BM25Retriever:
                 ORDER BY score DESC
                 LIMIT $limit
             """, query=query, limit=limit)
-            
+
             results = []
             for i, record in enumerate(result):
                 results.append((
@@ -858,7 +858,7 @@ class BM25Retriever:
                     record['score'],
                     i + 1  # 1-based rank
                 ))
-            
+
             return results
 ```
 
@@ -869,8 +869,8 @@ class BM25Retriever:
 ```python
 class VectorRetriever:
     """Semantic retrieval over chunk embeddings."""
-    
-    def search(self, query_vector: List[float], 
+
+    def search(self, query_vector: List[float],
               limit: int = 20) -> List[tuple]:
         """Vector similarity search."""
         results = self.client.search(
@@ -878,7 +878,7 @@ class VectorRetriever:
             query_vector=query_vector,
             limit=limit
         )
-        
+
         output = []
         for i, result in enumerate(results):
             output.append((
@@ -886,7 +886,7 @@ class VectorRetriever:
                 result.score,
                 i + 1  # 1-based rank
             ))
-        
+
         return output
 ```
 
@@ -899,64 +899,64 @@ class VectorRetriever:
 ```python
 class HybridFusion:
     """Reciprocal Rank Fusion for hybrid retrieval."""
-    
+
     def __init__(self, config: dict):
         self.rrf_k = config.get('rrf_k', 60)
         self.alpha = config.get('alpha', 0.6)  # For weighted fusion
-        
+
     def rrf_fuse(self, vector_results: List[tuple],
                  bm25_results: List[tuple]) -> List[tuple]:
         """RRF fusion: robust to score scale differences."""
         # Convert to rank dictionaries
         vector_ranks = {id: rank for id, _, rank in vector_results}
         bm25_ranks = {id: rank for id, _, rank in bm25_results}
-        
+
         # All unique chunk IDs
         all_ids = set(vector_ranks.keys()) | set(bm25_ranks.keys())
-        
+
         # Compute RRF scores
         rrf_scores = {}
         for id in all_ids:
             v_rank = vector_ranks.get(id, 9999)  # Large if missing
             b_rank = bm25_ranks.get(id, 9999)
-            
+
             # RRF formula
             rrf_scores[id] = (
                 1.0 / (self.rrf_k + v_rank) +
                 1.0 / (self.rrf_k + b_rank)
             )
-        
+
         # Sort by RRF score
         sorted_results = sorted(
             rrf_scores.items(),
             key=lambda x: x[1],
             reverse=True
         )
-        
-        return [(id, score, i+1) 
+
+        return [(id, score, i+1)
                 for i, (id, score) in enumerate(sorted_results)]
-    
+
     def weighted_fuse(self, vector_results: List[tuple],
                      bm25_results: List[tuple]) -> List[tuple]:
         """Alternative: weighted linear combination."""
         # Normalize scores to [0,1]
         v_scores = self._normalize_scores(vector_results)
         b_scores = self._normalize_scores(bm25_results)
-        
+
         all_ids = set(v_scores.keys()) | set(b_scores.keys())
-        
+
         weighted = {}
         for id in all_ids:
             v = v_scores.get(id, 0.0)
             b = b_scores.get(id, 0.0)
             weighted[id] = self.alpha * v + (1 - self.alpha) * b
-        
+
         sorted_results = sorted(
             weighted.items(),
             key=lambda x: x[1],
             reverse=True
         )
-        
+
         return [(id, score, i+1)
                 for i, (id, score) in enumerate(sorted_results)]
 ```
@@ -968,31 +968,31 @@ class HybridFusion:
 ```python
 class ChunkExpander:
     """Conditionally expand to adjacent chunks."""
-    
+
     def __init__(self, neo4j_driver, config: dict):
         self.driver = neo4j_driver
         self.query_min_tokens = config.get('query_min_tokens', 12)
         self.score_delta_max = config.get('score_delta_max', 0.02)
-        
-    def should_expand(self, query_tokens: int, 
+
+    def should_expand(self, query_tokens: int,
                      top_scores: List[float]) -> bool:
         """Determine if expansion warranted."""
         # Long query → likely needs more context
         if query_tokens >= self.query_min_tokens:
             return True
-        
+
         # Close scores → ambiguous results
         if len(top_scores) >= 2:
             delta = abs(top_scores[0] - top_scores[1])
             if delta <= self.score_delta_max:
                 return True
-        
+
         return False
-    
+
     def expand_chunks(self, chunk_ids: List[str]) -> List[str]:
         """Fetch ±1 adjacent chunks via NEXT_CHUNK."""
         expanded = set(chunk_ids)
-        
+
         with self.driver.session() as session:
             for id in chunk_ids:
                 # Get neighbors
@@ -1003,14 +1003,14 @@ class ChunkExpander:
                     RETURN prev.id AS prev_id,
                            next.id AS next_id
                 """, id=id)
-                
+
                 record = result.single()
                 if record:
                     if record['prev_id']:
                         expanded.add(record['prev_id'])
                     if record['next_id']:
                         expanded.add(record['next_id'])
-        
+
         return list(expanded)
 ```
 
@@ -1023,11 +1023,11 @@ class ChunkExpander:
 ```python
 class ContextAssembler:
     """Assemble and trim final context."""
-    
+
     def __init__(self, config: dict, tokenizer_service):
         self.max_tokens = config.get('max_tokens', 4500)
         self.tokenizer = tokenizer_service
-        
+
     def assemble_context(self, chunks: List[Chunk]) -> str:
         """Stitch chunks with budget enforcement."""
         # Sort by parent_section_id, then order
@@ -1035,39 +1035,39 @@ class ContextAssembler:
             chunks,
             key=lambda c: (c.parent_section_id, c.order)
         )
-        
+
         # Enforce token budget (trim tail-first)
         budgeted = self._enforce_budget(sorted_chunks)
-        
+
         # Stitch with headings
         context_parts = []
         prev_parent = None
-        
+
         for chunk in budgeted:
             if chunk.parent_section_id != prev_parent:
                 # New parent section
                 context_parts.append(f"\n## {chunk.heading}\n")
                 prev_parent = chunk.parent_section_id
-            
+
             context_parts.append(chunk.text)
-            
+
             # Add separator if not last
             if chunk != budgeted[-1]:
                 context_parts.append("\n\n---\n\n")
-        
+
         return "".join(context_parts)
-    
+
     def _enforce_budget(self, chunks: List[Chunk]) -> List[Chunk]:
         """Trim to fit context window."""
         total_tokens = sum(c.token_count for c in chunks)
-        
+
         if total_tokens <= self.max_tokens:
             return chunks
-        
+
         # Greedy: take chunks until budget exceeded
         result = []
         running_total = 0
-        
+
         for chunk in chunks:
             if running_total + chunk.token_count <= self.max_tokens:
                 result.append(chunk)
@@ -1076,7 +1076,7 @@ class ContextAssembler:
                 # Could partially include, but cleaner to stop
                 logger.warning(f"Context budget exceeded, trimming {len(chunks) - len(result)} chunks")
                 break
-        
+
         return result
 ```
 
@@ -1089,44 +1089,44 @@ class ContextAssembler:
 ```python
 class IntegrityChecker:
     """Verify perfect content preservation."""
-    
+
     def __init__(self, config: dict):
         self.sample_rate = config.get('sample_rate', 1.0)
-        
+
     def verify_zero_loss(self, original_sections: List[Section],
                         chunks: List[Chunk]) -> bool:
         """SHA-256 verification of content preservation."""
         # Sample check
         if random.random() > self.sample_rate:
             return True  # Skip this check
-        
+
         # Concatenate original text (sorted by original order)
         original_text = "".join(s.text for s in original_sections)
         original_hash = hashlib.sha256(original_text.encode()).hexdigest()
-        
+
         # Concatenate chunk text (remove any separators we added)
         chunk_texts = []
         for chunk in chunks:
             # Extract original content without our separators
             text = chunk.text.replace("\n\n---\n\n", "")
             chunk_texts.append(text)
-        
+
         chunk_text = "".join(chunk_texts)
         chunk_hash = hashlib.sha256(chunk_text.encode()).hexdigest()
-        
+
         if original_hash != chunk_hash:
             logger.error(f"INTEGRITY VIOLATION: {original_hash} != {chunk_hash}")
             logger.error(f"Original length: {len(original_text)}")
             logger.error(f"Chunk length: {len(chunk_text)}")
-            
+
             # Find first difference for debugging
             for i, (o, c) in enumerate(zip(original_text, chunk_text)):
                 if o != c:
                     logger.error(f"First diff at position {i}: '{o}' != '{c}'")
                     break
-            
+
             return False
-        
+
         logger.info(f"Integrity verified: {original_hash}")
         return True
 ```
@@ -1138,14 +1138,14 @@ class IntegrityChecker:
 ```python
 class ChunkMetricsCollector:
     """Comprehensive metrics for monitoring."""
-    
+
     def collect_metrics(self, chunks: List[Chunk]) -> dict:
         """Calculate distribution and statistics."""
         if not chunks:
             return {}
-        
+
         tokens = [c.token_count for c in chunks]
-        
+
         metrics = {
             'count': len(chunks),
             'total_tokens': sum(tokens),
@@ -1167,7 +1167,7 @@ class ChunkMetricsCollector:
             'combined_count': sum(1 for c in chunks if c.is_combined),
             'split_count': sum(1 for c in chunks if c.is_split)
         }
-        
+
         # Decision path metrics from combiner
         if hasattr(self, 'combiner_stats'):
             metrics['decisions'] = {
@@ -1175,7 +1175,7 @@ class ChunkMetricsCollector:
                 'eoh2_merges': self.combiner_stats['eoh2_merges'],
                 'hard_breaks': self.combiner_stats['hard_breaks']
             }
-        
+
         return metrics
 ```
 
@@ -1235,17 +1235,17 @@ SLO_DEFINITIONS = {
 
 class SLOMonitor:
     """Track and alert on SLO violations."""
-    
+
     def check_slos(self, metrics: dict) -> List[str]:
         """Return list of violations."""
         violations = []
-        
+
         for slo_name, slo_def in SLO_DEFINITIONS.items():
             if slo_name not in metrics:
                 continue
-            
+
             value = metrics[slo_name]
-            
+
             if 'max_threshold' in slo_def:
                 # Range SLO
                 if value < slo_def['min_threshold'] or value > slo_def['max_threshold']:
@@ -1261,7 +1261,7 @@ class SLOMonitor:
                         f"[{level}] SLO violation: {slo_name}={value} "
                         f"(target={slo_def['target']})"
                     )
-        
+
         return violations
 ```
 
@@ -1274,7 +1274,7 @@ class SLOMonitor:
 ```python
 class FeatureFlags:
     """Runtime feature control."""
-    
+
     def __init__(self):
         self.flags = {
             'COMBINE_SECTIONS': os.getenv('COMBINE_SECTIONS', 'false').lower() == 'true',
@@ -1284,10 +1284,10 @@ class FeatureFlags:
             'CACHE_RESULTS': os.getenv('CACHE_RESULTS', 'true').lower() == 'true',
             'CREATE_PART_OF': os.getenv('CREATE_PART_OF', 'false').lower() == 'true'
         }
-    
+
     def is_enabled(self, flag: str) -> bool:
         return self.flags.get(flag, False)
-    
+
     def set_flag(self, flag: str, value: bool):
         """Runtime flag update (if supported)."""
         self.flags[flag] = value
@@ -1336,7 +1336,7 @@ python scripts/verify_chunking_metrics.py \
 
 ```sql
 -- Chunk size distribution
-SELECT 
+SELECT
   token_bucket,
   count(*) as chunk_count,
   avg(token_count) as avg_tokens
@@ -1344,7 +1344,7 @@ FROM chunks
 GROUP BY token_bucket
 
 -- Combiner decisions
-SELECT 
+SELECT
   document_id,
   micro_absorbed,
   eoh2_merges,
@@ -1354,7 +1354,7 @@ FROM ingestion_stats
 WHERE timestamp > NOW() - INTERVAL '1 hour'
 
 -- Retrieval performance
-SELECT 
+SELECT
   percentile_cont(0.50) WITHIN GROUP (ORDER BY latency_ms) as p50,
   percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) as p95,
   percentile_cont(0.99) WITHIN GROUP (ORDER BY latency_ms) as p99,

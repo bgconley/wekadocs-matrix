@@ -1,5 +1,5 @@
 {
-  "timestamp": "2025-10-30T14:35:49.923023",
+  "timestamp": "2025-11-01T22:56:04.157450",
   "dry_run": false,
   "options": {
     "dry_run": false,
@@ -8,61 +8,60 @@
     "skip_qdrant": false,
     "skip_redis": false,
     "report_dir": "reports/cleanup",
-    "quiet": false
+    "quiet": false,
+    "restore_metadata": false
   },
   "before": {
     "redis": {
       "db": 1,
-      "key_count": 0,
-      "sample_keys": []
+      "total_keys": 0,
+      "system_keys": 0,
+      "data_keys": 0,
+      "sample_data_keys": [],
+      "preserved_keys": []
     }
   },
   "after": {
     "redis": {
       "db": 1,
-      "key_count": 0
+      "total_keys": 0,
+      "preserved_keys": 0
     }
   },
-  "actions": [
-    {
-      "timestamp": "2025-10-30T14:35:50.118243",
-      "action": "redis_flushdb",
-      "details": {
-        "db": 1,
-        "keys_deleted": 0
-      }
-    }
-  ],
+  "actions": [],
   "errors": [
     {
-      "timestamp": "2025-10-30T14:35:50.015774",
+      "timestamp": "2025-11-01T22:56:04.244825",
       "message": "Neo4j cleanup failed: Cannot resolve address weka-neo4j:7687"
     },
     {
-      "timestamp": "2025-10-30T14:35:50.111457",
+      "timestamp": "2025-11-01T22:56:04.341451",
       "message": "Qdrant cleanup failed: [Errno 8] nodename nor servname provided, or not known"
     }
   ],
   "summary": {
     "dry_run": false,
     "success": false,
+    "metadata_preserved": true,
     "databases_cleaned": [
       {
         "database": "neo4j",
-        "nodes_deleted": 0,
-        "relationships_deleted": 0,
+        "data_nodes_deleted": 0,
+        "metadata_nodes_preserved": 0,
         "schema_preserved": true
       },
       {
         "database": "qdrant",
-        "collections_deleted": 0,
+        "collections_preserved": 0,
         "total_vectors_deleted": 0
       },
       {
         "database": "redis",
         "db": 1,
-        "keys_deleted": 0
+        "data_keys_deleted": 0,
+        "system_keys_preserved": 0
       }
     ]
-  }
+  },
+  "preserved_nodes": []
 }

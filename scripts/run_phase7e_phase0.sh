@@ -51,12 +51,12 @@ run_task() {
     local task_num=$1
     local task_name=$2
     local command=$3
-    
+
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BLUE}Task ${task_num}: ${task_name}${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    
+
     if eval "$command"; then
         echo ""
         echo -e "${GREEN}✓ Task ${task_num} completed successfully${NC}"

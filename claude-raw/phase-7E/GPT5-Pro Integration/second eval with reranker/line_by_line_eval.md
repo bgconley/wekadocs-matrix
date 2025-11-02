@@ -1,6 +1,6 @@
 # Line-by-line Evaluation & Integration Check — Phase‑7E (BM25 + Vector + RRF + Jina Reranker)
 
-**Repo root:** `/mnt/data/repo`  
+**Repo root:** `/mnt/data/repo`
 **Generated:** 2025-10-28T21:57:22.942738Z
 
 This review compares your **current code** with the **proposed architecture** you shared. It flags exact insertion points, confirms what already exists, and provides a ready-to-apply patch.
@@ -48,12 +48,12 @@ This review compares your **current code** with the **proposed architecture** yo
 
 ### Files changed / added
 
-- **NEW** `src/query/bm25_search.py` — Neo4j fulltext BM25 retriever  
-- **NEW** `src/query/rank_fusion.py` — RRF implementation  
-- **MOD** `src/query/hybrid_search.py` — Wire hybrid recall + RRF, then rerank  
-- **MOD** `src/query/ranking.py` — Recognize `bm25`/`fused` score kinds  
-- **MOD** `src/shared/config.py` — Add knobs (`vector_top_k`, `bm25_top_k`, `rrf_k`, `rerank_candidates`, `rerank_top_k`)  
-- **MOD** `config/development.yaml` — Provide sane defaults  
+- **NEW** `src/query/bm25_search.py` — Neo4j fulltext BM25 retriever
+- **NEW** `src/query/rank_fusion.py` — RRF implementation
+- **MOD** `src/query/hybrid_search.py` — Wire hybrid recall + RRF, then rerank
+- **MOD** `src/query/ranking.py` — Recognize `bm25`/`fused` score kinds
+- **MOD** `src/shared/config.py` — Add knobs (`vector_top_k`, `bm25_top_k`, `rrf_k`, `rerank_candidates`, `rerank_top_k`)
+- **MOD** `config/development.yaml` — Provide sane defaults
 - **NEW** `scripts/neo4j/create_fulltext_index.cypher` — Create `chunk_text_index`
 
 ### Unified patch

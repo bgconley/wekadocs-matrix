@@ -19,7 +19,7 @@ from src.query.context_assembly import ContextAssembler
 from src.query.hybrid_retrieval import ChunkResult, HybridRetriever
 from src.query.hybrid_search import HybridSearchEngine, QdrantVectorStore, SearchResult
 from src.query.planner import QueryPlanner
-from src.query.ranking import RankingFeatures, RankedResult, rank_results
+from src.query.ranking import RankedResult, RankingFeatures, rank_results
 from src.query.response_builder import Response, Verbosity, build_response
 from src.query.session_tracker import SessionTracker
 from src.shared.config import get_config
@@ -175,9 +175,7 @@ class QueryService:
             logger.info("ContextAssembler initialized for stitched responses")
         return self._context_assembler
 
-    def _wrap_chunks_as_ranked(
-        self, chunks: List[ChunkResult]
-    ) -> List[RankedResult]:
+    def _wrap_chunks_as_ranked(self, chunks: List[ChunkResult]) -> List[RankedResult]:
         """Adapt ChunkResult objects to RankedResult instances for response building."""
 
         ranked: List[RankedResult] = []
@@ -185,11 +183,11 @@ class QueryService:
             score = float(
                 chunk.fused_score
                 if chunk.fused_score is not None
-                else chunk.vector_score
-                if chunk.vector_score is not None
-                else chunk.bm25_score
-                if chunk.bm25_score is not None
-                else 0.0
+                else (
+                    chunk.vector_score
+                    if chunk.vector_score is not None
+                    else chunk.bm25_score if chunk.bm25_score is not None else 0.0
+                )
             )
 
             metadata: Dict[str, Any] = {
@@ -232,7 +230,9 @@ class QueryService:
                 final_score=score,
             )
 
-            ranked.append(RankedResult(result=search_result, features=features, rank=index + 1))
+            ranked.append(
+                RankedResult(result=search_result, features=features, rank=index + 1)
+            )
 
         return ranked
 
@@ -346,8 +346,12 @@ class QueryService:
                 f"Added embedding_version filter: {self.config.embedding.version}"
             )
 
-            use_phase7e = bool(getattr(self.config.search.hybrid, "enabled", True)) and bool(
-                getattr(getattr(self.config.search.hybrid, "bm25", None), "enabled", False)
+            use_phase7e = bool(
+                getattr(self.config.search.hybrid, "enabled", True)
+            ) and bool(
+                getattr(
+                    getattr(self.config.search.hybrid, "bm25", None), "enabled", False
+                )
             )
 
             assembled_md: Optional[str] = None

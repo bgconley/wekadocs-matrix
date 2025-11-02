@@ -8,6 +8,7 @@ Phase 7E-4: Enhanced with comprehensive metrics collection and SLO monitoring
 Reference: Phase 7E Canonical Spec L1421-1444, L3781-3788
 """
 
+import json
 import os
 import time
 from dataclasses import dataclass, field
@@ -15,7 +16,6 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from neo4j import Driver
-from neo4j.exceptions import Neo4jError
 from qdrant_client import QdrantClient
 
 # Phase 7E-4: Monitoring imports
@@ -102,12 +102,14 @@ class BM25Retriever:
 
     def __init__(self, neo4j_driver: Driver, index_name: Optional[str] = None):
         self.driver = neo4j_driver
-        self.index_name = index_name or os.getenv("BM25_INDEX_NAME", "chunk_text_index_v2")
+        self.index_name = index_name or os.getenv(
+            "BM25_FT_INDEX_NAME", "chunk_text_index_v3"
+        )
         self._ensure_fulltext_index()
 
     def _list_indexes(self, session) -> List[Dict[str, Any]]:
         """
-        Return index metadata across Neo4j 4.x and 5.x.
+        Return normalized index metadata across Neo4j 4.x and 5.x.
         """
         try:
             query = """
@@ -116,28 +118,24 @@ class BM25Retriever:
             RETURN name, type, entityType, labelsOrTypes, properties, state, options
             """
             return session.run(query).data()
-        except Neo4jError:
-            query = """
-            CALL db.indexes()
-            YIELD name, type, entityType, labelsOrTypes, properties, state, options
-            RETURN name, type, entityType, labelsOrTypes, properties, state, options
-            """
-            return session.run(query).data()
-
-    def _await_index_online(self, session) -> None:
-        """
-        Await index readiness using whichever procedure is available.
-        """
-        try:
-            session.run("CALL db.index.awaitIndex($name)", name=self.index_name)
-            return
         except Exception:
             pass
 
-        try:
-            session.run("CALL db.awaitIndexes()")
-        except Exception:
-            pass
+        rows = session.run("CALL db.index.fulltext.list()").data()
+        normalized = []
+        for row in rows:
+            normalized.append(
+                {
+                    "name": row.get("name"),
+                    "type": "FULLTEXT",
+                    "entityType": "NODE",
+                    "labelsOrTypes": row.get("labels"),
+                    "properties": row.get("properties"),
+                    "state": row.get("state", "ONLINE"),
+                    "options": row.get("options"),
+                }
+            )
+        return normalized
 
     def _ensure_fulltext_index(self):
         """
@@ -148,51 +146,89 @@ class BM25Retriever:
         desired_props = {"text", "heading"}
 
         with self.driver.session() as session:
+            defn = None
             rows = self._list_indexes(session)
-
-            exists = False
-            needs_recreate = False
-            current_row = None
-
             for row in rows:
                 if row.get("name") == self.index_name:
-                    exists = True
-                    current_row = row
-                    labels = set(row.get("labelsOrTypes") or [])
-                    props = set(row.get("properties") or [])
-                    is_fulltext = (row.get("type") or "").upper() == "FULLTEXT"
-                    definition_ok = (
-                        is_fulltext
-                        and desired_labels.issubset(labels)
-                        and desired_props.issubset(props)
-                    )
-                    if not definition_ok:
-                        needs_recreate = True
+                    defn = {
+                        "type": (row.get("type") or "").upper(),
+                        "labels": set(row.get("labelsOrTypes") or []),
+                        "properties": set(row.get("properties") or []),
+                        "state": row.get("state"),
+                        "raw": row,
+                    }
                     break
 
-            if exists and needs_recreate:
-                logger.warning(
-                    "Dropping stale full-text index with wrong definition",
-                    extra={"name": self.index_name, "current": current_row},
-                )
-                try:
-                    session.run(f"DROP INDEX {self.index_name} IF EXISTS")
-                except Exception:
-                    session.run(f"DROP INDEX {self.index_name}")
+            need_create = False
+            if defn is None:
+                need_create = True
+            else:
+                if (
+                    defn["type"] != "FULLTEXT"
+                    or defn["labels"] != desired_labels
+                    or not desired_props.issubset(defn["properties"])
+                ):
+                    logger.warning(
+                        "Dropping mismatched full-text index",
+                        extra={"name": self.index_name, "current": defn.get("raw")},
+                    )
+                    dropped = False
+                    try:
+                        session.run(f"DROP INDEX {self.index_name} IF EXISTS")
+                        dropped = True
+                    except Exception:
+                        pass
 
-            if (not exists) or needs_recreate:
+                    if not dropped:
+                        session.run(
+                            "CALL db.index.fulltext.drop($name)", name=self.index_name
+                        )
+                    need_create = True
+
+            if need_create:
                 logger.info(
                     "Creating full-text index",
-                    extra={"name": self.index_name, "labels": list(desired_labels), "props": list(desired_props)},
+                    extra={
+                        "name": self.index_name,
+                        "labels": list(desired_labels),
+                        "props": list(desired_props),
+                    },
                 )
-                session.run(
-                    f"""
-                    CREATE FULLTEXT INDEX {self.index_name}
-                    IF NOT EXISTS
-                    FOR (n:Chunk|CitationUnit) ON EACH [n.text, n.heading]
-                    """
-                )
-                self._await_index_online(session)
+                created = False
+                try:
+                    session.run(
+                        f"CREATE FULLTEXT INDEX {self.index_name} "
+                        "FOR (n:Chunk|CitationUnit) ON EACH [n.text, n.heading]"
+                    )
+                    created = True
+                except Exception:
+                    pass
+
+                if not created:
+                    session.run(
+                        "CALL db.index.fulltext.createNodeIndex($name, $labels, $props)",
+                        name=self.index_name,
+                        labels=["Chunk", "CitationUnit"],
+                        props=["text", "heading"],
+                    )
+
+            # Wait for the index to come online (best effort)
+            try:
+                for _ in range(60):
+                    row = session.run(
+                        """
+                        SHOW INDEXES YIELD name, state
+                        WHERE name = $name
+                        RETURN state
+                        """,
+                        name=self.index_name,
+                    ).single()
+                    if row and row["state"] == "ONLINE":
+                        break
+                    time.sleep(0.25)
+            except Exception:
+                # Neo4j 4.x doesn't support SHOW; nothing further required.
+                pass
 
             logger.info("Full-text index ensured", extra={"name": self.index_name})
 
@@ -221,34 +257,41 @@ class BM25Retriever:
         where_clause = " AND " + " AND ".join(where_clauses) if where_clauses else ""
 
         search_query = f"""
-        CALL db.index.fulltext.queryNodes($index_name, $query)
-        YIELD node, score
-        OPTIONAL MATCH (node)-[:IN_CHUNK]->(parent:Chunk)
-        WITH
-          CASE WHEN node:Chunk THEN node ELSE parent END AS chunk,
-          CASE WHEN node:CitationUnit THEN node ELSE NULL END AS citation,
-          score
-        WHERE chunk IS NOT NULL{where_clause}
-        RETURN
-          chunk.id AS chunk_id,
-          chunk.document_id AS document_id,
-          chunk.parent_section_id AS parent_section_id,
-          chunk.order AS `order`,
-          chunk.level AS level,
-          chunk.heading AS chunk_heading,
-          chunk.text AS chunk_text,
-          chunk.token_count AS token_count,
-          chunk.is_combined AS is_combined,
-          chunk.is_split AS is_split,
-          chunk.original_section_ids AS original_section_ids,
-          chunk.boundaries_json AS boundaries_json,
-          score AS score,
-          (citation IS NOT NULL) AS is_citation,
-          citation.order AS citation_order,
-          citation.heading AS citation_heading
-        ORDER BY score DESC
-        LIMIT $limit
-        """
+CALL db.index.fulltext.queryNodes($index_name, $query)
+YIELD node, score
+OPTIONAL MATCH (node)-[:IN_CHUNK]->(parent:Chunk)
+WITH node, parent, score
+OPTIONAL MATCH (fallback:Chunk {{id: node.parent_chunk_id}})
+WITH
+  CASE
+    WHEN node:Chunk THEN node
+    WHEN parent IS NOT NULL THEN parent
+    WHEN fallback IS NOT NULL THEN fallback
+    ELSE NULL
+  END AS chunk,
+  CASE WHEN node:CitationUnit THEN node ELSE NULL END AS citation,
+  score
+WHERE chunk IS NOT NULL{where_clause}
+RETURN
+  chunk.id AS chunk_id,
+  chunk.document_id AS document_id,
+  chunk.parent_section_id AS parent_section_id,
+  chunk.order AS `order`,
+  chunk.level AS level,
+  chunk.heading AS chunk_heading,
+  chunk.text AS chunk_text,
+  chunk.token_count AS token_count,
+  chunk.is_combined AS is_combined,
+  chunk.is_split AS is_split,
+  chunk.original_section_ids AS original_section_ids,
+  chunk.boundaries_json AS boundaries_json,
+  score AS score,
+  (citation IS NOT NULL) AS is_citation,
+  citation.order AS citation_order,
+  citation.heading AS citation_heading
+ORDER BY score DESC
+LIMIT $limit
+"""
 
         aggregates: Dict[str, Dict[str, Any]] = {}
 
@@ -270,7 +313,8 @@ class BM25Retriever:
                             "token_count": int(record["token_count"] or 0),
                             "is_combined": bool(record["is_combined"]),
                             "is_split": bool(record["is_split"]),
-                            "original_section_ids": record["original_section_ids"] or [],
+                            "original_section_ids": record["original_section_ids"]
+                            or [],
                             "boundaries_json": record["boundaries_json"] or "{}",
                             "best_chunk_score": 0.0,
                             "best_cu_score": 0.0,
@@ -286,10 +330,16 @@ class BM25Retriever:
                     if is_citation:
                         entry["best_cu_score"] = max(entry["best_cu_score"], score)
                         if citation_heading:
-                            order_value = int(citation_order) if citation_order is not None else entry["order"]
+                            order_value = (
+                                int(citation_order)
+                                if citation_order is not None
+                                else entry["order"]
+                            )
                             entry["citations"].append((order_value, citation_heading))
                     else:
-                        entry["best_chunk_score"] = max(entry["best_chunk_score"], score)
+                        entry["best_chunk_score"] = max(
+                            entry["best_chunk_score"], score
+                        )
 
                 elapsed_ms = (time.time() - start_time) * 1000
                 logger.info(
@@ -309,14 +359,18 @@ class BM25Retriever:
             best_chunk_score = entry["best_chunk_score"]
             best_cu_score = entry["best_cu_score"]
             final_score = (
-                best_cu_score * CITATIONUNIT_BOOST if best_cu_score > 0.0 else best_chunk_score
+                best_cu_score * CITATIONUNIT_BOOST
+                if best_cu_score > 0.0
+                else best_chunk_score
             )
 
             raw_labels = entry["citations"]
             deduped: List[Tuple[int, str]] = []
             seen: Set[Tuple[int, str]] = set()
             for order_val, title in raw_labels:
-                normalized_order = int(order_val if order_val is not None else entry["order"])
+                normalized_order = int(
+                    order_val if order_val is not None else entry["order"]
+                )
                 normalized_title = title or entry["heading"] or "Section"
                 key = (normalized_order, normalized_title)
                 if key in seen:
@@ -607,6 +661,7 @@ class HybridRetriever:
 
         # Step 6: Dedup and final sort (no top_k cap - budget enforces limit)
         all_results = self._dedup_results(all_results)
+        self._hydrate_missing_citations(all_results)
         all_results.sort(
             key=lambda chunk: (
                 len(chunk.citation_labels or []),
@@ -811,54 +866,90 @@ class HybridRetriever:
         """
         Ensure chunks surfaced by vectors also emit citation labels by fetching their CitationUnit headings.
         """
-        missing = [
-            chunk.chunk_id
-            for chunk in chunks
-            if not (getattr(chunk, "citation_labels", None) or [])
-        ]
-        if not missing:
-            return
+        query_ids = list({chunk.chunk_id for chunk in chunks})
 
-        query = """
-        UNWIND $ids AS cid
-        MATCH (c:Chunk {id: cid})
-        OPTIONAL MATCH (u:CitationUnit)-[:IN_CHUNK]->(c)
-        WITH c, u ORDER BY u.order ASC
-        RETURN c.id AS chunk_id, collect([u.order, u.heading]) AS labels
-        """
+        lookup: Dict[str, List[Tuple[int, str]]] = {}
+        if query_ids:
+            query = """
+            UNWIND $ids AS cid
+            MATCH (c:Chunk {id: cid})
+            OPTIONAL MATCH (u:CitationUnit)-[:IN_CHUNK]->(c)
+            WITH c, u ORDER BY u.order ASC
+            RETURN c.id AS chunk_id, collect([u.order, u.heading]) AS labels
+            """
 
-        with self.neo4j_driver.session() as session:
-            rows = session.run(query, ids=missing).data()
+            with self.neo4j_driver.session() as session:
+                rows = session.run(query, ids=query_ids).data()
 
-        by_id: Dict[str, List[Tuple[int, str]]] = {
-            row["chunk_id"]: [
-                (int(order or 0), heading)
-                for order, heading in (row.get("labels") or [])
-                if heading
-            ]
-            for row in rows
-        }
+            lookup = {
+                row["chunk_id"]: [
+                    (int(order or 0), heading)
+                    for order, heading in (row.get("labels") or [])
+                    if heading
+                ]
+                for row in rows
+            }
 
         for chunk in chunks:
-            if getattr(chunk, "citation_labels", None):
-                continue
+            labels = []
+            if lookup:
+                labels.extend(lookup.get(chunk.chunk_id, []) or [])
 
-            labels = by_id.get(chunk.chunk_id) or []
+            existing = getattr(chunk, "citation_labels", None) or []
+            if existing:
+                labels.extend(existing)
+
+            if not labels:
+                try:
+                    boundaries = json.loads(chunk.boundaries_json or "{}")
+                    items = (
+                        boundaries
+                        if isinstance(boundaries, list)
+                        else boundaries.get("sections", [])
+                    )
+                    parsed: List[Tuple[int, str]] = []
+                    for section in items or []:
+                        heading_val = (
+                            section.get("heading")
+                            or section.get("title")
+                            or ""
+                        ).strip()
+                        if not heading_val:
+                            continue
+                        order_val = section.get("order") or 0
+                        try:
+                            order_int = int(order_val)
+                        except (TypeError, ValueError):
+                            order_int = 0
+                        parsed.append((order_int, heading_val))
+                    labels = parsed
+                except Exception:
+                    labels = []
+
             if not labels:
                 continue
 
             seen: Set[Tuple[int, str]] = set()
-            out: List[Tuple[int, str]] = []
-            for pair in labels:
-                key = tuple(pair)
+            normalized: List[Tuple[int, str]] = []
+            for order_val, title in labels:
+                key = (int(order_val or 0), title)
                 if key in seen:
                     continue
                 seen.add(key)
-                out.append((pair[0], pair[1]))
+                normalized.append(key)
 
-            out.sort(key=lambda x: (x[0], x[1]))
-            if out:
-                chunk.citation_labels = out
+            normalized.sort(key=lambda x: (x[0], x[1]))
+            if len(normalized) > 1:
+                heading = (chunk.heading or "").strip()
+                trimmed = [
+                    item
+                    for item in normalized
+                    if item[1] != heading or item[0] != 0
+                ]
+                if trimmed:
+                    normalized = trimmed
+            if normalized:
+                chunk.citation_labels = normalized
 
     def _should_expand(
         self, query: str, seeds: List[ChunkResult], when: ExpandWhen

@@ -101,15 +101,13 @@ def test_context_stitching_preserves_order_and_citations():
         ), "Stitched context header missing from response markdown"
 
         context_section = markdown.split(context_header, 1)[1].strip()
-        body_part, citation_part = context_section.split(
-            "\n\n---\n### Citations\n", 1
-        )
+        body_part, citation_part = context_section.split("\n\n---\n### Citations\n", 1)
 
         # Verify both steps are retrieved and included in context in document order
         assert "ORDER_STEP_ONE" in body_part, "Step 1 content not present in context"
         assert "ORDER_STEP_TWO" in body_part, "Step 2 content not present in context"
-        assert (
-            body_part.index("ORDER_STEP_ONE") < body_part.index("ORDER_STEP_TWO")
+        assert body_part.index("ORDER_STEP_ONE") < body_part.index(
+            "ORDER_STEP_TWO"
         ), "Step 1 content should appear before Step 2 in stitched context"
 
         citation_lines = [
@@ -117,12 +115,14 @@ def test_context_stitching_preserves_order_and_citations():
         ]
         assert len(citation_lines) >= 2, "Expected at least two citations"
 
-        assert citation_lines[0].startswith("[1]") and "Step 1: Prepare Environment" in citation_lines[0], (
-            "First citation should reference Step 1"
-        )
-        assert citation_lines[1].startswith("[2]") and "Step 2: Complete Installation" in citation_lines[1], (
-            "Second citation should reference Step 2"
-        )
+        assert (
+            citation_lines[0].startswith("[1]")
+            and "Step 1: Prepare Environment" in citation_lines[0]
+        ), "First citation should reference Step 1"
+        assert (
+            citation_lines[1].startswith("[2]")
+            and "Step 2: Complete Installation" in citation_lines[1]
+        ), "Second citation should reference Step 2"
 
         for i, line in enumerate(citation_lines, start=1):
             assert line.startswith(f"[{i}]")
@@ -149,9 +149,7 @@ def test_context_stitching_preserves_order_and_citations():
                     collection_name=collection,
                     points_selector={
                         "filter": {
-                            "must": [
-                                {"key": "document_id", "match": {"value": doc_id}}
-                            ]
+                            "must": [{"key": "document_id", "match": {"value": doc_id}}]
                         }
                     },
                     wait=True,

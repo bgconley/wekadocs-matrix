@@ -26,9 +26,9 @@ prerequisites:
 
 # Production Fix: Content Preservation and Token Management
 
-**Date:** 2025-01-27  
-**Status:** Planning  
-**Criticality:** PRODUCTION BLOCKER  
+**Date:** 2025-01-27
+**Status:** Planning
+**Criticality:** PRODUCTION BLOCKER
 **Estimated Implementation:** 4-6 hours
 
 ---
@@ -118,7 +118,7 @@ class TokenCounter:
         # CRITICAL: Use the EXACT tokenizer for jina-embeddings-v3 (XLM-RoBERTa family)
         # NOT cl100k_base (OpenAI) - that was wrong!
         self.backend = os.getenv('TOKENIZER_BACKEND', 'hf')  # 'hf' or 'segmenter'
-        
+
         if self.backend == 'hf':
             # Primary: HuggingFace tokenizer (local, fast, exact)
             self.tokenizer = AutoTokenizer.from_pretrained(
@@ -129,10 +129,10 @@ class TokenCounter:
             # Secondary: Jina Segmenter API (network, free, exact)
             self.segmenter_url = os.getenv('JINA_SEGMENTER_BASE_URL', 'https://api.jina.ai/v1/segment')
             self.api_key = os.getenv('JINA_API_KEY')  # Optional, improves rate limits
-        
+
         self.max_tokens = 8192
         self.target_tokens = 7900  # More conservative buffer
-    
+
     def count_tokens(self, text: str) -> int:
         """Actual token count using model-specific tokenizer."""
         if self.backend == 'hf':
@@ -140,11 +140,11 @@ class TokenCounter:
         else:
             # Call Jina Segmenter API
             return self._count_via_segmenter(text)
-    
+
     def needs_splitting(self, text: str) -> bool:
         """Check if text exceeds token limit."""
         return self.count_tokens(text) > self.max_tokens
-    
+
     def truncate_to_token_limit(self, text: str, max_tokens: int) -> str:
         """Truncate text to exact token count."""
         if self.backend == 'hf':
@@ -156,7 +156,7 @@ class TokenCounter:
         else:
             # Use segmenter for truncation guidance
             return self._truncate_via_segmenter(text, max_tokens)
-    
+
     def compute_integrity_hash(self, text: str) -> str:
         """Compute SHA256 for integrity verification."""
         return hashlib.sha256(text.encode('utf-8')).hexdigest()
@@ -171,11 +171,11 @@ class IntelligentSplitter:
         self.target_tokens = 8000  # Leave buffer for safety
         self.min_tokens = 1000     # Don't create tiny chunks
         self.overlap_tokens = 200  # Context preservation
-    
+
     def split_section(self, section_text: str, id: str) -> List[Dict]:
         """
         Split large section into chunks while preserving meaning.
-        
+
         Returns list of chunks with metadata:
         [
             {
@@ -199,20 +199,20 @@ class IntelligentSplitter:
                 'overlap_end': False,
                 'token_count': self.token_counter.count_tokens(section_text)
             }]
-        
+
         # Split strategy (in priority order):
         # 1. Try paragraph boundaries (double newline)
         # 2. Try sentence boundaries (. ! ?)
         # 3. Try line boundaries (single newline)
         # 4. Last resort: word boundaries
-        
+
         chunks = self._split_with_overlap(section_text, id)
         return chunks
-    
+
     def _split_with_overlap(self, text: str, id: str) -> List[Dict]:
         """
         Split text into chunks with overlapping context.
-        
+
         Key features:
         - Each chunk ≤ 8000 tokens (safe margin)
         - 200-token overlap between chunks for context
@@ -238,7 +238,7 @@ ALTER Section ADD PROPERTIES:
 // New relationship for chunk sequencing
 CREATE RELATIONSHIP:
   (:Section)-[:NEXT_CHUNK]->(:Section)
-  
+
 // New index for chunk queries
 CREATE INDEX section_chunk_idx FOR (s:Section) ON (s.parent_section_id, s.order)
 ```
@@ -270,7 +270,7 @@ CREATE INDEX section_chunk_idx FOR (s:Section) ON (s.parent_section_id, s.order)
 def retrieve_with_chunk_awareness(query_vector, top_k=10):
     """
     Retrieve sections with chunk-awareness.
-    
+
     Strategy:
     1. Find top matching chunks
     2. Aggregate scores by parent_section_id
@@ -279,7 +279,7 @@ def retrieve_with_chunk_awareness(query_vector, top_k=10):
     """
     # Get initial matches
     matches = qdrant.search(query_vector, limit=top_k * 2)
-    
+
     # Group by parent section
     section_groups = {}
     for match in matches:
@@ -287,7 +287,7 @@ def retrieve_with_chunk_awareness(query_vector, top_k=10):
         if parent_id not in section_groups:
             section_groups[parent_id] = []
         section_groups[parent_id].append(match)
-    
+
     # For each section, get all chunks if chunked
     complete_sections = []
     for id, chunks in section_groups.items():
@@ -307,7 +307,7 @@ def retrieve_with_chunk_awareness(query_vector, top_k=10):
                 'best_score': chunks[0].score,
                 'coverage': 1.0
             })
-    
+
     # Rerank by combination of score and coverage
     return rerank_sections(complete_sections, top_k)
 ```
@@ -547,32 +547,32 @@ logger = logging.getLogger(__name__)
 
 class TokenizerService(ABC):
     """Abstract interface for tokenization."""
-    
+
     @abstractmethod
     def count_tokens(self, text: str) -> int:
         pass
-    
+
     @abstractmethod
     def split_to_token_windows(
-        self, 
-        text: str, 
+        self,
+        text: str,
         target_tokens: int = 7900,
         overlap_tokens: int = 200,
         min_tokens: int = 1000
     ) -> List[Dict[str, any]]:
         pass
-    
+
     def compute_integrity_hash(self, text: str) -> str:
         """SHA256 for zero-loss verification."""
         return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 class HFTokenizerService(TokenizerService):
     """HuggingFace local tokenizer - PRIMARY."""
-    
+
     def __init__(self):
         model_id = os.getenv('HF_TOKENIZER_ID', 'jinaai/jina-embeddings-v3')
         cache_dir = os.getenv('HF_CACHE', '/opt/hf-cache')
-        
+
         logger.info(f"Loading HF tokenizer: {model_id}")
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_id,
@@ -581,20 +581,20 @@ class HFTokenizerService(TokenizerService):
         )
         self.target_tokens = int(os.getenv('EMBED_TARGET_TOKENS', '7900'))
         self.overlap_tokens = int(os.getenv('EMBED_OVERLAP_TOKENS', '200'))
-        
+
     def count_tokens(self, text: str) -> int:
         """Count tokens using exact model tokenizer."""
         return len(self.tokenizer.encode(text, add_special_tokens=False))
-    
-    def split_to_token_windows(self, text: str, target_tokens: int = None, 
+
+    def split_to_token_windows(self, text: str, target_tokens: int = None,
                                 overlap_tokens: int = None, min_tokens: int = 1000) -> List[Dict]:
         """Split text into overlapping chunks with exact token counts."""
         target = target_tokens or self.target_tokens
         overlap = overlap_tokens or self.overlap_tokens
-        
+
         tokens = self.tokenizer.encode(text, add_special_tokens=False)
         total_tokens = len(tokens)
-        
+
         if total_tokens <= target:
             return [{
                 'text': text,
@@ -605,20 +605,20 @@ class HFTokenizerService(TokenizerService):
                 'end_char': len(text),
                 'integrity_hash': self.compute_integrity_hash(text)
             }]
-        
+
         # Split with overlaps
         chunks = []
         start_idx = 0
         order = 0
-        
+
         while start_idx < total_tokens:
             # Take target tokens (or remainder)
             end_idx = min(start_idx + target, total_tokens)
-            
+
             # Decode this chunk
             chunk_tokens = tokens[start_idx:end_idx]
             chunk_text = self.tokenizer.decode(chunk_tokens, skip_special_tokens=True)
-            
+
             chunks.append({
                 'text': chunk_text,
                 'order': order,
@@ -627,38 +627,38 @@ class HFTokenizerService(TokenizerService):
                 'overlap_end': end_idx < total_tokens,
                 'integrity_hash': self.compute_integrity_hash(chunk_text)
             })
-            
+
             # Move forward with overlap
             start_idx = end_idx - overlap if end_idx < total_tokens else end_idx
             order += 1
-        
+
         # Update total_chunks
         for chunk in chunks:
             chunk['total_chunks'] = len(chunks)
-        
+
         # Log the split decision
         if os.getenv('LOG_SPLIT_DECISIONS', 'true').lower() == 'true':
             logger.info(
                 f"Split decision: {total_tokens} tokens -> {len(chunks)} chunks "
                 f"(target={target}, overlap={overlap})"
             )
-        
+
         return chunks
 
 class SegmenterClientService(TokenizerService):
     """Jina Segmenter API - SECONDARY/FALLBACK."""
-    
+
     def __init__(self):
         self.base_url = os.getenv('JINA_SEGMENTER_BASE_URL', 'https://api.jina.ai/v1/segment')
         self.api_key = os.getenv('JINA_API_KEY')  # Optional, improves rate limits
         self.tokenizer_name = os.getenv('SEGMENTER_TOKENIZER_NAME', 'xlm-roberta-base')
         self.timeout = int(os.getenv('SEGMENTER_TIMEOUT_MS', '3000')) / 1000
-        
+
         self.client = httpx.Client(
             timeout=self.timeout,
             headers={'Authorization': f'Bearer {self.api_key}'} if self.api_key else {}
         )
-        
+
     def count_tokens(self, text: str) -> int:
         """Count tokens via Segmenter API (FREE - not billed!)."""
         try:
@@ -676,7 +676,7 @@ class SegmenterClientService(TokenizerService):
         except Exception as e:
             logger.error(f"Segmenter API error: {e}")
             raise
-    
+
     def split_to_token_windows(self, text: str, target_tokens: int = 7900,
                                 overlap_tokens: int = 200, min_tokens: int = 1000) -> List[Dict]:
         """Use Segmenter's chunking suggestions."""
@@ -687,7 +687,7 @@ class SegmenterClientService(TokenizerService):
 def create_tokenizer_service() -> TokenizerService:
     """Factory to create tokenizer based on env config."""
     backend = os.getenv('TOKENIZER_BACKEND', 'hf')
-    
+
     if backend == 'hf':
         return HFTokenizerService()
     elif backend == 'segmenter':
@@ -711,30 +711,30 @@ class JinaEmbeddingProvider:
         self.target_tokens = int(os.getenv('EMBED_TARGET_TOKENS', '7900'))  # More conservative
         self.overlap_tokens = int(os.getenv('EMBED_OVERLAP_TOKENS', '200'))
         self.integrity_check_rate = float(os.getenv('INTEGRITY_CHECK_SAMPLE_RATE', '0.05'))
-    
+
     def _prepare_text_for_embedding(self, text: str, text_idx: int) -> List[str]:
         """Prepare text, splitting if necessary."""
         token_count = len(self.tokenizer.encode(text))
-        
+
         if token_count <= self.max_tokens:
             logger.debug(f"Text {text_idx}: {token_count} tokens, no split needed")
             return [text]
-        
+
         logger.warning(
             f"Text {text_idx}: {token_count} tokens exceeds limit, "
             f"splitting into chunks"
         )
-        
+
         # Use intelligent splitter
         from src.ingestion.chunk_splitter import IntelligentSplitter
         splitter = IntelligentSplitter(self.tokenizer, self.target_tokens)
         chunks = splitter.split_text(text)
-        
+
         logger.info(
             f"Text {text_idx} split into {len(chunks)} chunks, "
             f"preserving all {len(text)} characters"
         )
-        
+
         return [chunk['text'] for chunk in chunks]
 ```
 
@@ -751,7 +751,7 @@ CREATE (s1:Section {
     content: 'First 8000 tokens...'
 })
 CREATE (s2:Section {
-    id: 'hash_chunk_2', 
+    id: 'hash_chunk_2',
     parent_section_id: 'original_section_hash',
     is_chunked: true,
     order: 1,
@@ -760,7 +760,7 @@ CREATE (s2:Section {
 })
 CREATE (s3:Section {
     id: 'hash_chunk_3',
-    parent_section_id: 'original_section_hash', 
+    parent_section_id: 'original_section_hash',
     is_chunked: true,
     order: 2,
     total_chunks: 3,
@@ -776,33 +776,33 @@ CREATE (doc)-[:HAS_SECTION]->(s1)
 ```python
 def retrieve_complete_sections(query_vector, top_k=10):
     """Retrieve complete sections, aggregating chunks."""
-    
+
     # Search Qdrant
     results = qdrant_client.search(
         collection_name="weka_sections_v2",
         query_vector=query_vector,
         limit=top_k * 3,  # Over-fetch to ensure coverage
     )
-    
+
     # Group by parent section
     section_map = {}
     for result in results:
         metadata = result.payload
         parent_id = metadata.get('parent_section_id', result.id)
-        
+
         if parent_id not in section_map:
             section_map[parent_id] = {
                 'chunks': [],
                 'best_score': 0,
                 'is_chunked': metadata.get('is_chunked', False)
             }
-        
+
         section_map[parent_id]['chunks'].append(result)
         section_map[parent_id]['best_score'] = max(
             section_map[parent_id]['best_score'],
             result.score
         )
-    
+
     # For chunked sections, fetch all chunks
     complete_sections = []
     for id, data in section_map.items():
@@ -824,7 +824,7 @@ def retrieve_complete_sections(query_vector, top_k=10):
                 'chunk_matches': 1,
                 'total_chunks': 1
             })
-    
+
     # Sort by score and return top_k
     complete_sections.sort(key=lambda x: x['score'], reverse=True)
     return complete_sections[:top_k]
@@ -840,10 +840,10 @@ def retrieve_complete_sections(query_vector, top_k=10):
 def test_no_content_loss():
     """Verify 100% content preservation."""
     original = "A" * 50000  # 50KB text
-    
+
     splitter = IntelligentSplitter(tokenizer)
     chunks = splitter.split_text(original)
-    
+
     # Reassemble (accounting for overlaps)
     reassembled = chunks[0]['text']
     for i in range(1, len(chunks)):
@@ -853,7 +853,7 @@ def test_no_content_loss():
             overlap_size = chunk['overlap_tokens']
             # ... overlap handling logic
         reassembled += chunk['text'][overlap_size:]
-    
+
     assert len(reassembled) == len(original)
     assert reassembled == original
 ```
@@ -863,25 +863,25 @@ def test_no_content_loss():
 ```python
 def test_large_section_ingestion():
     """Test ingestion of 40KB section."""
-    
+
     # Create document with large section
     doc = create_test_document(section_size=40000)
-    
+
     # Ingest
     ingest_document(doc)
-    
+
     # Verify in Neo4j
     chunks = neo4j.query("""
         MATCH (s:Section)
         WHERE s.parent_section_id = $id
         RETURN s ORDER BY s.order
     """, id=doc.id)
-    
+
     assert len(chunks) >= 2  # Should be split
     assert all(c['is_chunked'] for c in chunks)
     assert chunks[0]['order'] == 0
     assert chunks[-1]['order'] == chunks[-1]['total_chunks'] - 1
-    
+
     # Verify no content loss
     full_content = ''.join(c['content'] for c in chunks)
     assert len(full_content) >= len(doc.section_content)  # May have overlaps
@@ -893,7 +893,7 @@ def test_large_section_ingestion():
 
 ### Ingestion Impact
 
-**Current:** 
+**Current:**
 - Single API call per section
 - ~1-2 seconds per document
 
@@ -972,7 +972,7 @@ def test_large_section_ingestion():
 - **Decision:** Rejected - too complex for hotfix
 
 ### 2. Hierarchical Chunking
-- **Pros:** Semantic hierarchy preservation  
+- **Pros:** Semantic hierarchy preservation
 - **Cons:** Requires document structure analysis
 - **Decision:** Deferred - for v2 intelligent chunking
 
@@ -1081,7 +1081,7 @@ reassembled = chunks[0]
 for i in range(1, len(chunks)):
     # Skip overlap tokens (would need actual overlap boundaries)
     reassembled += chunks[i][200:]  # Simplified
-    
+
 original_hash = hashlib.sha256(original_text.encode()).hexdigest()
 reassembled_hash = hashlib.sha256(reassembled.encode()).hexdigest()
 print(f'Original hash: {original_hash}')

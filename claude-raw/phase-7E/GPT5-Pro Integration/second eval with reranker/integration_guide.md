@@ -2,7 +2,7 @@
 
 **Goal:** Enable **BM25 + Vector + RRF → Jina Reranker → Context Expansion** with minimal changes to your current code.
 
-**Repo root:** `/mnt/data/repo`  
+**Repo root:** `/mnt/data/repo`
 **Generated:** 2025-10-28T21:57:22.942738Z
 
 ---

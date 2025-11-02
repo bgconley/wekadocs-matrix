@@ -300,15 +300,17 @@ class GreedyCombinerV2:
             parent_section_id = group[0]["id"]
 
             raw_sections = list(boundaries["sections"])
-            clean_sections = [
-                {
-                    "id": sec["id"],
-                    "order": sec["order"],
-                    "level": sec["level"],
-                    "tokens": sec["tokens"],
-                }
-                for sec in raw_sections
-            ]
+            clean_sections = []
+            for sec in raw_sections:
+                clean_sections.append(
+                    {
+                        "id": sec["id"],
+                        "order": int(sec.get("order", 0)),
+                        "level": int(sec.get("level", 3)),
+                        "tokens": int(sec.get("tokens", 0)),
+                        "heading": (sec.get("title") or "").strip(),
+                    }
+                )
             clean_boundaries = {
                 "combined": boundaries["combined"],
                 "sections": clean_sections,

@@ -13,7 +13,7 @@ Expected behavior:
 
 import json
 import os
-import sys
+
 import httpx
 
 # Jina API configuration
@@ -113,11 +113,11 @@ def test_large_payload():
         print(f"\nStatus Code: {response.status_code}")
 
         if response.status_code == 400:
-            print(f"✅ EXPECTED FAILURE: HTTP 400 (payload too large)")
+            print("✅ EXPECTED FAILURE: HTTP 400 (payload too large)")
             print(f"   Response: {response.text[:500]}")
         elif response.status_code == 200:
-            print(f"⚠️  UNEXPECTED SUCCESS: API accepted large payload")
-            print(f"   This contradicts our hypothesis - 160KB was accepted")
+            print("⚠️  UNEXPECTED SUCCESS: API accepted large payload")
+            print("   This contradicts our hypothesis - 160KB was accepted")
         else:
             print(f"❓ UNEXPECTED: {response.status_code}")
             print(f"   Response: {response.text[:200]}")
@@ -125,9 +125,9 @@ def test_large_payload():
         client.close()
         return response.status_code
 
-    except httpx.ReadTimeout as e:
-        print(f"⏱️  TIMEOUT: Request timed out after 30s")
-        print(f"   This suggests processing started but is too slow")
+    except httpx.ReadTimeout:
+        print("⏱️  TIMEOUT: Request timed out after 30s")
+        print("   This suggests processing started but is too slow")
         return "timeout"
 
     except Exception as e:
