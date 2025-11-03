@@ -5,6 +5,7 @@
 # Pre-Phase 7 B3: Modified to use embedding provider abstraction
 
 import os
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -258,6 +259,7 @@ class GraphBuilder:
             d.version = $version,
             d.checksum = $checksum,
             d.last_edited = $last_edited,
+            d.doc_tag = $doc_tag,
             d.updated_at = datetime()
         RETURN d.id as id
         """
@@ -336,6 +338,7 @@ class GraphBuilder:
                 s.updated_at = datetime()
             WITH s, chunk
             MATCH (d:Document {id: $document_id})
+            SET s.doc_tag = d.doc_tag
             MERGE (d)-[r:HAS_SECTION]->(s)
             SET r.order = chunk.order,
                 r.updated_at = datetime()
@@ -394,6 +397,9 @@ class GraphBuilder:
                 u.token_count     = r.token_count,
                 u.parent_chunk_id = r.parent_chunk_id,
                 u.updated_at      = timestamp()
+            WITH u, r
+            MATCH (d:Document {id: r.document_id})
+            SET u.doc_tag = d.doc_tag
             """,
             rows=units,
         )
@@ -1101,6 +1107,7 @@ class GraphBuilder:
             "document_id": document_id,
             "document_uri": document_uri,
             "source_uri": source_uri,
+            "doc_tag": document.get("doc_tag"),
             # Chunk-specific fields (Phase 7E-1)
             "id": node_id,
             "parent_section_id": section.get("parent_section_id"),
@@ -1419,6 +1426,19 @@ def ingest_document(
 
         document = result["Document"]
         sections = result["Sections"]
+
+        # Extract doc_tag from content or source_uri
+        doc_tag = None
+        m = re.search(r"\bDocTag:\s*([A-Z]+-\d+)\b", content or "", flags=re.I)
+        if m:
+            doc_tag = m.group(1).upper()
+        else:
+            m = re.search(r"\b([A-Z]+-\d+)\b", source_uri or "", flags=re.I)
+            if m:
+                doc_tag = m.group(1).upper()
+        document["doc_tag"] = doc_tag
+        for section in sections:
+            section["doc_tag"] = doc_tag
 
         # Extract entities
         entities, mentions = extract_entities(sections)

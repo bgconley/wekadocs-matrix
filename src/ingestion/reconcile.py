@@ -212,7 +212,8 @@ class Reconciler:
                 s.id AS id,
                 coalesce(s.text, s.content, s.title, '') AS text,
                 coalesce(s.document_id, d.id) AS document_id,
-                d.source_uri AS source_uri
+                d.source_uri AS source_uri,
+                d.doc_tag AS doc_tag
             """
             with self.neo4j.session() as sess:
                 res = sess.run(cypher, {"ids": missing})
@@ -221,6 +222,7 @@ class Reconciler:
                         "text": rec["text"] or "",
                         "document_id": rec.get("document_id"),
                         "source_uri": rec.get("source_uri"),
+                        "doc_tag": rec.get("doc_tag"),
                     }
 
             upserts = []
@@ -237,6 +239,7 @@ class Reconciler:
                     "document_id": meta.get("document_id"),
                     "document_uri": document_uri,
                     "source_uri": source_uri,
+                    "doc_tag": meta.get("doc_tag"),
                     "embedding_version": self.version,
                 }
                 upserts.append((sid, vec, payload))

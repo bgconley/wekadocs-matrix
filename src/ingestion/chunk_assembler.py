@@ -308,7 +308,7 @@ class GreedyCombinerV2:
                         "order": int(sec.get("order", 0)),
                         "level": int(sec.get("level", 3)),
                         "tokens": int(sec.get("tokens", 0)),
-                        "heading": (sec.get("title") or "").strip(),
+                        "title": sec.get("title") or "",
                     }
                 )
             clean_boundaries = {
@@ -339,6 +339,7 @@ class GreedyCombinerV2:
                 meta["tokens"] = c_tokens
                 meta["text"] = combined
                 meta["checksum"] = hashlib.sha256(combined.encode("utf-8")).hexdigest()
+                meta["doc_tag"] = group[0].get("doc_tag")
                 meta["_citation_units"] = self._build_citation_units(
                     document_id=document_id,
                     chunk_id=meta["id"],
@@ -363,6 +364,7 @@ class GreedyCombinerV2:
                     meta["checksum"] = hashlib.sha256(
                         combined.encode("utf-8")
                     ).hexdigest()
+                    meta["doc_tag"] = group[0].get("doc_tag")
                     meta["_citation_units"] = self._build_citation_units(
                         document_id=document_id,
                         chunk_id=meta["id"],
@@ -405,6 +407,7 @@ class GreedyCombinerV2:
                             ).hexdigest(),
                             "anchor": group[0].get("anchor", ""),
                             "tokens": int(part["token_count"]),
+                            "doc_tag": group[0].get("doc_tag"),
                         }
                         sub_chunk["_citation_units"] = self._build_citation_units(
                             document_id=document_id,

@@ -8,6 +8,7 @@ Task 7C.8: Integrated with SessionTracker for multi-turn conversation support.
 """
 
 import json
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -20,7 +21,12 @@ from src.query.hybrid_retrieval import ChunkResult, HybridRetriever
 from src.query.hybrid_search import HybridSearchEngine, QdrantVectorStore, SearchResult
 from src.query.planner import QueryPlanner
 from src.query.ranking import RankedResult, RankingFeatures, rank_results
-from src.query.response_builder import Response, Verbosity, build_response
+from src.query.response_builder import (
+    Response,
+    StructuredResponse,
+    Verbosity,
+    build_response,
+)
 from src.query.session_tracker import SessionTracker
 from src.shared.config import get_config
 from src.shared.connections import get_connection_manager
@@ -289,13 +295,30 @@ class QueryService:
         start_time = time.time()
 
         try:
-            # Convert verbosity string to enum
-            try:
-                verb_enum = Verbosity(verbosity)
-            except ValueError:
-                raise ValueError(
-                    f"Invalid verbosity '{verbosity}'. Must be one of: full, graph"
+            requested_verbosity = (
+                verbosity if verbosity is not None else Verbosity.GRAPH.value
+            )
+            legacy_markdown = False
+            if isinstance(requested_verbosity, Verbosity):
+                verb_enum = requested_verbosity
+            else:
+                normalized = (
+                    requested_verbosity.strip().lower()
+                    if isinstance(requested_verbosity, str)
+                    else requested_verbosity
                 )
+                legacy_markdown = isinstance(normalized, str) and normalized in {
+                    "markdown",
+                    "md",
+                }
+                target = "full" if legacy_markdown else normalized
+                try:
+                    verb_enum = Verbosity(target)
+                except Exception as e:
+                    allowed = ", ".join(option.value for option in Verbosity)
+                    raise ValueError(
+                        f"Invalid verbosity '{verbosity}'. Must be one of: {allowed}"
+                    ) from e
 
             # Classify intent using planner
             planner = self._get_planner()
@@ -340,6 +363,17 @@ class QueryService:
             # This ensures we only retrieve vectors created with the current embedding model
             filters = dict(filters or {})
 
+            # Detect a doc_tag like REGPACK-08 in the query and scope retrieval
+            if isinstance(query, str):
+                m = re.search(r"\b([A-Z]+-\d+)\b", query, flags=re.I)
+                if m:
+                    filters["doc_tag"] = m.group(1).upper()
+                    logger.info(
+                        "Detected doc_tag from query",
+                        doc_tag=filters["doc_tag"],
+                        query=query,
+                    )
+
             # Add embedding_version to filters
             filters.setdefault("embedding_version", self.config.embedding.version)
             logger.debug(
@@ -368,6 +402,18 @@ class QueryService:
                     filters=filters,
                     expand=expand_graph,
                 )
+
+                # Strict post-filter by doc_tag (defense-in-depth)
+                dt = filters.get("doc_tag")
+                if dt:
+                    before = len(chunks)
+                    chunks = [c for c in chunks if getattr(c, "doc_tag", None) == dt]
+                    logger.info(
+                        "Applied strict doc_tag=%s: kept %d/%d chunks",
+                        dt,
+                        len(chunks),
+                        before,
+                    )
 
                 assembler = self._get_context_assembler()
                 assembled_context = assembler.assemble(chunks, query=query)
@@ -488,22 +534,40 @@ class QueryService:
             )
 
             # Instrument metrics (E5)
-            mcp_search_verbosity_total.labels(verbosity=verbosity).inc()
+            mcp_search_verbosity_total.labels(verbosity=verb_enum.value).inc()
 
             # Measure response size
             response_json = json.dumps(response.to_dict())
             response_size = len(response_json.encode("utf-8"))
-            mcp_search_response_size_bytes.labels(verbosity=verbosity).observe(
+            mcp_search_response_size_bytes.labels(verbosity=verb_enum.value).observe(
                 response_size
             )
 
             logger.info(
-                f"Query completed: verbosity={verbosity}, "
+                f"Query completed: verbosity={verb_enum.value}, "
                 f"response_size_kb={response_size/1024:.1f}, "
                 f"confidence={response.answer_json.confidence:.2f}, "
                 f"evidence_count={len(response.answer_json.evidence)}, "
                 f"total_time={timing['total_ms']:.1f}ms"
             )
+
+            if legacy_markdown:
+                logger.info(
+                    "Using legacy 'markdown' verbosity alias (compat path). "
+                    "Consider migrating callers to 'full' or 'graph'."
+                )
+                markdown_answer = (
+                    assembled_md
+                    or response.answer_markdown
+                    or response.answer_json.answer
+                    or ""
+                )
+                return StructuredResponse(
+                    answer=markdown_answer,
+                    evidence=response.answer_json.evidence,
+                    confidence=response.answer_json.confidence,
+                    diagnostics=response.answer_json.diagnostics,
+                )
 
             return response
 

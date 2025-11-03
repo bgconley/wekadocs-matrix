@@ -72,6 +72,7 @@ class ChunkResult:
     is_split: bool = False
     original_section_ids: List[str] = None
     boundaries_json: str = "{}"
+    doc_tag: Optional[str] = None  # document scoping tag (e.g., REGPACK-01)
 
     # Expansion tracking
     is_expanded: bool = False  # Was this chunk added via expansion?
@@ -85,8 +86,8 @@ class ChunkResult:
     vector_score: Optional[float] = None  # Vector similarity score
     fused_score: Optional[float] = None  # Final fused score
 
-    # Citation labels (order, title) derived from CitationUnits
-    citation_labels: List[Tuple[int, str]] = field(default_factory=list)
+    # Citation labels (order, title, level) derived from CitationUnits
+    citation_labels: List[Tuple[int, str, int]] = field(default_factory=list)
 
     def __post_init__(self):
         """Ensure required fields are populated."""
@@ -285,6 +286,7 @@ RETURN
   chunk.is_split AS is_split,
   chunk.original_section_ids AS original_section_ids,
   chunk.boundaries_json AS boundaries_json,
+  chunk.doc_tag AS doc_tag,
   score AS score,
   (citation IS NOT NULL) AS is_citation,
   citation.order AS citation_order,
@@ -316,6 +318,7 @@ LIMIT $limit
                             "original_section_ids": record["original_section_ids"]
                             or [],
                             "boundaries_json": record["boundaries_json"] or "{}",
+                            "doc_tag": record.get("doc_tag"),
                             "best_chunk_score": 0.0,
                             "best_cu_score": 0.0,
                             "citations": [],
@@ -365,7 +368,7 @@ LIMIT $limit
             )
 
             raw_labels = entry["citations"]
-            deduped: List[Tuple[int, str]] = []
+            deduped: List[Tuple[int, str, int]] = []
             seen: Set[Tuple[int, str]] = set()
             for order_val, title in raw_labels:
                 normalized_order = int(
@@ -376,7 +379,7 @@ LIMIT $limit
                 if key in seen:
                     continue
                 seen.add(key)
-                deduped.append(key)
+                deduped.append((normalized_order, normalized_title, entry["level"]))
 
             deduped.sort(key=lambda item: (item[0], item[1]))
 
@@ -394,6 +397,11 @@ LIMIT $limit
                     is_split=entry["is_split"],
                     original_section_ids=list(entry["original_section_ids"] or []),
                     boundaries_json=entry["boundaries_json"],
+                    doc_tag=(
+                        record.get("doc_tag")
+                        if "record" in locals()
+                        else entry.get("doc_tag")
+                    ),
                     bm25_score=final_score,
                     citation_labels=deduped,
                 )
@@ -483,6 +491,7 @@ class VectorRetriever:
                         is_split=payload.get("is_split", False),
                         original_section_ids=payload.get("original_section_ids", []),
                         boundaries_json=payload.get("boundaries_json", "{}"),
+                        doc_tag=payload.get("doc_tag"),
                         citation_labels=[],
                     )
                 )
@@ -633,7 +642,52 @@ class HybridRetriever:
             reverse=True,
         )
 
-        # Step 4: Gating decision for expansion
+        dt = filters.get("doc_tag") if filters else None
+        if dt:
+            before = len(seeds)
+            seeds = [c for c in seeds if getattr(c, "doc_tag", None) == dt]
+            metrics["seed_count"] = len(seeds)
+            logger.info(
+                "Filtered seeds by doc_tag=%s: kept %d/%d", dt, len(seeds), before
+            )
+
+        # Step 4: Optional dominance gating before expansion (stabilize doc continuity)
+        # Gate seeds to a primary document only if dominance is clear
+        def _gate_to_primary_document(
+            cs: List[ChunkResult], sample_size: int = 8
+        ) -> List[ChunkResult]:
+            if not cs:
+                return cs
+            from collections import Counter
+
+            sample_ids = [
+                getattr(c, "document_id", None)
+                for c in cs[:sample_size]
+                if getattr(c, "document_id", None)
+            ]
+            if not sample_ids:
+                return cs
+            doc_id, count = Counter(sample_ids).most_common(1)[0]
+            top3 = sample_ids[:3]
+            dominance = (
+                (top3.count(doc_id) >= 2)
+                or (count >= 3)
+                or (count / max(1, len(sample_ids)) >= 0.5)
+            )
+            if dominance:
+                gated = [c for c in cs if getattr(c, "document_id", None) == doc_id]
+                logger.info(
+                    "Gating seeds to primary document %s: kept %d/%d",
+                    (doc_id or "")[:8],
+                    len(gated),
+                    len(cs),
+                )
+                return gated
+            return cs
+
+        seeds = _gate_to_primary_document(seeds)
+
+        # Step 5: Gating decision for expansion
         when = ExpandWhen(expand_when)
         triggered, reason, score_delta, query_tokens = self._should_expand(
             query, seeds, when
@@ -643,12 +697,26 @@ class HybridRetriever:
         metrics["scores_close_delta"] = score_delta
         metrics["query_tokens"] = query_tokens
 
-        # Step 5: Optional bounded adjacency expansion
+        # Step 6: Optional bounded adjacency expansion
         # Note: Expansion ADDS neighbors without re-limiting to top_k
         all_results = list(seeds)
         if expand and triggered and self.expansion_enabled:
             expansion_start = time.time()
             expanded_results = self._bounded_expansion(query, seeds)
+
+            # Enforce doc_tag and same-document continuity for neighbors
+            dt = filters.get("doc_tag") if filters else None
+            if dt:
+                expanded_results = [
+                    n for n in expanded_results if getattr(n, "doc_tag", None) == dt
+                ]
+            seed_docs = {c.chunk_id: c.document_id for c in seeds}
+            expanded_results = [
+                n
+                for n in expanded_results
+                if seed_docs.get(getattr(n, "expansion_source", None)) == n.document_id
+            ]
+
             all_results.extend(expanded_results)
             metrics["expansion_time_ms"] = (time.time() - expansion_start) * 1000
             metrics["expansion_count"] = len(expanded_results)
@@ -670,6 +738,9 @@ class HybridRetriever:
             reverse=True,
         )
         final_results = all_results
+
+        # Gentle document continuity boost before final assembly
+        final_results = self._apply_doc_continuity_boost(final_results, alpha=0.12)
 
         # Step 6: Context assembly with budget enforcement
         context_start = time.time()
@@ -814,7 +885,6 @@ class HybridRetriever:
         Note: Requires score normalization since BM25 and vector scores have different ranges.
         """
 
-        # Normalize scores to [0, 1] range
         def normalize_scores(results: List[ChunkResult], score_attr: str):
             scores = [
                 getattr(r, score_attr, 0) for r in results if getattr(r, score_attr)
@@ -835,8 +905,7 @@ class HybridRetriever:
         normalize_scores(bm25_results, "bm25_score")
         normalize_scores(vec_results, "vector_score")
 
-        # Build combined result map
-        all_chunks = {}
+        all_chunks: Dict[str, ChunkResult] = {}
         for r in bm25_results:
             all_chunks[r.chunk_id] = r
             r.norm_bm25_score = getattr(r, "norm_bm25_score", 0)
@@ -844,13 +913,11 @@ class HybridRetriever:
             if r.chunk_id not in all_chunks:
                 all_chunks[r.chunk_id] = r
             else:
-                # Update vector score if already exists
                 all_chunks[r.chunk_id].vector_score = r.vector_score
                 all_chunks[r.chunk_id].norm_vector_score = getattr(
                     r, "norm_vector_score", 0
                 )
 
-        # Calculate weighted scores
         for chunk in all_chunks.values():
             norm_vec = getattr(chunk, "norm_vector_score", 0)
             norm_bm25 = getattr(chunk, "norm_bm25_score", 0)
@@ -862,20 +929,40 @@ class HybridRetriever:
 
         return list(all_chunks.values())
 
+    def _apply_doc_continuity_boost(
+        self, chunks: List[ChunkResult], alpha: float = 0.12
+    ) -> List[ChunkResult]:
+        """Slightly favor documents that dominate the seed set."""
+        if not chunks:
+            return chunks
+
+        from collections import Counter
+
+        sample = chunks[:10]
+        counts = Counter(getattr(c, "document_id", None) for c in sample)
+        boosted: List[ChunkResult] = []
+        for c in chunks:
+            base = float(c.fused_score or c.vector_score or c.bm25_score or 0.0)
+            doc_count = counts.get(getattr(c, "document_id", None), 0)
+            c.fused_score = base * (1.0 + alpha * doc_count)
+            boosted.append(c)
+        boosted.sort(key=lambda x: x.fused_score or 0.0, reverse=True)
+        return boosted
+
     def _hydrate_missing_citations(self, chunks: List[ChunkResult]) -> None:
         """
         Ensure chunks surfaced by vectors also emit citation labels by fetching their CitationUnit headings.
         """
         query_ids = list({chunk.chunk_id for chunk in chunks})
 
-        lookup: Dict[str, List[Tuple[int, str]]] = {}
+        lookup: Dict[str, List[Tuple[int, str, int]]] = {}
         if query_ids:
             query = """
             UNWIND $ids AS cid
             MATCH (c:Chunk {id: cid})
             OPTIONAL MATCH (u:CitationUnit)-[:IN_CHUNK]->(c)
             WITH c, u ORDER BY u.order ASC
-            RETURN c.id AS chunk_id, collect([u.order, u.heading]) AS labels
+            RETURN c.id AS chunk_id, collect([u.order, u.heading, u.level]) AS labels
             """
 
             with self.neo4j_driver.session() as session:
@@ -883,73 +970,141 @@ class HybridRetriever:
 
             lookup = {
                 row["chunk_id"]: [
-                    (int(order or 0), heading)
-                    for order, heading in (row.get("labels") or [])
+                    (int(order or 0), heading, int(level or 0))
+                    for order, heading, level in (row.get("labels") or [])
                     if heading
                 ]
                 for row in rows
             }
 
+        pending_sections: List[str] = []
+        chunk_by_id: Dict[str, ChunkResult] = {c.chunk_id: c for c in chunks}
+
         for chunk in chunks:
-            labels = []
+            labels: List[Tuple[int, str, int]] = []
             if lookup:
                 labels.extend(lookup.get(chunk.chunk_id, []) or [])
 
             existing = getattr(chunk, "citation_labels", None) or []
             if existing:
-                labels.extend(existing)
+                for item in existing:
+                    if isinstance(item, (tuple, list)) and len(item) >= 2:
+                        order_val = int(item[0] or 0)
+                        title = (item[1] or "").strip()
+                        level_val = (
+                            int(item[2]) if len(item) > 2 and item[2] is not None else 0
+                        )
+                        if title:
+                            labels.append((order_val, title, level_val))
 
-            if not labels:
-                try:
-                    boundaries = json.loads(chunk.boundaries_json or "{}")
-                    items = (
-                        boundaries
-                        if isinstance(boundaries, list)
-                        else boundaries.get("sections", [])
-                    )
-                    parsed: List[Tuple[int, str]] = []
-                    for section in items or []:
-                        heading_val = (
-                            section.get("heading")
-                            or section.get("title")
-                            or ""
-                        ).strip()
-                        if not heading_val:
-                            continue
-                        order_val = section.get("order") or 0
-                        try:
-                            order_int = int(order_val)
-                        except (TypeError, ValueError):
-                            order_int = 0
-                        parsed.append((order_int, heading_val))
-                    labels = parsed
-                except Exception:
-                    labels = []
+            try:
+                boundaries = json.loads(chunk.boundaries_json or "{}")
+                items = (
+                    boundaries
+                    if isinstance(boundaries, list)
+                    else boundaries.get("sections", [])
+                )
+                parsed: List[Tuple[int, str, int]] = []
+                for section in items or []:
+                    heading_val = (
+                        section.get("heading") or section.get("title") or ""
+                    ).strip()
+                    if not heading_val:
+                        continue
+                    order_val = section.get("order") or 0
+                    try:
+                        order_int = int(order_val)
+                    except (TypeError, ValueError):
+                        order_int = 0
+                    level_val = int(section.get("level", 0))
+                    parsed.append((order_int, heading_val, level_val))
+                if parsed:
+                    labels.extend(parsed)
+            except Exception:
+                pass
 
-            if not labels:
+            if not labels and chunk.original_section_ids:
+                pending_sections.append(chunk.chunk_id)
                 continue
 
-            seen: Set[Tuple[int, str]] = set()
-            normalized: List[Tuple[int, str]] = []
-            for order_val, title in labels:
-                key = (int(order_val or 0), title)
-                if key in seen:
-                    continue
-                seen.add(key)
-                normalized.append(key)
+            if labels:
+                self._assign_normalized_citations(chunk, labels)
 
-            normalized.sort(key=lambda x: (x[0], x[1]))
-            if len(normalized) > 1:
-                heading = (chunk.heading or "").strip()
-                trimmed = [
-                    item
-                    for item in normalized
-                    if item[1] != heading or item[0] != 0
+        if pending_sections:
+            query = """
+            UNWIND $ids AS cid
+            MATCH (c:Chunk {id: cid})
+            UNWIND coalesce(c.original_section_ids, []) AS sid
+            MATCH (s:Section {id: sid})
+            RETURN c.id AS chunk_id, collect([s.order, s.heading, s.level]) AS labels
+            """
+            with self.neo4j_driver.session() as session:
+                rows = session.run(query, ids=pending_sections).data()
+
+            fallback_lookup = {
+                row["chunk_id"]: [
+                    (int(order or 0), heading, int(level or 0))
+                    for order, heading, level in (row.get("labels") or [])
+                    if heading
                 ]
-                if trimmed:
-                    normalized = trimmed
-            if normalized:
-                chunk.citation_labels = normalized
+                for row in rows
+            }
+
+            for chunk_id, labels in fallback_lookup.items():
+                chunk = chunk_by_id.get(chunk_id)
+                if chunk and not getattr(chunk, "citation_labels", None):
+                    if labels:
+                        self._assign_normalized_citations(chunk, labels)
+
+    def _assign_normalized_citations(
+        self, chunk: ChunkResult, labels: List[Tuple[int, str, int]]
+    ) -> None:
+        """Normalize citation labels while preserving document order and hierarchy."""
+        entries: List[Tuple[int, str, int]] = []
+        seen: Set[Tuple[int, str]] = set()
+
+        for order_val, title, level in labels:
+            clean_title = (title or "").strip()
+            if not clean_title:
+                continue
+            order_int = int(order_val or 0)
+            level_int = int(level or 0)
+            key = (order_int, clean_title.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append((order_int, clean_title, level_int))
+
+        if not entries:
+            return
+
+        entries.sort(key=lambda x: (x[0], x[2], x[1].lower()))
+
+        deep_levels = [level for order, _, level in entries if order > 0 and level >= 3]
+        if deep_levels:
+            min_level = min(deep_levels)
+            entries = [
+                (order, title, level)
+                for order, title, level in entries
+                if order == 0 or level >= min_level
+            ]
+
+        heading_lower = (chunk.heading or "").strip().lower()
+        final_labels: List[Tuple[int, str, int]] = []
+        for order_int, title, level_int in entries:
+            if (
+                heading_lower
+                and order_int == 0
+                and title.lower() == heading_lower
+                and len(entries) > 1
+            ):
+                continue
+            final_labels.append((order_int, title, level_int))
+
+        if not final_labels and entries:
+            final_labels = [entries[0]]
+
+        chunk.citation_labels = final_labels
 
     def _should_expand(
         self, query: str, seeds: List[ChunkResult], when: ExpandWhen
@@ -1056,6 +1211,7 @@ class HybridRetriever:
             neighbor.is_split AS is_split,
             neighbor.original_section_ids AS original_section_ids,
             neighbor.boundaries_json AS boundaries_json,
+            neighbor.doc_tag AS doc_tag,
             chunk_id AS source_chunk
         """
 
@@ -1097,6 +1253,7 @@ class HybridRetriever:
                             is_split=record["is_split"],
                             original_section_ids=record["original_section_ids"] or [],
                             boundaries_json=record["boundaries_json"] or "{}",
+                            doc_tag=record.get("doc_tag"),
                             is_expanded=True,
                             expansion_source=source_chunk_id,
                             fused_score=neighbor_score,

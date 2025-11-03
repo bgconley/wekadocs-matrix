@@ -5,6 +5,7 @@ Integrates with hybrid retrieval to assemble coherent context within token budge
 Reference: Phase 7E Canonical Spec - Context Budget: Max 4,500 tokens
 """
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -15,6 +16,73 @@ from src.shared.config import get_config
 from src.shared.observability import get_logger
 
 logger = get_logger(__name__)
+
+_STEP_RE = re.compile(r"^\s*step\s*\d+", re.I)
+
+
+def _normalize_and_order_citations(chunk) -> List[Tuple[int, str]]:
+    """
+    Accepts chunk.citation_labels as:
+      - list[(order:int, title:str)] or
+      - list[(order:int, title:str, level:int)]
+    Returns a normalized, ordered list of (order, title).
+    """
+    labels = getattr(chunk, "citation_labels", None) or []
+
+    # 1) Normalize to triples (order, title, level)
+    norm: List[Tuple[int, str, int]] = []
+    for item in labels:
+        if not item:
+            continue
+        if isinstance(item, (tuple, list)) and len(item) >= 2:
+            order = int(item[0] or 0)
+            title = (item[1] or "").strip()
+            level = int(item[2]) if len(item) > 2 and item[2] is not None else 0
+            if title:
+                norm.append((order, title, level))
+
+    if not norm:
+        return []
+
+    # 2) Case-insensitive dedupe by (order, title)
+    seen = set()
+    dedup: List[Tuple[int, str, int]] = []
+    for order_val, title_val, level_val in norm:
+        key = (order_val, title_val.casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup.append((order_val, title_val, level_val))
+
+    # 3) If >1 labels, drop the top-level document heading (order==0) that equals chunk.heading
+    heading_ci = ((getattr(chunk, "heading", "") or "").strip()).casefold()
+    if len(dedup) > 1:
+        filtered = [
+            (order_val, title_val, level_val)
+            for (order_val, title_val, level_val) in dedup
+            if order_val != 0
+        ]
+        if filtered:
+            dedup = filtered
+        elif len(dedup) > 1 and heading_ci:
+            filtered = [
+                (order_val, title_val, level_val)
+                for (order_val, title_val, level_val) in dedup
+                if not (order_val == 0 and title_val.strip().casefold() == heading_ci)
+            ]
+            if filtered:
+                dedup = filtered
+
+    # 4) Stable ordering: order asc, level asc (parents first), Step* bias, then lexical
+    def _sort_key(item: Tuple[int, str, int]):
+        order_val, title_val, level_val = item
+        step_priority = 0 if _STEP_RE.match(title_val) else 1
+        return (order_val, level_val, step_priority, title_val.casefold())
+
+    dedup.sort(key=_sort_key)
+
+    # 5) Return pairs
+    return [(order_val, title_val) for (order_val, title_val, _level_val) in dedup]
 
 
 @dataclass
@@ -331,39 +399,17 @@ class ContextAssembler:
 
         citation_index = 1
         for chunk in context.chunks:
-            labels = getattr(chunk, "citation_labels", None) or []
+            labels = _normalize_and_order_citations(chunk)
             lines_emitted = 0
 
-            if labels:
-                labels = sorted(labels, key=lambda x: (x[0], x[1]))
-                seen_titles = set()
-                for order_val, title in labels:
-                    cleaned_title = title or (chunk.heading or "Section")
-                    key = (order_val, cleaned_title)
-                    if key in seen_titles:
-                        continue
-                    seen_titles.add(key)
-                    parts.append(
-                        f"[{citation_index}] {cleaned_title} "
-                        f"(Doc: {chunk.document_id[:20]}..., "
-                        f"Tokens: {chunk.token_count})"
-                    )
-                    if chunk.is_expanded and lines_emitted == 0:
-                        parts.append(" [expanded]")
-                    parts.append("\n")
-                    citation_index += 1
-                    lines_emitted += 1
+            for _order, title in labels:
+                parts.append(f"[{citation_index}] {title}\n")
+                citation_index += 1
+                lines_emitted += 1
 
             if lines_emitted == 0:
-                fallback_title = chunk.heading or "Section"
-                parts.append(
-                    f"[{citation_index}] {fallback_title} "
-                    f"(Doc: {chunk.document_id[:20]}..., "
-                    f"Tokens: {chunk.token_count})"
-                )
-                if chunk.is_expanded:
-                    parts.append(" [expanded]")
-                parts.append("\n")
+                fallback = getattr(chunk, "heading", None) or "Section"
+                parts.append(f"[{citation_index}] {fallback}\n")
                 citation_index += 1
 
         return "".join(parts)

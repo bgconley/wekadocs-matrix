@@ -1,0 +1,199 @@
+[
+  {
+    "scenario": "scenario1_nested_h2_h3",
+    "document_id": "72907fbbaa69796d35827d20a167d069a435c93ee2da6aafa6aa29472ea4fe18",
+    "stats": {
+      "chunks": 1,
+      "avg_tokens": 1551.0,
+      "p50": 1551,
+      "p90": 1551,
+      "combined_chunks": 1
+    },
+    "raw_citations": [
+      {
+        "heading": "Installation Flow",
+        "ord": 0,
+        "chunk_id": "6215a9b621c60027b637e563"
+      },
+      {
+        "heading": "Step 1: Prepare Environment",
+        "ord": 1,
+        "chunk_id": "6215a9b621c60027b637e563"
+      },
+      {
+        "heading": "Step 2: Run Installer",
+        "ord": 2,
+        "chunk_id": "6215a9b621c60027b637e563"
+      },
+      {
+        "heading": "Step 3: Validate Results",
+        "ord": 3,
+        "chunk_id": "6215a9b621c60027b637e563"
+      }
+    ],
+    "rendered_citations": [
+      "[1] Step 1: Prepare Environment (Doc: 72907fbbaa69796d3582..., Tokens: 1551)",
+      "[2] Step 2: Run Installer (Doc: 72907fbbaa69796d3582..., Tokens: 1551)",
+      "[3] Step 3: Validate Results (Doc: 72907fbbaa69796d3582..., Tokens: 1551)"
+    ]
+  },
+  {
+    "scenario": "scenario2_h2_h3_h4",
+    "document_id": "f83ff60702706de2f5a36b9d3425a33922ca80a1a9f92f4198a10c04908ada8d",
+    "stats": {
+      "chunks": 1,
+      "avg_tokens": 1938.0,
+      "p50": 1938,
+      "p90": 1938,
+      "combined_chunks": 1
+    },
+    "raw_citations": [
+      {
+        "heading": "Deployment Flow",
+        "ord": 0,
+        "chunk_id": "57c394e23c4895c90e4f8000"
+      },
+      {
+        "heading": "Preparation",
+        "ord": 1,
+        "chunk_id": "57c394e23c4895c90e4f8000"
+      },
+      {
+        "heading": "Step 1a: Gather Credentials",
+        "ord": 2,
+        "chunk_id": "57c394e23c4895c90e4f8000"
+      },
+      {
+        "heading": "Step 2a: Configure Nodes",
+        "ord": 3,
+        "chunk_id": "57c394e23c4895c90e4f8000"
+      }
+    ],
+    "rendered_citations": [
+      "[1] Step 1a: Gather Credentials (Doc: f83ff60702706de2f5a3..., Tokens: 1938)",
+      "[2] Step 2a: Configure Nodes (Doc: f83ff60702706de2f5a3..., Tokens: 1938)"
+    ]
+  },
+  {
+    "scenario": "scenario3_no_parent_body",
+    "document_id": "bf3adbbb2ab7c783a4e47292d18e0b8607a4ca56696bd7295fd18eb86001b018",
+    "stats": {
+      "chunks": 1,
+      "avg_tokens": 1151.0,
+      "p50": 1151,
+      "p90": 1151,
+      "combined_chunks": 1
+    },
+    "raw_citations": [
+      {
+        "heading": "Step 1: Initialize",
+        "ord": 0,
+        "chunk_id": "3cc81b9ad178923cd47061c9"
+      },
+      {
+        "heading": "Step 2: Calibrate",
+        "ord": 1,
+        "chunk_id": "3cc81b9ad178923cd47061c9"
+      },
+      {
+        "heading": "Step 3: Commit",
+        "ord": 2,
+        "chunk_id": "3cc81b9ad178923cd47061c9"
+      }
+    ],
+    "rendered_citations": [
+      "[1] Step 2: Calibrate (Doc: bf3adbbb2ab7c783a4e4..., Tokens: 1151)",
+      "[2] Step 3: Commit (Doc: bf3adbbb2ab7c783a4e4..., Tokens: 1151)"
+    ]
+  },
+  {
+    "scenario": "scenario4_break_keyword",
+    "document_id": "99e240566ab8783f95b643415b0b032548b53d1c3fe8bf2150868872a4d97927",
+    "stats": {
+      "chunks": 1,
+      "avg_tokens": 1552.0,
+      "p50": 1552,
+      "p90": 1552,
+      "combined_chunks": 1
+    },
+    "raw_citations": [
+      {
+        "heading": "Guided Install",
+        "ord": 0,
+        "chunk_id": "9efe3acd1394dc6b665bc133"
+      },
+      {
+        "heading": "Step 1: Primary Setup",
+        "ord": 1,
+        "chunk_id": "9efe3acd1394dc6b665bc133"
+      },
+      {
+        "heading": "Step 2: Secondary Setup",
+        "ord": 2,
+        "chunk_id": "9efe3acd1394dc6b665bc133"
+      }
+    ],
+    "rendered_citations": [
+      "[1] Step 1: Primary Setup (Doc: 99e240566ab8783f95b6..., Tokens: 1552)",
+      "[2] Step 2: Secondary Setup (Doc: 99e240566ab8783f95b6..., Tokens: 1552)"
+    ]
+  },
+  {
+    "scenario": "scenario5_duplicate_steps",
+    "document_id": "8621d742968f84895f161561bc24693c9d144dc5483532c79e692d75b660d0cc",
+    "stats": {
+      "chunks": 1,
+      "avg_tokens": 1541.0,
+      "p50": 1541,
+      "p90": 1541,
+      "combined_chunks": 1
+    },
+    "raw_citations": [
+      {
+        "heading": "Step 1: Prepare Materials",
+        "ord": 0,
+        "chunk_id": "eaf40a8b6906a794e7680dc3"
+      },
+      {
+        "heading": "Step 2: Assemble Components",
+        "ord": 1,
+        "chunk_id": "eaf40a8b6906a794e7680dc3"
+      },
+      {
+        "heading": "Step 2: Run Calibration",
+        "ord": 3,
+        "chunk_id": "eaf40a8b6906a794e7680dc3"
+      }
+    ],
+    "rendered_citations": [
+      "[1] Step 2: Assemble Components (Doc: 8621d742968f84895f16..., Tokens: 1541)",
+      "[2] Step 2: Run Calibration (Doc: 8621d742968f84895f16..., Tokens: 1541)"
+    ]
+  },
+  {
+    "scenario": "scenario6_tiny_steps",
+    "document_id": "70cd31679479bc3aa6e77bcdefa767803baa4ad68ab1e705a9408a3fbbb68e07",
+    "stats": {
+      "chunks": 1,
+      "avg_tokens": 13.0,
+      "p50": 13,
+      "p90": 13,
+      "combined_chunks": 1
+    },
+    "raw_citations": [
+      {
+        "heading": "Step 1: Ping",
+        "ord": 0,
+        "chunk_id": "36fc441ede21b21d768c2fae"
+      },
+      {
+        "heading": "Step 2: Pong",
+        "ord": 1,
+        "chunk_id": "36fc441ede21b21d768c2fae"
+      }
+    ],
+    "rendered_citations": [
+      "[1] Step 2: Pong (Doc: 70cd31679479bc3aa6e7..., Tokens: 13)"
+    ]
+  }
+]

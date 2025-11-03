@@ -154,6 +154,7 @@ class IncrementalUpdater:
 
         # 2) Upsert added/modified sections
         to_upsert = internal_diff.adds + internal_diff.updates
+        doc_tag_value = None
         if to_upsert:
             with self.neo4j.session() as sess:
                 sess.run(
@@ -167,10 +168,16 @@ class IncrementalUpdater:
                         s.embedding_version = $v,
                         s.updated_at = datetime()
                     MERGE (d:Document {id: $doc})
+                    SET s.doc_tag = d.doc_tag
                     MERGE (d)-[:HAS_SECTION]->(s)
                     """,
                     {"rows": to_upsert, "doc": document_id, "v": self.version},
                 )
+                doc_tag_result = sess.run(
+                    "MATCH (d:Document {id:$doc}) RETURN d.doc_tag AS doc_tag",
+                    {"doc": document_id},
+                ).single()
+                doc_tag_value = doc_tag_result["doc_tag"] if doc_tag_result else None
                 upserted_count = len(to_upsert)
 
             # Upsert vectors (placeholder embeddings for tests)
@@ -182,6 +189,9 @@ class IncrementalUpdater:
                     embedding_dims = self.config.embedding.dims
 
                 for sec in to_upsert:
+                    sec_doc_tag = sec.get("doc_tag", doc_tag_value)
+                    if sec_doc_tag:
+                        sec["doc_tag"] = sec_doc_tag
                     point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, sec["id"]))
                     points.append(
                         PointStruct(
@@ -193,6 +203,7 @@ class IncrementalUpdater:
                                 "document_id": document_id,
                                 "document_uri": sec.get("source_uri")
                                 or sec.get("document_uri"),
+                                "doc_tag": sec_doc_tag,
                                 "embedding_version": self.version,
                             },
                         )
