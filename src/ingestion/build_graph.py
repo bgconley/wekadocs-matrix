@@ -263,7 +263,9 @@ class GraphBuilder:
             d.updated_at = datetime()
         RETURN d.id as id
         """
-        session.run(query, **document)
+        params = dict(document)
+        params.setdefault("doc_tag", None)
+        session.run(query, **params)
         logger.debug("Document upserted", document_id=document["id"])
 
     def _upsert_sections(self, session, document_id: str, sections: List[Dict]) -> int:

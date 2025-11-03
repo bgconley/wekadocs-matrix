@@ -319,33 +319,83 @@ class GreedyCombinerV2:
             boundaries = clean_boundaries
 
             if len(group) == 1:
-                # Single-section chunk (truthful metadata)
-                meta = create_chunk_metadata(
-                    section_id=group[0]["id"],
-                    document_id=document_id,
-                    level=level,
-                    order=order,
-                    heading=heading,
-                    parent_section_id=parent_section_id,
-                    is_combined=False,
-                    is_split=False,
-                    boundaries_json=json.dumps(
-                        {"combined": False, "sections": [clean_sections[0]]},
-                        separators=(",", ":"),
-                    ),
-                    token_count=c_tokens,
-                )
-                meta["anchor"] = group[0].get("anchor", "")
-                meta["tokens"] = c_tokens
-                meta["text"] = combined
-                meta["checksum"] = hashlib.sha256(combined.encode("utf-8")).hexdigest()
-                meta["doc_tag"] = group[0].get("doc_tag")
-                meta["_citation_units"] = self._build_citation_units(
-                    document_id=document_id,
-                    chunk_id=meta["id"],
-                    sections=raw_sections,
-                )
-                chunks.append(meta)
+                base_boundaries = {
+                    "combined": False,
+                    "sections": [clean_sections[0]],
+                }
+                if c_tokens <= self.hard_max:
+                    # Single-section chunk (within provider limits)
+                    meta = create_chunk_metadata(
+                        section_id=group[0]["id"],
+                        document_id=document_id,
+                        level=level,
+                        order=order,
+                        heading=heading,
+                        parent_section_id=parent_section_id,
+                        is_combined=False,
+                        is_split=False,
+                        boundaries_json=json.dumps(
+                            base_boundaries, separators=(",", ":")
+                        ),
+                        token_count=c_tokens,
+                    )
+                    meta["anchor"] = group[0].get("anchor", "")
+                    meta["tokens"] = c_tokens
+                    meta["text"] = combined
+                    meta["checksum"] = hashlib.sha256(
+                        combined.encode("utf-8")
+                    ).hexdigest()
+                    meta["doc_tag"] = group[0].get("doc_tag")
+                    meta["_citation_units"] = self._build_citation_units(
+                        document_id=document_id,
+                        chunk_id=meta["id"],
+                        sections=raw_sections,
+                    )
+                    chunks.append(meta)
+                else:
+                    # Single section exceeds provider limit → split deterministically
+                    parts = self.tok.split_to_chunks(
+                        combined, section_id=parent_section_id
+                    )
+                    for part in parts:
+                        payload = {
+                            "parent": base_boundaries,
+                            "chunk_index": part["chunk_index"],
+                            "total_chunks": part["total_chunks"],
+                            "token_count": part["token_count"],
+                            "overlap_start": part["overlap_start"],
+                            "overlap_end": part["overlap_end"],
+                        }
+                        pj = json.dumps(payload, separators=(",", ":"))
+                        bhash = hashlib.sha256(pj.encode("utf-8")).hexdigest()[:12]
+                        sub_original_ids = [group[0]["id"], bhash]
+                        sub_id = generate_chunk_id(document_id, sub_original_ids)
+
+                        meta = create_chunk_metadata(
+                            section_id=group[0]["id"],
+                            document_id=document_id,
+                            level=level,
+                            order=order * 100000 + part["chunk_index"],
+                            heading=heading,
+                            parent_section_id=parent_section_id,
+                            is_combined=False,
+                            is_split=True,
+                            boundaries_json=json.dumps(payload, separators=(",", ":")),
+                            token_count=part["token_count"],
+                        )
+                        meta["id"] = sub_id
+                        meta["original_section_ids"] = sub_original_ids
+                        meta["anchor"] = group[0].get("anchor", "")
+                        meta["tokens"] = part["token_count"]
+                        meta["text"] = part["text"]
+                        meta["checksum"] = part["integrity_hash"]
+                        meta["doc_tag"] = group[0].get("doc_tag")
+                        meta["_citation_units"] = self._build_citation_units(
+                            document_id=document_id,
+                            chunk_id=sub_id,
+                            sections=raw_sections,
+                        )
+                        chunks.append(meta)
             else:
                 if c_tokens <= self.hard_max:
                     meta = create_combined_chunk_metadata(
