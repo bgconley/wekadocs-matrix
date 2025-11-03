@@ -11,8 +11,9 @@ Reference: Phase 7E Canonical Spec L1421-1444, L3781-3788
 import json
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from neo4j import Driver
@@ -73,6 +74,9 @@ class ChunkResult:
     original_section_ids: List[str] = None
     boundaries_json: str = "{}"
     doc_tag: Optional[str] = None  # document scoping tag (e.g., REGPACK-01)
+    document_total_tokens: int = 0
+    source_path: Optional[str] = None
+    is_microdoc: bool = False
 
     # Expansion tracking
     is_expanded: bool = False  # Was this chunk added via expansion?
@@ -85,6 +89,11 @@ class ChunkResult:
     vector_rank: Optional[int] = None
     vector_score: Optional[float] = None  # Vector similarity score
     fused_score: Optional[float] = None  # Final fused score
+
+    # Retrieval context metadata
+    embedding_version: Optional[str] = None
+    tenant: Optional[str] = None
+    is_microdoc_extra: bool = False
 
     # Citation labels (order, title, level) derived from CitationUnits
     citation_labels: List[Tuple[int, str, int]] = field(default_factory=list)
@@ -287,6 +296,11 @@ RETURN
   chunk.original_section_ids AS original_section_ids,
   chunk.boundaries_json AS boundaries_json,
   chunk.doc_tag AS doc_tag,
+  chunk.document_total_tokens AS document_total_tokens,
+  chunk.is_microdoc AS is_microdoc,
+  chunk.source_path AS source_path,
+  chunk.embedding_version AS embedding_version,
+  chunk.tenant AS tenant,
   score AS score,
   (citation IS NOT NULL) AS is_citation,
   citation.order AS citation_order,
@@ -319,6 +333,13 @@ LIMIT $limit
                             or [],
                             "boundaries_json": record["boundaries_json"] or "{}",
                             "doc_tag": record.get("doc_tag"),
+                            "document_total_tokens": int(
+                                record.get("document_total_tokens") or 0
+                            ),
+                            "is_microdoc": bool(record.get("is_microdoc")),
+                            "source_path": record.get("source_path"),
+                            "embedding_version": record.get("embedding_version"),
+                            "tenant": record.get("tenant"),
                             "best_chunk_score": 0.0,
                             "best_cu_score": 0.0,
                             "citations": [],
@@ -397,11 +418,12 @@ LIMIT $limit
                     is_split=entry["is_split"],
                     original_section_ids=list(entry["original_section_ids"] or []),
                     boundaries_json=entry["boundaries_json"],
-                    doc_tag=(
-                        record.get("doc_tag")
-                        if "record" in locals()
-                        else entry.get("doc_tag")
-                    ),
+                    doc_tag=entry.get("doc_tag"),
+                    document_total_tokens=entry.get("document_total_tokens", 0),
+                    source_path=entry.get("source_path"),
+                    is_microdoc=entry.get("is_microdoc", False),
+                    embedding_version=entry.get("embedding_version"),
+                    tenant=entry.get("tenant"),
                     bm25_score=final_score,
                     citation_labels=deduped,
                 )
@@ -492,6 +514,11 @@ class VectorRetriever:
                         original_section_ids=payload.get("original_section_ids", []),
                         boundaries_json=payload.get("boundaries_json", "{}"),
                         doc_tag=payload.get("doc_tag"),
+                        document_total_tokens=payload.get("document_total_tokens", 0),
+                        source_path=payload.get("source_path"),
+                        is_microdoc=payload.get("is_microdoc", False),
+                        embedding_version=payload.get("embedding_version"),
+                        tenant=payload.get("tenant"),
                         citation_labels=[],
                     )
                 )
@@ -565,6 +592,21 @@ class HybridRetriever:
             self.expansion_query_min_tokens = 12
             self.expansion_score_delta_max = 0.02
 
+        # Micro-doc stitching configuration
+        self.micro_max_neighbors = int(os.getenv("MICRODOC_MAX_NEIGHBORS", "2"))
+        self.microdoc_enabled = self.micro_max_neighbors > 0
+        self.micro_min_tokens = int(os.getenv("MICRODOC_MIN_TOKENS", "600"))
+        self.micro_doc_max = int(os.getenv("MICRODOC_DOC_MAX", "2000"))
+        self.micro_dir_depth = int(os.getenv("MICRODOC_DIR_DEPTH", "2"))
+        self.micro_knn_limit = int(os.getenv("MICRODOC_KNN_LIMIT", "5"))
+        self.micro_sim_threshold = float(os.getenv("MICRODOC_SIM_THRESHOLD", "0.76"))
+        self.micro_per_doc_budget = int(
+            os.getenv("MICRODOC_PER_DOC_TOKEN_BUDGET", "300")
+        )
+        self.micro_total_budget = int(os.getenv("MICRODOC_MAX_STITCH_TOKENS", "1200"))
+        if self.micro_total_budget < self.micro_per_doc_budget:
+            self.micro_total_budget = self.micro_per_doc_budget
+
         # Context budget
         self.context_max_tokens = getattr(
             search_config.response, "answer_context_max_tokens", 4500
@@ -574,7 +616,8 @@ class HybridRetriever:
             f"HybridRetriever initialized: fusion={self.fusion_method.value}, "
             f"rrf_k={self.rrf_k}, alpha={self.fusion_alpha}, "
             f"expansion={'enabled' if self.expansion_enabled else 'disabled'}, "
-            f"context_budget={self.context_max_tokens}"
+            f"context_budget={self.context_max_tokens}, "
+            f"microdoc_neighbors={self.micro_max_neighbors}"
         )
 
     def retrieve(
@@ -687,6 +730,18 @@ class HybridRetriever:
 
         seeds = _gate_to_primary_document(seeds)
 
+        microdoc_extras: List[ChunkResult] = []
+        microdoc_tokens = 0
+        if self.microdoc_enabled:
+            microdoc_extras, microdoc_tokens = self._expand_microdoc_results(
+                query, fused_results, seeds, filters or {}
+            )
+            metrics["microdoc_extras"] = len(microdoc_extras)
+            metrics["microdoc_tokens"] = microdoc_tokens
+        else:
+            metrics["microdoc_extras"] = 0
+            metrics["microdoc_tokens"] = 0
+
         # Step 5: Gating decision for expansion
         when = ExpandWhen(expand_when)
         triggered, reason, score_delta, query_tokens = self._should_expand(
@@ -726,6 +781,10 @@ class HybridRetriever:
         else:
             metrics["expansion_count"] = 0
             metrics["expanded_source_count"] = 0
+
+        # Include micro-doc extras prior to dedup
+        if microdoc_extras:
+            all_results.extend(microdoc_extras)
 
         # Step 6: Dedup and final sort (no top_k cap - budget enforces limit)
         all_results = self._dedup_results(all_results)
@@ -811,6 +870,7 @@ class HybridRetriever:
         logger.info(
             f"Hybrid retrieval complete: query='{query[:50]}...', "
             f"results={len(final_results)}, tokens={metrics['total_tokens']}, "
+            f"microdocs={metrics['microdoc_extras']}, "
             f"time={metrics['total_time_ms']:.2f}ms"
         )
 
@@ -1212,6 +1272,11 @@ class HybridRetriever:
             neighbor.original_section_ids AS original_section_ids,
             neighbor.boundaries_json AS boundaries_json,
             neighbor.doc_tag AS doc_tag,
+            neighbor.document_total_tokens AS document_total_tokens,
+            neighbor.is_microdoc AS is_microdoc,
+            neighbor.source_path AS source_path,
+            neighbor.embedding_version AS embedding_version,
+            neighbor.tenant AS tenant,
             chunk_id AS source_chunk
         """
 
@@ -1254,6 +1319,13 @@ class HybridRetriever:
                             original_section_ids=record["original_section_ids"] or [],
                             boundaries_json=record["boundaries_json"] or "{}",
                             doc_tag=record.get("doc_tag"),
+                            document_total_tokens=record.get(
+                                "document_total_tokens", 0
+                            ),
+                            source_path=record.get("source_path"),
+                            is_microdoc=record.get("is_microdoc", False),
+                            embedding_version=record.get("embedding_version"),
+                            tenant=record.get("tenant"),
                             is_expanded=True,
                             expansion_source=source_chunk_id,
                             fused_score=neighbor_score,
@@ -1273,6 +1345,312 @@ class HybridRetriever:
             # Don't fail the whole search if expansion fails
 
         return expanded
+
+    def _expand_microdoc_results(
+        self,
+        query: str,
+        fused_results: List[ChunkResult],
+        seeds: List[ChunkResult],
+        filters: Dict[str, Any],
+    ) -> Tuple[List[ChunkResult], int]:
+        """Stitch additional micro-doc chunks when base results are inherently small."""
+        if not self.microdoc_enabled or not seeds or self.micro_max_neighbors <= 0:
+            return [], 0
+
+        extras: List[ChunkResult] = []
+        stitched_tokens = 0
+        used_docs = {r.document_id for r in seeds if r.document_id}
+
+        fused_pool = [
+            r for r in fused_results if r.document_id and r.document_id not in used_docs
+        ]
+        fused_pool.sort(key=lambda x: x.fused_score or 0.0, reverse=True)
+
+        for base in seeds:
+            if not self._is_microdoc_candidate(base):
+                continue
+
+            remaining = self.micro_max_neighbors
+            cohort: List[ChunkResult] = []
+
+            cohort.extend(
+                self._microdoc_from_fused(base, fused_pool, used_docs, remaining)
+            )
+            remaining = self.micro_max_neighbors - len(cohort)
+
+            if remaining > 0:
+                cohort.extend(self._microdoc_from_directory(base, used_docs, remaining))
+                remaining = self.micro_max_neighbors - len(cohort)
+
+            if remaining > 0:
+                cohort.extend(
+                    self._microdoc_from_knn(base, used_docs, remaining, filters)
+                )
+
+            for candidate in cohort:
+                if candidate.document_id in used_docs:
+                    continue
+
+                truncated_text, truncated_tokens = self._truncate_text(
+                    candidate.text, self.micro_per_doc_budget
+                )
+                if truncated_tokens == 0:
+                    continue
+                if stitched_tokens + truncated_tokens > self.micro_total_budget:
+                    logger.info(
+                        "Microdoc stitching budget exhausted",
+                        extra={"tokens": stitched_tokens},
+                    )
+                    return extras, stitched_tokens
+
+                patched = replace(
+                    candidate,
+                    text=truncated_text,
+                    token_count=truncated_tokens,
+                    parent_section_id=candidate.chunk_id,
+                    is_microdoc_extra=True,
+                    expansion_source=base.chunk_id,
+                )
+                extras.append(patched)
+                used_docs.add(candidate.document_id)
+                stitched_tokens += truncated_tokens
+
+        if extras:
+            logger.info(
+                "Microdoc stitching added extras",
+                extra={
+                    "base_count": len(seeds),
+                    "extras": len(extras),
+                    "tokens": stitched_tokens,
+                },
+            )
+        return extras, stitched_tokens
+
+    def _is_microdoc_candidate(self, chunk: ChunkResult) -> bool:
+        return (
+            chunk.token_count < self.micro_min_tokens
+            and (chunk.document_total_tokens or 0) <= self.micro_doc_max
+        )
+
+    def _is_microdoc_source(self, chunk: ChunkResult) -> bool:
+        return (chunk.document_total_tokens or 0) <= self.micro_doc_max
+
+    def _microdoc_from_fused(
+        self,
+        base: ChunkResult,
+        fused_pool: List[ChunkResult],
+        used_docs: Set[str],
+        limit: int,
+    ) -> List[ChunkResult]:
+        if limit <= 0:
+            return []
+        extras: List[ChunkResult] = []
+        for candidate in fused_pool:
+            if candidate.document_id in used_docs:
+                continue
+            if candidate.document_id == base.document_id:
+                continue
+            if not self._is_microdoc_source(candidate):
+                continue
+            extras.append(replace(candidate))
+            if len(extras) >= limit:
+                break
+        return extras
+
+    def _microdoc_from_directory(
+        self, base: ChunkResult, used_docs: Set[str], limit: int
+    ) -> List[ChunkResult]:
+        if limit <= 0:
+            return []
+        prefix = self._path_prefix(base.source_path)
+        if not prefix:
+            return []
+
+        query = """
+        MATCH (c:Chunk)
+        WHERE c.document_id <> $document_id
+          AND c.document_total_tokens <= $doc_max
+          AND c.source_path STARTS WITH $prefix
+        RETURN c
+        ORDER BY c.document_total_tokens ASC, c.token_count ASC
+        LIMIT $limit
+        """
+
+        extras: List[ChunkResult] = []
+        try:
+            with self.neo4j_driver.session() as session:
+                records = session.run(
+                    query,
+                    document_id=base.document_id,
+                    doc_max=self.micro_doc_max,
+                    prefix=prefix,
+                    limit=self.micro_knn_limit,
+                )
+                for record in records:
+                    node = record.get("c")
+                    if not node:
+                        continue
+                    candidate = self._chunk_from_props(dict(node))
+                    if candidate.document_id in used_docs:
+                        continue
+                    extras.append(candidate)
+                    if len(extras) >= limit:
+                        break
+        except Exception as exc:
+            logger.debug(
+                "Microdoc directory lookup failed",
+                extra={"error": str(exc), "doc": base.document_id},
+            )
+        return extras
+
+    def _microdoc_from_knn(
+        self,
+        base: ChunkResult,
+        used_docs: Set[str],
+        limit: int,
+        filters: Dict[str, Any],
+    ) -> List[ChunkResult]:
+        if limit <= 0:
+            return []
+        text = (base.text or "").strip()
+        if not text:
+            return []
+        try:
+            vectors = self.vector_retriever.embedder.embed_documents([text])
+            if not vectors:
+                return []
+            query_vector = vectors[0]
+        except Exception as exc:
+            logger.debug(
+                "Microdoc embedding failed",
+                extra={"error": str(exc), "doc": base.document_id},
+            )
+            return []
+
+        try:
+            from qdrant_client.models import FieldCondition, Filter, MatchValue
+        except ImportError:
+            return []
+
+        must_conditions = []
+        must_not_conditions = [
+            FieldCondition(key="document_id", match=MatchValue(value=base.document_id))
+        ]
+        doc_tag = filters.get("doc_tag")
+        if doc_tag:
+            must_conditions.append(
+                FieldCondition(key="doc_tag", match=MatchValue(value=doc_tag))
+            )
+
+        qdrant_filter = None
+        if must_conditions or must_not_conditions:
+            qdrant_filter = Filter(
+                must=must_conditions or None, must_not=must_not_conditions or None
+            )
+
+        extras: List[ChunkResult] = []
+        try:
+            hits = self.vector_retriever.client.search(
+                collection_name=self.vector_retriever.collection_name,
+                query_vector=query_vector,
+                limit=self.micro_knn_limit,
+                with_payload=True,
+                score_threshold=self.micro_sim_threshold,
+                query_filter=qdrant_filter,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Microdoc kNN search failed",
+                extra={"error": str(exc), "doc": base.document_id},
+            )
+            return []
+
+        for hit in hits:
+            payload = hit.payload or {}
+            doc_id = payload.get("document_id")
+            if not doc_id or doc_id in used_docs or doc_id == base.document_id:
+                continue
+            doc_total = payload.get("document_total_tokens", 0)
+            if doc_total and doc_total > self.micro_doc_max:
+                continue
+            candidate = ChunkResult(
+                chunk_id=payload.get("id", hit.id),
+                document_id=doc_id,
+                parent_section_id=payload.get("parent_section_id", ""),
+                order=payload.get("order", 0),
+                level=payload.get("level", 3),
+                heading=payload.get("heading", ""),
+                text=payload.get("text", ""),
+                token_count=payload.get("token_count", 0),
+                is_combined=payload.get("is_combined", False),
+                is_split=payload.get("is_split", False),
+                original_section_ids=payload.get("original_section_ids", []),
+                boundaries_json=payload.get("boundaries_json", "{}"),
+                doc_tag=payload.get("doc_tag"),
+                document_total_tokens=doc_total,
+                source_path=payload.get("source_path"),
+                is_microdoc=payload.get("is_microdoc", False),
+                embedding_version=payload.get("embedding_version"),
+                tenant=payload.get("tenant"),
+                fused_score=hit.score,
+                citation_labels=[],
+            )
+            extras.append(candidate)
+            if len(extras) >= limit:
+                break
+        return extras
+
+    def _truncate_text(self, text: str, token_budget: int) -> Tuple[str, int]:
+        if token_budget <= 0 or not text:
+            return "", 0
+        total = self.tokenizer.count_tokens(text)
+        if total <= token_budget:
+            return text, total
+        tokens = self.tokenizer.backend.encode(text)
+        truncated_tokens = tokens[:token_budget]
+        truncated_text = self.tokenizer.backend.decode(truncated_tokens)
+        return truncated_text, len(truncated_tokens)
+
+    def _chunk_from_props(self, props: Dict[str, Any]) -> ChunkResult:
+        boundaries = props.get("boundaries_json", "{}")
+        if isinstance(boundaries, dict):
+            boundaries_json = json.dumps(boundaries, separators=(",", ":"))
+        else:
+            boundaries_json = boundaries or "{}"
+        return ChunkResult(
+            chunk_id=props.get("id"),
+            document_id=props.get("document_id", ""),
+            parent_section_id=props.get("parent_section_id", ""),
+            order=int(props.get("order", 0)),
+            level=int(props.get("level", 3)),
+            heading=props.get("heading", ""),
+            text=props.get("text", ""),
+            token_count=int(props.get("token_count", 0)),
+            is_combined=bool(props.get("is_combined", False)),
+            is_split=bool(props.get("is_split", False)),
+            original_section_ids=props.get("original_section_ids", []),
+            boundaries_json=boundaries_json,
+            doc_tag=props.get("doc_tag"),
+            document_total_tokens=int(props.get("document_total_tokens", 0)),
+            source_path=props.get("source_path"),
+            is_microdoc=bool(props.get("is_microdoc", False)),
+            embedding_version=props.get("embedding_version"),
+            tenant=props.get("tenant"),
+            citation_labels=[],
+        )
+
+    def _path_prefix(self, source_path: Optional[str]) -> Optional[str]:
+        if not source_path:
+            return None
+        path = Path(source_path)
+        parts = [p for p in path.parts if p not in ("", os.sep)]
+        if not parts:
+            normalized = source_path.replace("\\", "/")
+            parts = [p for p in normalized.split("/") if p]
+        if not parts:
+            return None
+        depth = min(self.micro_dir_depth, len(parts))
+        return "/".join(parts[:depth])
 
     def _enforce_context_budget(self, results: List[ChunkResult]) -> List[ChunkResult]:
         """

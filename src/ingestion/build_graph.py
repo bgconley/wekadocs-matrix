@@ -114,6 +114,19 @@ class GraphBuilder:
         assembler = get_chunk_assembler()
         sections = assembler.assemble(document["id"], sections)
 
+        doc_total_tokens = sum(int(s.get("token_count", 0)) for s in sections)
+        document["total_tokens"] = doc_total_tokens
+        doc_fallback_threshold = int(
+            os.getenv(
+                "COMBINE_DOC_FALLBACK_DOC_TOKEN_MAX",
+                str(max(int(os.getenv("COMBINE_TARGET_TOKENS", "1300")) * 2, 2600)),
+            )
+        )
+        is_microdoc = doc_total_tokens <= doc_fallback_threshold
+        for section in sections:
+            section["document_total_tokens"] = doc_total_tokens
+            section["is_microdoc"] = is_microdoc
+
         with self.driver.session() as session:
             # Step 1: Upsert Document node
             self._upsert_document_node(session, document)
@@ -260,11 +273,13 @@ class GraphBuilder:
             d.checksum = $checksum,
             d.last_edited = $last_edited,
             d.doc_tag = $doc_tag,
+            d.total_tokens = $total_tokens,
             d.updated_at = datetime()
         RETURN d.id as id
         """
         params = dict(document)
         params.setdefault("doc_tag", None)
+        params.setdefault("total_tokens", 0)
         session.run(query, **params)
         logger.debug("Document upserted", document_id=document["id"])
 
@@ -337,6 +352,8 @@ class GraphBuilder:
                 s.is_combined = chunk.is_combined,
                 s.is_split = chunk.is_split,
                 s.boundaries_json = chunk.boundaries_json,
+                s.document_total_tokens = chunk.document_total_tokens,
+                s.is_microdoc = chunk.is_microdoc,
                 s.updated_at = datetime()
             WITH s, chunk
             MATCH (d:Document {id: $document_id})
@@ -1085,6 +1102,7 @@ class GraphBuilder:
         collection = self.config.search.vector.qdrant.collection_name
 
         source_uri = document.get("source_uri", "")
+        source_path = str(Path(source_uri).parent) if source_uri else ""
         document_uri = Path(source_uri).name if source_uri else source_uri
         document_id = document.get("id") or section.get("document_id")
 
@@ -1109,7 +1127,10 @@ class GraphBuilder:
             "document_id": document_id,
             "document_uri": document_uri,
             "source_uri": source_uri,
+            "source_path": source_path,
             "doc_tag": document.get("doc_tag"),
+            "document_total_tokens": document.get("total_tokens"),
+            "is_microdoc": section.get("is_microdoc"),
             # Chunk-specific fields (Phase 7E-1)
             "id": node_id,
             "parent_section_id": section.get("parent_section_id"),
@@ -1124,6 +1145,7 @@ class GraphBuilder:
                 "original_section_ids", [section.get("id")]
             ),
             "boundaries_json": section.get("boundaries_json", "{}"),
+            "document_total_tokens_chunk": section.get("document_total_tokens"),
             # Legacy fields (for compatibility)
             "title": section.get("title"),
             "anchor": section.get("anchor"),

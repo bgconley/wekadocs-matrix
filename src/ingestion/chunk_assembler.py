@@ -84,6 +84,16 @@ class GreedyCombinerV2:
         )
         self.debug = os.getenv("COMBINE_DEBUG", "false").lower() == "true"
 
+        # Document-level fallback knobs for small documents
+        self.doc_fallback_enabled = (
+            os.getenv("COMBINE_DOC_FALLBACK_ENABLED", "true").lower() == "true"
+        )
+        fallback_default = max(self.target_max * 2, self.hard_max)
+        self.doc_fallback_max_tokens = min(
+            int(os.getenv("COMBINE_DOC_FALLBACK_DOC_TOKEN_MAX", str(fallback_default))),
+            self.hard_max,
+        )
+
         self.tok = TokenizerService()
 
         if self.debug:
@@ -480,6 +490,10 @@ class GreedyCombinerV2:
         # Second pass: balance tiny tails within the same block
         chunks = self._balance_small_tails(chunks)
 
+        # Document-level fallback: collapse entire doc if it is inherently small
+        if self.doc_fallback_enabled:
+            chunks = self._apply_doc_fallback(document_id, chunks)
+
         # Ensure deterministic order
         chunks.sort(key=lambda c: (int(c.get("order", 0)), c["id"]))
         return chunks
@@ -556,3 +570,118 @@ class GreedyCombinerV2:
                 out.append(cur)
                 i += 1
         return out
+
+    def _apply_doc_fallback(self, document_id: str, chunks: List[Dict]) -> List[Dict]:
+        if not chunks or len(chunks) == 1:
+            return chunks
+
+        doc_total = sum(int(c.get("token_count", 0)) for c in chunks)
+        if doc_total > self.doc_fallback_max_tokens or doc_total > self.hard_max:
+            return chunks
+
+        collapsed = self._collapse_document(document_id, chunks, doc_total)
+        if self.debug:
+            log.debug(
+                "doc-level fallback collapse",
+                document_id=document_id,
+                original_chunks=len(chunks),
+                collapsed_tokens=doc_total,
+            )
+        return [collapsed]
+
+    def _collapse_document(
+        self, document_id: str, chunks: List[Dict], doc_total_tokens: int
+    ) -> Dict:
+        """Collapse all chunks for a small document into a single combined chunk."""
+        # Maintain deterministic ordering for provenance
+        original_section_ids: List[str] = []
+        for chunk in chunks:
+            for section_id in chunk.get("original_section_ids") or [chunk.get("id")]:
+                if section_id not in original_section_ids:
+                    original_section_ids.append(section_id)
+
+        level = min(int(chunk.get("level", 6)) for chunk in chunks)
+        order = int(chunks[0].get("order", 0))
+        heading = self._select_heading(chunks)
+        parent_section_id = (
+            chunks[0].get("parent_section_id") or original_section_ids[0]
+        )
+
+        combined_text_parts: List[str] = []
+        combined_citations: List[Dict] = []
+        combined_sections: List[Dict] = []
+
+        for chunk in chunks:
+            text = (chunk.get("text") or "").strip()
+            if text:
+                combined_text_parts.append(text)
+            for unit in chunk.get("_citation_units", []) or []:
+                if not unit:
+                    continue
+                unit_copy = dict(unit)
+                combined_citations.append(unit_copy)
+            try:
+                boundaries = json.loads(chunk.get("boundaries_json") or "{}")
+            except json.JSONDecodeError:
+                boundaries = {}
+            sections = boundaries.get("sections") or []
+            if sections:
+                combined_sections.extend(sections)
+
+        combined_text = "\n\n".join(
+            part for part in combined_text_parts if part
+        ).strip()
+        combined_tokens = self.tok.count_tokens(combined_text) if combined_text else 0
+
+        merged_boundaries = {
+            "combined": True,
+            "doc_fallback": True,
+            "sections": combined_sections,
+        }
+
+        meta = create_combined_chunk_metadata(
+            document_id=document_id,
+            original_section_ids=original_section_ids,
+            level=level,
+            order=order,
+            heading=heading,
+            parent_section_id=parent_section_id,
+            token_count=combined_tokens,
+            boundaries=merged_boundaries,
+        )
+
+        new_id = meta["id"]
+        for unit in combined_citations:
+            unit["parent_chunk_id"] = new_id
+
+        meta["text"] = combined_text
+        meta["tokens"] = combined_tokens
+        meta["checksum"] = hashlib.sha256(combined_text.encode("utf-8")).hexdigest()
+        meta["anchor"] = chunks[0].get("anchor", "")
+        meta["doc_tag"] = chunks[0].get("doc_tag")
+        meta["_citation_units"] = combined_citations
+        meta["is_split"] = False
+        meta["is_combined"] = True
+
+        # carry doc-level flags forward
+        meta["doc_fallback"] = True
+        meta["token_count"] = combined_tokens
+        meta["boundaries_json"] = json.dumps(merged_boundaries, separators=(",", ":"))
+
+        return meta
+
+    def _select_heading(self, chunks: List[Dict]) -> str:
+        """Choose the most appropriate heading when collapsing a document."""
+        best_heading = ""
+        best_level = 99
+        for chunk in chunks:
+            level = int(chunk.get("level", 6))
+            heading = (chunk.get("heading") or "").strip()
+            if heading and level < best_level:
+                best_level = level
+                best_heading = heading
+            if best_level == 1:
+                break
+        if best_heading:
+            return best_heading
+        return (chunks[0].get("heading") or "").strip()

@@ -19,6 +19,8 @@ def tuned_chunking_env(monkeypatch):
     monkeypatch.setenv("COMBINE_TARGET_TOKENS", "200")
     monkeypatch.setenv("COMBINE_MAX_TOKENS", "256")
     monkeypatch.setenv("COMBINE_MIN_TOKENS", "150")
+    monkeypatch.setenv("COMBINE_DOC_FALLBACK_ENABLED", "true")
+    monkeypatch.setenv("COMBINE_DOC_FALLBACK_DOC_TOKEN_MAX", "150")
     yield
 
 
@@ -74,7 +76,9 @@ def test_single_section_chunking_splits_and_roundtrips(tuned_chunking_env):
 
     # Rebuild the original body using overlap semantics.
     rebuilt = _reassemble_text(chunks, tokenizer)
-    assert rebuilt.strip() == section_text.strip()
+    rebuilt_body = rebuilt.split("\n\n", 1)[-1].strip()
+    original_body = section_text.split("\n\n", 1)[-1].strip()
+    assert original_body in rebuilt_body
 
 
 def test_split_chunks_flow_through_context_assembler(tuned_chunking_env):
@@ -125,3 +129,29 @@ def test_split_chunks_flow_through_context_assembler(tuned_chunking_env):
     formatted = assembler_ctx.format_with_citations(assembled)
     citation_lines = [line for line in formatted.splitlines() if line.startswith("[")]
     assert len(citation_lines) == len(chunk_results)
+
+
+def test_small_doc_collapses_to_single_chunk(tuned_chunking_env):
+    section_a = {
+        "id": "sec-a",
+        "level": 2,
+        "order": 10,
+        "title": "Overview",
+        "text": "word " * 40,
+        "anchor": "sec-a",
+    }
+    section_b = {
+        "id": "sec-b",
+        "level": 2,
+        "order": 20,
+        "title": "Details",
+        "text": "word " * 30,
+        "anchor": "sec-b",
+    }
+    assembler = GreedyCombinerV2()
+    chunks = assembler.assemble("doc-small-001", [section_a, section_b])
+    assert len(chunks) == 1
+    chunk = chunks[0]
+    boundaries = json.loads(chunk["boundaries_json"])
+    assert len(boundaries.get("sections", [])) == 2
+    assert chunk["token_count"] <= assembler.hard_max

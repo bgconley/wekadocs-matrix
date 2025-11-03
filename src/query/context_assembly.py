@@ -256,6 +256,8 @@ class ContextAssembler:
         grouped = {}
         for chunk in chunks:
             parent = chunk.parent_section_id or chunk.chunk_id
+            if getattr(chunk, "is_microdoc_extra", False):
+                parent = f"microdoc:{chunk.chunk_id}"
             if parent not in grouped:
                 grouped[parent] = []
             grouped[parent].append(chunk)
@@ -315,15 +317,28 @@ class ContextAssembler:
         if current_document and first_chunk.document_id != current_document:
             parts.append("\n---\n")
 
+        is_microdoc_extra = getattr(first_chunk, "is_microdoc_extra", False)
+
         # Add section heading if available and different from current
         if first_chunk.heading and first_chunk.parent_section_id != current_parent:
-            # Determine heading level based on chunk level
-            heading_prefix = "#" * min(first_chunk.level + 1, 4)  # Cap at ####
-            # Don't add leading newline for the very first heading
-            if current_parent is None:
-                parts.append(f"{heading_prefix} {first_chunk.heading}\n")
+            if is_microdoc_extra:
+                display_heading = first_chunk.heading or "Related Document"
+                doc_hint = (
+                    first_chunk.document_id[:8] if first_chunk.document_id else ""
+                )
+                header_line = f"#### Related: {display_heading}"
+                if doc_hint:
+                    header_line += f"  \n*(Doc: {doc_hint})*"
+                if current_parent is None:
+                    parts.append(f"{header_line}\n")
+                else:
+                    parts.append(f"\n{header_line}\n")
             else:
-                parts.append(f"\n{heading_prefix} {first_chunk.heading}\n")
+                heading_prefix = "#" * min(first_chunk.level + 1, 4)  # Cap at ####
+                if current_parent is None:
+                    parts.append(f"{heading_prefix} {first_chunk.heading}\n")
+                else:
+                    parts.append(f"\n{heading_prefix} {first_chunk.heading}\n")
 
         # Add chunk texts
         for chunk in chunks:
@@ -409,6 +424,8 @@ class ContextAssembler:
 
             if lines_emitted == 0:
                 fallback = getattr(chunk, "heading", None) or "Section"
+                if getattr(chunk, "is_microdoc_extra", False):
+                    fallback = f"Related: {fallback}"
                 parts.append(f"[{citation_index}] {fallback}\n")
                 citation_index += 1
 
