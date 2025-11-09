@@ -67,6 +67,7 @@ def create_schema(driver: Driver, config: Config) -> Dict[str, any]:
     Returns:
         Dict with status and details
     """
+    schema_version = config.graph_schema.version if config else "v2.1"
     results = {
         "success": False,
         "total_statements": 0,
@@ -74,7 +75,7 @@ def create_schema(driver: Driver, config: Config) -> Dict[str, any]:
         "constraints_created": 0,
         "indexes_created": 0,
         "vector_indexes_created": 0,
-        "schema_version": "v2.1",
+        "schema_version": schema_version,
         "schema_version_set": False,
         "dual_labeled_sections": 0,
         "errors": [],
@@ -82,20 +83,24 @@ def create_schema(driver: Driver, config: Config) -> Dict[str, any]:
 
     try:
         with driver.session() as session:
-            # Phase 7C: Use complete standalone v2.1 schema (Session 06-07)
-            # Single source of truth - no multi-file complexity
-            logger.info("Applying complete v2.1 schema (single source of truth)")
+            logger.info(
+                f"Applying complete {schema_version} schema (single source of truth)"
+            )
+
+            schema_filename = "create_graphrag_schema_v2_2_20251105_guard.cypher"
+            if schema_version.startswith("v2.1"):
+                schema_filename = "create_schema_v2_1_complete.cypher"
 
             cypher_script_path = (
                 Path(__file__).parent.parent.parent
                 / "scripts"
                 / "neo4j"
-                / "create_schema_v2_1_complete.cypher"
+                / schema_filename
             )
 
             if not cypher_script_path.exists():
                 raise FileNotFoundError(
-                    f"Complete v2.1 schema not found: {cypher_script_path}"
+                    f"Complete schema not found: {cypher_script_path}"
                 )
 
             with open(cypher_script_path, "r") as f:
@@ -106,7 +111,7 @@ def create_schema(driver: Driver, config: Config) -> Dict[str, any]:
             results["total_statements"] = len(statements)
 
             logger.info(
-                f"Parsed {len(statements)} statements from complete v2.1 schema"
+                f"Parsed {len(statements)} statements from complete {schema_version} schema"
             )
 
             for idx, stmt in enumerate(statements, 1):
@@ -204,73 +209,8 @@ def apply_schema_v2_1(session) -> Dict[str, any]:
         "schema_version": None,
     }
 
-    try:
-        # Check if v2.1 script exists
-        v2_1_script_path = (
-            Path(__file__).parent.parent.parent
-            / "scripts"
-            / "neo4j"
-            / "create_schema_v2_1.cypher"
-        )
-
-        if not v2_1_script_path.exists():
-            logger.debug("Schema v2.1 script not found, skipping")
-            result["reason"] = "script not found"
-            return result
-
-        logger.info("Applying schema v2.1 (Pre-Phase 7 foundation)")
-
-        # Read and execute script
-        with open(v2_1_script_path, "r") as f:
-            cypher_script = f.read()
-
-        # Parse into statements (handles multi-line + comments)
-        statements = parse_cypher_statements(cypher_script)
-
-        for stmt in statements:
-            if not stmt:
-                continue
-            try:
-                execution_result = session.run(stmt)
-
-                # Track dual-labeling
-                if "SET s:Chunk" in stmt:
-                    # Get count from execution result
-                    summary = execution_result.consume()
-                    result["dual_labeled_sections"] = summary.counters.labels_added
-
-                # Track constraint creation
-                if "CREATE CONSTRAINT" in stmt:
-                    result["constraints_created"] += 1
-
-            except Exception as e:
-                # Ignore already exists errors (idempotent)
-                if (
-                    "already exists" not in str(e).lower()
-                    and "equivalent" not in str(e).lower()
-                ):
-                    logger.warning(f"Error executing v2.1 statement: {str(e)[:100]}")
-
-        # Verify schema version was set
-        version_result = session.run(
-            "MATCH (sv:SchemaVersion {id: 'singleton'}) RETURN sv.version AS version"
-        )
-        version_record = version_result.single()
-        if version_record:
-            result["schema_version"] = version_record["version"]
-
-        result["executed"] = True
-        logger.info(
-            "Schema v2.1 applied successfully",
-            dual_labeled=result["dual_labeled_sections"],
-            constraints=result["constraints_created"],
-            version=result["schema_version"],
-        )
-
-    except Exception as e:
-        logger.warning(f"Failed to apply schema v2.1: {str(e)}")
-        result["error"] = str(e)
-
+    logger.warning("apply_schema_v2_1() is deprecated; use create_schema() instead.")
+    result["reason"] = "deprecated"
     return result
 
 
@@ -447,6 +387,33 @@ def verify_schema(session) -> Dict[str, any]:
         verification["error"] = str(e)
 
     return verification
+
+
+def ensure_schema_version(driver: Driver, expected_version: str) -> None:
+    """
+    Ensure the SchemaVersion node matches the expected value.
+
+    Raises:
+        RuntimeError: if the node is missing or versions mismatch
+    """
+    if not expected_version:
+        return
+
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (sv:SchemaVersion {id: 'singleton'}) RETURN sv.version AS version"
+        )
+        record = result.single()
+        if not record or not record["version"]:
+            raise RuntimeError(
+                "SchemaVersion node not found - run the Neo4j schema migration."
+            )
+
+        version = record["version"]
+        if version != expected_version:
+            raise RuntimeError(
+                f"SchemaVersion mismatch: expected {expected_version}, got {version}"
+            )
 
 
 def drop_schema(driver: Driver) -> Dict[str, any]:

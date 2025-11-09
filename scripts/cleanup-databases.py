@@ -3,7 +3,9 @@
 Database Cleanup Script - Surgical Data Deletion with Metadata Preservation
 
 This script performs intelligent cleanup of test/development data while preserving
-critical system metadata nodes that are required for system operation.
+critical system metadata nodes that are required for system operation. It is aware
+of the new Neo4j v2.2 schema objects and the Qdrant multi-vector `chunks_multi`
+collection, deleting only vector data while keeping collection/schema definitions.
 
 IMPORTANT: This script now preserves:
 - SchemaVersion nodes (required for health checks)
@@ -78,6 +80,7 @@ class DatabaseCleaner:
         "SchemaVersion",  # Required for health checks
         "SystemMetadata",  # System configuration
         "MigrationHistory",  # Schema migration tracking
+        "RelationshipTypesMarker",  # Documents available relationship types
         "_metadata",  # Generic metadata suffix
         "_system",  # Generic system suffix
     }
@@ -88,6 +91,10 @@ class DatabaseCleaner:
         "Section",
         "Chunk",
         "Entity",
+        "CitationUnit",
+        "Example",
+        "Parameter",
+        "Component",
         "Procedure",
         "Command",
         "Configuration",
@@ -101,6 +108,9 @@ class DatabaseCleaner:
         "Software",
         "Hardware",
         "Metric",
+        "Session",
+        "Query",
+        "Answer",
     }
 
     def __init__(self, args: argparse.Namespace):
@@ -125,6 +135,25 @@ class DatabaseCleaner:
         except Exception as e:
             self._log_error(f"Failed to load config: {e}")
             sys.exit(1)
+
+        # Track the primary / known Qdrant collections (legacy + new multi-vector)
+        primary_collection = None
+        if self.config and hasattr(self.config.search.vector, "qdrant"):
+            primary_collection = (
+                self.config.search.vector.qdrant.collection_name or None
+            )
+
+        self.qdrant_known_collections = sorted(
+            {
+                coll_name
+                for coll_name in [
+                    primary_collection,
+                    "chunks",  # legacy single-vector
+                    "chunks_multi",  # new multi-vector collection
+                ]
+                if coll_name
+            }
+        )
 
     def _log(self, message: str, level: str = "info"):
         """Log message to console and report."""
@@ -154,6 +183,47 @@ class DatabaseCleaner:
                 "details": details,
             }
         )
+
+    @staticmethod
+    def _describe_vector_config(vector_config: Any) -> str:
+        """
+        Produce a compact description of a Qdrant vector configuration.
+
+        Handles both single-vector (VectorParams) and named-vector structures.
+        """
+
+        def _safe_dump(obj: Any) -> Dict[str, Any]:
+            if obj is None:
+                return {}
+            if hasattr(obj, "model_dump"):
+                return obj.model_dump()
+            if hasattr(obj, "dict"):
+                return obj.dict()
+            if isinstance(obj, dict):
+                return obj
+            return {"value": str(obj)}
+
+        try:
+            raw = _safe_dump(vector_config)
+            # Named-vector structures tend to store data under "vectors"
+            if isinstance(raw, dict) and "vectors" in raw:
+                raw = raw["vectors"]
+
+            if isinstance(raw, dict):
+                parts = []
+                for name, cfg in raw.items():
+                    cfg_data = _safe_dump(cfg)
+                    size = cfg_data.get("size") or cfg_data.get("dimensions")
+                    distance = (
+                        cfg_data.get("distance")
+                        or cfg_data.get("metric")
+                        or cfg_data.get("similarity")
+                    )
+                    parts.append(f"{name}:{size}D/{distance}")
+                return ", ".join(parts) if parts else json.dumps(raw)
+            return json.dumps(raw)
+        except Exception:
+            return str(vector_config)
 
     def restore_metadata_nodes(self, session) -> bool:
         """
@@ -453,6 +523,11 @@ class DatabaseCleaner:
         self._log("", "header")
         self._log("Qdrant Vector Cleanup", "header")
         self._log("-" * 60, "header")
+        if self.qdrant_known_collections:
+            self._log(
+                "Target collections: " + ", ".join(self.qdrant_known_collections),
+                "info",
+            )
 
         try:
             qdrant = QdrantClient(
@@ -470,11 +545,18 @@ class DatabaseCleaner:
 
                     qdrant_before[coll.name] = {
                         "vector_count": before_count,
-                        "config": str(coll_info.config.params.vectors)[:100],
+                        "vectors": self._describe_vector_config(
+                            coll_info.config.params.vectors
+                        ),
                     }
 
                     self._log(f"Collection: {coll.name}")
                     self._log(f"  Before: {before_count} vectors")
+                    if qdrant_before[coll.name]["vectors"]:
+                        self._log(
+                            f"  Vector config: {qdrant_before[coll.name]['vectors']}",
+                            "info",
+                        )
 
                     # Delete all points but keep collection structure
                     if not self.args.dry_run and before_count > 0:
@@ -520,15 +602,24 @@ class DatabaseCleaner:
                         qdrant_after[coll.name] = {
                             "vector_count": 0,
                             "preserved": True,
+                            "vectors": qdrant_before[coll.name]["vectors"],
                         }
                     elif self.args.dry_run:
                         self._log(
                             f"  DRY RUN: Would delete {before_count} vectors", "warning"
                         )
-                        qdrant_after[coll.name] = qdrant_before[coll.name]
+                        qdrant_after[coll.name] = {
+                            "vector_count": before_count,
+                            "preserved": True,
+                            "vectors": qdrant_before[coll.name]["vectors"],
+                        }
                     else:
                         self._log("  No vectors to delete", "info")
-                        qdrant_after[coll.name] = {"vector_count": 0, "preserved": True}
+                        qdrant_after[coll.name] = {
+                            "vector_count": 0,
+                            "preserved": True,
+                            "vectors": qdrant_before[coll.name]["vectors"],
+                        }
 
                 except Exception as e:
                     self._log(
@@ -699,6 +790,7 @@ class DatabaseCleaner:
                     "database": "qdrant",
                     "collections_preserved": len(qdrant_before),
                     "total_vectors_deleted": total_vectors,
+                    "target_collections": self.qdrant_known_collections,
                 }
             )
 

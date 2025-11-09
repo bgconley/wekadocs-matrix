@@ -1,0 +1,279 @@
+{
+  "timestamp": "2025-11-03T03:22:28.508259",
+  "dry_run": false,
+  "options": {
+    "dry_run": false,
+    "redis_db": 1,
+    "skip_neo4j": false,
+    "skip_qdrant": false,
+    "skip_redis": false,
+    "report_dir": "reports/cleanup",
+    "quiet": false,
+    "restore_metadata": false
+  },
+  "before": {
+    "neo4j": {
+      "total_nodes": 1293,
+      "total_relationships": 1149,
+      "preserved_nodes": {
+        "SchemaVersion": 1
+      },
+      "deletable_nodes": {
+        "Step": 481,
+        "Configuration": 266,
+        "CitationUnit": 230,
+        "Section": 129,
+        "Chunk": 129,
+        "Procedure": 114,
+        "Document": 51,
+        "Command": 21
+      },
+      "constraints": 16,
+      "indexes": 46
+    },
+    "qdrant": {
+      "chunks": {
+        "vector_count": 129,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "CONFIGURATION": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "curl": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "Canonical": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "logs": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "configuration": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "upsert": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "See": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "-": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "stats": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "Schema": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "indexes": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "points": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "Setup": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "with": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "already": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "collection": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "sections": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "string": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      },
+      "Section": {
+        "vector_count": 0,
+        "config": "size=1024 distance=<Distance.COSINE: 'Cosine'> hnsw_config=None quantization_config=None on_disk=Non"
+      }
+    },
+    "redis": {
+      "db": 1,
+      "total_keys": 0,
+      "system_keys": 0,
+      "data_keys": 0,
+      "sample_data_keys": [],
+      "preserved_keys": []
+    }
+  },
+  "after": {
+    "neo4j": {
+      "total_nodes": 1,
+      "total_relationships": 0,
+      "preserved_nodes": {
+        "SchemaVersion": 1
+      },
+      "constraints": 16,
+      "indexes": 46
+    },
+    "qdrant": {
+      "chunks": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "CONFIGURATION": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "curl": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "Canonical": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "logs": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "configuration": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "upsert": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "See": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "-": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "stats": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "Schema": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "indexes": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "points": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "Setup": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "with": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "already": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "collection": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "sections": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "string": {
+        "vector_count": 0,
+        "preserved": true
+      },
+      "Section": {
+        "vector_count": 0,
+        "preserved": true
+      }
+    },
+    "redis": {
+      "db": 1,
+      "total_keys": 0,
+      "preserved_keys": 0
+    }
+  },
+  "actions": [
+    {
+      "timestamp": "2025-11-03T03:22:28.823546",
+      "action": "neo4j_selective_delete",
+      "details": {
+        "nodes_deleted": 1292,
+        "labels_deleted": [
+          "Step",
+          "Configuration",
+          "CitationUnit",
+          "Section",
+          "Chunk",
+          "Procedure",
+          "Document",
+          "Command"
+        ],
+        "preserved_labels": [
+          "SchemaVersion"
+        ]
+      }
+    },
+    {
+      "timestamp": "2025-11-03T03:22:28.902330",
+      "action": "qdrant_delete_points",
+      "details": {
+        "collection": "chunks",
+        "vectors_deleted": 129
+      }
+    }
+  ],
+  "errors": [],
+  "summary": {
+    "dry_run": false,
+    "success": true,
+    "metadata_preserved": true,
+    "databases_cleaned": [
+      {
+        "database": "neo4j",
+        "data_nodes_deleted": 1421,
+        "metadata_nodes_preserved": 1,
+        "schema_preserved": true
+      },
+      {
+        "database": "qdrant",
+        "collections_preserved": 20,
+        "total_vectors_deleted": 129
+      },
+      {
+        "database": "redis",
+        "db": 1,
+        "data_keys_deleted": 0,
+        "system_keys_preserved": 0
+      }
+    ]
+  },
+  "preserved_nodes": []
+}

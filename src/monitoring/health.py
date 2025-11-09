@@ -1,6 +1,6 @@
 """
 Phase 7E-4: Health Check System
-Verifies Neo4j schema v2.1, Qdrant 1024-D, embedding configuration at startup
+Verifies Neo4j schema v2.2, Qdrant 1024-D, embedding configuration at startup
 
 Reference: Canonical Spec L3513-3528, L535, L621, L3570
 Integration Guide L1905-1918
@@ -62,18 +62,18 @@ class SystemHealth:
 
 class HealthChecker:
     """
-    Comprehensive health check system for GraphRAG v2.1.
+    Comprehensive health check system for GraphRAG v2.2.
 
     Verifies:
-    - Neo4j constraints and indexes exist (v2.1 schema)
+    - Neo4j constraints and indexes exist (v2.2 schema)
     - Vector indexes are 1024-D with cosine distance
     - Qdrant collection exists with 1024-D named vectors
-    - SchemaVersion marker is v2.1
+    - SchemaVersion marker is v2.2
     - Embedding configuration matches canonical spec
     """
 
     # Canonical requirements from Phase 7E spec
-    REQUIRED_SCHEMA_VERSION = "v2.1"
+    REQUIRED_SCHEMA_VERSION = "v2.2"
     REQUIRED_EMBED_DIM = 1024
     REQUIRED_EMBED_MODEL = "jina-embeddings-v3"
     REQUIRED_EMBED_PROVIDER = "jina-ai"
@@ -86,7 +86,7 @@ class HealthChecker:
         embed_dim: int,
         embed_model: str,
         embed_provider: str,
-        qdrant_collection: str = "chunks",
+        qdrant_collection: str = "chunks_multi",
     ):
         """
         Initialize health checker.
@@ -174,7 +174,7 @@ class HealthChecker:
             )
 
     def _check_neo4j_schema_version(self) -> HealthCheckResult:
-        """Verify SchemaVersion marker is v2.1."""
+        """Verify SchemaVersion marker matches the required version."""
         try:
             with self.neo4j_driver.session() as session:
                 result = session.run(

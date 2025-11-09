@@ -134,6 +134,38 @@ ranking_candidates_total = Histogram(
     buckets=(1, 5, 10, 20, 50, 100, 200),
 )
 
+ranking_missing_vector_score_total = Counter(
+    "ranking_missing_vector_score_total",
+    "Total RRF ranking entries missing vector similarity metadata",
+    ["fallback"],
+)
+
+ranking_vector_score_distribution = Histogram(
+    "ranking_vector_score_distribution",
+    "Distribution of raw vector similarity scores seen during ranking",
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+
+ranking_semantic_score_distribution = Histogram(
+    "ranking_semantic_score_distribution",
+    "Distribution of normalized semantic confidence scores",
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+
+# ===== Ingestion: Semantic enrichment metrics =====
+semantic_enrichment_total = Counter(
+    "semantic_enrichment_total",
+    "Total semantic enrichment attempts grouped by provider and status.",
+    ["provider", "status"],  # status: success, error, skipped
+)
+
+semantic_enrichment_latency_ms = Histogram(
+    "semantic_enrichment_latency_ms",
+    "Latency of semantic enrichment in milliseconds.",
+    ["provider"],
+    buckets=(1, 5, 10, 25, 50, 100, 250, 500, 1000),
+)
+
 # ===== Phase 7C: Reranking metrics =====
 rerank_request_total = Counter(
     "rerank_request_total",

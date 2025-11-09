@@ -165,9 +165,22 @@ class ResponseBuilder:
         if not results:
             return ""
 
-        lines = []
-        for i, ranked in enumerate(results[:max_citations], 1):
+        lines: List[str] = []
+        seen: set = set()
+
+        for ranked in results:
             metadata = ranked.result.metadata
+
+            # Dedup based on chunk/document identity
+            chunk_id = metadata.get("chunk_id")
+            dedupe_key = chunk_id or (
+                metadata.get("document_uri"),
+                metadata.get("anchor"),
+                metadata.get("title"),
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
 
             # Extract citation components
             title = metadata.get("title") or metadata.get("name") or "Untitled"
@@ -177,15 +190,19 @@ class ResponseBuilder:
             anchor = metadata.get("anchor", "")
 
             # Format citation
+            index = len(lines) + 1
             if document_uri:
                 if anchor:
-                    citation = f"[{i}] {title} ({document_uri}#{anchor})"
+                    citation = f"[{index}] {title} ({document_uri}#{anchor})"
                 else:
-                    citation = f"[{i}] {title} ({document_uri})"
+                    citation = f"[{index}] {title} ({document_uri})"
             else:
-                citation = f"[{i}] {title}"
+                citation = f"[{index}] {title}"
 
             lines.append(citation)
+
+            if len(lines) >= max_citations:
+                break
 
         return "\n".join(lines)
 
@@ -589,8 +606,10 @@ class ResponseBuilder:
         if not ranked_results:
             return 0.0
 
+        top_results = ranked_results[:5]
+
         # Top result semantic score (weight: 0.3)
-        top_score = ranked_results[0].features.semantic_score if ranked_results else 0.0
+        top_score = top_results[0].features.semantic_score if top_results else 0.0
 
         # Evidence strength: average confidence of top 3 (weight: 0.2)
         evidence_scores = [e.confidence for e in evidence[:3]]
@@ -598,17 +617,26 @@ class ResponseBuilder:
             sum(evidence_scores) / len(evidence_scores) if evidence_scores else 0.0
         )
 
-        # Coverage: how many high-confidence results (weight: 0.2)
-        high_conf_count = sum(
-            1 for r in ranked_results[:5] if r.features.semantic_score > 0.7
-        )
-        coverage = min(1.0, high_conf_count / 3.0)
+        # Coverage: adapt threshold to score distribution (weight: 0.2)
+        semantic_samples = [r.features.semantic_score for r in top_results]
+        if semantic_samples:
+            sorted_scores = sorted(semantic_samples)
+            idx = min(len(sorted_scores) - 1, max(0, len(sorted_scores) * 3 // 4))
+            dynamic_threshold = sorted_scores[idx]
+            dynamic_threshold = min(0.85, max(0.5, dynamic_threshold))
+            high_conf_count = sum(
+                1 for score in semantic_samples if score >= dynamic_threshold
+            )
+            coverage = min(1.0, high_conf_count / 3.0)
+        else:
+            coverage = 0.0
 
-        # Path coherence: results with paths are more coherent (weight: 0.3)
-        path_count = sum(1 for r in ranked_results[:5] if r.result.path)
-        path_coherence = (
-            path_count / min(5, len(ranked_results)) if ranked_results else 0.0
-        )
+        # Path coherence: neutral default until paths are populated (weight: 0.3)
+        path_flags = [bool(getattr(r.result, "path", None)) for r in top_results]
+        if any(path_flags):
+            path_coherence = sum(path_flags) / max(1, len(path_flags))
+        else:
+            path_coherence = 0.5
 
         # Weighted combination
         confidence = (

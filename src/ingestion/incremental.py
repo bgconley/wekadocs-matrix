@@ -5,7 +5,7 @@
 
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from neo4j import Driver
 from qdrant_client import QdrantClient
@@ -106,6 +106,36 @@ class IncrementalUpdater:
             "unchanged": unchanged,
         }
 
+    def _vector_field_names(self) -> List[str]:
+        """
+        Determine which named vectors should be populated for compatibility with
+        the configured Qdrant collection. Defaults to ["content"] so incremental
+        updates remain backwards compatible in minimal environments.
+        """
+        if (
+            self.config
+            and hasattr(self.config, "search")
+            and hasattr(self.config.search, "hybrid")
+        ):
+            fields = getattr(self.config.search.hybrid, "vector_fields", None)
+            if isinstance(fields, dict) and fields:
+                return list(fields.keys())
+        return ["content"]
+
+    def _build_named_vectors(
+        self, base_vector: List[float], field_names: Optional[List[str]] = None
+    ) -> Dict[str, List[float]]:
+        """
+        Clone the supplied base vector across all configured named-vector slots.
+        This allows placeholder embeddings (or a single computed vector) to
+        satisfy the multi-vector schema without additional model invocations.
+        """
+        vectors: Dict[str, List[float]] = {}
+        names = field_names or self._vector_field_names()
+        for name in names:
+            vectors[name] = list(base_vector)
+        return vectors
+
     def apply_incremental_update(
         self, diff: Dict, sections: List[Dict], entities: Dict, mentions: List[Dict]
     ) -> Dict[str, Any]:
@@ -187,16 +217,22 @@ class IncrementalUpdater:
                 embedding_dims = 384  # Default fallback
                 if self.config and hasattr(self.config, "embedding"):
                     embedding_dims = self.config.embedding.dims
+                zero_template = [0.0] * embedding_dims
+                vector_field_names = self._vector_field_names()
+                expected_dims = {name: embedding_dims for name in vector_field_names}
 
                 for sec in to_upsert:
                     sec_doc_tag = sec.get("doc_tag", doc_tag_value)
                     if sec_doc_tag:
                         sec["doc_tag"] = sec_doc_tag
                     point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, sec["id"]))
+                    vectors = self._build_named_vectors(
+                        zero_template, vector_field_names
+                    )
                     points.append(
                         PointStruct(
                             id=point_uuid,
-                            vector=[0.0] * embedding_dims,  # config-driven placeholder
+                            vector=vectors,  # config-driven placeholder across fields
                             payload={
                                 "node_id": sec["id"],
                                 "node_label": "Section",
@@ -213,7 +249,7 @@ class IncrementalUpdater:
                     self.qdrant.upsert_validated(
                         collection_name=self.collection,
                         points=points,
-                        expected_dim=embedding_dims,
+                        expected_dim=expected_dims or embedding_dims,
                     )
 
         return {

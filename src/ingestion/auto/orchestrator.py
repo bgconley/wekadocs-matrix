@@ -12,9 +12,11 @@ Phase 3 pipeline: parse → extract → graph → embed → vectors → reconcil
 State is persisted to Redis after each stage for crash recovery.
 """
 
+import hashlib
 import json
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -30,6 +32,10 @@ from src.ingestion.parsers.markdown import parse_markdown
 from src.ingestion.parsers.notion import parse_notion
 from src.ingestion.reconcile import Reconciler
 from src.shared.config import Config
+from src.shared.embedding_fields import (
+    canonicalize_embedding_metadata,
+    ensure_no_embedding_model_in_payload,
+)
 from src.shared.observability import get_logger
 
 from .progress import JobStage, ProgressTracker
@@ -37,6 +43,29 @@ from .report import ReportGenerator
 from .verification import PostIngestVerifier
 
 logger = get_logger(__name__)
+
+
+def _text_hash(text: str) -> str:
+    if not text:
+        return ""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _shingle_hash(text: str, n: int = 8) -> str:
+    if not text:
+        return ""
+    tokens = text.split()
+    if not tokens:
+        return ""
+    shingles = []
+    limit = 64
+    for i in range(0, max(0, len(tokens) - n + 1)):
+        shingles.append(" ".join(tokens[i : i + n]))
+        if len(shingles) >= limit:
+            break
+    if not shingles:
+        shingles = [" ".join(tokens)]
+    return hashlib.sha256("||".join(shingles).encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -426,6 +455,7 @@ class Orchestrator:
         tracker.advance(JobStage.EMBEDDING, "Computing embeddings")
 
         start_time = time.time()
+        state.document.setdefault("doc_id", state.document_id)
 
         # Initialize embedder lazily
         if not self.embedder:
@@ -447,6 +477,14 @@ class Orchestrator:
 
             # Store in section (not yet persisted to vector store)
             section["vector_embedding"] = embedding
+            section["title_vector_embedding"] = embedding
+            section.setdefault(
+                "doc_id", state.document.get("doc_id") or state.document_id
+            )
+            section.setdefault("tenant", state.document.get("tenant"))
+            section.setdefault("lang", state.document.get("lang"))
+            section.setdefault("version", state.document.get("version"))
+            section.setdefault("semantic_metadata", {"entities": [], "topics": []})
             section["embedding_version"] = self.config.embedding.version
             embeddings_computed += 1
 
@@ -826,6 +864,10 @@ class Orchestrator:
         collection_name = self.config.search.vector.qdrant.collection_name
         source_uri = document.get("source_uri", "")
         document_uri = Path(source_uri).name if source_uri else source_uri
+        doc_alias = document.get("doc_id") or document_id
+        tenant = document.get("tenant")
+        lang = document.get("lang")
+        version = document.get("version")
 
         points = []
         for section in sections:
@@ -836,28 +878,75 @@ class Orchestrator:
             # Convert section_id to UUID
             point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, section["id"]))
 
+            title_vector = section.get("title_vector_embedding") or embedding
+            entity_vector = section.get("entity_vector_embedding") or embedding
+            vectors = {"content": embedding, "title": title_vector}
+            if entity_vector:
+                vectors["entity"] = entity_vector
+
+            text_value = section.get("text", "")
+            embedding_metadata = canonicalize_embedding_metadata(
+                embedding_model=self.config.embedding.version,
+                dimensions=len(embedding),
+                provider=self.config.embedding.provider,
+                task="retrieval.passage",
+                timestamp=datetime.utcnow(),
+            )
+
             point = PointStruct(
                 id=point_uuid,
-                vector=embedding,
+                vector=vectors,
                 payload={
                     "node_id": section["id"],  # Original section ID
                     "node_label": "Section",
                     "document_id": document_id,
+                    "doc_id": doc_alias,
                     "document_uri": document_uri,
                     "source_uri": source_uri,
                     "title": section.get("title"),
                     "anchor": section.get("anchor"),
-                    "embedding_version": self.config.embedding.version,
+                    "text": text_value,
+                    "heading": section.get("heading") or section.get("title", ""),
+                    "parent_section_id": section.get("parent_section_id"),
+                    "order": section.get("order", 0),
+                    "level": section.get("level", 3),
+                    "token_count": section.get("token_count")
+                    or section.get("tokens", 0),
+                    "is_combined": section.get("is_combined", False),
+                    "is_split": section.get("is_split", False),
+                    "original_section_ids": section.get(
+                        "original_section_ids", [section.get("id")]
+                    ),
+                    "document_total_tokens": document.get("total_tokens"),
+                    "document_total_tokens_chunk": section.get("document_total_tokens"),
+                    "doc_tag": document.get("doc_tag"),
+                    "is_microdoc": document.get("is_microdoc"),
+                    "tenant": tenant,
+                    "lang": lang,
+                    "version": version,
+                    "text_hash": _text_hash(text_value),
+                    "shingle_hash": _shingle_hash(text_value),
+                    "updated_at": datetime.utcnow().isoformat() + "Z",
+                    **embedding_metadata,
                 },
             )
+            point.payload = ensure_no_embedding_model_in_payload(point.payload)
             points.append(point)
 
         if points:
             # Pre-Phase 7: Use validated upsert with dimension checking
+            expected_dims: Dict[str, int] = {}
+            for pt in points:
+                vector_payload = getattr(pt, "vector", None) or {}
+                if isinstance(vector_payload, dict):
+                    for name, vec in vector_payload.items():
+                        expected_dims[name] = len(vec)
+                elif isinstance(vector_payload, list):
+                    expected_dims.setdefault("content", len(vector_payload))
             self.qdrant.upsert_validated(
                 collection_name=collection_name,
                 points=points,
-                expected_dim=self.config.embedding.dims,
+                expected_dim=expected_dims,
             )
 
         return len(points)

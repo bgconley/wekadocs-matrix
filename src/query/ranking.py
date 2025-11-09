@@ -19,6 +19,13 @@ from typing import Any, Dict, List, Optional
 from src.query.hybrid_search import SearchResult
 from src.shared.config import get_config
 from src.shared.observability import get_logger
+from src.shared.observability.metrics import (
+    ranking_candidates_total,
+    ranking_latency_ms,
+    ranking_missing_vector_score_total,
+    ranking_semantic_score_distribution,
+    ranking_vector_score_distribution,
+)
 
 logger = get_logger(__name__)
 
@@ -109,11 +116,6 @@ class Ranker:
         # Pre-Phase 7 (G1): Metrics instrumentation for ranking
         import time
 
-        from src.shared.observability.metrics import (
-            ranking_candidates_total,
-            ranking_latency_ms,
-        )
-
         start_time = time.time()
 
         # Extract all features
@@ -145,10 +147,39 @@ class Ranker:
         """Extract all ranking features for a result."""
         features = RankingFeatures()
 
-        # 1. Semantic score (from vector search)
-        features.semantic_score = self._normalize_score(
-            result.score, result.metadata.get("score_kind", "similarity")
-        )
+        fusion_method = result.metadata.get("fusion_method")
+        vector_score = result.metadata.get("vector_score")
+        vector_score_kind = result.metadata.get("vector_score_kind")
+        bm25_score = result.metadata.get("bm25_score")
+
+        # Observe raw vector similarity distribution when available
+        if vector_score is not None:
+            ranking_vector_score_distribution.observe(vector_score)
+
+        if fusion_method == "rrf":
+            # Prefer original vector similarity; fall back to BM25 or fused score
+            fallback = "vector"
+            semantic_raw = vector_score
+            score_kind_for_norm = vector_score_kind or "similarity"
+            if semantic_raw is None:
+                if bm25_score is not None:
+                    semantic_raw = bm25_score
+                    fallback = "bm25"
+                    score_kind_for_norm = "similarity"
+                else:
+                    semantic_raw = result.score
+                    fallback = "fused"
+                    score_kind_for_norm = "similarity"
+            if fallback != "vector":
+                ranking_missing_vector_score_total.labels(fallback=fallback).inc()
+            features.semantic_score = self._normalize_score(
+                semantic_raw or 0.0, score_kind_for_norm
+            )
+        else:
+            score_kind = result.metadata.get("score_kind", "similarity")
+            features.semantic_score = self._normalize_score(result.score, score_kind)
+
+        ranking_semantic_score_distribution.observe(features.semantic_score)
 
         # 2. Graph distance score (closer = higher)
         features.graph_distance_score = self._distance_score(result.distance)
@@ -165,15 +196,20 @@ class Ranker:
         # Pre-Phase 7: Entity focus hook (returns 0.0 until Phase 7)
         entity_focus_bonus = self._entity_focus_bonus(result, context)
 
-        # Compute weighted final score
-        features.final_score = (
+        base_score = (
             self.weights["semantic"] * features.semantic_score
             + self.weights["graph_distance"] * features.graph_distance_score
             + self.weights["recency"] * features.recency_score
             + self.weights["entity_priority"] * features.entity_priority_score
             + self.weights["coverage"] * features.coverage_score
-            + entity_focus_bonus  # No-op until Phase 7
+            + entity_focus_bonus
         )
+
+        if fusion_method == "rrf":
+            fused_primary = result.score or 0.0
+            features.final_score = fused_primary + 1e-6 * base_score
+        else:
+            features.final_score = base_score
 
         return features
 
@@ -189,7 +225,12 @@ class Ranker:
         Returns:
             Normalized similarity score in [0, 1]
         """
-        if score_kind == "distance":
+        if score is None:
+            return 0.0
+
+        kind = (score_kind or "similarity").lower()
+
+        if kind in {"distance", "l2", "euclidean"}:
             # Distance metrics: lower is better
             # Assume distance in [0, 2] for normalized vectors
             # Convert to similarity: 1 - (distance/2)
@@ -205,15 +246,22 @@ class Ranker:
                 self._distance_warning_logged = True
 
             return similarity
-        else:
-            # Similarity metrics: higher is better
-            # Cosine similarity in [-1, 1], convert to [0, 1]
-            if score < 0:
-                # Handle negative similarities (rare but possible)
-                return (score + 1.0) / 2.0
-            else:
-                # Already in [0, 1]
-                return min(1.0, score)
+        if kind in {"cos", "cosine"}:
+            # Clamp cosine similarity to expected range [-1, 1]
+            clamped = max(-1.0, min(1.0, score))
+            return (clamped + 1.0) / 2.0
+        if kind in {"dot", "inner_product", "ip"}:
+            # Map unbounded dot products to (0,1) via logistic function
+            try:
+                return 1.0 / (1.0 + math.exp(-score))
+            except OverflowError:
+                return 0.0 if score < 0 else 1.0
+        if kind == "rrf":
+            # RRF scores are small positive values; scale linearly with a soft cap
+            return max(0.0, min(1.0, score * 50.0))
+
+        # Default similarity handling: clamp to [0,1]
+        return max(0.0, min(1.0, score))
 
     def _distance_score(self, distance: int) -> float:
         """

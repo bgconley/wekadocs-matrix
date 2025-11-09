@@ -6,15 +6,22 @@ import json
 import os
 import re
 from datetime import datetime
-from typing import Dict, List, Protocol
+from time import perf_counter
+from typing import Dict, List, Optional, Protocol
 
+from src.ingestion.semantic import SemanticEnricher, get_semantic_enricher
 from src.providers.tokenizer_service import TokenizerService
 from src.shared.chunk_utils import (
     create_chunk_metadata,
     create_combined_chunk_metadata,
     generate_chunk_id,
 )
+from src.shared.config import ChunkAssemblyConfig, SemanticEnrichmentConfig
 from src.shared.logging import get_logger
+from src.shared.observability.metrics import (
+    semantic_enrichment_latency_ms,
+    semantic_enrichment_total,
+)
 
 log = get_logger(__name__)
 
@@ -23,9 +30,50 @@ class ChunkAssembler(Protocol):
     def assemble(self, document_id: str, sections: List[Dict]) -> List[Dict]: ...
 
 
-def get_chunk_assembler() -> ChunkAssembler:
-    # Allow swapping to an alternate pipeline later (e.g., CHUNK_ASSEMBLER=pipeline)
-    name = (os.getenv("CHUNK_ASSEMBLER") or "greedy").lower().strip()
+def post_process_chunk(chunk: Dict) -> Dict:
+    """
+    Hook for semantic chunking / metadata enrichment. StructuredChunker will bypass
+    this helper and call configured enrichers directly. GreedyCombiner keeps this
+    for backwards compatibility.
+    """
+    return chunk
+
+
+def _text_hash(text: str) -> str:
+    if not text:
+        return ""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _shingle_hash(text: str, n: int = 8) -> str:
+    if not text:
+        return ""
+    tokens = text.split()
+    if not tokens:
+        return ""
+    shingles = []
+    limit = 64
+    for i in range(0, max(0, len(tokens) - n + 1)):
+        shingles.append(" ".join(tokens[i : i + n]))
+        if len(shingles) >= limit:
+            break
+    if not shingles:
+        shingles = [" ".join(tokens)]
+    return hashlib.sha256("||".join(shingles).encode("utf-8")).hexdigest()
+
+
+def get_chunk_assembler(
+    assembly_config: Optional[ChunkAssemblyConfig] = None,
+) -> ChunkAssembler:
+    name = ""
+    if assembly_config is not None:
+        name = assembly_config.assembler.lower().strip()
+    else:
+        name = (os.getenv("CHUNK_ASSEMBLER") or "greedy").lower().strip()
+
+    if name == "structured":
+        return StructuredChunker(assembly_config)
+
     if name == "pipeline":
         try:
             from src.ingestion.pipeline_combiner import PipelineCombiner
@@ -33,10 +81,16 @@ def get_chunk_assembler() -> ChunkAssembler:
             return PipelineCombiner()
         except Exception as e:
             log.warning(
-                "CHUNK_ASSEMBLER=pipeline requested but unavailable: %s; falling back to greedy",
+                "CHUNK_ASSEMBLER=pipeline requested but unavailable: %s; falling back to structured",
                 e,
             )
-    return GreedyCombinerV2()
+            return StructuredChunker(assembly_config)
+
+    if name == "greedy":
+        return GreedyCombinerV2()
+
+    log.warning("Unknown chunk assembler '%s'; defaulting to structured", name)
+    return StructuredChunker(assembly_config)
 
 
 class GreedyCombinerV2:
@@ -54,47 +108,79 @@ class GreedyCombinerV2:
       - Debug logging for every skip reason
     """
 
-    def __init__(self):
-        # Back-compat mapping: prefer COMBINE_* but accept legacy TARGET_* if present
-        if os.getenv("TARGET_MIN_TOKENS") and not os.getenv("COMBINE_MIN_TOKENS"):
-            os.environ["COMBINE_MIN_TOKENS"] = os.getenv("TARGET_MIN_TOKENS")
-        if os.getenv("TARGET_MAX_TOKENS") and not os.getenv("COMBINE_TARGET_TOKENS"):
-            os.environ["COMBINE_TARGET_TOKENS"] = os.getenv("TARGET_MAX_TOKENS")
+    def __init__(self, assembly_config: Optional[ChunkAssemblyConfig] = None):
+        self.structured_mode = assembly_config is not None
 
-        self.min_tokens = int(os.getenv("COMBINE_MIN_TOKENS", "900"))
-        self.target_max = int(os.getenv("COMBINE_TARGET_TOKENS", "1300"))
-        # Provider safety ceiling (use tokenizer’s max if available; otherwise safe default 7900)
-        self.provider_max = int(os.getenv("EMBED_MAX_TOKENS", "8192"))
-        self.hard_max = int(
-            os.getenv("COMBINE_MAX_TOKENS", str(min(7900, self.provider_max)))
-        )
+        self.semantic_enricher: Optional[SemanticEnricher] = None
+        if self.structured_mode:
+            structure = assembly_config.structure
+            self.min_tokens = structure.min_tokens
+            self.target_max = structure.target_tokens
+            self.provider_max = structure.hard_tokens
+            self.hard_max = structure.hard_tokens
+            self.max_sections = structure.max_sections
+            self.respect_levels = structure.respect_major_levels
+            self.stop_at_level = structure.stop_at_level
+            self.break_re = re.compile(structure.break_keywords, re.I)
+            self.debug = False
+            self.doc_fallback_enabled = False
+            self.microdoc_enabled = assembly_config.microdoc.enabled
+            self.microdoc_threshold = assembly_config.microdoc.doc_token_threshold
+            self.microdoc_min_split_tokens = assembly_config.microdoc.min_split_tokens
+            self.split_enabled = assembly_config.split.enabled
+            self.split_overlap_tokens = assembly_config.split.overlap_tokens
+            self.semantic_config = assembly_config.semantic
+        else:
+            if os.getenv("TARGET_MIN_TOKENS") and not os.getenv("COMBINE_MIN_TOKENS"):
+                os.environ["COMBINE_MIN_TOKENS"] = os.getenv("TARGET_MIN_TOKENS")
+            if os.getenv("TARGET_MAX_TOKENS") and not os.getenv(
+                "COMBINE_TARGET_TOKENS"
+            ):
+                os.environ["COMBINE_TARGET_TOKENS"] = os.getenv("TARGET_MAX_TOKENS")
 
-        self.max_sections = int(os.getenv("COMBINE_MAX_SECTIONS", "12"))
-        self.respect_levels = (
-            os.getenv("COMBINE_RESPECT_MAJOR_LEVELS", "true").lower() == "true"
-        )
-        # H1/H2 act as "block anchors" by default; we combine within a block
-        self.stop_at_level = int(os.getenv("COMBINE_STOP_AT_LEVEL", "2"))
-        self.break_re = re.compile(
-            os.getenv(
-                "COMBINE_BREAK_KEYWORDS",
-                r"(faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting)",
-            ),
-            re.I,
-        )
-        self.debug = os.getenv("COMBINE_DEBUG", "false").lower() == "true"
-
-        # Document-level fallback knobs for small documents
-        self.doc_fallback_enabled = (
-            os.getenv("COMBINE_DOC_FALLBACK_ENABLED", "true").lower() == "true"
-        )
-        fallback_default = max(self.target_max * 2, self.hard_max)
-        self.doc_fallback_max_tokens = min(
-            int(os.getenv("COMBINE_DOC_FALLBACK_DOC_TOKEN_MAX", str(fallback_default))),
-            self.hard_max,
-        )
+            self.min_tokens = int(os.getenv("COMBINE_MIN_TOKENS", "900"))
+            self.target_max = int(os.getenv("COMBINE_TARGET_TOKENS", "1300"))
+            self.provider_max = int(os.getenv("EMBED_MAX_TOKENS", "8192"))
+            self.hard_max = int(
+                os.getenv("COMBINE_MAX_TOKENS", str(min(7900, self.provider_max)))
+            )
+            self.max_sections = int(os.getenv("COMBINE_MAX_SECTIONS", "12"))
+            self.respect_levels = (
+                os.getenv("COMBINE_RESPECT_MAJOR_LEVELS", "true").lower() == "true"
+            )
+            self.stop_at_level = int(os.getenv("COMBINE_STOP_AT_LEVEL", "2"))
+            self.break_re = re.compile(
+                os.getenv(
+                    "COMBINE_BREAK_KEYWORDS",
+                    r"(faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting)",
+                ),
+                re.I,
+            )
+            self.debug = os.getenv("COMBINE_DEBUG", "false").lower() == "true"
+            self.doc_fallback_enabled = (
+                os.getenv("COMBINE_DOC_FALLBACK_ENABLED", "true").lower() == "true"
+            )
+            fallback_default = max(self.target_max * 2, 2600)
+            self.doc_fallback_max_tokens = min(
+                int(
+                    os.getenv(
+                        "COMBINE_DOC_FALLBACK_DOC_TOKEN_MAX", str(fallback_default)
+                    )
+                ),
+                self.hard_max,
+            )
+            self.microdoc_enabled = True
+            self.microdoc_threshold = max(self.target_max * 2, 2000)
+            self.microdoc_min_split_tokens = 400
+            self.split_enabled = True
+            self.split_overlap_tokens = 150
+            self.semantic_config = SemanticEnrichmentConfig()
 
         self.tok = TokenizerService()
+        if self.semantic_config.enabled:
+            self.semantic_enricher = get_semantic_enricher(self.semantic_config)
+        else:
+            self.semantic_enricher = None
 
         if self.debug:
             log.debug(
@@ -153,12 +239,53 @@ class GreedyCombinerV2:
             )
         return units
 
+    def _enrich_chunk(self, chunk: Dict) -> Dict:
+        provider = getattr(self.semantic_config, "provider", "unknown")
+        if not self.semantic_enricher:
+            chunk.setdefault("semantic_metadata", {})
+            if getattr(self.semantic_config, "enabled", False):
+                semantic_enrichment_total.labels(
+                    provider=provider, status="skipped"
+                ).inc()
+            return chunk
+
+        status = "success"
+        start = perf_counter()
+        try:
+            result = self.semantic_enricher.enrich(chunk)
+            chunk["semantic_metadata"] = result.metadata or {}
+            if result.error:
+                chunk.setdefault("semantic_metadata", {}).setdefault(
+                    "_errors", []
+                ).append(result.error)
+        except Exception as exc:
+            status = "error"
+            log.warning(
+                "Semantic enrichment failed",
+                error=str(exc),
+                chunk_id=chunk.get("id"),
+            )
+            chunk.setdefault("semantic_metadata", {}).setdefault("_errors", []).append(
+                str(exc)
+            )
+        finally:
+            duration_ms = max((perf_counter() - start) * 1000.0, 0.0)
+            semantic_enrichment_latency_ms.labels(provider=provider).observe(
+                duration_ms
+            )
+            semantic_enrichment_total.labels(provider=provider, status=status).inc()
+
+        return chunk
+
     # ---------- main assemble ----------
 
     def assemble(self, document_id: str, sections: List[Dict]) -> List[Dict]:
         if not sections:
             return []
 
+        doc_total_tokens = sum(
+            int(s.get("token_count") or s.get("tokens", 0)) for s in sections
+        )
         block_ids = self._build_blocks(sections)
         chunks: List[Dict] = []
         i, N = 0, len(sections)
@@ -167,6 +294,11 @@ class GreedyCombinerV2:
             seed = sections[i]
             seed_block = block_ids[i]
             seed_level = int(seed.get("level", 3))
+            seed_doc_id = seed.get("doc_id") or document_id
+            seed_doc_tag = seed.get("doc_tag")
+            seed_tenant = seed.get("tenant")
+            seed_lang = seed.get("lang")
+            seed_version = seed.get("version")
 
             group = [seed]
             texts = [self._clean_text(seed)]
@@ -348,6 +480,13 @@ class GreedyCombinerV2:
                             base_boundaries, separators=(",", ":")
                         ),
                         token_count=c_tokens,
+                        doc_id=seed_doc_id,
+                        doc_tag=seed_doc_tag,
+                        tenant=seed_tenant,
+                        lang=seed_lang,
+                        version=seed_version,
+                        text_hash=_text_hash(combined),
+                        shingle_hash=_shingle_hash(combined),
                     )
                     meta["anchor"] = group[0].get("anchor", "")
                     meta["tokens"] = c_tokens
@@ -361,6 +500,8 @@ class GreedyCombinerV2:
                         chunk_id=meta["id"],
                         sections=raw_sections,
                     )
+                    meta = self._enrich_chunk(meta)
+                    meta = post_process_chunk(meta)
                     chunks.append(meta)
                 else:
                     # Single section exceeds provider limit → split deterministically
@@ -392,6 +533,13 @@ class GreedyCombinerV2:
                             is_split=True,
                             boundaries_json=json.dumps(payload, separators=(",", ":")),
                             token_count=part["token_count"],
+                            doc_id=seed_doc_id,
+                            doc_tag=seed_doc_tag,
+                            tenant=seed_tenant,
+                            lang=seed_lang,
+                            version=seed_version,
+                            text_hash=_text_hash(part["text"]),
+                            shingle_hash=_shingle_hash(part["text"]),
                         )
                         meta["id"] = sub_id
                         meta["original_section_ids"] = sub_original_ids
@@ -405,6 +553,8 @@ class GreedyCombinerV2:
                             chunk_id=sub_id,
                             sections=raw_sections,
                         )
+                        meta = self._enrich_chunk(meta)
+                        meta = post_process_chunk(meta)
                         chunks.append(meta)
             else:
                 if c_tokens <= self.hard_max:
@@ -417,6 +567,13 @@ class GreedyCombinerV2:
                         parent_section_id=parent_section_id,
                         token_count=c_tokens,
                         boundaries=clean_boundaries,
+                        doc_id=seed_doc_id,
+                        doc_tag=seed_doc_tag,
+                        tenant=seed_tenant,
+                        lang=seed_lang,
+                        version=seed_version,
+                        text_hash=_text_hash(combined),
+                        shingle_hash=_shingle_hash(combined),
                     )
                     meta["anchor"] = group[0].get("anchor", "")
                     meta["tokens"] = c_tokens
@@ -430,6 +587,8 @@ class GreedyCombinerV2:
                         chunk_id=meta["id"],
                         sections=raw_sections,
                     )
+                    meta = self._enrich_chunk(meta)
+                    meta = post_process_chunk(meta)
                     chunks.append(meta)
                 else:
                     # Split combined unit (rare here because hard_max is high)
@@ -468,12 +627,20 @@ class GreedyCombinerV2:
                             "anchor": group[0].get("anchor", ""),
                             "tokens": int(part["token_count"]),
                             "doc_tag": group[0].get("doc_tag"),
+                            "doc_id": seed_doc_id,
+                            "tenant": seed_tenant,
+                            "lang": seed_lang,
+                            "version": seed_version,
+                            "text_hash": _text_hash(part["text"]),
+                            "shingle_hash": _shingle_hash(part["text"]),
                         }
                         sub_chunk["_citation_units"] = self._build_citation_units(
                             document_id=document_id,
                             chunk_id=sub_id,
                             sections=raw_sections,
                         )
+                        sub_chunk = self._enrich_chunk(sub_chunk)
+                        sub_chunk = post_process_chunk(sub_chunk)
                         chunks.append(sub_chunk)
 
             if self.debug:
@@ -490,6 +657,11 @@ class GreedyCombinerV2:
         # Second pass: balance tiny tails within the same block
         chunks = self._balance_small_tails(chunks)
 
+        if self.structured_mode:
+            chunks = self._apply_microdoc_annotations(
+                document_id, chunks, doc_total_tokens
+            )
+
         # Document-level fallback: collapse entire doc if it is inherently small
         if self.doc_fallback_enabled:
             chunks = self._apply_doc_fallback(document_id, chunks)
@@ -497,6 +669,58 @@ class GreedyCombinerV2:
         # Ensure deterministic order
         chunks.sort(key=lambda c: (int(c.get("order", 0)), c["id"]))
         return chunks
+
+    def _apply_microdoc_annotations(
+        self, document_id: str, chunks: List[Dict], doc_total_tokens: int
+    ) -> List[Dict]:
+        if not self.structured_mode or not self.microdoc_enabled:
+            return chunks
+
+        doc_flag = doc_total_tokens <= self.microdoc_threshold
+        if not doc_flag:
+            return chunks
+
+        annotated: List[Dict] = []
+        for chunk in chunks:
+            chunk["doc_is_microdoc"] = True
+            chunk["is_microdoc"] = True
+            annotated.append(chunk)
+
+        if len(annotated) == 1:
+            annotated = self._ensure_microdoc_neighbor(document_id, annotated)
+
+        return annotated
+
+    def _ensure_microdoc_neighbor(
+        self, document_id: str, chunks: List[Dict]
+    ) -> List[Dict]:
+        if len(chunks) != 1:
+            return chunks
+
+        chunk = chunks[0]
+        if chunk.get("is_microdoc_stub"):
+            return chunks
+
+        if chunk.get("token_count", 0) < self.microdoc_min_split_tokens:
+            return chunks
+
+        orig_ids = list(chunk.get("original_section_ids") or [chunk.get("id")])
+        stub_suffix = "microdoc-stub"
+        new_ids = orig_ids + [stub_suffix]
+        stub_id = generate_chunk_id(document_id, new_ids)
+        stub = dict(chunk)
+        stub["id"] = stub_id
+        stub["text"] = ""
+        stub["token_count"] = 0
+        stub["tokens"] = 0
+        stub["order"] = int(chunk.get("order", 0)) + 1
+        stub["is_microdoc_stub"] = True
+        stub["doc_is_microdoc"] = True
+        stub["is_microdoc"] = True
+        stub["boundaries_json"] = chunk.get("boundaries_json", "{}")
+        stub = self._enrich_chunk(stub)
+        stub = post_process_chunk(stub)
+        return [chunk, stub]
 
     def _balance_small_tails(self, chunks: List[Dict]) -> List[Dict]:
         if not chunks:
@@ -564,9 +788,13 @@ class GreedyCombinerV2:
                     cur["text"].encode("utf-8")
                 ).hexdigest()
                 cur["updated_at"] = datetime.utcnow()
+                cur = self._enrich_chunk(cur)
+                cur = post_process_chunk(cur)
                 out.append(cur)
                 i += 2
             else:
+                cur = self._enrich_chunk(cur)
+                cur = post_process_chunk(cur)
                 out.append(cur)
                 i += 1
         return out
@@ -639,6 +867,7 @@ class GreedyCombinerV2:
             "sections": combined_sections,
         }
 
+        first_chunk = chunks[0] if chunks else {}
         meta = create_combined_chunk_metadata(
             document_id=document_id,
             original_section_ids=original_section_ids,
@@ -648,6 +877,13 @@ class GreedyCombinerV2:
             parent_section_id=parent_section_id,
             token_count=combined_tokens,
             boundaries=merged_boundaries,
+            doc_id=first_chunk.get("doc_id") or document_id,
+            doc_tag=first_chunk.get("doc_tag"),
+            tenant=first_chunk.get("tenant"),
+            lang=first_chunk.get("lang"),
+            version=first_chunk.get("version"),
+            text_hash=_text_hash(combined_text),
+            shingle_hash=_shingle_hash(combined_text),
         )
 
         new_id = meta["id"]
@@ -668,6 +904,8 @@ class GreedyCombinerV2:
         meta["token_count"] = combined_tokens
         meta["boundaries_json"] = json.dumps(merged_boundaries, separators=(",", ":"))
 
+        meta = self._enrich_chunk(meta)
+        meta = post_process_chunk(meta)
         return meta
 
     def _select_heading(self, chunks: List[Dict]) -> str:
@@ -685,3 +923,8 @@ class GreedyCombinerV2:
         if best_heading:
             return best_heading
         return (chunks[0].get("heading") or "").strip()
+
+
+class StructuredChunker(GreedyCombinerV2):
+    def __init__(self, assembly_config: Optional[ChunkAssemblyConfig]):
+        super().__init__(assembly_config=assembly_config)

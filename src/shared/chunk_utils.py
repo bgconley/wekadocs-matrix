@@ -59,6 +59,14 @@ def create_chunk_metadata(
     is_split: bool = False,
     boundaries_json: Optional[str] = None,
     token_count: Optional[int] = None,
+    *,
+    doc_id: Optional[str] = None,
+    doc_tag: Optional[str] = None,
+    tenant: Optional[str] = None,
+    lang: Optional[str] = None,
+    version: Optional[str] = None,
+    text_hash: Optional[str] = None,
+    shingle_hash: Optional[str] = None,
 ) -> Dict:
     """
     Create chunk metadata dict for a single-section chunk (Phase 7E-1 default).
@@ -99,6 +107,13 @@ def create_chunk_metadata(
         "is_split": is_split,
         "boundaries_json": boundaries_json or "{}",
         "token_count": token_count or 0,
+        "doc_id": doc_id or document_id,
+        "doc_tag": doc_tag,
+        "tenant": tenant,
+        "lang": lang,
+        "version": version,
+        "text_hash": text_hash,
+        "shingle_hash": shingle_hash,
         "updated_at": datetime.utcnow(),
     }
 
@@ -160,6 +175,14 @@ def create_combined_chunk_metadata(
     parent_section_id: Optional[str] = None,
     token_count: Optional[int] = None,
     boundaries: Optional[Dict] = None,
+    *,
+    doc_id: Optional[str] = None,
+    doc_tag: Optional[str] = None,
+    tenant: Optional[str] = None,
+    lang: Optional[str] = None,
+    version: Optional[str] = None,
+    text_hash: Optional[str] = None,
+    shingle_hash: Optional[str] = None,
 ) -> Dict:
     """
     Create chunk metadata dict for a combined chunk (multiple sections).
@@ -198,9 +221,16 @@ def create_combined_chunk_metadata(
         "heading": heading or "",
         "parent_section_id": parent_section_id,
         "original_section_ids": original_section_ids,
-        "is_combined": True,  # ALWAYS TRUE for combined chunks
-        "is_split": False,  # Combined chunks start unsplit (may be split later if too large)
+        "is_combined": True,
+        "is_split": False,
         "boundaries_json": boundaries_json,
         "token_count": token_count or 0,
+        "doc_id": doc_id or document_id,
+        "doc_tag": doc_tag,
+        "tenant": tenant,
+        "lang": lang,
+        "version": version,
+        "text_hash": text_hash,
+        "shingle_hash": shingle_hash,
         "updated_at": datetime.utcnow(),
     }

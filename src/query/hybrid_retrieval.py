@@ -9,15 +9,20 @@ Reference: Phase 7E Canonical Spec L1421-1444, L3781-3788
 """
 
 import json
+import logging
 import os
 import time
+from collections import defaultdict
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from neo4j import Driver
 from qdrant_client import QdrantClient
+from qdrant_client.models import FieldCondition
+from qdrant_client.models import Filter as QdrantFilter
+from qdrant_client.models import MatchValue
 
 # Phase 7E-4: Monitoring imports
 from src.monitoring.metrics import get_metrics_aggregator
@@ -29,6 +34,7 @@ from src.shared.observability.metrics import (
     retrieval_expansion_rate_current,
     retrieval_expansion_total,
 )
+from src.shared.schema import ensure_schema_version
 
 logger = get_logger(__name__)
 
@@ -77,6 +83,8 @@ class ChunkResult:
     document_total_tokens: int = 0
     source_path: Optional[str] = None
     is_microdoc: bool = False
+    doc_is_microdoc: bool = False
+    is_microdoc_stub: bool = False
 
     # Expansion tracking
     is_expanded: bool = False  # Was this chunk added via expansion?
@@ -88,6 +96,9 @@ class ChunkResult:
     bm25_score: Optional[float] = None  # BM25/keyword score
     vector_rank: Optional[int] = None
     vector_score: Optional[float] = None  # Vector similarity score
+    vector_score_kind: Optional[str] = None  # Similarity metric (cosine, dot, etc.)
+    title_vec_score: Optional[float] = None
+    entity_vec_score: Optional[float] = None
     fused_score: Optional[float] = None  # Final fused score
 
     # Retrieval context metadata
@@ -298,6 +309,8 @@ RETURN
   chunk.doc_tag AS doc_tag,
   chunk.document_total_tokens AS document_total_tokens,
   chunk.is_microdoc AS is_microdoc,
+  chunk.doc_is_microdoc AS doc_is_microdoc,
+  chunk.is_microdoc_stub AS is_microdoc_stub,
   chunk.source_path AS source_path,
   chunk.embedding_version AS embedding_version,
   chunk.tenant AS tenant,
@@ -337,6 +350,8 @@ LIMIT $limit
                                 record.get("document_total_tokens") or 0
                             ),
                             "is_microdoc": bool(record.get("is_microdoc")),
+                            "doc_is_microdoc": bool(record.get("doc_is_microdoc")),
+                            "is_microdoc_stub": bool(record.get("is_microdoc_stub")),
                             "source_path": record.get("source_path"),
                             "embedding_version": record.get("embedding_version"),
                             "tenant": record.get("tenant"),
@@ -422,6 +437,8 @@ LIMIT $limit
                     document_total_tokens=entry.get("document_total_tokens", 0),
                     source_path=entry.get("source_path"),
                     is_microdoc=entry.get("is_microdoc", False),
+                    doc_is_microdoc=entry.get("doc_is_microdoc", False),
+                    is_microdoc_stub=entry.get("is_microdoc_stub", False),
                     embedding_version=entry.get("embedding_version"),
                     tenant=entry.get("tenant"),
                     bm25_score=final_score,
@@ -442,98 +459,230 @@ LIMIT $limit
         return results[:top_k]
 
 
-class VectorRetriever:
-    """Vector retriever using Qdrant."""
+class QdrantMultiVectorRetriever:
+    """Multi-field Qdrant retriever with weighted fusion across named vectors."""
 
     def __init__(
-        self, qdrant_client: QdrantClient, embedder, collection_name: str = "chunks"
+        self,
+        qdrant_client: QdrantClient,
+        embedder,
+        collection_name: str = "chunks_multi",
+        field_weights: Optional[Dict[str, float]] = None,
+        rrf_k: int = 60,
+        payload_keys: Optional[List[str]] = None,
     ):
         self.client = qdrant_client
         self.embedder = embedder
-        self.collection_name = collection_name
+        self.collection = collection_name
+        self.rrf_k = rrf_k
+        self.field_weights = {
+            name: float(weight)
+            for name, weight in (field_weights or {"content": 1.0}).items()
+            if float(weight) > 0
+        }
+        if not self.field_weights:
+            self.field_weights = {"content": 1.0}
+        self.payload_keys = payload_keys or [
+            "id",
+            "node_id",
+            "document_id",
+            "doc_id",
+            "parent_section_id",
+            "order",
+            "level",
+            "heading",
+            "text",
+            "token_count",
+            "doc_tag",
+            "document_total_tokens",
+            "source_path",
+            "is_microdoc",
+            "embedding_version",
+            "embedding_provider",
+            "embedding_dimensions",
+            "tenant",
+            "lang",
+            "version",
+            "boundaries_json",
+            "original_section_ids",
+            "text_hash",
+            "shingle_hash",
+        ]
 
     def search(
-        self, query: str, top_k: int = 50, filters: Optional[Dict[str, Any]] = None
+        self,
+        query: str,
+        top_k: int,
+        filters: Optional[Dict[str, Any]] = None,
+        ef: Optional[int] = 256,
     ) -> List[ChunkResult]:
-        """
-        Perform vector search on chunks using Qdrant.
-
-        Args:
-            query: Search query text
-            top_k: Number of results to return
-            filters: Optional filters (e.g., document_id)
-
-        Returns:
-            List of ChunkResult objects with vector scores
-        """
         start_time = time.time()
+        query_vectors = self._build_query_vectors(query)
+        qdrant_filter = self._build_filter(filters)
 
-        # Embed the query
-        query_vector = self.embedder.embed_query(query)
+        rankings: Dict[str, List[Tuple[str, float]]] = {}
+        payload_by_id: Dict[str, Dict[str, Any]] = {}
+        vec_score_by_id: Dict[Tuple[str, str], float] = {}
 
-        # Build Qdrant filter
-        qdrant_filter = None
-        if filters:
-            from qdrant_client.models import FieldCondition, Filter, MatchValue
+        for vector_name, vector in query_vectors.items():
+            weight = self.field_weights.get(vector_name, 0.0)
+            if weight <= 0:
+                continue
+            hits = self._search_single(vector_name, vector, top_k, qdrant_filter, ef)
+            hits_sorted = sorted(hits, key=lambda h: h.score or 0.0, reverse=True)
+            rankings[vector_name] = []
+            for hit in hits_sorted:
+                pid = str(hit.id)
+                score = float(hit.score or 0.0)
+                rankings[vector_name].append((pid, score))
+                vec_score_by_id[(pid, vector_name)] = score
+                if pid not in payload_by_id:
+                    payload = dict(hit.payload or {})
+                    if self.payload_keys:
+                        payload = {k: payload.get(k) for k in self.payload_keys}
+                    payload_by_id[pid] = payload
 
-            conditions = []
-            for key, value in filters.items():
-                conditions.append(
-                    FieldCondition(key=key, match=MatchValue(value=value))
-                )
-            if conditions:
-                qdrant_filter = Filter(must=conditions)
-
-        # Search Qdrant
-        results = []
-        try:
-            search_results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector,
-                limit=top_k,
-                query_filter=qdrant_filter,
-                with_payload=True,
+        fused = self._fuse_rankings(rankings)
+        results: List[ChunkResult] = []
+        for pid, fused_score in sorted(
+            fused.items(), key=lambda kv: kv[1], reverse=True
+        ):
+            payload = payload_by_id.get(pid, {})
+            chunk_id = payload.get("id") or payload.get("node_id") or pid
+            doc_id = payload.get("document_id") or payload.get("doc_id") or ""
+            result = ChunkResult(
+                chunk_id=chunk_id,
+                document_id=doc_id,
+                parent_section_id=payload.get("parent_section_id", ""),
+                order=payload.get("order", 0),
+                level=payload.get("level", 3),
+                heading=payload.get("heading", ""),
+                text=payload.get("text", ""),
+                token_count=payload.get("token_count", 0),
+                doc_tag=payload.get("doc_tag"),
+                document_total_tokens=payload.get("document_total_tokens", 0),
+                source_path=payload.get("source_path"),
+                is_microdoc=payload.get("is_microdoc", False),
+                doc_is_microdoc=payload.get("doc_is_microdoc", False),
+                is_microdoc_stub=payload.get("is_microdoc_stub", False),
+                embedding_version=payload.get("embedding_version"),
+                tenant=payload.get("tenant"),
+                fused_score=float(fused_score),
+                vector_score=vec_score_by_id.get((pid, "content"), 0.0),
+                title_vec_score=vec_score_by_id.get((pid, "title"), 0.0),
+                entity_vec_score=vec_score_by_id.get((pid, "entity"), 0.0),
             )
+            results.append(result)
 
-            for rank, hit in enumerate(search_results, start=1):
-                payload = hit.payload
-                results.append(
-                    ChunkResult(
-                        chunk_id=payload.get("id", hit.id),
-                        document_id=payload.get("document_id", ""),
-                        parent_section_id=payload.get("parent_section_id", ""),
-                        order=payload.get("order", 0),
-                        level=payload.get("level", 3),
-                        heading=payload.get("heading", ""),
-                        text=payload.get("text", ""),
-                        token_count=payload.get("token_count", 0),
-                        vector_rank=rank,
-                        vector_score=hit.score,
-                        is_combined=payload.get("is_combined", False),
-                        is_split=payload.get("is_split", False),
-                        original_section_ids=payload.get("original_section_ids", []),
-                        boundaries_json=payload.get("boundaries_json", "{}"),
-                        doc_tag=payload.get("doc_tag"),
-                        document_total_tokens=payload.get("document_total_tokens", 0),
-                        source_path=payload.get("source_path"),
-                        is_microdoc=payload.get("is_microdoc", False),
-                        embedding_version=payload.get("embedding_version"),
-                        tenant=payload.get("tenant"),
-                        citation_labels=[],
-                    )
-                )
-
-            elapsed_ms = (time.time() - start_time) * 1000
-            logger.info(
-                f"Vector search completed: query='{query[:50]}...', "
-                f"results={len(results)}, time={elapsed_ms:.2f}ms"
-            )
-
-        except Exception as e:
-            logger.error(f"Vector search failed: {e}")
-            raise
-
+        elapsed_ms = (time.time() - start_time) * 1000
+        logger.info(
+            "Multi-vector search completed",
+            fields=list(self.field_weights.keys()),
+            results=len(results),
+            time_ms=f"{elapsed_ms:.2f}",
+        )
         return results
+
+    def search_named_vector(
+        self,
+        vector_name: str,
+        vector: Sequence[float],
+        limit: int,
+        query_filter: Optional[QdrantFilter] = None,
+        score_threshold: Optional[float] = None,
+    ):
+        try:
+            query_vector = {"name": vector_name, "vector": list(vector)}
+            return self.client.search(
+                collection_name=self.collection,
+                query_vector=query_vector,
+                limit=limit,
+                query_filter=query_filter,
+                with_payload=True,
+                score_threshold=score_threshold,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Named vector search failed", field=vector_name, error=str(exc)
+            )
+            return []
+
+    def _build_query_vectors(self, query: str) -> Dict[str, Sequence[float]]:
+        base_vector = self.embedder.embed_query(query)
+        vectors: Dict[str, Sequence[float]] = {}
+        for vector_name in self.field_weights.keys():
+            vectors[vector_name] = base_vector
+        return vectors
+
+    def _build_filter(
+        self, filters: Optional[Dict[str, Any]]
+    ) -> Optional[QdrantFilter]:
+        if not filters:
+            return None
+        must: List[FieldCondition] = []
+        for key, value in filters.items():
+            must.append(FieldCondition(key=key, match=MatchValue(value=value)))
+        return QdrantFilter(must=must) if must else None
+
+    def _search_single(
+        self,
+        vector_name: str,
+        vector: Sequence[float],
+        top_k: int,
+        query_filter: Optional[QdrantFilter],
+        ef: Optional[int],
+    ):
+        search_params = None
+        try:
+            from qdrant_client.http.models import SearchParams
+
+            search_params = SearchParams(hnsw_ef=ef) if ef else None
+        except Exception:
+            search_params = None
+
+        query_vector = {"name": vector_name, "vector": list(vector)}
+
+        return self.client.search(
+            collection_name=self.collection,
+            query_vector=query_vector,
+            limit=top_k,
+            query_filter=query_filter,
+            search_params=search_params,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+    def _fuse_rankings(
+        self, rankings: Dict[str, List[Tuple[str, float]]]
+    ) -> Dict[str, float]:
+        fused: Dict[str, float] = defaultdict(float)
+        for vector_name, items in rankings.items():
+            weight = self.field_weights.get(vector_name, 1.0)
+            for rank, (pid, _score) in enumerate(items, start=1):
+                fused[pid] += weight * 1.0 / (self.rrf_k + rank)
+        return fused
+
+
+class VectorRetriever(QdrantMultiVectorRetriever):
+    """
+    Backward-compatible wrapper for legacy VectorRetriever tests.
+    Uses the new multi-vector retriever under the hood.
+    """
+
+    def __init__(
+        self,
+        qdrant_client: QdrantClient,
+        embedder,
+        collection_name: str = "chunks_multi",
+        similarity: str = "cosine",  # Kept for signature compatibility
+    ):
+        super().__init__(
+            qdrant_client,
+            embedder,
+            collection_name=collection_name,
+            field_weights={"content": 1.0},
+        )
+        self.collection_name = collection_name
 
 
 class HybridRetriever:
@@ -558,15 +707,37 @@ class HybridRetriever:
             embedder: Embedding provider for query vectorization
             tokenizer: Tokenizer service for token counting (optional)
         """
+        config = get_config()
+
+        self.expected_schema_version = getattr(config.graph_schema, "version", None)
+        if self.expected_schema_version:
+            ensure_schema_version(neo4j_driver, self.expected_schema_version)
+
         self.neo4j_driver = neo4j_driver
         self.bm25_retriever = BM25Retriever(neo4j_driver)
-        self.vector_retriever = VectorRetriever(qdrant_client, embedder)
-        self.tokenizer = tokenizer or TokenizerService()
-
-        # Load configuration
-        config = get_config()
         search_config = config.search
 
+        self.vector_field_weights = dict(
+            getattr(config.search.hybrid, "vector_fields", {"content": 1.0})
+        )
+        self.max_sources_to_expand = getattr(
+            getattr(search_config.hybrid, "expansion", {}), "max_sources", 5
+        )
+        self.vector_retriever = QdrantMultiVectorRetriever(
+            qdrant_client,
+            embedder,
+            collection_name=config.search.vector.qdrant.collection_name,
+            field_weights=self.vector_field_weights,
+            rrf_k=getattr(config.search.hybrid, "rrf_k", 60),
+        )
+        self.tokenizer = tokenizer or TokenizerService()
+        self.reranker_config = getattr(config.search.hybrid, "reranker", None)
+        self.context_group_cap = getattr(
+            search_config.response, "max_sections_per_parent", 3
+        )
+
+        # Load configuration
+        # (already assigned above)
         # Fusion configuration
         self.fusion_method = FusionMethod(
             getattr(search_config.hybrid, "method", "rrf")
@@ -658,6 +829,7 @@ class HybridRetriever:
         vec_results = self.vector_retriever.search(query, candidate_k, filters)
         metrics["vec_time_ms"] = (time.time() - vec_start) * 1000
         metrics["vec_count"] = len(vec_results)
+        metrics["vector_fields"] = list(self.vector_field_weights.keys())
 
         # Step 2: Fuse rankings
         fusion_start = time.time()
@@ -668,9 +840,13 @@ class HybridRetriever:
         metrics["fusion_time_ms"] = (time.time() - fusion_start) * 1000
         metrics["fusion_method"] = self.fusion_method.value
 
+        fused_results = [r for r in fused_results if not r.is_microdoc_stub]
+
         # Step 3: Take top_k from fusion as seeds
         fused_results.sort(key=lambda x: x.fused_score or 0, reverse=True)
+        self._log_stage_snapshot("post-fusion", fused_results)
         seeds = fused_results[:top_k]
+        seeds = self._apply_reranker(query, seeds, metrics)
         metrics["seed_count"] = len(seeds)
 
         # Hydrate vector-only winners with citation labels
@@ -728,7 +904,11 @@ class HybridRetriever:
                 return gated
             return cs
 
+        before_gate = len(seeds)
         seeds = _gate_to_primary_document(seeds)
+        metrics["seed_gated"] = max(0, before_gate - len(seeds))
+        metrics["seeds_after_gate"] = len(seeds)
+        self._log_stage_snapshot("post-gate", seeds)
 
         microdoc_extras: List[ChunkResult] = []
         microdoc_tokens = 0
@@ -778,35 +958,59 @@ class HybridRetriever:
             metrics["expanded_source_count"] = min(
                 len(seeds), getattr(self, "max_sources_to_expand", 5)
             )
+            metrics["expansion_cap_hit"] = int(
+                len(seeds) > getattr(self, "max_sources_to_expand", 5)
+            )
         else:
             metrics["expansion_count"] = 0
             metrics["expanded_source_count"] = 0
+            metrics["expansion_cap_hit"] = 0
 
         # Include micro-doc extras prior to dedup
         if microdoc_extras:
             all_results.extend(microdoc_extras)
 
-        # Step 6: Dedup and final sort (no top_k cap - budget enforces limit)
+        # Step 6: Dedup, hydrate citations, and maintain deterministic ordering
         all_results = self._dedup_results(all_results)
+        all_results = [
+            c for c in all_results if not getattr(c, "is_microdoc_stub", False)
+        ]
         self._hydrate_missing_citations(all_results)
-        all_results.sort(
-            key=lambda chunk: (
+
+        dt = filters.get("doc_tag") if filters else None
+        if dt:
+            all_results = [c for c in all_results if getattr(c, "doc_tag", None) == dt]
+
+        primaries = [c for c in all_results if not c.is_microdoc_extra]
+        extras = [c for c in all_results if c.is_microdoc_extra]
+
+        def _primary_score_key(chunk: ChunkResult) -> Tuple[int, float]:
+            return (
                 len(chunk.citation_labels or []),
                 chunk.fused_score or 0.0,
-            ),
-            reverse=True,
-        )
-        final_results = all_results
+            )
 
-        # Gentle document continuity boost before final assembly
-        final_results = self._apply_doc_continuity_boost(final_results, alpha=0.12)
+        primaries.sort(key=_primary_score_key, reverse=True)
+        extras.sort(key=lambda chunk: chunk.fused_score or 0.0, reverse=True)
+
+        primaries = self._apply_doc_continuity_boost(primaries, alpha=0.12)
+        self._log_stage_snapshot("post-continuity", primaries)
 
         # Step 6: Context assembly with budget enforcement
         context_start = time.time()
-        final_results = self._enforce_context_budget(final_results)
+        primary_budget, primary_tokens = self._enforce_context_budget(primaries)
+        extra_budget, total_tokens = self._enforce_context_budget(
+            extras, starting_tokens=primary_tokens
+        )
+        final_results = primary_budget + extra_budget
+        self._log_stage_snapshot("post-budget", final_results)
+
         metrics["context_assembly_ms"] = (time.time() - context_start) * 1000
+        metrics["primary_count"] = len(primary_budget)
+        metrics["microdoc_used"] = len(extra_budget)
+        metrics["microdoc_present"] = int(bool(extras))
         metrics["final_count"] = len(final_results)
-        metrics["total_tokens"] = sum(r.token_count for r in final_results)
+        metrics["total_tokens"] = total_tokens
 
         metrics["total_time_ms"] = (time.time() - start_time) * 1000
 
@@ -887,49 +1091,96 @@ class HybridRetriever:
 
         Reference: Cormack et al. "Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods"
         """
-        # Build rank dictionaries
+        # Build rank dictionaries and preserve best modality scores
         bm25_ranks: Dict[str, int] = {}
+        bm25_scores: Dict[str, float] = {}
         for i, r in enumerate(bm25_results):
             rank = i + 1
-            bm25_ranks[r.chunk_id] = rank
-            if r.bm25_rank is None:
+            best_rank = bm25_ranks.get(r.chunk_id)
+            if best_rank is None or rank < best_rank:
+                bm25_ranks[r.chunk_id] = rank
+            if r.bm25_rank is None or r.bm25_rank > rank:
                 r.bm25_rank = rank
+            if r.bm25_score is not None:
+                best_score = bm25_scores.get(r.chunk_id)
+                if best_score is None or r.bm25_score > best_score:
+                    bm25_scores[r.chunk_id] = r.bm25_score
 
         vec_ranks: Dict[str, int] = {}
+        vec_scores: Dict[str, float] = {}
+        vec_kinds: Dict[str, str] = {}
         for i, r in enumerate(vec_results):
             rank = i + 1
-            vec_ranks[r.chunk_id] = rank
-            if r.vector_rank is None:
+            best_rank = vec_ranks.get(r.chunk_id)
+            if best_rank is None or rank < best_rank:
+                vec_ranks[r.chunk_id] = rank
+            if r.vector_rank is None or r.vector_rank > rank:
                 r.vector_rank = rank
+            if r.vector_score is not None:
+                best_score = vec_scores.get(r.chunk_id)
+                if best_score is None or r.vector_score > best_score:
+                    vec_scores[r.chunk_id] = r.vector_score
+            if r.vector_score_kind:
+                current_kind = vec_kinds.get(r.chunk_id)
+                if current_kind is None or (
+                    r.vector_score is not None
+                    and vec_scores.get(r.chunk_id, float("-inf")) == r.vector_score
+                ):
+                    vec_kinds[r.chunk_id] = r.vector_score_kind
 
-        # Build combined result map
-        all_chunks = {}
+        # Build combined result map (prefer BM25 ordering, then enrich with vector data)
+        all_chunks: Dict[str, ChunkResult] = {}
         for r in bm25_results:
-            all_chunks[r.chunk_id] = r
+            all_chunks.setdefault(r.chunk_id, r)
         for r in vec_results:
-            if r.chunk_id not in all_chunks:
+            existing = all_chunks.get(r.chunk_id)
+            if existing is None:
                 all_chunks[r.chunk_id] = r
+            else:
+                if existing.vector_score is None or (
+                    r.vector_score is not None
+                    and existing.vector_score < r.vector_score
+                ):
+                    existing.vector_score = r.vector_score
+                if existing.vector_rank is None or (
+                    r.vector_rank is not None and existing.vector_rank > r.vector_rank
+                ):
+                    existing.vector_rank = r.vector_rank
 
         # Calculate RRF scores
         for chunk_id, chunk in all_chunks.items():
-            bm25_rank = bm25_ranks.get(chunk_id, float("inf"))
-            vec_rank = vec_ranks.get(chunk_id, float("inf"))
+            bm25_rank = bm25_ranks.get(chunk_id)
+            vec_rank = vec_ranks.get(chunk_id)
 
             # RRF formula
             rrf_score = 0.0
-            if bm25_rank != float("inf"):
+            if bm25_rank is not None:
                 rrf_score += 1.0 / (self.rrf_k + bm25_rank)
-            if vec_rank != float("inf"):
+            if vec_rank is not None:
                 rrf_score += 1.0 / (self.rrf_k + vec_rank)
 
             chunk.fused_score = rrf_score
             chunk.fusion_method = "rrf"
 
-            # Preserve original scores for diagnostics
-            if chunk_id in bm25_ranks:
-                chunk.bm25_score = chunk.bm25_score or 0
-            if chunk_id in vec_ranks:
-                chunk.vector_score = chunk.vector_score or 0
+            if bm25_rank is not None:
+                chunk.bm25_rank = bm25_rank
+            if vec_rank is not None:
+                chunk.vector_rank = vec_rank
+
+            best_bm25_score = bm25_scores.get(chunk_id)
+            if best_bm25_score is not None and (
+                chunk.bm25_score is None or chunk.bm25_score < best_bm25_score
+            ):
+                chunk.bm25_score = best_bm25_score
+
+            best_vec_score = vec_scores.get(chunk_id)
+            if best_vec_score is not None and (
+                chunk.vector_score is None or chunk.vector_score < best_vec_score
+            ):
+                chunk.vector_score = best_vec_score
+            best_vec_kind = vec_kinds.get(chunk_id)
+            if best_vec_kind is not None:
+                chunk.vector_score_kind = best_vec_kind
 
         return list(all_chunks.values())
 
@@ -992,20 +1243,27 @@ class HybridRetriever:
     def _apply_doc_continuity_boost(
         self, chunks: List[ChunkResult], alpha: float = 0.12
     ) -> List[ChunkResult]:
-        """Slightly favor documents that dominate the seed set."""
+        """Favor documents that consistently appear at the top of the list."""
         if not chunks:
             return chunks
 
         from collections import Counter
 
-        sample = chunks[:10]
-        counts = Counter(getattr(c, "document_id", None) for c in sample)
+        counts = Counter(getattr(c, "document_id", None) for c in chunks)
+        total = max(1, len(chunks))
+
         boosted: List[ChunkResult] = []
         for c in chunks:
             base = float(c.fused_score or c.vector_score or c.bm25_score or 0.0)
-            doc_count = counts.get(getattr(c, "document_id", None), 0)
-            c.fused_score = base * (1.0 + alpha * doc_count)
+            if base == 0.0:
+                boosted.append(c)
+                continue
+            doc_id = getattr(c, "document_id", None)
+            share = counts.get(doc_id, 0) / total if doc_id else 0.0
+            multiplier = 1.0 + alpha * share
+            c.fused_score = base * multiplier
             boosted.append(c)
+
         boosted.sort(key=lambda x: x.fused_score or 0.0, reverse=True)
         return boosted
 
@@ -1166,6 +1424,20 @@ class HybridRetriever:
 
         chunk.citation_labels = final_labels
 
+    def _apply_reranker(
+        self, query: str, seeds: List[ChunkResult], metrics: Dict[str, Any]
+    ) -> List[ChunkResult]:
+        cfg = self.reranker_config
+        if not cfg or not getattr(cfg, "enabled", False):
+            metrics["reranker_applied"] = False
+            return seeds
+
+        logger.warning(
+            "Reranker enabled, but no reranker implementation is wired in this build."
+        )
+        metrics["reranker_applied"] = False
+        return seeds
+
     def _should_expand(
         self, query: str, seeds: List[ChunkResult], when: ExpandWhen
     ) -> Tuple[bool, str, float, int]:
@@ -1274,6 +1546,8 @@ class HybridRetriever:
             neighbor.doc_tag AS doc_tag,
             neighbor.document_total_tokens AS document_total_tokens,
             neighbor.is_microdoc AS is_microdoc,
+            neighbor.doc_is_microdoc AS doc_is_microdoc,
+            neighbor.is_microdoc_stub AS is_microdoc_stub,
             neighbor.source_path AS source_path,
             neighbor.embedding_version AS embedding_version,
             neighbor.tenant AS tenant,
@@ -1301,8 +1575,7 @@ class HybridRetriever:
                             source_score = seed.fused_score or 0.0
                             break
 
-                    # Neighbor score = source_score × 0.5 (never outrank source)
-                    neighbor_score = source_score * 0.5
+                    neighbor_score = self._neighbor_score(source_score)
 
                     expanded.append(
                         ChunkResult(
@@ -1324,6 +1597,8 @@ class HybridRetriever:
                             ),
                             source_path=record.get("source_path"),
                             is_microdoc=record.get("is_microdoc", False),
+                            doc_is_microdoc=record.get("doc_is_microdoc", False),
+                            is_microdoc_stub=record.get("is_microdoc_stub", False),
                             embedding_version=record.get("embedding_version"),
                             tenant=record.get("tenant"),
                             is_expanded=True,
@@ -1345,6 +1620,13 @@ class HybridRetriever:
             # Don't fail the whole search if expansion fails
 
         return expanded
+
+    def _neighbor_score(self, source_score: float) -> float:
+        if source_score <= 0:
+            return 0.0
+        epsilon = 1e-4
+        half = source_score * 0.5
+        return max(0.0, min(half, source_score - epsilon))
 
     def _expand_microdoc_results(
         self,
@@ -1428,12 +1710,12 @@ class HybridRetriever:
 
     def _is_microdoc_candidate(self, chunk: ChunkResult) -> bool:
         return (
-            chunk.token_count < self.micro_min_tokens
-            and (chunk.document_total_tokens or 0) <= self.micro_doc_max
-        )
+            chunk.doc_is_microdoc or chunk.token_count < self.micro_min_tokens
+        ) and (chunk.document_total_tokens or 0) <= self.micro_doc_max
 
     def _is_microdoc_source(self, chunk: ChunkResult) -> bool:
-        return (chunk.document_total_tokens or 0) <= self.micro_doc_max
+        total_tokens = chunk.document_total_tokens or 0
+        return chunk.doc_is_microdoc or total_tokens <= self.micro_doc_max
 
     def _microdoc_from_fused(
         self,
@@ -1550,13 +1832,12 @@ class HybridRetriever:
 
         extras: List[ChunkResult] = []
         try:
-            hits = self.vector_retriever.client.search(
-                collection_name=self.vector_retriever.collection_name,
-                query_vector=query_vector,
-                limit=self.micro_knn_limit,
-                with_payload=True,
-                score_threshold=self.micro_sim_threshold,
+            hits = self.vector_retriever.search_named_vector(
+                "content",
+                query_vector,
+                self.micro_knn_limit,
                 query_filter=qdrant_filter,
+                score_threshold=self.micro_sim_threshold,
             )
         except Exception as exc:
             logger.debug(
@@ -1590,6 +1871,8 @@ class HybridRetriever:
                 document_total_tokens=doc_total,
                 source_path=payload.get("source_path"),
                 is_microdoc=payload.get("is_microdoc", False),
+                doc_is_microdoc=payload.get("doc_is_microdoc", False),
+                is_microdoc_stub=payload.get("is_microdoc_stub", False),
                 embedding_version=payload.get("embedding_version"),
                 tenant=payload.get("tenant"),
                 fused_score=hit.score,
@@ -1634,6 +1917,8 @@ class HybridRetriever:
             document_total_tokens=int(props.get("document_total_tokens", 0)),
             source_path=props.get("source_path"),
             is_microdoc=bool(props.get("is_microdoc", False)),
+            doc_is_microdoc=bool(props.get("doc_is_microdoc", False)),
+            is_microdoc_stub=bool(props.get("is_microdoc_stub", False)),
             embedding_version=props.get("embedding_version"),
             tenant=props.get("tenant"),
             citation_labels=[],
@@ -1652,7 +1937,9 @@ class HybridRetriever:
         depth = min(self.micro_dir_depth, len(parts))
         return "/".join(parts[:depth])
 
-    def _enforce_context_budget(self, results: List[ChunkResult]) -> List[ChunkResult]:
+    def _enforce_context_budget(
+        self, results: List[ChunkResult], starting_tokens: int = 0
+    ) -> Tuple[List[ChunkResult], int]:
         """
         Enforce context budget by limiting total tokens.
 
@@ -1662,51 +1949,54 @@ class HybridRetriever:
         Reference: Phase 7E Canonical Spec - Context Budget: Max 4,500 tokens
         """
         if not results:
-            return results
+            return [], starting_tokens
 
-        # Group by parent_section_id for proper ordering
-        grouped = {}
-        for r in results:
-            parent = r.parent_section_id or r.chunk_id
-            if parent not in grouped:
-                grouped[parent] = []
-            grouped[parent].append(r)
+        from collections import OrderedDict
 
-        # Sort within each group by order
-        for chunks in grouped.values():
-            chunks.sort(key=lambda x: x.order)
+        total_tokens = starting_tokens
+        final_results: List[ChunkResult] = []
+        grouped: "OrderedDict[str, List[ChunkResult]]" = OrderedDict()
 
-        # Assemble final list, respecting token budget
-        final_results = []
-        total_tokens = 0
+        for chunk in results:
+            parent = chunk.parent_section_id or chunk.chunk_id
+            grouped.setdefault(parent, []).append(chunk)
 
-        # Process groups by best score first
-        sorted_groups = sorted(
-            grouped.items(),
-            key=lambda x: max(c.fused_score or 0 for c in x[1]),
-            reverse=True,
-        )
-
-        for parent_id, chunks in sorted_groups:
+        for parent, chunks in grouped.items():
+            taken = 0
             for chunk in chunks:
-                if total_tokens + chunk.token_count <= self.context_max_tokens:
-                    final_results.append(chunk)
-                    total_tokens += chunk.token_count
-                else:
-                    # Budget exceeded
-                    logger.info(
-                        f"Context budget enforced: {len(final_results)} chunks, "
-                        f"{total_tokens} tokens (max: {self.context_max_tokens})"
-                    )
+                tokens = max(0, chunk.token_count or 0)
+                if total_tokens + tokens > self.context_max_tokens:
+                    self._log_context_budget(total_tokens, len(final_results))
+                    return final_results, total_tokens
+                final_results.append(chunk)
+                total_tokens += tokens
+                taken += 1
+                if taken >= max(1, self.context_group_cap):
                     break
 
-            if total_tokens >= self.context_max_tokens:
-                break
+        return final_results, total_tokens
 
-        # Sort final results by parent_section_id and order for coherent context
-        final_results.sort(key=lambda x: (x.parent_section_id or "", x.order))
+    def _log_context_budget(self, tokens: int, count: int) -> None:
+        logger.info(
+            "Context budget enforced",
+            extra={
+                "chunks": count,
+                "tokens": tokens,
+                "max_tokens": self.context_max_tokens,
+            },
+        )
 
-        return final_results
+    def _log_stage_snapshot(
+        self, stage: str, chunks: List[ChunkResult], limit: int = 5
+    ) -> None:
+        underlying = getattr(logger, "_logger", None) or getattr(logger, "logger", None)
+        if not underlying or not underlying.isEnabledFor(logging.DEBUG):
+            return
+        sample = [getattr(c, "chunk_id", None) for c in chunks[:limit]]
+        logger.debug(
+            "Ranking stage snapshot",
+            extra={"stage": stage, "count": len(chunks), "sample": sample},
+        )
 
     def assemble_context(self, chunks: List[ChunkResult]) -> str:
         """

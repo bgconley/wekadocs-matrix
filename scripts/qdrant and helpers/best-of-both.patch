@@ -1,0 +1,87 @@
+diff --git a/hybrid_rag_helpers-1546.py b/hybrid_rag_helpers-1546.py
+--- a/hybrid_rag_helpers-1546.py
++++ b/hybrid_rag_helpers-1546.py
+@@ -47,12 +47,12 @@
+     def total_tokens(self, token_counter: Optional[Callable[[str], int]] = None) -> int:
+         if self.token_count is not None:
+             return int(self.token_count)
+         if token_counter:
+             return int(token_counter(self.text))
+-        # fallback approximation: ~1.35 words per token
+-        return max(1, int(len(self.text.split()) * 1.35))
++        # fallback to the same estimator used elsewhere (~1.33 words per token)
++        return default_token_counter(self.text)
+
+
+ @dataclass
+ class GraphNeighbor:
+     neighbor_id: str
+@@ -77,14 +77,6 @@
+ def sentences(text: str) -> List[str]:
+     if not text:
+         return []
+     parts = _SENT_SPLIT_RE.split(text.strip())
+     return [p.strip() for p in parts if p.strip()]
+-
+-def shingles(tokens: Sequence[str], n: int = 8) -> Set[Tuple[str, ...]]:
+-    if n <= 0:
+-        return set()
+-    return {tuple(tokens[i:i+n]) for i in range(0, max(0, len(tokens) - n + 1))}
+
+ def jaccard_similarity(a: str, b: str, ngram: int = 8) -> float:
+     """
+     Approximate near-duplicate detection via shingled Jaccard similarity on tokens.
+     """
+diff --git a/qdrant_setup_chunks_multi-1546.py b/qdrant_setup_chunks_multi-1546.py
+--- a/qdrant_setup_chunks_multi-1546.py
++++ b/qdrant_setup_chunks_multi-1546.py
+@@ -21,6 +21,7 @@
+ """
+
+ import argparse
++import os
+ from qdrant_client import QdrantClient
+ from qdrant_client.models import Distance, VectorParams, OptimizersConfigDiff, HnswConfigDiff
+ from qdrant_client.http.models import PayloadSchemaType
+@@ -60,7 +61,22 @@
+         )
+         print(f"[OK] Created collection '{name}'.")
+     else:
+-        print(f"[OK] Collection '{name}' already exists; leaving as-is.")
++        # Apply best-effort, non-destructive tuning updates if supported by this Qdrant version.
++        try:
++            client.update_collection(
++                collection_name=name,
++                hnsw_config=HnswConfigDiff(
++                    m=48,
++                    ef_construct=256,
++                    full_scan_threshold=10000
++                ),
++                optimizer_config=OptimizersConfigDiff(
++                    default_segment_number=2,
++                    indexing_threshold=20000,
++                    deleted_threshold=0.2,
++                    vacuum_min_vector_number=2000,
++                    max_optimization_threads=1,
++                    flush_interval_sec=5,
++                ),
++            )
++            print(f"[OK] Collection '{name}' already exists; applied non-destructive config updates.")
++        except Exception:
++            print(f"[OK] Collection '{name}' already exists; leaving as-is.")
+
+ def ensure_payload_indexes(client: QdrantClient, name: str) -> None:
+     fields = [
+@@ -110,10 +126,10 @@
+
+ def main():
+     ap = argparse.ArgumentParser()
+-    ap.add_argument("--host", default="localhost")
+-    ap.add_argument("--port", type=int, default=6333)
++    ap.add_argument("--host", default=os.getenv("QDRANT_HOST", "localhost"))
++    ap.add_argument("--port", type=int, default=int(os.getenv("QDRANT_PORT", "6333")))
+     ap.add_argument("--collection", default="chunks_multi")
+-    ap.add_argument("--dims", type=int, default=1024)
++    ap.add_argument("--dims", type=int, default=int(os.getenv("QDRANT_DIMS", "1024")))
+     ap.add_argument("--add-entity", action="store_true")
+     args = ap.parse_args()

@@ -145,7 +145,7 @@ class CompatQdrantClient(QdrantClient):
         self,
         collection_name: str,
         points: Sequence,
-        expected_dim: int,
+        expected_dim: int | Dict[str, int],
         wait: bool = True,
     ):
         """
@@ -175,17 +175,45 @@ class CompatQdrantClient(QdrantClient):
         try:
             # Validate all point vectors before upsert
             for i, point in enumerate(points):
-                vector = (
-                    point.vector
-                    if hasattr(point, "vector")
-                    else point.get("vector", [])
-                )
-                actual_dim = len(vector)
-                if actual_dim != expected_dim:
-                    raise ValueError(
-                        f"Dimension mismatch in point {i}: expected {expected_dim}, "
-                        f"got {actual_dim}. Point ID: {getattr(point, 'id', 'unknown')}"
-                    )
+                vectors = self._extract_point_vectors(point)
+                if vectors:
+                    if isinstance(vectors, dict):
+                        iterator = vectors.items()
+                    else:
+                        iterator = [(None, vectors)]
+
+                    for name, vec in iterator:
+                        if vec is None:
+                            continue
+                        expected = (
+                            expected_dim.get(name)
+                            if isinstance(expected_dim, dict)
+                            else expected_dim
+                        )
+                        if expected is None and isinstance(expected_dim, dict):
+                            expected = next(iter(expected_dim.values()), None)
+                        if expected and len(vec) != expected:
+                            label = name or "vector"
+                            raise ValueError(
+                                f"Dimension mismatch for vector '{label}' in point {i}: "
+                                f"expected {expected}, got {len(vec)}. "
+                                f"Point ID: {getattr(point, 'id', 'unknown')}"
+                            )
+                else:
+                    # Fall back to treating point.vector as a single unnamed vector
+                    raw_vector = getattr(point, "vector", None) or []
+                    actual_dim = len(raw_vector)
+                    if isinstance(expected_dim, dict):
+                        exp_dim = expected_dim.get("content") or next(
+                            iter(expected_dim.values())
+                        )
+                    else:
+                        exp_dim = expected_dim
+                    if exp_dim and actual_dim != exp_dim:
+                        raise ValueError(
+                            f"Dimension mismatch in point {i}: expected {exp_dim}, "
+                            f"got {actual_dim}. Point ID: {getattr(point, 'id', 'unknown')}"
+                        )
 
             # All dimensions valid, proceed with upsert
             result = super().upsert(
@@ -211,6 +239,45 @@ class CompatQdrantClient(QdrantClient):
                 collection_name=collection_name, status=status
             ).inc()
             raise
+
+    @staticmethod
+    def _extract_point_vectors(point: Any):
+        """
+        Normalize PointStruct vector payloads (single unnamed vectors or named
+        vector dictionaries) into a structure we can inspect.
+        """
+        candidate = None
+        if hasattr(point, "vector") and point.vector is not None:
+            candidate = point.vector
+        elif hasattr(point, "vectors") and point.vectors is not None:
+            candidate = point.vectors
+        elif isinstance(getattr(point, "payload", None), dict):
+            payload_vectors = point.payload.get("vectors")
+            if payload_vectors:
+                candidate = payload_vectors
+
+        if candidate is None:
+            return None
+
+        # Convert NamedVector structures into plain lists so len() reflects
+        # dimensionality instead of field count.
+        if isinstance(candidate, dict):
+            normalized = {}
+            for name, vec in candidate.items():
+                if hasattr(vec, "vector"):
+                    normalized[name] = list(vec.vector)
+                elif isinstance(vec, list):
+                    normalized[name] = vec
+                elif isinstance(vec, tuple):
+                    normalized[name] = list(vec)
+                else:
+                    normalized[name] = vec
+            return normalized
+
+        if hasattr(candidate, "vector"):
+            return list(candidate.vector)
+
+        return candidate
 
     def create_collection_with_dims(
         self,

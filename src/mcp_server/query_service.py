@@ -20,7 +20,7 @@ from src.query.context_assembly import ContextAssembler
 from src.query.hybrid_retrieval import ChunkResult, HybridRetriever
 from src.query.hybrid_search import HybridSearchEngine, QdrantVectorStore, SearchResult
 from src.query.planner import QueryPlanner
-from src.query.ranking import RankedResult, RankingFeatures, rank_results
+from src.query.ranking import RankedResult, Ranker, rank_results
 from src.query.response_builder import (
     Response,
     StructuredResponse,
@@ -185,6 +185,8 @@ class QueryService:
         """Adapt ChunkResult objects to RankedResult instances for response building."""
 
         ranked: List[RankedResult] = []
+        ranker = Ranker()
+
         for index, chunk in enumerate(chunks):
             score = float(
                 chunk.fused_score
@@ -195,6 +197,9 @@ class QueryService:
                     else chunk.bm25_score if chunk.bm25_score is not None else 0.0
                 )
             )
+
+            fusion_method = chunk.fusion_method or None
+            score_kind = "rrf" if fusion_method == "rrf" else "similarity"
 
             metadata: Dict[str, Any] = {
                 "chunk_id": chunk.chunk_id,
@@ -208,11 +213,12 @@ class QueryService:
                 "is_combined": chunk.is_combined,
                 "is_split": chunk.is_split,
                 "boundaries_json": chunk.boundaries_json,
-                "score_kind": "similarity",
-                "fusion_method": chunk.fusion_method,
+                "score_kind": score_kind,
+                "fusion_method": fusion_method,
                 "bm25_score": chunk.bm25_score,
                 "vector_score": chunk.vector_score,
                 "vec_score": chunk.vector_score,
+                "vector_score_kind": chunk.vector_score_kind,
                 "bm25_rank": chunk.bm25_rank,
                 "vector_rank": chunk.vector_rank,
             }
@@ -227,14 +233,7 @@ class QueryService:
                 metadata=metadata,
             )
 
-            features = RankingFeatures(
-                semantic_score=float(chunk.vector_score or chunk.fused_score or 0.0),
-                graph_distance_score=0.0,
-                recency_score=0.0,
-                entity_priority_score=1.0,
-                coverage_score=0.0,
-                final_score=score,
-            )
+            features = ranker._extract_features(search_result)
 
             ranked.append(
                 RankedResult(result=search_result, features=features, rank=index + 1)

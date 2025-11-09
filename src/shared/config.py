@@ -5,7 +5,7 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 import yaml
 from pydantic import BaseModel, Field, validator
@@ -102,6 +102,13 @@ class ExpansionConfig(BaseModel):
     score_delta_max: float = 0.02
 
 
+class RerankerConfig(BaseModel):
+    enabled: bool = False
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    top_n: int = 100
+
+
 class HybridSearchConfig(BaseModel):
     enabled: bool = True
     method: str = "rrf"  # Phase 7E: rrf or weighted
@@ -110,6 +117,10 @@ class HybridSearchConfig(BaseModel):
     vector_weight: float = 0.7  # Legacy
     graph_weight: float = 0.3  # Legacy
     top_k: int = 20
+    vector_fields: Dict[str, float] = Field(
+        default_factory=lambda: {"content": 1.0, "title": 0.35, "entity": 0.2}
+    )
+    reranker: RerankerConfig = Field(default_factory=RerankerConfig)
     bm25: BM25Config = Field(default_factory=BM25Config)  # Phase 7E
     expansion: ExpansionConfig = Field(default_factory=ExpansionConfig)  # Phase 7E
 
@@ -187,11 +198,52 @@ class QueueRecoveryConfig(BaseModel):
     stale_job_action: str = "requeue"
 
 
+class SemanticEnrichmentConfig(BaseModel):
+    enabled: bool = False
+    provider: str = "stub"
+    model_name: Optional[str] = None
+    timeout_seconds: int = 5
+    max_retries: int = 1
+
+
+class ChunkStructureConfig(BaseModel):
+    min_tokens: int = 800
+    target_tokens: int = 1500
+    hard_tokens: int = 7900
+    max_sections: int = 8
+    respect_major_levels: bool = True
+    stop_at_level: int = 2
+    break_keywords: str = (
+        "faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting"
+    )
+
+
+class ChunkSplitConfig(BaseModel):
+    enabled: bool = True
+    max_tokens: int = 7900
+    overlap_tokens: int = 150
+
+
+class ChunkMicrodocConfig(BaseModel):
+    enabled: bool = True
+    doc_token_threshold: int = 2000
+    min_split_tokens: int = 400
+
+
+class ChunkAssemblyConfig(BaseModel):
+    assembler: str = "structured"
+    structure: ChunkStructureConfig = Field(default_factory=ChunkStructureConfig)
+    split: ChunkSplitConfig = Field(default_factory=ChunkSplitConfig)
+    microdoc: ChunkMicrodocConfig = Field(default_factory=ChunkMicrodocConfig)
+    semantic: SemanticEnrichmentConfig = Field(default_factory=SemanticEnrichmentConfig)
+
+
 class IngestionConfig(BaseModel):
     batch_size: int = 500
     max_section_tokens: int = 1000
     timeout_seconds: int = 300
     workers: int = 2
+    chunk_assembly: ChunkAssemblyConfig = Field(default_factory=ChunkAssemblyConfig)
     queue_recovery: QueueRecoveryConfig = Field(default_factory=QueueRecoveryConfig)
     reconciliation: ReconciliationConfig
 

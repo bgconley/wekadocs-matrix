@@ -39,7 +39,7 @@ search:
     primary: "qdrant"
     dual_write: false  # Phase 7C: Set to true during migration
     qdrant:
-      collection_name: "chunks"  # Phase 7E-1: New chunks collection for dual-label schema
+      collection_name: "chunks_multi"  # Phase 7E+: Multi-vector collection
       use_grpc: false
       timeout: 30
     neo4j:
@@ -59,6 +59,17 @@ search:
     # Legacy weights (for backward compatibility)
     vector_weight: 0.7  # Weight for vector similarity (0.0-1.0)
     graph_weight: 0.3   # Weight for graph/text match
+
+    vector_fields:
+      content: 1.0
+      title: 0.35
+      entity: 0.2
+
+    reranker:
+      enabled: false
+      provider: "jina"
+      model: "jina-reranker-v3"
+      top_n: 100
 
     top_k: 20  # Number of candidates to retrieve
 
@@ -122,21 +133,28 @@ ingestion:
   # Phase 7E-2: Chunk assembly configuration
   # Controls intelligent combining and splitting for optimal retrieval quality
   chunk_assembly:
-    # Assembler strategy: "greedy" (default) or "pipeline"
-    assembler: "greedy"
-
-    # Greedy combiner settings
-    combine_min_tokens: 800      # Minimum tokens before stopping combine
-    combine_target_tokens: 1500  # Target chunk size for optimal retrieval
-    combine_max_tokens: 7900     # Provider hard maximum (don't exceed)
-    combine_max_sections: 8      # Max sections to combine into one chunk
-
-    # Semantic boundary respect
-    respect_major_levels: true   # Don't cross H1/H2 boundaries
-    stop_at_level: 2             # Don't combine across this heading level
-
-    # Section types that should not be combined (regex pattern)
-    break_keywords: "faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting"
+    assembler: "structured"
+    structure:
+      min_tokens: 800
+      target_tokens: 1500
+      hard_tokens: 7900
+      max_sections: 8
+      respect_major_levels: true
+      stop_at_level: 2
+      break_keywords: "faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting"
+    split:
+      enabled: true
+      max_tokens: 7900
+      overlap_tokens: 150
+    microdoc:
+      enabled: true
+      doc_token_threshold: 2000
+      min_split_tokens: 400
+    semantic:
+      enabled: false
+      provider: "stub"
+      model_name: null
+      timeout_seconds: 5
 
   # Queue recovery (Phase 6: job reaper)
   queue_recovery:
@@ -176,7 +194,7 @@ ranking:
 
 # Schema configuration
 schema:
-  version: "v2.1"  # Phase 7C: Updated to v2.1 (1024-D vectors, dual-labeling, session tracking)
+  version: "v2.2"  # Phase 7E+: Hybrid retrieval enablement with multi-vector support
   auto_migrate: false
 
 # Rate limiting configuration
