@@ -402,7 +402,7 @@ class QueryService:
                     expand=expand_graph,
                 )
 
-                # Strict post-filter by doc_tag (defense-in-depth)
+                # Strict post-filter by doc_tag or snapshot_scope (defense-in-depth)
                 dt = filters.get("doc_tag")
                 if dt:
                     before = len(chunks)
@@ -410,6 +410,18 @@ class QueryService:
                     logger.info(
                         "Applied strict doc_tag=%s: kept %d/%d chunks",
                         dt,
+                        len(chunks),
+                        before,
+                    )
+                scope = filters.get("snapshot_scope")
+                if scope:
+                    before = len(chunks)
+                    chunks = [
+                        c for c in chunks if getattr(c, "snapshot_scope", None) == scope
+                    ]
+                    logger.info(
+                        "Applied strict snapshot_scope=%s: kept %d/%d chunks",
+                        scope,
                         len(chunks),
                         before,
                     )

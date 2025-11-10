@@ -249,7 +249,8 @@ class Reconciler:
                 coalesce(s.text, s.content, s.title, '') AS text,
                 coalesce(s.document_id, d.id) AS document_id,
                 d.source_uri AS source_uri,
-                d.doc_tag AS doc_tag
+                d.doc_tag AS doc_tag,
+                d.snapshot_scope AS snapshot_scope
             """
             with self.neo4j.session() as sess:
                 res = sess.run(cypher, {"ids": missing})
@@ -277,6 +278,7 @@ class Reconciler:
                     "document_uri": document_uri,
                     "source_uri": source_uri,
                     "doc_tag": meta.get("doc_tag"),
+                    "snapshot_scope": meta.get("snapshot_scope"),
                     "embedding_version": self.version,
                 }
                 upserts.append((sid, named_vecs, payload))

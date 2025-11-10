@@ -318,12 +318,14 @@ class GraphBuilder:
             d.checksum = $checksum,
             d.last_edited = $last_edited,
             d.doc_tag = $doc_tag,
+            d.snapshot_scope = $snapshot_scope,
             d.total_tokens = $total_tokens,
             d.updated_at = datetime()
         RETURN d.id as id
         """
         params = dict(document)
         params.setdefault("doc_tag", None)
+        params.setdefault("snapshot_scope", None)
         params.setdefault("total_tokens", 0)
         session.run(query, **params)
         logger.debug("Document upserted", document_id=document["id"])
@@ -403,7 +405,8 @@ class GraphBuilder:
                 s.updated_at = datetime()
             WITH s, chunk
             MATCH (d:Document {id: $document_id})
-            SET s.doc_tag = d.doc_tag
+            SET s.doc_tag = d.doc_tag,
+                s.snapshot_scope = d.snapshot_scope
             MERGE (d)-[r:HAS_SECTION]->(s)
             SET r.order = chunk.order,
                 r.updated_at = datetime()
@@ -1325,6 +1328,7 @@ class GraphBuilder:
             ("heading", PayloadSchemaType.TEXT),
             ("updated_at", PayloadSchemaType.INTEGER),
             ("doc_tag", PayloadSchemaType.KEYWORD),
+            ("snapshot_scope", PayloadSchemaType.KEYWORD),
             ("is_microdoc", PayloadSchemaType.BOOL),
             ("token_count", PayloadSchemaType.INTEGER),
             ("tenant", PayloadSchemaType.KEYWORD),
@@ -1415,6 +1419,7 @@ class GraphBuilder:
             "source_uri": source_uri,
             "source_path": source_path,
             "doc_tag": document.get("doc_tag"),
+            "snapshot_scope": document.get("snapshot_scope"),
             "document_total_tokens": document.get("total_tokens"),
             "is_microdoc": section.get("is_microdoc"),
             "doc_is_microdoc": section.get("doc_is_microdoc", False),
@@ -1750,18 +1755,37 @@ def ingest_document(
         document = result["Document"]
         sections = result["Sections"]
 
-        # Extract doc_tag from content or source_uri
+        # Extract per-document doc_tag and snapshot_scope
+        # Rules:
+        # 1) Prefer explicit "DocTag: <TAG>" in content for doc_tag.
+        # 2) Else derive from filename stem. If stem is "<scope>__<slug>",
+        #    treat <scope> as snapshot_scope and <slug> as doc_tag; otherwise
+        #    use the full stem as doc_tag.
         doc_tag = None
-        m = re.search(r"\bDocTag:\s*([A-Z]+-\d+)\b", content or "", flags=re.I)
+        snapshot_scope = None
+
+        m = re.search(r"DocTag:\s*([A-Za-z0-9_\-]+)", content or "", flags=re.I)
         if m:
-            doc_tag = m.group(1).upper()
+            doc_tag = m.group(1)
         else:
-            m = re.search(r"\b([A-Z]+-\d+)\b", source_uri or "", flags=re.I)
-            if m:
-                doc_tag = m.group(1).upper()
+            try:
+                fname = Path(source_uri or "").name
+                stem = Path(fname).stem
+                if "__" in stem:
+                    scope_part, slug_part = stem.split("__", 1)
+                    snapshot_scope = scope_part
+                    doc_tag = slug_part
+                else:
+                    doc_tag = stem
+            except Exception:
+                doc_tag = None
+                snapshot_scope = None
+
         document["doc_tag"] = doc_tag
+        document["snapshot_scope"] = snapshot_scope
         for section in sections:
             section["doc_tag"] = doc_tag
+            section["snapshot_scope"] = snapshot_scope
 
         # Extract entities
         entities, mentions = extract_entities(sections)

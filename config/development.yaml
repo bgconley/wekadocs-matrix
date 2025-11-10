@@ -135,17 +135,17 @@ ingestion:
   chunk_assembly:
     assembler: "structured"
     structure:
-      min_tokens: 800
-      target_tokens: 1500
-      hard_tokens: 7900
-      max_sections: 8
+      min_tokens: 350
+      target_tokens: 500
+      hard_tokens: 750
+      max_sections: 4
       respect_major_levels: true
       stop_at_level: 2
       break_keywords: "faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting"
     split:
       enabled: true
-      max_tokens: 7900
-      overlap_tokens: 150
+      max_tokens: 750
+      overlap_tokens: 100
     microdoc:
       enabled: true
       doc_token_threshold: 2000

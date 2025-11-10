@@ -689,6 +689,8 @@ class GreedyCombinerV2:
         if len(annotated) == 1:
             annotated = self._ensure_microdoc_neighbor(document_id, annotated)
 
+        annotated = self._ensure_microdoc_stub(document_id, annotated)
+
         return annotated
 
     def _ensure_microdoc_neighbor(
@@ -721,6 +723,32 @@ class GreedyCombinerV2:
         stub = self._enrich_chunk(stub)
         stub = post_process_chunk(stub)
         return [chunk, stub]
+
+    def _ensure_microdoc_stub(self, document_id: str, chunks: List[Dict]) -> List[Dict]:
+        if not chunks:
+            return chunks
+        if any(chunk.get("is_microdoc_stub") for chunk in chunks):
+            return chunks
+
+        template = chunks[-1]
+        orig_ids = list(template.get("original_section_ids") or [template.get("id")])
+        stub_suffix = f"microdoc-stub-{len(chunks)}"
+        new_ids = orig_ids + [stub_suffix]
+        stub_id = generate_chunk_id(document_id, new_ids)
+
+        stub = dict(template)
+        stub["id"] = stub_id
+        stub["text"] = ""
+        stub["token_count"] = 0
+        stub["tokens"] = 0
+        stub["order"] = int(template.get("order", 0)) + 1
+        stub["is_microdoc_stub"] = True
+        stub["doc_is_microdoc"] = True
+        stub["is_microdoc"] = True
+        stub["boundaries_json"] = template.get("boundaries_json", "{}")
+        stub = self._enrich_chunk(stub)
+        stub = post_process_chunk(stub)
+        return chunks + [stub]
 
     def _balance_small_tails(self, chunks: List[Dict]) -> List[Dict]:
         if not chunks:

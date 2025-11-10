@@ -79,7 +79,8 @@ class ChunkResult:
     is_split: bool = False
     original_section_ids: List[str] = None
     boundaries_json: str = "{}"
-    doc_tag: Optional[str] = None  # document scoping tag (e.g., REGPACK-01)
+    doc_tag: Optional[str] = None  # document scoping tag (per-document)
+    snapshot_scope: Optional[str] = None  # snapshot-level scope tag
     document_total_tokens: int = 0
     source_path: Optional[str] = None
     is_microdoc: bool = False
@@ -560,6 +561,7 @@ class QdrantMultiVectorRetriever:
                 text=payload.get("text", ""),
                 token_count=payload.get("token_count", 0),
                 doc_tag=payload.get("doc_tag"),
+                snapshot_scope=payload.get("snapshot_scope"),
                 document_total_tokens=payload.get("document_total_tokens", 0),
                 source_path=payload.get("source_path"),
                 is_microdoc=payload.get("is_microdoc", False),
@@ -1823,6 +1825,13 @@ class HybridRetriever:
             must_conditions.append(
                 FieldCondition(key="doc_tag", match=MatchValue(value=doc_tag))
             )
+        snapshot_scope = filters.get("snapshot_scope")
+        if snapshot_scope:
+            must_conditions.append(
+                FieldCondition(
+                    key="snapshot_scope", match=MatchValue(value=snapshot_scope)
+                )
+            )
 
         qdrant_filter = None
         if must_conditions or must_not_conditions:
@@ -1868,6 +1877,7 @@ class HybridRetriever:
                 original_section_ids=payload.get("original_section_ids", []),
                 boundaries_json=payload.get("boundaries_json", "{}"),
                 doc_tag=payload.get("doc_tag"),
+                snapshot_scope=payload.get("snapshot_scope"),
                 document_total_tokens=doc_total,
                 source_path=payload.get("source_path"),
                 is_microdoc=payload.get("is_microdoc", False),

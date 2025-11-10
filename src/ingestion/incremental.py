@@ -198,16 +198,20 @@ class IncrementalUpdater:
                         s.embedding_version = $v,
                         s.updated_at = datetime()
                     MERGE (d:Document {id: $doc})
-                    SET s.doc_tag = d.doc_tag
+                    SET s.doc_tag = d.doc_tag,
+                        s.snapshot_scope = d.snapshot_scope
                     MERGE (d)-[:HAS_SECTION]->(s)
                     """,
                     {"rows": to_upsert, "doc": document_id, "v": self.version},
                 )
                 doc_tag_result = sess.run(
-                    "MATCH (d:Document {id:$doc}) RETURN d.doc_tag AS doc_tag",
+                    "MATCH (d:Document {id:$doc}) RETURN d.doc_tag AS doc_tag, d.snapshot_scope AS snapshot_scope",
                     {"doc": document_id},
                 ).single()
                 doc_tag_value = doc_tag_result["doc_tag"] if doc_tag_result else None
+                snapshot_scope_value = (
+                    doc_tag_result["snapshot_scope"] if doc_tag_result else None
+                )
                 upserted_count = len(to_upsert)
 
             # Upsert vectors (placeholder embeddings for tests)
@@ -225,6 +229,9 @@ class IncrementalUpdater:
                     sec_doc_tag = sec.get("doc_tag", doc_tag_value)
                     if sec_doc_tag:
                         sec["doc_tag"] = sec_doc_tag
+                    sec_snapshot_scope = sec.get("snapshot_scope", snapshot_scope_value)
+                    if sec_snapshot_scope:
+                        sec["snapshot_scope"] = sec_snapshot_scope
                     point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, sec["id"]))
                     vectors = self._build_named_vectors(
                         zero_template, vector_field_names
@@ -240,6 +247,7 @@ class IncrementalUpdater:
                                 "document_uri": sec.get("source_uri")
                                 or sec.get("document_uri"),
                                 "doc_tag": sec_doc_tag,
+                                "snapshot_scope": sec_snapshot_scope,
                                 "embedding_version": self.version,
                             },
                         )
