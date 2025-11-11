@@ -8,13 +8,21 @@ Enhanced Response Features (E1-E7):
 - Verbosity modes: full (text only), graph (text + relationships, default)
 - Graph mode provides complete context for better LLM reasoning
 - Supports multi-turn exploration via traverse_relationships
+
+Task 7C.8: Answer provenance tracking via SessionTracker
+- Tracks which sections support each answer (SUPPORTED_BY relationships)
+- Enables citation integrity and hallucination detection
 """
 
 from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from src.query.ranking import RankedResult
+
+# Task 7C.8: Import SessionTracker for answer provenance
+if TYPE_CHECKING:
+    from src.query.session_tracker import SessionTracker
 
 
 class Verbosity(str, Enum):
@@ -92,14 +100,111 @@ class ResponseBuilder:
     Builds dual-format responses (Markdown + JSON) from ranked results.
     """
 
-    def __init__(self, neo4j_driver=None):
+    def __init__(self, neo4j_driver=None, max_text_bytes: int = 32768):
         """
         Initialize ResponseBuilder.
 
         Args:
             neo4j_driver: Optional Neo4j driver for graph mode queries (E3)
+            max_text_bytes: Maximum bytes for full text truncation (E1, default: 32KB)
         """
         self.neo4j_driver = neo4j_driver
+        self.max_text_bytes = max_text_bytes
+
+    def _truncate_to_bytes(self, text: str, max_bytes: Optional[int] = None) -> str:
+        """
+        Truncate text to max bytes (UTF-8) without breaking multi-byte sequences.
+
+        Pre-Phase 7 (E1): Byte-accurate truncation for FULL mode 32KB cap.
+        Uses UTF-8 encoding and safe decoding to avoid splitting multi-byte chars.
+
+        Args:
+            text: Text to truncate
+            max_bytes: Maximum bytes (defaults to self.max_text_bytes)
+
+        Returns:
+            Truncated text with ellipsis if truncated
+        """
+        if max_bytes is None:
+            max_bytes = self.max_text_bytes
+
+        # Encode to UTF-8 bytes
+        text_bytes = text.encode("utf-8")
+
+        if len(text_bytes) <= max_bytes:
+            return text
+
+        # Truncate at byte boundary
+        truncated_bytes = text_bytes[:max_bytes]
+
+        # Decode with error handling (ignores incomplete multi-byte sequences)
+        truncated_text = truncated_bytes.decode("utf-8", errors="ignore")
+
+        return truncated_text + "...[truncated]"
+
+    def format_citations(
+        self, results: List[RankedResult], max_citations: int = 5
+    ) -> str:
+        """
+        Format citations from ranked results as Markdown.
+
+        Pre-Phase 7 (E3): Citation scaffolding - currently unused.
+        Will be integrated in Phase 7 for answer provenance tracking.
+
+        Args:
+            results: Ranked search results to cite
+            max_citations: Maximum citations to include (default: 5)
+
+        Returns:
+            Markdown-formatted citation block
+
+        Example output:
+            [1] Installation Prerequisites (prerequisites.md#network-requirements)
+            [2] Network Configuration Guide (network-config.md#interface-setup)
+        """
+        if not results:
+            return ""
+
+        lines: List[str] = []
+        seen: set = set()
+
+        for ranked in results:
+            metadata = ranked.result.metadata
+
+            # Dedup based on chunk/document identity
+            chunk_id = metadata.get("chunk_id")
+            dedupe_key = chunk_id or (
+                metadata.get("document_uri"),
+                metadata.get("anchor"),
+                metadata.get("title"),
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+
+            # Extract citation components
+            title = metadata.get("title") or metadata.get("name") or "Untitled"
+            document_uri = metadata.get("document_uri") or metadata.get(
+                "source_uri", ""
+            )
+            anchor = metadata.get("anchor", "")
+
+            # Format citation
+            index = len(lines) + 1
+            if document_uri:
+                if anchor:
+                    citation = f"[{index}] {title} ({document_uri}#{anchor})"
+                else:
+                    citation = f"[{index}] {title} ({document_uri})"
+            else:
+                citation = f"[{index}] {title}"
+
+            lines.append(citation)
+
+            if len(lines) >= max_citations:
+                break
+
+        return "\n".join(lines)
 
     def build_response(
         self,
@@ -109,9 +214,15 @@ class ResponseBuilder:
         timing: Dict[str, float],
         filters: Optional[Dict[str, Any]] = None,
         verbosity: Verbosity = Verbosity.GRAPH,
+        query_id: Optional[str] = None,  # Task 7C.8: For answer provenance
+        session_tracker: Optional["SessionTracker"] = None,  # Task 7C.8
+        assembled_context: Optional[str] = None,
     ) -> Response:
         """
         Build complete response from ranked results.
+
+        Task 7C.8: Now tracks answer provenance if query_id and session_tracker provided.
+        Creates Answer node with SUPPORTED_BY relationships to cited sections.
 
         Args:
             query: Original query text
@@ -120,10 +231,22 @@ class ResponseBuilder:
             timing: Timing information
             filters: Optional filters applied
             verbosity: Response detail level (full=text only, graph=text+relationships, default=graph)
+            query_id: Optional query ID for answer provenance tracking (Task 7C.8)
+            session_tracker: Optional SessionTracker instance for provenance (Task 7C.8)
+            assembled_context: Optional stitched context to append for LLM consumption (Phase 7E-3)
 
         Returns:
-            Response with Markdown and JSON
+            Response with Markdown and JSON (includes answer_id if provenance tracked)
         """
+        # Pre-Phase 7 (G1): Metrics instrumentation for response builder
+        import time
+
+        from src.shared.observability.metrics import (
+            response_builder_evidence_count,
+            response_builder_latency_ms,
+        )
+
+        start_time = time.time()
         # Extract top evidence with verbosity mode
         evidence = self._extract_evidence(ranked_results[:5], verbosity)
 
@@ -138,6 +261,10 @@ class ResponseBuilder:
             query, intent, ranked_results, evidence, confidence
         )
 
+        if assembled_context:
+            markdown += "\n\n---\n### Context (chunk-stitched, budget-bounded)\n"
+            markdown += assembled_context
+
         # Build structured answer
         answer_text = self._extract_answer_text(intent, ranked_results)
 
@@ -146,6 +273,69 @@ class ResponseBuilder:
             evidence=evidence,
             confidence=confidence,
             diagnostics=diagnostics,
+        )
+
+        # Task 7C.8: Track answer provenance if session tracking is active
+        answer_id = None
+        if query_id and session_tracker:
+            try:
+                # Extract supporting section IDs from top evidence (up to 5 citations)
+                supporting_section_ids = []
+                for ev in evidence[:5]:
+                    # Prefer section_id, fallback to node_id if it's a Section
+                    if ev.section_id:
+                        supporting_section_ids.append(ev.section_id)
+                    elif ev.node_label == "Section" and ev.node_id:
+                        supporting_section_ids.append(ev.node_id)
+
+                # Create answer with provenance
+                if supporting_section_ids:
+                    # Get model name from environment or use default
+                    import os
+
+                    model_name = os.getenv("ANSWER_MODEL", "search-result-formatting")
+
+                    answer_id = session_tracker.create_answer(
+                        query_id=query_id,
+                        answer_text=markdown,  # Store full Markdown answer
+                        supporting_section_ids=supporting_section_ids,
+                        model=model_name,
+                        tokens_used=None,  # Not applicable: answer is formatted search results, not LLM-generated
+                        generation_duration_ms=None,  # Not applicable: answer is formatted search results, not LLM-generated
+                    )
+
+                    from src.shared.observability import get_logger
+
+                    logger = get_logger(__name__)
+                    logger.info(
+                        f"Created answer {answer_id} with {len(supporting_section_ids)} citations "
+                        f"for query {query_id}"
+                    )
+                else:
+                    from src.shared.observability import get_logger
+
+                    logger = get_logger(__name__)
+                    logger.warning(
+                        f"No supporting sections found for answer provenance (query {query_id})"
+                    )
+
+            except Exception as e:
+                # Log error but don't fail response generation
+                from src.shared.observability import get_logger
+
+                logger = get_logger(__name__)
+                logger.error(f"Failed to track answer provenance: {e}")
+
+        # Add answer_id to structured response if tracked
+        if answer_id:
+            # Store answer_id in diagnostics for reference
+            structured.diagnostics.ranking_features["answer_id"] = answer_id
+
+        # Record metrics
+        latency = (time.time() - start_time) * 1000
+        response_builder_latency_ms.labels(verbosity=verbosity.value).observe(latency)
+        response_builder_evidence_count.labels(verbosity=verbosity.value).observe(
+            len(evidence)
         )
 
         return Response(answer_markdown=markdown, answer_json=structured)
@@ -181,14 +371,14 @@ class ResponseBuilder:
 
             # Mode-specific evidence extraction
             if verbosity == Verbosity.FULL:
-                # Full mode: complete section text (32KB limit)
-                # Fetch full text from Neo4j
+                # Full mode: complete section text (32KB byte limit)
+                # Pre-Phase 7 (E1): Byte-accurate UTF-8 truncation
                 full_text, node_title, tokens = self._fetch_full_text_from_neo4j(
                     node_id
                 )
 
-                if len(full_text) > 32768:  # 32KB limit
-                    full_text = full_text[:32768] + "...[truncated]"
+                # Apply byte cap (32KB)
+                full_text = self._truncate_to_bytes(full_text, max_bytes=32768)
 
                 evidence_list.append(
                     Evidence(
@@ -211,17 +401,18 @@ class ResponseBuilder:
 
             elif verbosity == Verbosity.GRAPH:
                 # Graph mode: full text + related entities
-                # Fetch full text from Neo4j
+                # Pre-Phase 7 (E1, E2): Byte-accurate truncation + safety caps
                 full_text, node_title, tokens = self._fetch_full_text_from_neo4j(
                     node_id
                 )
 
-                if len(full_text) > 32768:  # 32KB limit
-                    full_text = full_text[:32768] + "...[truncated]"
+                # Apply byte cap (32KB)
+                full_text = self._truncate_to_bytes(full_text, max_bytes=32768)
 
-                # Get related entities from Neo4j (E3 implementation)
+                # Get related entities from Neo4j with safety caps (E2)
+                # Max 20 related entities per seed (prevents explosion)
                 related = (
-                    self._get_related_entities(node_id)
+                    self._get_related_entities(node_id, max_entities=20)
                     if self.neo4j_driver
                     else {
                         "entities": [],
@@ -253,17 +444,22 @@ class ResponseBuilder:
         return evidence_list
 
     def _get_related_entities(
-        self, node_id: str, max_entities: int = 20
+        self, node_id: str, max_entities: int = 20, max_depth: int = 1
     ) -> Dict[str, List]:
         """
-        Fetch related entities and sections from Neo4j (E3 implementation).
+        Fetch related entities and sections from Neo4j (E2, E3 implementation).
+
+        Pre-Phase 7 (E2): Safety caps prevent graph explosion
+        - max_entities: Limit entities per seed (default: 20)
+        - max_depth: Limit traversal depth (default: 1, currently enforced)
 
         Query: 1-hop neighbors via MENTIONS, CONTAINS_STEP, REQUIRES, AFFECTS.
         Filter: Only entity labels (Command, Configuration, Step, Error, Concept).
 
         Args:
             node_id: Starting node ID
-            max_entities: Maximum entities to return (default: 20)
+            max_entities: Maximum entities to return (default: 20, E2 cap)
+            max_depth: Maximum traversal depth (default: 1, E2 cap - future expansion)
 
         Returns:
             Dict with "entities" and "sections" lists
@@ -281,6 +477,7 @@ class ResponseBuilder:
 
         try:
             # Parameterized Cypher query for 1-hop neighbors (bi-directional)
+            # Pre-Phase 7 (E2): max_depth=1 enforced (prevents deep traversal)
             # Why bi-directional: Sections may have incoming HAS_SECTION from Documents
             query = """
             MATCH (n {id: $node_id})-[r:MENTIONS|CONTAINS_STEP|REQUIRES|AFFECTS]-(e)
@@ -310,7 +507,23 @@ class ResponseBuilder:
                         }
                     )
 
-            # TODO: Add related sections query (optional enhancement)
+            # Pre-Phase 7 (E2): Payload size early-stop (defensive guard)
+            # Check if accumulated entities exceed safe payload size
+            MAX_PAYLOAD_BYTES = 50000  # 50KB safety limit (defensive guard)
+            payload_size = sum(len(str(entity)) for entity in entities)
+
+            if payload_size > MAX_PAYLOAD_BYTES:
+                logger.warning(
+                    f"Payload size {payload_size} bytes exceeds limit {MAX_PAYLOAD_BYTES}, "
+                    f"truncating from {len(entities)} entities"
+                )
+                # Truncate to approximately half to get under limit
+                entities = entities[: len(entities) // 2]
+                logger.info(f"Truncated to {len(entities)} entities")
+
+            # Note: Related sections query not implemented - current graph expansion
+            # via MENTIONS/CONTAINS_STEP relationships provides sufficient context.
+            # Future enhancement could add explicit section-to-section relationships.
             sections = []
 
             return {"entities": entities, "sections": sections}
@@ -393,8 +606,10 @@ class ResponseBuilder:
         if not ranked_results:
             return 0.0
 
+        top_results = ranked_results[:5]
+
         # Top result semantic score (weight: 0.3)
-        top_score = ranked_results[0].features.semantic_score if ranked_results else 0.0
+        top_score = top_results[0].features.semantic_score if top_results else 0.0
 
         # Evidence strength: average confidence of top 3 (weight: 0.2)
         evidence_scores = [e.confidence for e in evidence[:3]]
@@ -402,17 +617,26 @@ class ResponseBuilder:
             sum(evidence_scores) / len(evidence_scores) if evidence_scores else 0.0
         )
 
-        # Coverage: how many high-confidence results (weight: 0.2)
-        high_conf_count = sum(
-            1 for r in ranked_results[:5] if r.features.semantic_score > 0.7
-        )
-        coverage = min(1.0, high_conf_count / 3.0)
+        # Coverage: adapt threshold to score distribution (weight: 0.2)
+        semantic_samples = [r.features.semantic_score for r in top_results]
+        if semantic_samples:
+            sorted_scores = sorted(semantic_samples)
+            idx = min(len(sorted_scores) - 1, max(0, len(sorted_scores) * 3 // 4))
+            dynamic_threshold = sorted_scores[idx]
+            dynamic_threshold = min(0.85, max(0.5, dynamic_threshold))
+            high_conf_count = sum(
+                1 for score in semantic_samples if score >= dynamic_threshold
+            )
+            coverage = min(1.0, high_conf_count / 3.0)
+        else:
+            coverage = 0.0
 
-        # Path coherence: results with paths are more coherent (weight: 0.3)
-        path_count = sum(1 for r in ranked_results[:5] if r.result.path)
-        path_coherence = (
-            path_count / min(5, len(ranked_results)) if ranked_results else 0.0
-        )
+        # Path coherence: neutral default until paths are populated (weight: 0.3)
+        path_flags = [bool(getattr(r.result, "path", None)) for r in top_results]
+        if any(path_flags):
+            path_coherence = sum(path_flags) / max(1, len(path_flags))
+        else:
+            path_coherence = 0.5
 
         # Weighted combination
         confidence = (
@@ -574,9 +798,14 @@ def build_response(
     filters: Optional[Dict[str, Any]] = None,
     verbosity: Verbosity = Verbosity.GRAPH,
     neo4j_driver=None,
+    query_id: Optional[str] = None,  # Task 7C.8
+    session_tracker: Optional["SessionTracker"] = None,  # Task 7C.8
+    assembled_context: Optional[str] = None,
 ) -> Response:
     """
     Convenience function to build a response.
+
+    Task 7C.8: Now supports answer provenance tracking via query_id and session_tracker.
 
     Args:
         query: Original query text
@@ -586,11 +815,22 @@ def build_response(
         filters: Optional filters applied
         verbosity: Response detail level (full=text only, graph=text+relationships, default=graph)
         neo4j_driver: Optional Neo4j driver for graph mode
+        query_id: Optional query ID for answer provenance tracking (Task 7C.8)
+        session_tracker: Optional SessionTracker instance for provenance (Task 7C.8)
+        assembled_context: Optional stitched context to append for LLM consumption (Phase 7E-3)
 
     Returns:
         Response with Markdown and JSON
     """
     builder = ResponseBuilder(neo4j_driver=neo4j_driver)
     return builder.build_response(
-        query, intent, ranked_results, timing, filters, verbosity
+        query,
+        intent,
+        ranked_results,
+        timing,
+        filters,
+        verbosity,
+        query_id=query_id,
+        session_tracker=session_tracker,
+        assembled_context=assembled_context,
     )

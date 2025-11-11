@@ -1,0 +1,4 @@
+rel_type, count
+"MENTIONS", 3479
+"CONTAINS_STEP", 1873
+"HAS_SECTION", 268

@@ -17,6 +17,13 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Prefetch jina-embeddings-v3 tokenizer during build (Phase 7C hotfix)
+# This eliminates runtime downloads and enables offline operation
+ENV HF_HOME=/opt/hf-cache
+RUN mkdir -p /opt/hf-cache && \
+    python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('jinaai/jina-embeddings-v3', cache_dir='/opt/hf-cache')" && \
+    echo "Tokenizer prefetched successfully"
+
 # Copy application code
 COPY src/ src/
 COPY config/ config/

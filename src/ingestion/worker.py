@@ -114,13 +114,20 @@ async def main():
 
     # Load config for reaper settings
     try:
-        config = load_config()
-        reaper_config = config.ingest.queue_recovery
-        reaper_enabled = reaper_config.enabled
-        job_timeout = reaper_config.job_timeout_seconds
-        reaper_interval = reaper_config.reaper_interval_seconds
-        max_retries = reaper_config.max_retries
-        stale_action = reaper_config.stale_job_action
+        config, settings = load_config()  # load_config returns (config, settings)
+        # correct field name is 'ingestion', not 'ingest'
+        reaper_root = getattr(config, "ingestion", None)
+        reaper_config = (
+            getattr(reaper_root, "queue_recovery", None) if reaper_root else None
+        )
+        if reaper_config:
+            reaper_enabled = reaper_config.enabled
+            job_timeout = reaper_config.job_timeout_seconds
+            reaper_interval = reaper_config.reaper_interval_seconds
+            max_retries = reaper_config.max_retries
+            stale_action = reaper_config.stale_job_action
+        else:
+            raise AttributeError("queue_recovery config not found")
     except Exception as e:
         log.warning(
             "Failed to load reaper config, using defaults",

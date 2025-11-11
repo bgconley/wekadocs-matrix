@@ -1,84 +1,223 @@
-# Implements Phase 1, Task 1.1 (Docker environment setup)
-# See: /docs/spec.md §3.3 (IDs, versions, consistency)
-# See: /docs/implementation-plan.md → Task 1.3 (Schema with config-driven vectors)
+# WekaDocs Matrix Configuration - Development Environment
+# This is the single source of truth for all configuration values
+# Eliminates phantom defaults and hardcoded values throughout the codebase
 
+# Application metadata
 app:
-  name: wekadocs-graphrag-mcp
-  version: "0.1.0"
-  log_level: INFO
+  name: wekadocs-matrix
   environment: development
+  log_level: INFO
+  version: "2.0.0"
 
-server:
-  host: "0.0.0.0"
-  port: 8000
-  workers: 4
-  timeout: 30
-
-# Embedding configuration (used by schema creation and ingestion)
+# Embedding configuration - critical for vector operations
+# Phase 7C: Updated to Jina v3 @ 1024-D by default
 embedding:
-  model_name: "sentence-transformers/all-MiniLM-L6-v2"
-  dims: 384
-  similarity: "cosine"  # cosine | euclidean | dot
-  multilingual: false
-  version: "v1"
+  # Model configuration (ENV overrideable via EMBEDDINGS_MODEL)
+  model_name: "jina-embeddings-v3"  # Phase 7C: Stable v3 model
+  dims: 1024  # Phase 7C: v3 defaults to 1024-D
+  similarity: "cosine"  # Options: cosine, dot, euclidean
 
-# Vector store configuration
+  # Version tracking for provenance
+  # This ensures we can filter vectors by the model version used
+  # For Jina models, the model name IS the version (they don't use dated tags)
+  version: "jina-embeddings-v3"  # Phase 7C: Actual Jina model identifier
+
+  # Provider configuration (ENV overrideable via EMBEDDINGS_PROVIDER)
+  provider: "jina-ai"  # Phase 7C: Changed from sentence-transformers
+
+  # Task configuration (Jina-specific)
+  task: "retrieval.passage"  # Options: retrieval.passage, retrieval.query
+
+  # Performance settings
+  batch_size: 32
+  max_sequence_length: 8192  # Jina v3 supports longer sequences
+
+# Search configuration
 search:
+  # Vector search settings
   vector:
-    primary: "qdrant"  # qdrant | neo4j
-    dual_write: false  # if true, write to both stores
+    primary: "qdrant"
+    dual_write: false  # Phase 7C: Set to true during migration
     qdrant:
-      collection_name: "weka_sections"
+      collection_name: "chunks_multi"  # Phase 7E+: Multi-vector collection
       use_grpc: false
       timeout: 30
     neo4j:
-      index_name: "section_embeddings"
-  graph:
-    max_depth: 2
-    max_results: 100
-    timeout: 30
+      index_name: "section_embeddings_v2"  # Phase 7C: New 1024-D index
+
+  # Hybrid search settings (Phase 7E: RRF + BM25)
   hybrid:
-    vector_weight: 0.7
-    graph_weight: 0.3
-    top_k: 20
+    enabled: true  # Phase 7E: Enable hybrid retrieval
+    method: "rrf"  # Phase 7E: Options: rrf (default), weighted
 
-# Neo4j configuration
-neo4j:
-  max_connection_lifetime: 3600
-  max_connection_pool_size: 50
-  connection_acquisition_timeout: 60
-  encrypted: false
-  trust: "TRUST_ALL_CERTIFICATES"
-  database: "neo4j"
+    # RRF (Reciprocal Rank Fusion) settings
+    rrf_k: 60  # Phase 7E: RRF constant (default: 60)
 
-# Redis configuration
-redis:
-  db: 0
-  socket_timeout: 5
-  socket_connect_timeout: 5
-  max_connections: 50
+    # Weighted fusion settings (alternative to RRF)
+    fusion_alpha: 0.6  # Phase 7E: Vector weight (0.0-1.0), BM25 weight = 1-alpha
 
-# Rate limiting (Redis token bucket)
+    # Legacy weights (for backward compatibility)
+    vector_weight: 0.7  # Weight for vector similarity (0.0-1.0)
+    graph_weight: 0.3   # Weight for graph/text match
+
+    vector_fields:
+      content: 1.0
+      title: 0.35
+      entity: 0.2
+
+    reranker:
+      enabled: false
+      provider: "jina"
+      model: "jina-reranker-v3"
+      top_n: 100
+
+    top_k: 20  # Number of candidates to retrieve
+
+    # BM25/keyword retrieval settings
+    bm25:
+      enabled: true  # Phase 7E: Enable BM25 full-text search
+      top_k: 50  # Retrieve more candidates for fusion
+
+    # Bounded adjacency expansion (Phase 7E)
+    expansion:
+      enabled: true  # Enable neighbor expansion
+      max_neighbors: 1  # ±1 NEXT_CHUNK neighbor
+      query_min_tokens: 12  # Expand if query >= 12 tokens
+      score_delta_max: 0.02  # Expand if top score delta <= 0.02
+
+  # Graph search settings
+  graph:
+    max_depth: 3
+    max_related_per_seed: 20
+
+  # Response building (Phase 7E: Context budget enforcement)
+  response:
+    max_bytes_full: 32768  # 32KB limit for FULL mode
+    max_sections: 10
+    include_citations: true
+
+    # Phase 7E: Answer context budget (tokens)
+    answer_context_max_tokens: 4500  # Max tokens for LLM context window
+
+# Database connections
+databases:
+  neo4j:
+    # Connection details from environment variables
+    uri_env: "NEO4J_URI"
+    username_env: "NEO4J_USERNAME"
+    password_env: "NEO4J_PASSWORD"  # pragma: allowlist secret
+    database: "neo4j"
+
+  qdrant:
+    # Connection details
+    host_env: "QDRANT_HOST"
+    port_env: "QDRANT_PORT"
+    api_key_env: "QDRANT_API_KEY"  # pragma: allowlist secret
+    timeout: 30
+
+  redis:
+    # Connection details
+    host_env: "REDIS_HOST"
+    port_env: "REDIS_PORT"
+    password_env: "REDIS_PASSWORD"  # pragma: allowlist secret
+    db: 0
+
+# Ingestion settings
+ingestion:
+  # Batch processing
+  batch_size: 500
+  max_section_tokens: 1000
+  timeout_seconds: 300
+  workers: 2
+
+  # Phase 7E-2: Chunk assembly configuration
+  # Controls intelligent combining and splitting for optimal retrieval quality
+  chunk_assembly:
+    assembler: "structured"
+    structure:
+      min_tokens: 350
+      target_tokens: 500
+      hard_tokens: 750
+      max_sections: 4
+      respect_major_levels: true
+      stop_at_level: 2
+      break_keywords: "faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting"
+    split:
+      enabled: true
+      max_tokens: 750
+      overlap_tokens: 100
+    microdoc:
+      enabled: true
+      doc_token_threshold: 2000
+      min_split_tokens: 400
+    semantic:
+      enabled: false
+      provider: "stub"
+      model_name: null
+      timeout_seconds: 5
+
+  # Queue recovery (Phase 6: job reaper)
+  queue_recovery:
+    enabled: true
+    job_timeout_seconds: 600
+    reaper_interval_seconds: 30
+    max_retries: 3
+    stale_job_action: requeue
+
+  # Reconciliation (for drift detection)
+  reconciliation:
+    enabled: true
+    schedule: "0 2 * * *"  # 2 AM daily
+    drift_threshold: 0.01
+
+# Ranking configuration
+ranking:
+  # Score normalization
+  normalize_scores: true
+  score_range: [0.0, 1.0]
+
+  # Recency weighting
+  recency:
+    enabled: true
+    decay_factor: 365  # Days for exponential decay
+
+  # Entity focus (Phase 7 will activate)
+  entity_focus:
+    enabled: false  # Will be true in Phase 7
+    boost_weight: 0.2
+
+  # Coverage signals
+  coverage:
+    enabled: true
+    connection_weight: 0.1
+    mention_weight: 0.15
+
+# Schema configuration
+schema:
+  version: "v2.2"  # Phase 7E+: Hybrid retrieval enablement with multi-vector support
+  auto_migrate: false
+
+# Rate limiting configuration
 rate_limit:
   enabled: true
   requests_per_minute: 60
   burst_size: 10
   window_seconds: 60
 
-# JWT authentication
+# Authentication configuration
 auth:
   enabled: true
   algorithm: "HS256"
   expiry_minutes: 60
 
-# Audit logging
+# Audit logging configuration
 audit:
   enabled: true
   log_params: true
-  log_results: false  # avoid large payloads in audit log
+  log_results: false
   retention_days: 90
 
-# Query validation
+# Query validator configuration
 validator:
   max_depth: 3
   max_label_scans: 2
@@ -88,7 +227,11 @@ validator:
   enforce_parameters: true
   enforce_limits: true
 
-# Cache configuration
+# Telemetry configuration
+telemetry:
+  enabled: true
+
+# Cache configuration (Phase 7E-3: Epoch-based invalidation)
 cache:
   l1:
     enabled: true
@@ -99,98 +242,71 @@ cache:
     ttl_seconds: 3600
     key_prefix: "weka:cache:v1"
 
-# OpenTelemetry
-telemetry:
-  enabled: true
-  traces:
-    enabled: true
-    sample_rate: 1.0  # 1.0 = 100% sampling in dev
-  metrics:
-    enabled: true
-    interval_seconds: 60
+  # Phase 7E-3: Cache invalidation configuration
+  # Reference: Canonical Spec L3184-3281 (epoch), L3116-3183 (scan)
+  invalidation:
+    mode: "epoch"  # Options: epoch (O(1) preferred), scan (fallback)
+    namespace: "rag:v1"  # Cache namespace for epoch/pattern keys
+    redis_uri: null  # Falls back to CACHE_REDIS_URI or REDIS_URL env vars
 
-# Ingestion pipeline
-ingestion:
-  batch_size: 500
-  max_section_tokens: 1000
-  timeout_seconds: 300
-  workers: 2
-  reconciliation:
-    enabled: true
-    schedule: "0 2 * * *"  # 2 AM daily
-    drift_threshold: 0.01  # 1% drift triggers repair
+  # Note: Epoch counters are stored in Redis:
+  #   - {namespace}:doc_epoch -> HSET {document_id} -> epoch_int
+  #   - {namespace}:chunk_epoch -> HSET {chunk_id} -> epoch_int
 
-# Schema versioning
-schema:
-  version: "v1"
-  auto_migrate: false
-
-# Phase 7a: Feature flags for enhanced responses
+# Feature flags for gradual rollout
 feature_flags:
-  verbosity_enabled: true
-  graph_mode_enabled: true
-  # Phase 7 performance/safety limits
-  graph_limits:
-    max_depth_soft: 3
-    max_depth_hard: 5
-    max_nodes_hard: 200
-    timeout_ms: 2000
-    rel_whitelist:
-      - "MENTIONS"
-      - "HAS_SECTION"
-    label_whitelist:
-      - "Section"
-      - "Chunk"
-      - "Entity"
-      - "Document"
-      - "Topic"
+  use_embedding_provider: true  # New in pre-phase7
+  validate_dimensions: true     # New in pre-phase7
+  coverage_enrichment: true      # New in pre-phase7
+  byte_cap_responses: true       # New in pre-phase7
+  schema_v2_1_dev: true         # Dev only for pre-phase7
+  dual_write_1024d: false       # Phase 7C.4: Enable dual-write to both 384-D and 1024-D indices
 
-# Phase 6: Auto-ingestion configuration
-ingest:
-  # File system watcher
-  watch:
-    enabled: true
-    paths:
-      - "./ingest/watch"
-    debounce_seconds: 3
-    poll_interval: 5
+# Phase 7E-4: Monitoring and observability configuration
+# Reference: Canonical Spec L4916-4976, L3513-3528
+monitoring:
+  # Health checks
+  health_checks_enabled: true  # Run health checks at startup
+  health_check_fail_fast: true  # Fail startup if critical checks fail
 
-  # S3 watcher (disabled by default)
-  s3:
-    enabled: false
-    buckets: []
+  # SLO monitoring
+  slo_monitoring_enabled: true  # Enable SLO tracking and alerting
 
-  # HTTP watcher (disabled by default)
-  http:
-    enabled: false
-    endpoints: []
-    poll_interval: 300  # 5 minutes
+  # SLO thresholds (from canonical spec)
+  retrieval_p95_target_ms: 500  # Retrieval p95 latency target (ms)
+  ingestion_target_seconds: 10  # Ingestion duration target (seconds)
+  expansion_rate_min: 0.10  # Minimum expansion rate (10%)
+  expansion_rate_max: 0.40  # Maximum expansion rate (40%)
 
-  # Processing settings
-  tag: "wekadocs"
-  concurrency: 4
-  batch_size: 500
-  timeout_seconds: 300
+  # Metrics collection
+  metrics_enabled: true  # Enable Prometheus metrics collection
+  metrics_aggregation_enabled: true  # Enable metrics aggregation for dashboards
 
-  # Sample queries for verification (per tag)
-  sample_queries:
-    wekadocs:
-      - "How do I configure a cluster?"
-      - "What are the performance tuning options?"
-      - "How do I troubleshoot performance issues?"
-    default:
-      - "What is this documentation about?"
+# Performance tuning
+performance:
+  # Connection pools
+  neo4j_max_connections: 50
+  qdrant_max_connections: 20
 
-  # Back-pressure thresholds
-  backpressure:
-    neo4j_cpu_threshold: 0.8
-    qdrant_p95_threshold_ms: 200.0
-    pause_seconds: 30
+  # Timeouts (seconds)
+  default_timeout: 30
+  embedding_timeout: 10
+  search_timeout: 5
 
-  # Queue recovery & stale job handling
-  queue_recovery:
-    enabled: true
-    job_timeout_seconds: 600      # 10 min max processing time per job
-    reaper_interval_seconds: 30   # Check for stale jobs every 30s
-    max_retries: 3                # Max requeue attempts before DLQ
-    stale_job_action: "requeue"   # "requeue" | "fail" | "dlq"
+  # Caching
+  cache_ttl_seconds: 3600
+  cache_max_size: 1000
+
+# Development settings
+development:
+  # Debug options
+  debug: false
+  verbose_logging: false
+
+  # Testing helpers
+  use_mock_embeddings: false
+  deterministic_ids: true
+
+  # Hot reload
+  watch_config: true
+  reload_on_change: false

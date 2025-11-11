@@ -1,0 +1,32 @@
+{
+  "job_id": "81bc0716-bb24-4232-8621-e7fe8606682f",
+  "tag": "test",
+  "timestamp_utc": "2025-10-18T23:19:38.560062Z",
+  "doc": {
+    "source_uri": "file:///private/var/folders/ly/5hgrbf0n3rz7hlqwlt1xn9mr0000gn/T/pytest-of-brennanconley/pytest-80/test_no_duplicate_work_on_resu0/watch/nodup_test.md",
+    "checksum": "f9bde783a580cd40fae9ea7732b6f024a0a82b6538a4b81092adedf856b499e6",
+    "sections": 1,
+    "title": "No Dup Test"
+  },
+  "graph": {
+    "nodes_total": 124,
+    "rels_total": 0,
+    "sections_total": 0,
+    "documents_total": 0
+  },
+  "vector": {
+    "sot": "qdrant",
+    "sections_indexed": 543,
+    "embedding_version": "v1"
+  },
+  "drift_pct": 0.0,
+  "sample_queries": [],
+  "ready_for_queries": true,
+  "timings_ms": {
+    "parse": 0,
+    "extract": 0,
+    "graph": 993,
+    "embed": 7
+  },
+  "errors": []
+}

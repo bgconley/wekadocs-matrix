@@ -1,0 +1,234 @@
+{
+  "meta": {
+    "version": "1.0",
+    "created": "2025-01-25",
+    "description": "Golden query test set for Phase 7C.9 quality validation",
+    "total_queries": 20,
+    "categories": [
+      "installation",
+      "configuration",
+      "troubleshooting",
+      "performance",
+      "networking",
+      "storage",
+      "cli_commands",
+      "api_usage"
+    ]
+  },
+  "queries": [
+    {
+      "id": "q001",
+      "text": "How do I install Weka on RHEL 8?",
+      "category": "installation",
+      "difficulty": "easy",
+      "expected_topics": ["installation", "prerequisites", "rhel", "linux"],
+      "expected_entity_types": ["Procedure", "Command", "Configuration"],
+      "min_relevant_results": 2,
+      "description": "Basic installation query - should retrieve installation procedures"
+    },
+    {
+      "id": "q002",
+      "text": "What are the prerequisites for installing Weka?",
+      "category": "installation",
+      "difficulty": "easy",
+      "expected_topics": ["prerequisites", "requirements", "compatibility", "hardware"],
+      "expected_entity_types": ["Configuration", "Concept"],
+      "min_relevant_results": 2,
+      "description": "Prerequisites query - should find requirement documentation"
+    },
+    {
+      "id": "q003",
+      "text": "How do I configure NFS for Weka filesystem?",
+      "category": "configuration",
+      "difficulty": "medium",
+      "expected_topics": ["nfs", "filesystem", "configuration", "protocol"],
+      "expected_entity_types": ["Configuration", "Procedure", "Command"],
+      "min_relevant_results": 3,
+      "description": "NFS configuration - common networking setup"
+    },
+    {
+      "id": "q004",
+      "text": "How do I set up SMB protocol for Weka?",
+      "category": "configuration",
+      "difficulty": "medium",
+      "expected_topics": ["smb", "protocol", "configuration", "windows"],
+      "expected_entity_types": ["Configuration", "Procedure"],
+      "min_relevant_results": 2,
+      "description": "SMB protocol configuration"
+    },
+    {
+      "id": "q005",
+      "text": "What should I do if I get error 'cluster not reachable'?",
+      "category": "troubleshooting",
+      "difficulty": "medium",
+      "expected_topics": ["error", "cluster", "connectivity", "troubleshooting"],
+      "expected_entity_types": ["Error", "Procedure"],
+      "min_relevant_results": 2,
+      "description": "Error resolution - connectivity issues"
+    },
+    {
+      "id": "q006",
+      "text": "How do I troubleshoot slow filesystem performance?",
+      "category": "troubleshooting",
+      "difficulty": "hard",
+      "expected_topics": ["performance", "troubleshooting", "optimization", "diagnostics"],
+      "expected_entity_types": ["Procedure", "Command", "Configuration"],
+      "min_relevant_results": 3,
+      "description": "Performance troubleshooting - multi-faceted issue"
+    },
+    {
+      "id": "q007",
+      "text": "How do I upgrade Weka cluster to version 4.2?",
+      "category": "installation",
+      "difficulty": "hard",
+      "expected_topics": ["upgrade", "version", "migration", "cluster"],
+      "expected_entity_types": ["Procedure", "Command"],
+      "min_relevant_results": 2,
+      "description": "Upgrade procedure - complex multi-step process"
+    },
+    {
+      "id": "q008",
+      "text": "What is tiering in Weka and how do I configure it?",
+      "category": "configuration",
+      "difficulty": "medium",
+      "expected_topics": ["tiering", "object", "storage", "configuration"],
+      "expected_entity_types": ["Concept", "Configuration", "Procedure"],
+      "min_relevant_results": 3,
+      "description": "Concept + configuration query"
+    },
+    {
+      "id": "q009",
+      "text": "How do I create a new filesystem using weka fs create?",
+      "category": "cli_commands",
+      "difficulty": "easy",
+      "expected_topics": ["filesystem", "cli", "command", "create"],
+      "expected_entity_types": ["Command", "Parameter"],
+      "min_relevant_results": 2,
+      "description": "Specific CLI command usage"
+    },
+    {
+      "id": "q010",
+      "text": "What parameters does weka fs create accept?",
+      "category": "cli_commands",
+      "difficulty": "easy",
+      "expected_topics": ["command", "parameters", "filesystem", "options"],
+      "expected_entity_types": ["Command", "Parameter"],
+      "min_relevant_results": 2,
+      "description": "Command parameter documentation"
+    },
+    {
+      "id": "q011",
+      "text": "How do I optimize Weka for machine learning workloads?",
+      "category": "performance",
+      "difficulty": "hard",
+      "expected_topics": ["performance", "optimization", "ml", "tuning"],
+      "expected_entity_types": ["Configuration", "Procedure", "Concept"],
+      "min_relevant_results": 2,
+      "description": "Use-case specific optimization"
+    },
+    {
+      "id": "q012",
+      "text": "What network requirements does Weka have?",
+      "category": "networking",
+      "difficulty": "easy",
+      "expected_topics": ["network", "requirements", "bandwidth", "latency"],
+      "expected_entity_types": ["Configuration", "Concept"],
+      "min_relevant_results": 2,
+      "description": "Network requirements documentation"
+    },
+    {
+      "id": "q013",
+      "text": "How do I configure RDMA for Weka?",
+      "category": "networking",
+      "difficulty": "hard",
+      "expected_topics": ["rdma", "network", "configuration", "performance"],
+      "expected_entity_types": ["Configuration", "Procedure"],
+      "min_relevant_results": 2,
+      "description": "Advanced networking feature"
+    },
+    {
+      "id": "q014",
+      "text": "How do I monitor Weka cluster health?",
+      "category": "cli_commands",
+      "difficulty": "medium",
+      "expected_topics": ["monitoring", "health", "status", "cli"],
+      "expected_entity_types": ["Command", "Procedure"],
+      "min_relevant_results": 2,
+      "description": "Monitoring and observability"
+    },
+    {
+      "id": "q015",
+      "text": "What storage backends does Weka support?",
+      "category": "storage",
+      "difficulty": "easy",
+      "expected_topics": ["storage", "backend", "object", "s3"],
+      "expected_entity_types": ["Concept", "Configuration"],
+      "min_relevant_results": 2,
+      "description": "Storage architecture overview"
+    },
+    {
+      "id": "q016",
+      "text": "How do I configure S3 as an object store for Weka?",
+      "category": "storage",
+      "difficulty": "medium",
+      "expected_topics": ["s3", "object", "storage", "configuration"],
+      "expected_entity_types": ["Configuration", "Procedure"],
+      "min_relevant_results": 2,
+      "description": "Object store configuration"
+    },
+    {
+      "id": "q017",
+      "text": "How do I add a new node to the Weka cluster?",
+      "category": "configuration",
+      "difficulty": "medium",
+      "expected_topics": ["cluster", "node", "scale", "expansion"],
+      "expected_entity_types": ["Procedure", "Command"],
+      "min_relevant_results": 2,
+      "description": "Cluster scaling operation"
+    },
+    {
+      "id": "q018",
+      "text": "What is the Weka REST API and how do I use it?",
+      "category": "api_usage",
+      "difficulty": "medium",
+      "expected_topics": ["api", "rest", "authentication", "endpoints"],
+      "expected_entity_types": ["Concept", "Example"],
+      "min_relevant_results": 2,
+      "description": "API documentation and usage"
+    },
+    {
+      "id": "q019",
+      "text": "How do I perform a rolling restart of Weka services?",
+      "category": "configuration",
+      "difficulty": "hard",
+      "expected_topics": ["restart", "maintenance", "procedure", "downtime"],
+      "expected_entity_types": ["Procedure", "Command"],
+      "min_relevant_results": 2,
+      "description": "Maintenance procedure with downtime implications"
+    },
+    {
+      "id": "q020",
+      "text": "How do I backup and restore Weka configuration?",
+      "category": "configuration",
+      "difficulty": "medium",
+      "expected_topics": ["backup", "restore", "configuration", "disaster"],
+      "expected_entity_types": ["Procedure", "Command"],
+      "min_relevant_results": 2,
+      "description": "Configuration management and DR"
+    }
+  ],
+  "evaluation_config": {
+    "ndcg_k_values": [3, 5, 10],
+    "mrr_cutoff": 10,
+    "latency_targets": {
+      "p50_ms": 200,
+      "p95_ms": 900,
+      "p99_ms": 1500
+    },
+    "quality_gates": {
+      "min_avg_results_per_query": 1,
+      "max_failure_rate": 0.05,
+      "min_system_uptime": 0.99
+    }
+  }
+}

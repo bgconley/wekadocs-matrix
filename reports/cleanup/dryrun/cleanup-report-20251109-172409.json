@@ -1,0 +1,281 @@
+{
+  "timestamp": "2025-11-09T17:24:09.186415",
+  "dry_run": true,
+  "options": {
+    "dry_run": true,
+    "redis_db": 1,
+    "skip_neo4j": false,
+    "skip_qdrant": false,
+    "skip_redis": false,
+    "report_dir": "reports/cleanup/dryrun",
+    "quiet": false,
+    "restore_metadata": false
+  },
+  "before": {
+    "neo4j": {
+      "total_nodes": 323,
+      "total_relationships": 559,
+      "preserved_nodes": {
+        "RelationshipTypesMarker": 1,
+        "SchemaVersion": 1
+      },
+      "deletable_nodes": {
+        "Section": 124,
+        "Chunk": 124,
+        "CitationUnit": 124,
+        "Document": 73
+      },
+      "constraints": 16,
+      "indexes": 71
+    },
+    "qdrant": {
+      "Setup": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "CONFIGURATION": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "See": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "chunks": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "sections": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "with": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "already": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "string": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "Section": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "Canonical": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "collection": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "chunks_multi": {
+        "vector_count": 121,
+        "vectors": "content:1024D/Cosine, entity:1024D/Cosine, title:1024D/Cosine"
+      },
+      "points": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "-": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "curl": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "Schema": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "indexes": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "logs": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "stats": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "configuration": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "upsert": {
+        "vector_count": 0,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      }
+    },
+    "redis": {
+      "db": 1,
+      "total_keys": 0,
+      "system_keys": 0,
+      "data_keys": 0,
+      "sample_data_keys": [],
+      "preserved_keys": []
+    }
+  },
+  "after": {
+    "neo4j": {
+      "total_nodes": 323,
+      "total_relationships": 559,
+      "preserved_nodes": {
+        "RelationshipTypesMarker": 1,
+        "SchemaVersion": 1
+      },
+      "constraints": 16,
+      "indexes": 71
+    },
+    "qdrant": {
+      "Setup": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "CONFIGURATION": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "See": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "chunks": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "sections": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "with": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "already": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "string": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "Section": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "Canonical": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "collection": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "chunks_multi": {
+        "vector_count": 121,
+        "preserved": true,
+        "vectors": "content:1024D/Cosine, entity:1024D/Cosine, title:1024D/Cosine"
+      },
+      "points": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "-": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "curl": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "Schema": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "indexes": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "logs": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "stats": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "configuration": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      },
+      "upsert": {
+        "vector_count": 0,
+        "preserved": true,
+        "vectors": "size:NoneD/None, distance:NoneD/None, hnsw_config:NoneD/None, quantization_config:NoneD/None, on_disk:NoneD/None, datatype:NoneD/None, multivector_config:NoneD/None"
+      }
+    },
+    "redis": {
+      "db": 1,
+      "total_keys": 0,
+      "preserved_keys": 0
+    }
+  },
+  "actions": [],
+  "errors": [],
+  "summary": {
+    "dry_run": true,
+    "success": true,
+    "metadata_preserved": true,
+    "databases_cleaned": [
+      {
+        "database": "neo4j",
+        "data_nodes_deleted": 445,
+        "metadata_nodes_preserved": 2,
+        "schema_preserved": true
+      },
+      {
+        "database": "qdrant",
+        "collections_preserved": 21,
+        "total_vectors_deleted": 121,
+        "target_collections": [
+          "chunks",
+          "chunks_multi"
+        ]
+      },
+      {
+        "database": "redis",
+        "db": 1,
+        "data_keys_deleted": 0,
+        "system_keys_preserved": 0
+      }
+    ]
+  },
+  "preserved_nodes": []
+}

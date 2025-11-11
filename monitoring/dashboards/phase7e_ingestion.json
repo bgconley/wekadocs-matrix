@@ -1,0 +1,159 @@
+{
+  "dashboard": {
+    "title": "Phase 7E: Ingestion & Chunk Quality",
+    "tags": ["phase7e", "ingestion", "quality"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 0,
+    "refresh": "1m",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Ingestion Duration (per document)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(ingestion_duration_seconds_bucket[5m]))",
+            "legendFormat": "p50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(ingestion_duration_seconds_bucket[5m]))",
+            "legendFormat": "p95",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "s",
+            "label": "Duration"
+          }
+        ],
+        "thresholds": [
+          {
+            "value": 10,
+            "colorMode": "custom",
+            "op": "gt",
+            "line": true
+          },
+          {
+            "value": 15,
+            "colorMode": "critical",
+            "op": "gt",
+            "fill": true,
+            "line": true
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Documents Ingested",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(ingestion_documents_total{status=\"success\"}[5m])",
+            "legendFormat": "Success Rate",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(ingestion_documents_total{status=\"failed\"}[5m])",
+            "legendFormat": "Failure Rate",
+            "refId": "B"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Chunk Token Distribution (Target: 200-7900 tokens)",
+        "type": "graph",
+        "description": "ZERO-tolerance SLO: No chunks > 7900 tokens",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(chunk_token_distribution_bucket[5m]))",
+            "legendFormat": "p50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.90, rate(chunk_token_distribution_bucket[5m]))",
+            "legendFormat": "p90",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(chunk_token_distribution_bucket[5m]))",
+            "legendFormat": "p95",
+            "refId": "C"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(chunk_token_distribution_bucket[5m]))",
+            "legendFormat": "p99 (MUST be <7900)",
+            "refId": "D"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "short",
+            "label": "Tokens"
+          }
+        ],
+        "thresholds": [
+          {
+            "value": 7900,
+            "colorMode": "critical",
+            "op": "gt",
+            "fill": true,
+            "line": true
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Oversized Chunk Rate (ZERO-tolerance SLO)",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "sum(chunks_oversized_total) / sum(chunks_created_total)",
+            "refId": "A"
+          }
+        ],
+        "format": "percentunit",
+        "thresholds": "0,0.0001",
+        "colors": ["#299c46", "#e24d42", "#e24d42"]
+      },
+      {
+        "id": 5,
+        "title": "Qdrant Upsert Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(qdrant_operation_latency_ms_bucket{operation=\"upsert\"}[5m]))",
+            "legendFormat": "p95 Latency",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ms",
+            "label": "Latency"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Embedding Generation",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(embedding_latency_ms_bucket{model_id=\"jina-embeddings-v3\"}[5m]))",
+            "legendFormat": "Jina v3 p95",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(embedding_error_total{model_id=\"jina-embeddings-v3\"}[5m])",
+            "legendFormat": "Error Rate",
+            "refId": "B"
+          }
+        ]
+      }
+    ]
+  }
+}

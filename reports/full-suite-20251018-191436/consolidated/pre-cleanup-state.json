@@ -1,0 +1,42 @@
+{
+  "timestamp": "2025-10-18T19:14:36Z",
+  "test_run_id": "20251018-191436",
+  "pre_cleanup_state": {
+    "neo4j": {
+      "nodes": 1557,
+      "relationships": 335,
+      "constraints": 13,
+      "indexes": 35
+    },
+    "qdrant": {
+      "weka_sections": {
+        "vector_count": 713
+      }
+    },
+    "redis": {
+      "db": 1,
+      "key_count": 41,
+      "sample_keys": [
+        "ingest:state:ae4839dd-504b-454b-944b-6349ba1a94dd",
+        "ingest:state:23e89772-c9e7-4fcc-b986-67774b8384f2",
+        "ingest:events:28c37bbd-053e-42ec-a998-b236ee1c7fec",
+        "ingest:state:f45ef388-f5b1-4875-831b-a24596a5c7fe",
+        "ingest:events:5082f8bc-7999-40d5-8dae-dc6d222c47ed",
+        "ingest:events:fb89100d-c5d6-4873-992d-9289e409d297",
+        "ingest:state:6ee8cb2f-da1e-46fc-9f64-faf2300afeaa",
+        "ingest:events:b1da7946-a937-48f9-8028-dfda975b1acf",
+        "ingest:state:28c37bbd-053e-42ec-a998-b236ee1c7fec",
+        "ingest:events:5794d4c2-2fed-4b4a-ba9e-a4ed706c3c54"
+      ]
+    },
+    "docker_services": [
+      "weka-ingestion-service\tUp 37 minutes (healthy)",
+      "weka-ingestion-worker\tUp 27 hours",
+      "weka-mcp-server\tUp 3 days (healthy)",
+      "weka-redis\tUp 2 days (healthy)",
+      "weka-qdrant\tUp 2 days (healthy)",
+      "weka-jaeger\tUp 5 days (healthy)",
+      "weka-neo4j\tUp 5 days (healthy)"
+    ]
+  }
+}

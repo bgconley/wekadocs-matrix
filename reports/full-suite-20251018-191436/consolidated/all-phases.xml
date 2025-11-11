@@ -1,0 +1,843 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="12" failures="6" skipped="9" tests="411" time="224.665" timestamp="2025-10-18T19:17:38.445191" hostname="bgc-mbp-m1.local"><testcase classname="tests.p1_t1_test" name="test_docker_compose_exists" time="0.007" /><testcase classname="tests.p1_t1_test" name="test_env_example_exists" time="0.000" /><testcase classname="tests.p1_t1_test" name="test_neo4j_connectivity" time="0.018" /><testcase classname="tests.p1_t1_test" name="test_redis_connectivity" time="0.005" /><testcase classname="tests.p1_t1_test" name="test_qdrant_connectivity" time="0.014" /><testcase classname="tests.p1_t1_test" name="test_health_endpoint" time="0.105" /><testcase classname="tests.p1_t1_test" name="test_readiness_endpoint" time="0.004" /><testcase classname="tests.p1_t1_test" name="test_data_persistence_after_restart" time="0.000" /><testcase classname="tests.p1_t2_test" name="test_mcp_initialize_endpoint" time="0.002" /><testcase classname="tests.p1_t2_test" name="test_mcp_tools_list_endpoint" time="0.002" /><testcase classname="tests.p1_t2_test" name="test_mcp_tools_call_endpoint" time="0.002" /><testcase classname="tests.p1_t2_test" name="test_correlation_id_header" time="0.002" /><testcase classname="tests.p1_t2_test" name="test_metrics_endpoint" time="0.002"><failure message="json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)">client = &lt;starlette.testclient.TestClient object at 0x11aff1c50&gt;
+
+    def test_metrics_endpoint(client):
+        """Test /metrics endpoint"""
+        response = client.get("/metrics")
+        assert response.status_code == 200
+&gt;       data = response.json()
+
+tests/p1_t2_test.py:66:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;Response [200 OK]&gt;, kwargs = {}
+
+    def json(self, **kwargs: typing.Any) -&gt; typing.Any:
+&gt;       return jsonlib.loads(self.content, **kwargs)
+
+/opt/homebrew/lib/python3.11/site-packages/httpx/_models.py:762:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+s = '# HELP python_gc_objects_collected_total Objects collected during gc\n# TYPE python_gc_objects_collected_total counte...docs_mcp_info gauge\nwekadocs_mcp_info{environment="development",service_name="weka-mcp-server",version="0.1.0"} 1.0\n'
+cls = None, object_hook = None, parse_float = None, parse_int = None
+parse_constant = None, object_pairs_hook = None, kw = {}
+
+    def loads(s, *, cls=None, object_hook=None, parse_float=None,
+            parse_int=None, parse_constant=None, object_pairs_hook=None, **kw):
+        """Deserialize ``s`` (a ``str``, ``bytes`` or ``bytearray`` instance
+        containing a JSON document) to a Python object.
+
+        ``object_hook`` is an optional function that will be called with the
+        result of any object literal decode (a ``dict``). The return value of
+        ``object_hook`` will be used instead of the ``dict``. This feature
+        can be used to implement custom decoders (e.g. JSON-RPC class hinting).
+
+        ``object_pairs_hook`` is an optional function that will be called with the
+        result of any object literal decoded with an ordered list of pairs.  The
+        return value of ``object_pairs_hook`` will be used instead of the ``dict``.
+        This feature can be used to implement custom decoders.  If ``object_hook``
+        is also defined, the ``object_pairs_hook`` takes priority.
+
+        ``parse_float``, if specified, will be called with the string
+        of every JSON float to be decoded. By default this is equivalent to
+        float(num_str). This can be used to use another datatype or parser
+        for JSON floats (e.g. decimal.Decimal).
+
+        ``parse_int``, if specified, will be called with the string
+        of every JSON int to be decoded. By default this is equivalent to
+        int(num_str). This can be used to use another datatype or parser
+        for JSON integers (e.g. float).
+
+        ``parse_constant``, if specified, will be called with one of the
+        following strings: -Infinity, Infinity, NaN.
+        This can be used to raise an exception if invalid JSON numbers
+        are encountered.
+
+        To use a custom ``JSONDecoder`` subclass, specify it with the ``cls``
+        kwarg; otherwise ``JSONDecoder`` is used.
+        """
+        if isinstance(s, str):
+            if s.startswith('\ufeff'):
+                raise JSONDecodeError("Unexpected UTF-8 BOM (decode using utf-8-sig)",
+                                      s, 0)
+        else:
+            if not isinstance(s, (bytes, bytearray)):
+                raise TypeError(f'the JSON object must be str, bytes or bytearray, '
+                                f'not {s.__class__.__name__}')
+            s = s.decode(detect_encoding(s), 'surrogatepass')
+
+        if (cls is None and object_hook is None and
+                parse_int is None and parse_float is None and
+                parse_constant is None and object_pairs_hook is None and not kw):
+&gt;           return _default_decoder.decode(s)
+
+/opt/homebrew/Cellar/python@3.11/3.11.13_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/json/__init__.py:346:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;json.decoder.JSONDecoder object at 0x10a0f8050&gt;
+s = '# HELP python_gc_objects_collected_total Objects collected during gc\n# TYPE python_gc_objects_collected_total counte...docs_mcp_info gauge\nwekadocs_mcp_info{environment="development",service_name="weka-mcp-server",version="0.1.0"} 1.0\n'
+_w = &lt;built-in method match of re.Pattern object at 0x10a0e4a00&gt;
+
+    def decode(self, s, _w=WHITESPACE.match):
+        """Return the Python representation of ``s`` (a ``str`` instance
+        containing a JSON document).
+
+        """
+&gt;       obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+
+/opt/homebrew/Cellar/python@3.11/3.11.13_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/json/decoder.py:337:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;json.decoder.JSONDecoder object at 0x10a0f8050&gt;
+s = '# HELP python_gc_objects_collected_total Objects collected during gc\n# TYPE python_gc_objects_collected_total counte...docs_mcp_info gauge\nwekadocs_mcp_info{environment="development",service_name="weka-mcp-server",version="0.1.0"} 1.0\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+
+        """
+        try:
+            obj, end = self.scan_once(s, idx)
+        except StopIteration as err:
+&gt;           raise JSONDecodeError("Expecting value", s, err.value) from None
+E           json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+/opt/homebrew/Cellar/python@3.11/3.11.13_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/json/decoder.py:355: JSONDecodeError</failure></testcase><testcase classname="tests.p1_t2_test" name="test_connection_pools_created" time="0.001" /><testcase classname="tests.p1_t2_test" name="test_async_connection_pools" time="0.005" /><testcase classname="tests.p1_t2_test" name="test_graceful_shutdown_handlers_exist" time="0.000" /><testcase classname="tests.p1_t2_test" name="test_structured_logging_configured" time="0.000" /><testcase classname="tests.p1_t2_test" name="test_opentelemetry_tracing_setup" time="0.000" /><testcase classname="tests.p1_t3_test" name="test_schema_creation" time="0.002"><failure message="AttributeError: 'function' object has no attribute 'version'">neo4j_driver = &lt;neo4j._sync.driver.BoltDriver object at 0x11b03dc10&gt;
+
+    def test_schema_creation(neo4j_driver):
+        """Test schema creation is idempotent"""
+        from src.shared.config import get_config
+        from src.shared.schema import create_schema
+
+        config = get_config()
+
+        # Create schema first time
+&gt;       result1 = create_schema(neo4j_driver, config)
+
+tests/p1_t3_test.py:13:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+driver = &lt;neo4j._sync.driver.BoltDriver object at 0x11b03dc10&gt;
+config = Config(app=AppConfig(name='wekadocs-graphrag-mcp', version='0.1.0', log_level='INFO', environment='development'), embe...d=True, ttl_seconds=300, max_size=1000), l2=L2CacheConfig(enabled=True, ttl_seconds=3600, key_prefix='weka:cache:v1')))
+
+    def create_schema(driver: Driver, config: Config) -&gt; Dict[str, any]:
+        """
+        Create Neo4j schema including constraints, indexes, and vector indexes.
+        Idempotent - can be run multiple times safely.
+
+        Args:
+            driver: Neo4j driver instance
+            config: Application configuration
+
+        Returns:
+            Dict with status and details
+        """
+        results = {
+            "success": False,
+            "constraints_created": 0,
+            "indexes_created": 0,
+            "vector_indexes_created": 0,
+&gt;           "schema_version": config.schema.version,
+            "errors": [],
+        }
+E       AttributeError: 'function' object has no attribute 'version'
+
+src/shared/schema.py:35: AttributeError</failure></testcase><testcase classname="tests.p1_t3_test" name="test_constraints_exist" time="0.005" /><testcase classname="tests.p1_t3_test" name="test_indexes_exist" time="0.024"><failure message="AssertionError: Index section_document_id not found&#10;assert 'section_document_id' in ['command_id_unique', 'component_id_unique', 'component_name', 'concept_id_unique', 'concept_term', 'configuration_id_unique', ...]">neo4j_driver = &lt;neo4j._sync.driver.BoltDriver object at 0x11b03dc10&gt;
+
+    def test_indexes_exist(neo4j_driver):
+        """Test that required indexes are created"""
+        with neo4j_driver.session() as session:
+            result = session.run("SHOW INDEXES WHERE type &lt;&gt; 'VECTOR'")
+            indexes = [record["name"] for record in result]
+
+            # Check key indexes exist
+            required_indexes = [
+                "document_source_type",
+                "section_document_id",
+                "command_name",
+            ]
+
+            for index_name in required_indexes:
+&gt;               assert index_name in indexes, f"Index {index_name} not found"
+E               AssertionError: Index section_document_id not found
+E               assert 'section_document_id' in ['command_id_unique', 'component_id_unique', 'component_name', 'concept_id_unique', 'concept_term', 'configuration_id_unique', ...]
+
+tests/p1_t3_test.py:55: AssertionError</failure></testcase><testcase classname="tests.p1_t3_test" name="test_vector_indexes_exist" time="0.017" /><testcase classname="tests.p1_t3_test" name="test_schema_version_node" time="0.000"><failure message="AttributeError: 'function' object has no attribute 'version'">neo4j_driver = &lt;neo4j._sync.driver.BoltDriver object at 0x11b03dc10&gt;
+
+    def test_schema_version_node(neo4j_driver):
+        """Test that schema version singleton node exists"""
+        from src.shared.config import get_config
+
+        config = get_config()
+&gt;       expected_version = config.schema.version
+E       AttributeError: 'function' object has no attribute 'version'
+
+tests/p1_t3_test.py:83: AttributeError</failure></testcase><testcase classname="tests.p1_t3_test" name="test_schema_idempotence" time="0.005"><failure message="AttributeError: 'function' object has no attribute 'version'">neo4j_driver = &lt;neo4j._sync.driver.BoltDriver object at 0x11b03dc10&gt;
+
+    def test_schema_idempotence(neo4j_driver):
+        """Test that re-running schema creation doesn't create duplicates"""
+        from src.shared.config import get_config
+        from src.shared.schema import create_schema
+
+        config = get_config()
+
+        # Get initial counts
+        with neo4j_driver.session() as session:
+            constraints_before = len(list(session.run("SHOW CONSTRAINTS")))
+            indexes_before = len(list(session.run("SHOW INDEXES")))
+
+        # Re-run schema creation
+&gt;       result = create_schema(neo4j_driver, config)
+
+tests/p1_t3_test.py:107:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+driver = &lt;neo4j._sync.driver.BoltDriver object at 0x11b03dc10&gt;
+config = Config(app=AppConfig(name='wekadocs-graphrag-mcp', version='0.1.0', log_level='INFO', environment='development'), embe...d=True, ttl_seconds=300, max_size=1000), l2=L2CacheConfig(enabled=True, ttl_seconds=3600, key_prefix='weka:cache:v1')))
+
+    def create_schema(driver: Driver, config: Config) -&gt; Dict[str, any]:
+        """
+        Create Neo4j schema including constraints, indexes, and vector indexes.
+        Idempotent - can be run multiple times safely.
+
+        Args:
+            driver: Neo4j driver instance
+            config: Application configuration
+
+        Returns:
+            Dict with status and details
+        """
+        results = {
+            "success": False,
+            "constraints_created": 0,
+            "indexes_created": 0,
+            "vector_indexes_created": 0,
+&gt;           "schema_version": config.schema.version,
+            "errors": [],
+        }
+E       AttributeError: 'function' object has no attribute 'version'
+
+src/shared/schema.py:35: AttributeError</failure></testcase><testcase classname="tests.p1_t3_test" name="test_can_create_document_node" time="0.035" /><testcase classname="tests.p1_t3_test" name="test_can_create_section_node" time="0.028" /><testcase classname="tests.p1_t4_test" name="test_jwt_token_creation" time="0.271" /><testcase classname="tests.p1_t4_test" name="test_jwt_token_verification" time="0.000" /><testcase classname="tests.p1_t4_test" name="test_invalid_jwt_token_rejected" time="0.000" /><testcase classname="tests.p1_t4_test" name="test_expired_jwt_token_rejected" time="0.000" /><testcase classname="tests.p1_t4_test" name="test_rate_limiter_allows_normal_requests" time="0.012" /><testcase classname="tests.p1_t4_test" name="test_rate_limiter_blocks_burst_requests" time="0.008" /><testcase classname="tests.p1_t4_test" name="test_rate_limiter_refills_over_time" time="2.006" /><testcase classname="tests.p1_t4_test" name="test_audit_logger_logs_request" time="0.000" /><testcase classname="tests.p1_t4_test" name="test_audit_logger_logs_response" time="0.000" /><testcase classname="tests.p1_t4_test" name="test_audit_logger_logs_auth_events" time="0.000" /><testcase classname="tests.p1_t4_test" name="test_audit_logger_logs_security_events" time="0.001" /><testcase classname="tests.p1_t4_test" name="test_correlation_id_in_logs" time="0.000" /><testcase classname="tests.p2_t1_test.TestIntentClassifier" name="test_classify_search_intent" time="0.002" /><testcase classname="tests.p2_t1_test.TestIntentClassifier" name="test_classify_troubleshoot_intent" time="0.000" /><testcase classname="tests.p2_t1_test.TestIntentClassifier" name="test_classify_compare_intent" time="0.000" /><testcase classname="tests.p2_t1_test.TestIntentClassifier" name="test_classify_explain_intent" time="0.000" /><testcase classname="tests.p2_t1_test.TestIntentClassifier" name="test_classify_traverse_intent" time="0.000" /><testcase classname="tests.p2_t1_test.TestEntityLinker" name="test_link_error_code" time="0.001" /><testcase classname="tests.p2_t1_test.TestEntityLinker" name="test_link_command" time="0.000" /><testcase classname="tests.p2_t1_test.TestEntityLinker" name="test_link_component" time="0.000" /><testcase classname="tests.p2_t1_test.TestTemplateLibrary" name="test_templates_loaded" time="0.001" /><testcase classname="tests.p2_t1_test.TestTemplateLibrary" name="test_has_template" time="0.000" /><testcase classname="tests.p2_t1_test.TestTemplateLibrary" name="test_get_template" time="0.000" /><testcase classname="tests.p2_t1_test.TestTemplateLibrary" name="test_render_template" time="0.000" /><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_plan_search_query" time="0.000" /><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_plan_troubleshoot_query" time="0.000" /><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_plan_has_parameters" time="0.000" /><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_plan_has_depth_limit" time="0.000" /><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_plan_injects_limit" time="0.000" /><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_plan_template_confidence_high" time="0.000" /><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_plan_fallback_confidence_lower" time="0.000" /><testcase classname="tests.p2_t1_test.TestQueryPlanner" name="test_parameterization_no_literals" time="0.001" /><testcase classname="tests.p2_t2_test.TestValidatorRegexGuards" name="test_blocks_delete" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorRegexGuards" name="test_blocks_detach_delete" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorRegexGuards" name="test_blocks_drop" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorRegexGuards" name="test_blocks_merge" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorRegexGuards" name="test_blocks_set_without_param" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorRegexGuards" name="test_blocks_grant_revoke" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorRegexGuards" name="test_allows_read_queries" time="0.001" /><testcase classname="tests.p2_t2_test.TestValidatorTraversalDepth" name="test_blocks_excessive_depth" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorTraversalDepth" name="test_allows_acceptable_depth" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorTraversalDepth" name="test_blocks_invalid_range" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorParameterization" name="test_blocks_unparameterized_string_in_where" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorParameterization" name="test_allows_parameterized_query" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorParameterization" name="test_blocks_large_numeric_literal" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorLimits" name="test_adds_limit_if_missing" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorLimits" name="test_preserves_existing_limit" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorExplainPlan" name="test_analyzes_plan_for_safe_query" time="0.018" /><testcase classname="tests.p2_t2_test.TestValidatorExplainPlan" name="test_warns_or_blocks_expensive_plan" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorExplainPlan" name="test_blocks_cartesian_product" time="0.000" /><testcase classname="tests.p2_t2_test.TestValidatorEndToEnd" name="test_validates_safe_template_query" time="0.037" /><testcase classname="tests.p2_t2_test.TestValidatorEndToEnd" name="test_false_positives_under_5_percent" time="0.097" /><testcase classname="tests.p2_t2_test.TestValidatorEndToEnd" name="test_blocks_all_malicious_queries" time="0.002" /><testcase classname="tests.p2_t2_test.TestValidatorDangerousPatterns" name="test_warns_unbounded_relationship" time="0.001" /><testcase classname="tests.p2_t2_test.TestValidatorDangerousPatterns" name="test_warns_where_in_pattern" time="0.001" /><testcase classname="tests.p2_t3_test.TestVectorSearch" name="test_vector_search_returns_results" time="0.006"><error message="failed on setup with &quot;AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'&quot;">config = Config(app=AppConfig(name='wekadocs-graphrag-mcp', version='0.1.0', log_level='INFO', environment='development'), embe...d=True, ttl_seconds=300, max_size=1000), l2=L2CacheConfig(enabled=True, ttl_seconds=3600, key_prefix='weka:cache:v1')))
+
+    @pytest.fixture(scope="module")
+    def embedder(config):
+        """Get embedder."""
+&gt;       model_name = config.embedding.model_name
+
+tests/p2_t3_test.py:43:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = EmbeddingConfig(embedding_model='sentence-transformers/all-MiniLM-L6-v2', dims=384, similarity='cosine', multilingual=False, version='v1')
+item = 'model_name'
+
+    def __getattr__(self, item: str) -&gt; Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+
+            if pydantic_extra is not None:
+                try:
+                    return pydantic_extra[item]
+                except KeyError as exc:
+                    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+&gt;                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'
+
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: AttributeError</error></testcase><testcase classname="tests.p2_t3_test.TestVectorSearch" name="test_vector_search_ranked_by_score" time="0.000"><error message="failed on setup with &quot;AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'&quot;">config = Config(app=AppConfig(name='wekadocs-graphrag-mcp', version='0.1.0', log_level='INFO', environment='development'), embe...d=True, ttl_seconds=300, max_size=1000), l2=L2CacheConfig(enabled=True, ttl_seconds=3600, key_prefix='weka:cache:v1')))
+
+    @pytest.fixture(scope="module")
+    def embedder(config):
+        """Get embedder."""
+&gt;       model_name = config.embedding.model_name
+
+tests/p2_t3_test.py:43:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = EmbeddingConfig(embedding_model='sentence-transformers/all-MiniLM-L6-v2', dims=384, similarity='cosine', multilingual=False, version='v1')
+item = 'model_name'
+
+    def __getattr__(self, item: str) -&gt; Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+
+            if pydantic_extra is not None:
+                try:
+                    return pydantic_extra[item]
+                except KeyError as exc:
+                    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+&gt;                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'
+
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: AttributeError</error></testcase><testcase classname="tests.p2_t3_test.TestVectorSearch" name="test_vector_search_respects_k" time="0.000"><error message="failed on setup with &quot;AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'&quot;">config = Config(app=AppConfig(name='wekadocs-graphrag-mcp', version='0.1.0', log_level='INFO', environment='development'), embe...d=True, ttl_seconds=300, max_size=1000), l2=L2CacheConfig(enabled=True, ttl_seconds=3600, key_prefix='weka:cache:v1')))
+
+    @pytest.fixture(scope="module")
+    def embedder(config):
+        """Get embedder."""
+&gt;       model_name = config.embedding.model_name
+
+tests/p2_t3_test.py:43:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = EmbeddingConfig(embedding_model='sentence-transformers/all-MiniLM-L6-v2', dims=384, similarity='cosine', multilingual=False, version='v1')
+item = 'model_name'
+
+    def __getattr__(self, item: str) -&gt; Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+
+            if pydantic_extra is not None:
+                try:
+                    return pydantic_extra[item]
+                except KeyError as exc:
+                    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+&gt;                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'
+
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: AttributeError</error></testcase><testcase classname="tests.p2_t3_test.TestHybridSearch" name="test_hybrid_search_returns_results" time="0.000"><error message="failed on setup with &quot;AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'&quot;">config = Config(app=AppConfig(name='wekadocs-graphrag-mcp', version='0.1.0', log_level='INFO', environment='development'), embe...d=True, ttl_seconds=300, max_size=1000), l2=L2CacheConfig(enabled=True, ttl_seconds=3600, key_prefix='weka:cache:v1')))
+
+    @pytest.fixture(scope="module")
+    def embedder(config):
+        """Get embedder."""
+&gt;       model_name = config.embedding.model_name
+
+tests/p2_t3_test.py:43:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = EmbeddingConfig(embedding_model='sentence-transformers/all-MiniLM-L6-v2', dims=384, similarity='cosine', multilingual=False, version='v1')
+item = 'model_name'
+
+    def __getattr__(self, item: str) -&gt; Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+
+            if pydantic_extra is not None:
+                try:
+                    return pydantic_extra[item]
+                except KeyError as exc:
+                    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+&gt;                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'
+
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: AttributeError</error></testcase><testcase classname="tests.p2_t3_test.TestHybridSearch" name="test_hybrid_search_with_expansion" time="0.000"><error message="failed on setup with &quot;AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'&quot;">config = Config(app=AppConfig(name='wekadocs-graphrag-mcp', version='0.1.0', log_level='INFO', environment='development'), embe...d=True, ttl_seconds=300, max_size=1000), l2=L2CacheConfig(enabled=True, ttl_seconds=3600, key_prefix='weka:cache:v1')))
+
+    @pytest.fixture(scope="module")
+    def embedder(config):
+        """Get embedder."""
+&gt;       model_name = config.embedding.model_name
+
+tests/p2_t3_test.py:43:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = EmbeddingConfig(embedding_model='sentence-transformers/all-MiniLM-L6-v2', dims=384, similarity='cosine', multilingual=False, version='v1')
+item = 'model_name'
+
+    def __getattr__(self, item: str) -&gt; Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+
+            if pydantic_extra is not None:
+                try:
+                    return pydantic_extra[item]
+                except KeyError as exc:
+                    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+&gt;                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'
+
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: AttributeError</error></testcase><testcase classname="tests.p2_t3_test.TestHybridSearch" name="test_hybrid_search_distances" time="0.000"><error message="failed on setup with &quot;AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'&quot;">config = Config(app=AppConfig(name='wekadocs-graphrag-mcp', version='0.1.0', log_level='INFO', environment='development'), embe...d=True, ttl_seconds=300, max_size=1000), l2=L2CacheConfig(enabled=True, ttl_seconds=3600, key_prefix='weka:cache:v1')))
+
+    @pytest.fixture(scope="module")
+    def embedder(config):
+        """Get embedder."""
+&gt;       model_name = config.embedding.model_name
+
+tests/p2_t3_test.py:43:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = EmbeddingConfig(embedding_model='sentence-transformers/all-MiniLM-L6-v2', dims=384, similarity='cosine', multilingual=False, version='v1')
+item = 'model_name'
+
+    def __getattr__(self, item: str) -&gt; Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+
+            if pydantic_extra is not None:
+                try:
+                    return pydantic_extra[item]
+                except KeyError as exc:
+                    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+&gt;                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'
+
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: AttributeError</error></testcase><testcase classname="tests.p2_t3_test.TestHybridSearch" name="test_hybrid_search_deduplicates" time="0.000"><error message="failed on setup with &quot;AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'&quot;">config = Config(app=AppConfig(name='wekadocs-graphrag-mcp', version='0.1.0', log_level='INFO', environment='development'), embe...d=True, ttl_seconds=300, max_size=1000), l2=L2CacheConfig(enabled=True, ttl_seconds=3600, key_prefix='weka:cache:v1')))
+
+    @pytest.fixture(scope="module")
+    def embedder(config):
+        """Get embedder."""
+&gt;       model_name = config.embedding.model_name
+
+tests/p2_t3_test.py:43:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = EmbeddingConfig(embedding_model='sentence-transformers/all-MiniLM-L6-v2', dims=384, similarity='cosine', multilingual=False, version='v1')
+item = 'model_name'
+
+    def __getattr__(self, item: str) -&gt; Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+
+            if pydantic_extra is not None:
+                try:
+                    return pydantic_extra[item]
+                except KeyError as exc:
+                    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+&gt;                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'
+
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: AttributeError</error></testcase><testcase classname="tests.p2_t3_test.TestRanking" name="test_ranker_ranks_results" time="0.000" /><testcase classname="tests.p2_t3_test.TestRanking" name="test_ranker_features_computed" time="0.000" /><testcase classname="tests.p2_t3_test.TestRanking" name="test_ranker_deterministic_ties" time="0.000" /><testcase classname="tests.p2_t3_test.TestRanking" name="test_ranker_prefers_high_semantic_score" time="0.000" /><testcase classname="tests.p2_t3_test.TestRanking" name="test_ranker_prefers_close_distance" time="0.000" /><testcase classname="tests.p2_t3_test.TestPerformance" name="test_hybrid_search_p95_latency_warmed" time="0.000"><error message="failed on setup with &quot;AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'&quot;">config = Config(app=AppConfig(name='wekadocs-graphrag-mcp', version='0.1.0', log_level='INFO', environment='development'), embe...d=True, ttl_seconds=300, max_size=1000), l2=L2CacheConfig(enabled=True, ttl_seconds=3600, key_prefix='weka:cache:v1')))
+
+    @pytest.fixture(scope="module")
+    def embedder(config):
+        """Get embedder."""
+&gt;       model_name = config.embedding.model_name
+
+tests/p2_t3_test.py:43:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = EmbeddingConfig(embedding_model='sentence-transformers/all-MiniLM-L6-v2', dims=384, similarity='cosine', multilingual=False, version='v1')
+item = 'model_name'
+
+    def __getattr__(self, item: str) -&gt; Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+
+            if pydantic_extra is not None:
+                try:
+                    return pydantic_extra[item]
+                except KeyError as exc:
+                    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+&gt;                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'
+
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: AttributeError</error></testcase><testcase classname="tests.p2_t3_test.TestPerformance" name="test_vector_search_latency" time="0.000"><error message="failed on setup with &quot;AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'&quot;">config = Config(app=AppConfig(name='wekadocs-graphrag-mcp', version='0.1.0', log_level='INFO', environment='development'), embe...d=True, ttl_seconds=300, max_size=1000), l2=L2CacheConfig(enabled=True, ttl_seconds=3600, key_prefix='weka:cache:v1')))
+
+    @pytest.fixture(scope="module")
+    def embedder(config):
+        """Get embedder."""
+&gt;       model_name = config.embedding.model_name
+
+tests/p2_t3_test.py:43:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = EmbeddingConfig(embedding_model='sentence-transformers/all-MiniLM-L6-v2', dims=384, similarity='cosine', multilingual=False, version='v1')
+item = 'model_name'
+
+    def __getattr__(self, item: str) -&gt; Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+
+            if pydantic_extra is not None:
+                try:
+                    return pydantic_extra[item]
+                except KeyError as exc:
+                    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+&gt;                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'
+
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: AttributeError</error></testcase><testcase classname="tests.p2_t3_test.TestPerformance" name="test_graph_expansion_bounded" time="0.000"><error message="failed on setup with &quot;AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'&quot;">config = Config(app=AppConfig(name='wekadocs-graphrag-mcp', version='0.1.0', log_level='INFO', environment='development'), embe...d=True, ttl_seconds=300, max_size=1000), l2=L2CacheConfig(enabled=True, ttl_seconds=3600, key_prefix='weka:cache:v1')))
+
+    @pytest.fixture(scope="module")
+    def embedder(config):
+        """Get embedder."""
+&gt;       model_name = config.embedding.model_name
+
+tests/p2_t3_test.py:43:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = EmbeddingConfig(embedding_model='sentence-transformers/all-MiniLM-L6-v2', dims=384, similarity='cosine', multilingual=False, version='v1')
+item = 'model_name'
+
+    def __getattr__(self, item: str) -&gt; Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+
+            if pydantic_extra is not None:
+                try:
+                    return pydantic_extra[item]
+                except KeyError as exc:
+                    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+&gt;                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'
+
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: AttributeError</error></testcase><testcase classname="tests.p2_t3_test.TestEndToEnd" name="test_full_pipeline" time="0.000"><error message="failed on setup with &quot;AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'&quot;">config = Config(app=AppConfig(name='wekadocs-graphrag-mcp', version='0.1.0', log_level='INFO', environment='development'), embe...d=True, ttl_seconds=300, max_size=1000), l2=L2CacheConfig(enabled=True, ttl_seconds=3600, key_prefix='weka:cache:v1')))
+
+    @pytest.fixture(scope="module")
+    def embedder(config):
+        """Get embedder."""
+&gt;       model_name = config.embedding.model_name
+
+tests/p2_t3_test.py:43:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = EmbeddingConfig(embedding_model='sentence-transformers/all-MiniLM-L6-v2', dims=384, similarity='cosine', multilingual=False, version='v1')
+item = 'model_name'
+
+    def __getattr__(self, item: str) -&gt; Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+
+            if pydantic_extra is not None:
+                try:
+                    return pydantic_extra[item]
+                except KeyError as exc:
+                    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+&gt;                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'
+
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: AttributeError</error></testcase><testcase classname="tests.p2_t3_test.TestEndToEnd" name="test_search_with_filters" time="0.001"><error message="failed on setup with &quot;AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'&quot;">config = Config(app=AppConfig(name='wekadocs-graphrag-mcp', version='0.1.0', log_level='INFO', environment='development'), embe...d=True, ttl_seconds=300, max_size=1000), l2=L2CacheConfig(enabled=True, ttl_seconds=3600, key_prefix='weka:cache:v1')))
+
+    @pytest.fixture(scope="module")
+    def embedder(config):
+        """Get embedder."""
+&gt;       model_name = config.embedding.model_name
+
+tests/p2_t3_test.py:43:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = EmbeddingConfig(embedding_model='sentence-transformers/all-MiniLM-L6-v2', dims=384, similarity='cosine', multilingual=False, version='v1')
+item = 'model_name'
+
+    def __getattr__(self, item: str) -&gt; Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+
+            if pydantic_extra is not None:
+                try:
+                    return pydantic_extra[item]
+                except KeyError as exc:
+                    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+&gt;                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'
+
+/opt/homebrew/lib/python3.11/site-packages/pydantic/main.py:761: AttributeError</error></testcase><testcase classname="tests.p2_t4_test.TestEvidence" name="test_extract_evidence" time="0.000" /><testcase classname="tests.p2_t4_test.TestEvidence" name="test_evidence_has_section_id" time="0.000" /><testcase classname="tests.p2_t4_test.TestEvidence" name="test_evidence_has_snippet" time="0.000" /><testcase classname="tests.p2_t4_test.TestEvidence" name="test_evidence_has_path" time="0.000" /><testcase classname="tests.p2_t4_test.TestConfidence" name="test_estimate_confidence_in_range" time="0.000" /><testcase classname="tests.p2_t4_test.TestConfidence" name="test_high_confidence_for_strong_results" time="0.000" /><testcase classname="tests.p2_t4_test.TestConfidence" name="test_low_confidence_for_weak_results" time="0.000" /><testcase classname="tests.p2_t4_test.TestDiagnostics" name="test_diagnostics_has_ranking_features" time="0.000" /><testcase classname="tests.p2_t4_test.TestDiagnostics" name="test_diagnostics_has_timing" time="0.000" /><testcase classname="tests.p2_t4_test.TestDiagnostics" name="test_diagnostics_has_candidate_count" time="0.000" /><testcase classname="tests.p2_t4_test.TestStructuredResponse" name="test_structured_response_schema" time="0.000" /><testcase classname="tests.p2_t4_test.TestStructuredResponse" name="test_structured_response_json_serializable" time="0.000" /><testcase classname="tests.p2_t4_test.TestStructuredResponse" name="test_evidence_array_structure" time="0.000" /><testcase classname="tests.p2_t4_test.TestMarkdownResponse" name="test_markdown_contains_query" time="0.000" /><testcase classname="tests.p2_t4_test.TestMarkdownResponse" name="test_markdown_contains_intent" time="0.000" /><testcase classname="tests.p2_t4_test.TestMarkdownResponse" name="test_markdown_contains_confidence" time="0.000" /><testcase classname="tests.p2_t4_test.TestMarkdownResponse" name="test_markdown_contains_evidence" time="0.000" /><testcase classname="tests.p2_t4_test.TestMarkdownResponse" name="test_markdown_contains_why_these_results" time="0.000" /><testcase classname="tests.p2_t4_test.TestMarkdownResponse" name="test_markdown_is_formatted" time="0.000" /><testcase classname="tests.p2_t4_test.TestIntentSpecificAnswers" name="test_search_intent_answer" time="0.000" /><testcase classname="tests.p2_t4_test.TestIntentSpecificAnswers" name="test_troubleshoot_intent_answer" time="0.000" /><testcase classname="tests.p2_t4_test.TestIntentSpecificAnswers" name="test_compare_intent_answer" time="0.000" /><testcase classname="tests.p2_t4_test.TestEndToEnd" name="test_complete_response_generation" time="0.000" /><testcase classname="tests.p2_t4_test.TestEndToEnd" name="test_response_has_both_formats" time="0.000" /><testcase classname="tests.p2_t4_test.TestEndToEnd" name="test_empty_results_handled_gracefully" time="0.000" /><testcase classname="tests.p3_t1_test.TestMarkdownParser" name="test_parse_getting_started" time="0.025" /><testcase classname="tests.p3_t1_test.TestMarkdownParser" name="test_parse_determinism" time="0.030" /><testcase classname="tests.p3_t1_test.TestMarkdownParser" name="test_preserves_code_blocks" time="0.005" /><testcase classname="tests.p3_t1_test.TestMarkdownParser" name="test_anchor_generation" time="0.008" /><testcase classname="tests.p3_t1_test.TestMarkdownParser" name="test_token_counting" time="0.006" /><testcase classname="tests.p3_t1_test.TestHTMLParser" name="test_parse_html_document" time="0.002" /><testcase classname="tests.p3_t1_test.TestHTMLParser" name="test_html_determinism" time="0.003" /><testcase classname="tests.p3_t1_test.TestHTMLParser" name="test_html_preserves_code" time="0.002" /><testcase classname="tests.p3_t1_test.TestHTMLParser" name="test_html_preserves_tables" time="0.003" /><testcase classname="tests.p3_t1_test.TestParserDeterminism" name="test_section_id_uniqueness_within_document" time="0.001" /><testcase classname="tests.p3_t1_test.TestParserDeterminism" name="test_checksum_changes_with_content" time="0.001" /><testcase classname="tests.p3_t2_test.TestCommandExtraction" name="test_extracts_commands_from_code_blocks" time="0.007" /><testcase classname="tests.p3_t2_test.TestCommandExtraction" name="test_commands_have_mentions" time="0.005" /><testcase classname="tests.p3_t2_test.TestCommandExtraction" name="test_command_confidence_scores" time="0.005" /><testcase classname="tests.p3_t2_test.TestConfigurationExtraction" name="test_extracts_config_files" time="0.005" /><testcase classname="tests.p3_t2_test.TestConfigurationExtraction" name="test_extracts_config_parameters" time="0.005" /><testcase classname="tests.p3_t2_test.TestConfigurationExtraction" name="test_extracts_env_variables" time="0.005" /><testcase classname="tests.p3_t2_test.TestProcedureExtraction" name="test_extracts_procedures_from_titled_sections" time="0.007" /><testcase classname="tests.p3_t2_test.TestProcedureExtraction" name="test_extracts_steps_from_numbered_lists" time="0.005" /><testcase classname="tests.p3_t2_test.TestProcedureExtraction" name="test_steps_have_procedure_relationship" time="0.005" /><testcase classname="tests.p3_t2_test.TestEntityExtractionPrecision" name="test_minimal_false_positives" time="0.000" /><testcase classname="tests.p3_t2_test.TestEntityExtractionPrecision" name="test_extracts_from_realistic_documentation" time="0.017" /><testcase classname="tests.p3_t2_test.TestEntityExtractionPrecision" name="test_mention_provenance" time="0.008" /><testcase classname="tests.p3_t3_integration_test.TestGraphConstruction" name="test_idempotent_graph_build" time="5.618" /><testcase classname="tests.p3_t3_integration_test.TestGraphConstruction" name="test_vector_parity" time="2.192" /><testcase classname="tests.p3_t3_test.TestGraphConstruction" name="test_upsert_document_creates_nodes" time="1.159" /><testcase classname="tests.p3_t3_test.TestGraphConstruction" name="test_idempotent_upsert" time="1.278" /><testcase classname="tests.p3_t3_test.TestGraphConstruction" name="test_mentions_have_provenance" time="1.276" /><testcase classname="tests.p3_t3_test.TestGraphConstruction" name="test_embeddings_computed" time="1.164" /><testcase classname="tests.p3_t3_test.TestGraphConstruction" name="test_vector_parity_with_graph" time="1.089" /><testcase classname="tests.p3_t3_test.TestGraphConstruction" name="test_embedding_version_set" time="1.170" /><testcase classname="tests.p3_t3_test.TestBatchProcessing" name="test_batch_size_respected" time="6.562" /><testcase classname="tests.p3_t4_integration_test.TestIncrementalUpdates" name="test_incremental_update_minimal_delta" time="8.670" /><testcase classname="tests.p3_t4_integration_test.TestReconciliation" name="test_reconciliation_drift_repair" time="3.733" /><testcase classname="tests.p3_t4_test.TestIncrementalUpdates" name="test_compute_diff_no_changes" time="1.126" /><testcase classname="tests.p3_t4_test.TestIncrementalUpdates" name="test_compute_diff_with_modifications" time="1.040" /><testcase classname="tests.p3_t4_test.TestIncrementalUpdates" name="test_incremental_update_limited_changes" time="1.062" /><testcase classname="tests.p3_t4_test.TestIncrementalUpdates" name="test_staged_sections_cleanup" time="1.013" /><testcase classname="tests.p3_t4_test.TestIncrementalUpdates" name="test_compute_diff_heading_rename" time="0.956" /><testcase classname="tests.p3_t4_test.TestReconciliation" name="test_reconcile_no_drift" time="2.067" /><testcase classname="tests.p3_t4_test.TestReconciliation" name="test_reconcile_repairs_drift" time="2.121" /><testcase classname="tests.p3_t4_test.TestReconciliation" name="test_reconciliation_performance" time="1.237" /><testcase classname="tests.p3_t4_test.TestDriftMetrics" name="test_drift_percentage_calculation" time="0.039" /><testcase classname="tests.p3_t4_test.TestDriftMetrics" name="test_drift_threshold_configuration" time="0.006" /><testcase classname="tests.p4_t1_complex_patterns_test" name="test_dependency_chain_query" time="0.132" /><testcase classname="tests.p4_t1_complex_patterns_test" name="test_impact_assessment_query" time="0.023" /><testcase classname="tests.p4_t1_complex_patterns_test" name="test_troubleshooting_path_query" time="0.034" /><testcase classname="tests.p4_t1_test.TestTemplateRegistry" name="test_list_templates" time="0.000" /><testcase classname="tests.p4_t1_test.TestTemplateRegistry" name="test_get_template" time="0.000" /><testcase classname="tests.p4_t1_test.TestTemplateRegistry" name="test_get_unknown_template_raises" time="0.000" /><testcase classname="tests.p4_t1_test.TestTemplateSchemas" name="test_dependency_chain_schema" time="0.000" /><testcase classname="tests.p4_t1_test.TestTemplateSchemas" name="test_impact_assessment_schema" time="0.000" /><testcase classname="tests.p4_t1_test.TestTemplateSchemas" name="test_comparison_schema" time="0.000" /><testcase classname="tests.p4_t1_test.TestTemplateSchemas" name="test_temporal_schema" time="0.000" /><testcase classname="tests.p4_t1_test.TestTemplateSchemas" name="test_troubleshooting_path_schema" time="0.000" /><testcase classname="tests.p4_t1_test.TestTemplateExecution" name="test_dependency_chain_executes" time="0.132" /><testcase classname="tests.p4_t1_test.TestTemplateExecution" name="test_impact_assessment_executes" time="0.023" /><testcase classname="tests.p4_t1_test.TestTemplateExecution" name="test_troubleshooting_path_executes" time="0.048" /><testcase classname="tests.p4_t1_test.TestTemplateOutputs" name="test_dependency_chain_output_structure" time="0.002" /><testcase classname="tests.p4_t1_test.TestTemplateOutputs" name="test_impact_assessment_output_structure" time="0.003" /><testcase classname="tests.p4_t1_test.TestTemplateEdgeCases" name="test_nonexistent_component" time="0.017" /><testcase classname="tests.p4_t1_test.TestTemplateEdgeCases" name="test_nonexistent_config" time="0.002" /><testcase classname="tests.p4_t1_test.TestTemplateEdgeCases" name="test_max_depth_respected" time="0.001" /><testcase classname="tests.p4_t1_test.TestTemplateGuardrails" name="test_all_templates_have_guardrails" time="0.000" /><testcase classname="tests.p4_t1_test.TestTemplateGuardrails" name="test_all_templates_have_file_paths" time="0.000" /><testcase classname="tests.p4_t1_test.TestTemplateGuardrails" name="test_all_templates_have_schemas" time="0.018" /><testcase classname="tests.p4_t2_optimizer_test" name="test_explain_uses_index_seek_for_point_lookup" time="0.015" /><testcase classname="tests.p4_t2_optimizer_test" name="test_traversal_depth_is_capped" time="0.012" /><testcase classname="tests.p4_t2_perf_test.TestBeforeAfterOptimization" name="test_index_optimization_improves_performance" time="1.243" /><testcase classname="tests.p4_t2_perf_test.TestBeforeAfterOptimization" name="test_plan_cache_reduces_overhead" time="0.001" /><testcase classname="tests.p4_t2_perf_test" name="test_generate_performance_report" time="4.394" /><testcase classname="tests.p4_t2_test.TestPlanCache" name="test_cache_stores_and_retrieves_plans" time="0.000" /><testcase classname="tests.p4_t2_test.TestPlanCache" name="test_cache_evicts_lru_when_full" time="0.000" /><testcase classname="tests.p4_t2_test.TestPlanCache" name="test_cache_stats" time="0.000" /><testcase classname="tests.p4_t2_test.TestSlowQueryRecording" name="test_records_slow_queries_above_threshold" time="0.000" /><testcase classname="tests.p4_t2_test.TestSlowQueryRecording" name="test_ignores_fast_queries_below_threshold" time="0.000" /><testcase classname="tests.p4_t2_test.TestSlowQueryRecording" name="test_computes_query_fingerprint" time="0.000" /><testcase classname="tests.p4_t2_test.TestExplainAnalysis" name="test_explain_query_without_index" time="0.067" /><testcase classname="tests.p4_t2_test.TestExplainAnalysis" name="test_explain_query_extracts_operators" time="0.009" /><testcase classname="tests.p4_t2_test.TestIndexRecommendations" name="test_recommends_index_for_label_scan" time="0.001" /><testcase classname="tests.p4_t2_test.TestIndexRecommendations" name="test_extract_label_property_patterns" time="0.000" /><testcase classname="tests.p4_t2_test.TestIndexRecommendations" name="test_export_recommendations_as_cypher" time="0.000" /><testcase classname="tests.p4_t2_test.TestQueryRewrites" name="test_suggests_rewrite_for_unbounded_pattern" time="0.000" /><testcase classname="tests.p4_t2_test.TestQueryRewrites" name="test_suggests_limit_when_missing" time="0.000" /><testcase classname="tests.p4_t2_test.TestOptimizationReport" name="test_analyze_slow_queries_generates_report" time="0.027" /><testcase classname="tests.p4_t2_test.TestOptimizationReport" name="test_report_deduplicates_recommendations" time="0.002" /><testcase classname="tests.p4_t2_test.TestPlanCacheIntegration" name="test_cache_and_retrieve_plan" time="0.000" /><testcase classname="tests.p4_t2_test.TestPlanCacheIntegration" name="test_cache_stats_tracking" time="0.000" /><testcase classname="tests.p4_t2_test" name="test_optimizer_initialization" time="0.014" /><testcase classname="tests.p4_t3_cache_perf_test" name="test_cold_to_warm_latency_improves_and_cache_key_exists" time="0.009"><failure message="requests.exceptions.HTTPError: 404 Client Error: Not Found for url: http://localhost:8000/mcp">redis_sync = Redis&lt;ConnectionPool&lt;Connection&lt;host=localhost,port=6379,db=0&gt;&gt;&gt;
+
+    @pytest.mark.order(6)
+    def test_cold_to_warm_latency_improves_and_cache_key_exists(redis_sync):
+        # Tool name should match your server’s registry (adjust if different)
+        tool = os.getenv("P4_CACHE_TEST_TOOL", "search_documentation")
+        args = {"query": "fsync configuration", "limit": 5}
+
+        # Compose the cache key the server uses (keep in sync with server logic)
+        cache_key = f"tool:{tool}:{json.dumps(args, sort_keys=True)}"
+
+        # Ensure clean slate
+        redis_sync.delete(cache_key)
+
+        t0 = time.time()
+&gt;       _ = _call_tool(tool, args)  # cold
+
+tests/p4_t3_cache_perf_test.py:48:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+name = 'search_documentation'
+args = {'limit': 5, 'query': 'fsync configuration'}
+
+    def _call_tool(name: str, args: dict):
+        payload = {
+            "method": "tools/call",
+            "params": {"name": name, "arguments": args},
+            "id": str(uuid.uuid4()),
+        }
+        r = requests.post(f"{MCP_URL}", json=payload, timeout=30)
+&gt;       r.raise_for_status()
+
+tests/p4_t3_cache_perf_test.py:31:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;Response [404]&gt;
+
+    def raise_for_status(self):
+        """Raises :class:`HTTPError`, if one occurred."""
+
+        http_error_msg = ""
+        if isinstance(self.reason, bytes):
+            # We attempt to decode utf-8 first because some servers
+            # choose to localize their reason strings. If the string
+            # isn't utf-8, we fall back to iso-8859-1 for all other
+            # encodings. (See PR #3538)
+            try:
+                reason = self.reason.decode("utf-8")
+            except UnicodeDecodeError:
+                reason = self.reason.decode("iso-8859-1")
+        else:
+            reason = self.reason
+
+        if 400 &lt;= self.status_code &lt; 500:
+            http_error_msg = (
+                f"{self.status_code} Client Error: {reason} for url: {self.url}"
+            )
+
+        elif 500 &lt;= self.status_code &lt; 600:
+            http_error_msg = (
+                f"{self.status_code} Server Error: {reason} for url: {self.url}"
+            )
+
+        if http_error_msg:
+&gt;           raise HTTPError(http_error_msg, response=self)
+E           requests.exceptions.HTTPError: 404 Client Error: Not Found for url: http://localhost:8000/mcp
+
+/opt/homebrew/lib/python3.11/site-packages/requests/models.py:1026: HTTPError</failure></testcase><testcase classname="tests.p4_t3_cache_perf_test" name="test_cache_invalidation_after_graph_update" time="0.001" /><testcase classname="tests.p4_t3_test.TestL1Cache" name="test_l1_basic_get_put" time="0.000" /><testcase classname="tests.p4_t3_test.TestL1Cache" name="test_l1_miss_returns_none" time="0.000" /><testcase classname="tests.p4_t3_test.TestL1Cache" name="test_l1_ttl_expiration" time="1.106" /><testcase classname="tests.p4_t3_test.TestL1Cache" name="test_l1_lru_eviction" time="0.002" /><testcase classname="tests.p4_t3_test.TestL1Cache" name="test_l1_invalidate_prefix" time="0.000" /><testcase classname="tests.p4_t3_test.TestL1Cache" name="test_l1_clear" time="0.000" /><testcase classname="tests.p4_t3_test.TestL2Cache" name="test_l2_basic_get_put" time="0.005" /><testcase classname="tests.p4_t3_test.TestL2Cache" name="test_l2_miss_returns_none" time="0.003" /><testcase classname="tests.p4_t3_test.TestL2Cache" name="test_l2_ttl_expiration" time="1.111" /><testcase classname="tests.p4_t3_test.TestL2Cache" name="test_l2_invalidate_prefix" time="0.014" /><testcase classname="tests.p4_t3_test.TestTieredCache" name="test_tiered_cache_l1_hit" time="0.011" /><testcase classname="tests.p4_t3_test.TestTieredCache" name="test_tiered_cache_l2_promotion" time="0.011" /><testcase classname="tests.p4_t3_test.TestTieredCache" name="test_tiered_cache_miss" time="0.011" /><testcase classname="tests.p4_t3_test.TestTieredCache" name="test_tiered_cache_cached_function" time="0.013" /><testcase classname="tests.p4_t3_test.TestTieredCache" name="test_cache_key_includes_versions" time="0.010" /><testcase classname="tests.p4_t3_test.TestTieredCache" name="test_cache_invalidation_on_version_rotation" time="0.012" /><testcase classname="tests.p4_t3_test.TestTieredCache" name="test_explicit_version_invalidation" time="0.013" /><testcase classname="tests.p4_t3_test.TestQueryWarmer" name="test_warmer_basic_warming" time="0.011" /><testcase classname="tests.p4_t3_test.TestQueryWarmer" name="test_warmer_skips_already_cached" time="0.011" /><testcase classname="tests.p4_t3_test.TestQueryWarmer" name="test_warmer_handles_failures" time="0.012" /><testcase classname="tests.p4_t3_test.TestCachePerformance" name="test_steady_state_hit_rate_exceeds_80_percent" time="0.068" /><testcase classname="tests.p4_t4_test.TestFeedbackCollection" name="test_log_and_retrieve_query" time="0.037" /><testcase classname="tests.p4_t4_test.TestFeedbackCollection" name="test_add_user_feedback" time="0.044" /><testcase classname="tests.p4_t4_test.TestFeedbackCollection" name="test_feedback_statistics" time="0.038" /><testcase classname="tests.p4_t4_test.TestFeedbackCollection" name="test_invalid_rating_rejected" time="0.005" /><testcase classname="tests.p4_t4_test.TestRankingWeightTuner" name="test_compute_ndcg_perfect_ranking" time="0.000" /><testcase classname="tests.p4_t4_test.TestRankingWeightTuner" name="test_compute_ndcg_worst_ranking" time="0.000" /><testcase classname="tests.p4_t4_test.TestRankingWeightTuner" name="test_compute_ndcg_at_k" time="0.000" /><testcase classname="tests.p4_t4_test.TestRankingWeightTuner" name="test_tune_weights_with_feedback" time="0.116" /><testcase classname="tests.p4_t4_test.TestRankingWeightTuner" name="test_tune_weights_insufficient_samples" time="0.019" /><testcase classname="tests.p4_t4_test.TestRankingWeightTuner" name="test_evaluate_weights" time="0.003" /><testcase classname="tests.p4_t4_test.TestSuggestionEngine" name="test_suggest_templates" time="0.046" /><testcase classname="tests.p4_t4_test.TestSuggestionEngine" name="test_suggest_templates_filters_low_rating" time="0.026" /><testcase classname="tests.p4_t4_test.TestSuggestionEngine" name="test_suggest_indexes" time="0.030" /><testcase classname="tests.p4_t4_test.TestSuggestionEngine" name="test_generate_report" time="0.028" /><testcase classname="tests.p4_t4_test.TestIntegration" name="test_end_to_end_learning_loop" time="0.089" /><testcase classname="tests.p4_t4_test.TestIntegration" name="test_ndcg_improvement_demonstration" time="0.043" /><testcase classname="tests.p5_t1_test.TestCircuitBreaker" name="test_circuit_breaker_starts_closed" time="0.000" /><testcase classname="tests.p5_t1_test.TestCircuitBreaker" name="test_circuit_breaker_opens_after_threshold" time="0.000" /><testcase classname="tests.p5_t1_test.TestCircuitBreaker" name="test_circuit_breaker_half_open_after_timeout" time="1.101" /><testcase classname="tests.p5_t1_test.TestCircuitBreaker" name="test_circuit_breaker_closes_on_success" time="1.107" /><testcase classname="tests.p5_t1_test.TestCircuitBreaker" name="test_circuit_breaker_reopens_on_half_open_failure" time="1.106" /><testcase classname="tests.p5_t1_test.TestIngestionQueue" name="test_enqueue_and_dequeue" time="0.006" /><testcase classname="tests.p5_t1_test.TestIngestionQueue" name="test_queue_rejects_when_full" time="0.060" /><testcase classname="tests.p5_t1_test.TestIngestionQueue" name="test_priority_queue_ordering" time="0.002" /><testcase classname="tests.p5_t1_test.TestIngestionQueue" name="test_backpressure_detection" time="0.040" /><testcase classname="tests.p5_t1_test.TestGitHubConnector" name="test_github_connector_initialization" time="0.001" /><testcase classname="tests.p5_t1_test.TestGitHubConnector" name="test_webhook_signature_verification" time="0.002" /><testcase classname="tests.p5_t1_test.TestConnectorManager" name="test_connector_manager_initialization" time="0.000" /><testcase classname="tests.p5_t1_test.TestConnectorManager" name="test_connector_registration" time="0.000" /><testcase classname="tests.p5_t1_test.TestConnectorManager" name="test_get_all_stats" time="0.000" /><testcase classname="tests.p5_t1_test.TestConnectorManager" name="test_queue_stats" time="0.001" /><testcase classname="tests.p5_t1_test" name="test_end_to_end_webhook_processing" time="0.000"><skipped type="pytest.skip" message="Async fixture event loop issue - core functionality tested in unit tests">/Users/brennanconley/vibecode/wekadocs-matrix/tests/p5_t1_test.py:360: Async fixture event loop issue - core functionality tested in unit tests</skipped></testcase><testcase classname="tests.p5_t2_test.TestPrometheusMetrics" name="test_metrics_endpoint_returns_prometheus_format" time="0.007" /><testcase classname="tests.p5_t2_test.TestPrometheusMetrics" name="test_http_request_metrics_increment" time="0.528" /><testcase classname="tests.p5_t2_test.TestPrometheusMetrics" name="test_mcp_tool_metrics_recorded" time="0.526" /><testcase classname="tests.p5_t2_test.TestPrometheusMetrics" name="test_cache_metrics_exist" time="0.006" /><testcase classname="tests.p5_t2_test.TestPrometheusMetrics" name="test_service_info_metric" time="0.006" /><testcase classname="tests.p5_t2_test.TestPrometheusMetrics" name="test_histogram_buckets_configured" time="0.011" /><testcase classname="tests.p5_t2_test.TestOpenTelemetryTracing" name="test_traces_recorded_for_http_requests" time="0.028" /><testcase classname="tests.p5_t2_test.TestOpenTelemetryTracing" name="test_trace_mcp_tool_context_manager" time="0.013" /><testcase classname="tests.p5_t2_test.TestOpenTelemetryTracing" name="test_trace_cypher_query_with_exemplar" time="0.013" /><testcase classname="tests.p5_t2_test.TestOpenTelemetryTracing" name="test_trace_hybrid_search_logs_slow_queries" time="0.606" /><testcase classname="tests.p5_t2_test.TestOpenTelemetryTracing" name="test_correlation_id_propagation" time="0.010" /><testcase classname="tests.p5_t2_test.TestAlertRules" name="test_alert_rules_file_valid_yaml" time="0.009" /><testcase classname="tests.p5_t2_test.TestAlertRules" name="test_high_latency_alert_defined" time="0.006" /><testcase classname="tests.p5_t2_test.TestAlertRules" name="test_drift_alert_defined" time="0.006" /><testcase classname="tests.p5_t2_test.TestAlertRules" name="test_error_rate_alert_defined" time="0.006" /><testcase classname="tests.p5_t2_test.TestAlertRules" name="test_all_alerts_have_runbook_urls" time="0.007" /><testcase classname="tests.p5_t2_test.TestGrafanaDashboards" name="test_overview_dashboard_valid_json" time="0.001" /><testcase classname="tests.p5_t2_test.TestGrafanaDashboards" name="test_overview_dashboard_has_required_panels" time="0.000" /><testcase classname="tests.p5_t2_test.TestGrafanaDashboards" name="test_query_performance_dashboard_valid" time="0.000" /><testcase classname="tests.p5_t2_test.TestGrafanaDashboards" name="test_ingestion_dashboard_valid" time="0.000" /><testcase classname="tests.p5_t2_test.TestGrafanaDashboards" name="test_dashboard_alerts_configured" time="0.000" /><testcase classname="tests.p5_t2_test.TestMonitoringRunbook" name="test_runbook_exists_and_readable" time="0.001" /><testcase classname="tests.p5_t2_test.TestMonitoringRunbook" name="test_runbook_covers_all_critical_alerts" time="0.007" /><testcase classname="tests.p5_t2_test.TestMonitoringRunbook" name="test_runbook_has_slo_targets" time="0.000" /><testcase classname="tests.p5_t2_test.TestMonitoringRunbook" name="test_runbook_has_escalation_procedures" time="0.000" /><testcase classname="tests.p5_t2_test.TestMonitoringIntegration" name="test_metrics_to_traces_linking" time="0.545" /><testcase classname="tests.p5_t2_test.TestMonitoringIntegration" name="test_end_to_end_observability_stack" time="1.109" /><testcase classname="tests.p5_t2_test.TestPerformanceMetrics" name="test_latency_histogram_accuracy" time="0.519" /><testcase classname="tests.p5_t2_test.TestPerformanceMetrics" name="test_cache_hit_rate_calculation" time="0.542" /><testcase classname="tests.p5_t2_test.TestSyntheticAlertFiring" name="test_can_fire_high_latency_alert" time="0.001"><skipped type="pytest.skip" message="Requires Prometheus with alertmanager">/Users/brennanconley/vibecode/wekadocs-matrix/tests/p5_t2_test.py:524: Requires Prometheus with alertmanager</skipped></testcase><testcase classname="tests.p5_t2_test.TestSyntheticAlertFiring" name="test_can_fire_error_rate_alert" time="0.000"><skipped type="pytest.skip" message="Requires Prometheus with alertmanager">/Users/brennanconley/vibecode/wekadocs-matrix/tests/p5_t2_test.py:530: Requires Prometheus with alertmanager</skipped></testcase><testcase classname="tests.p5_t3_test.TestCoreValidation" name="test_validator_blocks_dangerous_operations" time="0.000" /><testcase classname="tests.p5_t3_test.TestCoreValidation" name="test_validator_returns_valid_result" time="0.000" /><testcase classname="tests.p5_t3_test.TestCoreValidation" name="test_parser_determinism" time="0.001" /><testcase classname="tests.p5_t3_test.TestCoreValidation" name="test_schema_idempotence" time="0.023" /><testcase classname="tests.p5_t3_test.TestEndToEndWorkflows" name="test_health_endpoint" time="0.006" /><testcase classname="tests.p5_t3_test.TestEndToEndWorkflows" name="test_mcp_initialize" time="0.004" /><testcase classname="tests.p5_t3_test.TestEndToEndWorkflows" name="test_mcp_tools_list" time="0.004" /><testcase classname="tests.p5_t3_test.TestEndToEndWorkflows" name="test_mcp_tools_call" time="0.004" /><testcase classname="tests.p5_t3_test.TestPerformance" name="test_p95_latency_under_500ms" time="0.261" /><testcase classname="tests.p5_t3_test.TestPerformance" name="test_concurrent_operations" time="0.053" /><testcase classname="tests.p5_t3_test.TestSecurity" name="test_injection_blocked" time="0.000" /><testcase classname="tests.p5_t3_test.TestSecurity" name="test_rate_limiter_configured" time="0.000" /><testcase classname="tests.p5_t3_test.TestChaos" name="test_qdrant_down" time="8.463" /><testcase classname="tests.p5_t3_test.TestChaos" name="test_redis_down" time="8.428" /><testcase classname="tests.p5_t3_test.TestChaos" name="test_neo4j_backpressure" time="2.023" /><testcase classname="tests.p5_t4_test.TestBlueGreenDeployment" name="test_blue_green_switch_script_exists" time="0.001" /><testcase classname="tests.p5_t4_test.TestBlueGreenDeployment" name="test_blue_deployment_manifest_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestBlueGreenDeployment" name="test_green_deployment_manifest_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestBlueGreenDeployment" name="test_blue_green_manifests_have_version_labels" time="0.001" /><testcase classname="tests.p5_t4_test.TestCanaryDeployment" name="test_canary_rollout_script_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestCanaryDeployment" name="test_canary_deployment_manifest_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestCanaryDeployment" name="test_canary_manifest_has_correct_labels" time="0.000" /><testcase classname="tests.p5_t4_test.TestCanaryDeployment" name="test_canary_script_has_progressive_stages" time="0.000" /><testcase classname="tests.p5_t4_test.TestBackupRestore" name="test_backup_script_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestBackupRestore" name="test_restore_script_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestBackupRestore" name="test_backup_script_covers_all_services" time="0.000" /><testcase classname="tests.p5_t4_test.TestBackupRestore" name="test_restore_script_validates_manifest" time="0.000" /><testcase classname="tests.p5_t4_test.TestDisasterRecovery" name="test_dr_runbook_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestDisasterRecovery" name="test_dr_drill_script_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestDisasterRecovery" name="test_dr_runbook_documents_rto_rpo" time="0.000" /><testcase classname="tests.p5_t4_test.TestDisasterRecovery" name="test_dr_drill_measures_timing" time="0.000" /><testcase classname="tests.p5_t4_test.TestFeatureFlags" name="test_feature_flags_module_exists" time="0.001" /><testcase classname="tests.p5_t4_test.TestFeatureFlags" name="test_feature_flags_config_exists" time="0.001" /><testcase classname="tests.p5_t4_test.TestFeatureFlags" name="test_feature_flags_config_is_valid_json" time="0.000" /><testcase classname="tests.p5_t4_test.TestFeatureFlags" name="test_feature_flags_have_rollout_percentage" time="0.000" /><testcase classname="tests.p5_t4_test.TestKubernetesManifests" name="test_namespace_manifest_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestKubernetesManifests" name="test_configmap_manifest_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestKubernetesManifests" name="test_secrets_manifest_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestKubernetesManifests" name="test_neo4j_statefulset_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestKubernetesManifests" name="test_qdrant_statefulset_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestKubernetesManifests" name="test_redis_statefulset_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestKubernetesManifests" name="test_ingestion_worker_deployment_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestKubernetesManifests" name="test_jaeger_deployment_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestKubernetesManifests" name="test_ingress_manifest_exists" time="0.000" /><testcase classname="tests.p5_t4_test.TestKubernetesManifests" name="test_kustomization_exists" time="0.000" /><testcase classname="tests.p6_t1_test.TestFileSystemWatcher" name="test_fs_watcher_spool_pattern" time="3.035" /><testcase classname="tests.p6_t1_test.TestFileSystemWatcher" name="test_duplicate_prevention" time="5.029" /><testcase classname="tests.p6_t1_test.TestFileSystemWatcher" name="test_debounce_handling" time="5.037" /><testcase classname="tests.p6_t1_test.TestRedisQueue" name="test_job_enqueue" time="0.008" /><testcase classname="tests.p6_t1_test.TestRedisQueue" name="test_job_dequeue" time="0.015" /><testcase classname="tests.p6_t1_test.TestIngestionServiceHealth" name="test_health_endpoint" time="0.006" /><testcase classname="tests.p6_t1_test.TestIngestionServiceHealth" name="test_metrics_endpoint" time="0.006" /><testcase classname="tests.p6_t1_test.TestBackPressure" name="test_neo4j_backpressure" time="3.050" /><testcase classname="tests.p6_t1_test.TestBackPressure" name="test_qdrant_backpressure" time="3.054" /><testcase classname="tests.p6_t1_test.TestE2EWatcherFlow" name="test_complete_watcher_flow" time="6.039" /><testcase classname="tests.p6_t2_test.TestStateMachine" name="test_state_progression" time="2.074" /><testcase classname="tests.p6_t2_test.TestStateMachine" name="test_error_state" time="0.004" /><testcase classname="tests.p6_t2_test.TestResumeLogic" name="test_resume_from_parsing" time="2.148" /><testcase classname="tests.p6_t2_test.TestResumeLogic" name="test_resume_from_embedding" time="0.961" /><testcase classname="tests.p6_t2_test.TestResumeLogic" name="test_no_duplicate_work_on_resume" time="2.241" /><testcase classname="tests.p6_t2_test.TestIdempotency" name="test_reingest_unchanged_doc" time="2.522" /><testcase classname="tests.p6_t2_test.TestIdempotency" name="test_deterministic_ids" time="3.474" /><testcase classname="tests.p6_t2_test.TestProgressEvents" name="test_progress_events_emitted" time="2.096" /><testcase classname="tests.p6_t2_test.TestProgressEvents" name="test_progress_percentages" time="2.092" /><testcase classname="tests.p6_t2_test.TestPipelineIntegration" name="test_calls_existing_parsers" time="2.147" /><testcase classname="tests.p6_t2_test.TestPipelineIntegration" name="test_calls_existing_extractors" time="2.130" /><testcase classname="tests.p6_t2_test.TestPipelineIntegration" name="test_calls_build_graph" time="2.013" /><testcase classname="tests.p6_t2_test.TestE2EOrchestratorFlow" name="test_complete_job_lifecycle" time="2.244" /><testcase classname="tests.p6_t3_test.TestIngestCommand" name="test_ingest_single_file" time="3.670" /><testcase classname="tests.p6_t3_test.TestIngestCommand" name="test_ingest_glob_pattern" time="2.793" /><testcase classname="tests.p6_t3_test.TestIngestCommand" name="test_ingest_with_tag" time="2.758" /><testcase classname="tests.p6_t3_test.TestIngestCommand" name="test_ingest_watch_mode" time="2.920" /><testcase classname="tests.p6_t3_test.TestIngestCommand" name="test_ingest_dry_run" time="2.827" /><testcase classname="tests.p6_t3_test.TestStatusCommand" name="test_status_all_jobs" time="5.607" /><testcase classname="tests.p6_t3_test.TestStatusCommand" name="test_status_specific_job" time="5.641" /><testcase classname="tests.p6_t3_test.TestTailCommand" name="test_tail_job_logs" time="2.806"><skipped type="pytest.skip" message="Failed to enqueue job for tail test">/Users/brennanconley/vibecode/wekadocs-matrix/tests/p6_t3_test.py:358: Failed to enqueue job for tail test</skipped></testcase><testcase classname="tests.p6_t3_test.TestCancelCommand" name="test_cancel_running_job" time="5.748" /><testcase classname="tests.p6_t3_test.TestCancelCommand" name="test_cancel_nonexistent_job" time="2.783" /><testcase classname="tests.p6_t3_test.TestReportCommand" name="test_report_completed_job" time="2.794"><skipped type="pytest.skip" message="Failed to enqueue job for report test">/Users/brennanconley/vibecode/wekadocs-matrix/tests/p6_t3_test.py:442: Failed to enqueue job for report test</skipped></testcase><testcase classname="tests.p6_t3_test.TestReportCommand" name="test_report_in_progress_job" time="2.898"><skipped type="pytest.skip" message="Failed to enqueue job for in-progress report test">/Users/brennanconley/vibecode/wekadocs-matrix/tests/p6_t3_test.py:475: Failed to enqueue job for in-progress report test</skipped></testcase><testcase classname="tests.p6_t3_test.TestProgressUI" name="test_progress_bar_stages" time="2.775" /><testcase classname="tests.p6_t3_test.TestProgressUI" name="test_progress_percentages" time="2.795" /><testcase classname="tests.p6_t3_test.TestProgressUI" name="test_timing_display" time="2.921" /><testcase classname="tests.p6_t3_test.TestJSONOutput" name="test_json_status_output" time="2.817" /><testcase classname="tests.p6_t3_test.TestJSONOutput" name="test_json_progress_output" time="2.743" /><testcase classname="tests.p6_t3_test.TestErrorHandling" name="test_invalid_file_path" time="2.981" /><testcase classname="tests.p6_t3_test.TestErrorHandling" name="test_redis_connection_failure" time="0.000"><skipped type="pytest.skip" message="Requires stopping Redis - skipping for stack safety">/Users/brennanconley/vibecode/wekadocs-matrix/tests/p6_t3_test.py:640: Requires stopping Redis - skipping for stack safety</skipped></testcase><testcase classname="tests.p6_t3_test.TestErrorHandling" name="test_malformed_command" time="2.863" /><testcase classname="tests.p6_t3_test.TestE2ECLIFlow" name="test_complete_cli_workflow" time="13.238" /><testcase classname="tests.p6_t4_test.TestDriftChecks" name="test_check_drift_no_drift" time="0.864" /><testcase classname="tests.p6_t4_test.TestDriftChecks" name="test_check_drift_calculation" time="0.814" /><testcase classname="tests.p6_t4_test.TestDriftChecks" name="test_check_drift_qdrant_primary" time="0.015" /><testcase classname="tests.p6_t4_test.TestDriftChecks" name="test_check_drift_neo4j_primary" time="0.000"><skipped type="pytest.skip" message="Test requires Neo4j as primary vector store">/Users/brennanconley/vibecode/wekadocs-matrix/tests/p6_t4_test.py:200: Test requires Neo4j as primary vector store</skipped></testcase><testcase classname="tests.p6_t4_test.TestDriftChecks" name="test_check_drift_threshold_validation" time="0.806" /><testcase classname="tests.p6_t4_test.TestSampleQueries" name="test_run_sample_queries_success" time="0.828" /><testcase classname="tests.p6_t4_test.TestSampleQueries" name="test_run_sample_queries_no_config" time="0.961" /><testcase classname="tests.p6_t4_test.TestSampleQueries" name="test_run_sample_queries_no_search_engine" time="0.005" /><testcase classname="tests.p6_t4_test.TestSampleQueries" name="test_sample_query_evidence_required" time="0.819" /><testcase classname="tests.p6_t4_test.TestReadinessVerdict" name="test_compute_readiness_ready" time="0.837" /><testcase classname="tests.p6_t4_test.TestReadinessVerdict" name="test_compute_readiness_high_drift" time="0.823" /><testcase classname="tests.p6_t4_test.TestReadinessVerdict" name="test_compute_readiness_no_evidence" time="0.825" /><testcase classname="tests.p6_t4_test.TestReadinessVerdict" name="test_compute_readiness_no_queries" time="0.891" /><testcase classname="tests.p6_t4_test.TestVerificationIntegration" name="test_verify_ingestion_complete" time="0.819" /><testcase classname="tests.p6_t4_test.TestReportGeneration" name="test_generate_report_structure" time="0.011" /><testcase classname="tests.p6_t4_test.TestReportGeneration" name="test_generate_report_with_errors" time="0.011" /><testcase classname="tests.p6_t4_test.TestReportPersistence" name="test_write_report_json" time="0.015" /><testcase classname="tests.p6_t4_test.TestReportPersistence" name="test_write_report_markdown" time="0.013" /><testcase classname="tests.p6_t4_test.TestReportHelpers" name="test_get_doc_stats" time="0.005" /><testcase classname="tests.p6_t4_test.TestReportHelpers" name="test_get_graph_stats" time="0.009" /><testcase classname="tests.p6_t4_test.TestReportHelpers" name="test_get_vector_stats_qdrant" time="0.007" /><testcase classname="tests.p6_t4_test.TestReportHelpers" name="test_get_vector_stats_neo4j" time="0.001"><skipped type="pytest.skip" message="Test requires Neo4j as primary">/Users/brennanconley/vibecode/wekadocs-matrix/tests/p6_t4_test.py:530: Test requires Neo4j as primary</skipped></testcase><testcase classname="tests.p6_t4_test.TestReportHelpers" name="test_render_markdown_format" time="0.011" /><testcase classname="tests.p6_t4_test.TestReportHelpers" name="test_report_full_flow" time="0.021" /></testsuite></testsuites>

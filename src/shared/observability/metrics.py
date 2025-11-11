@@ -81,6 +81,126 @@ cache_size_bytes = Gauge(
     ["layer"],
 )
 
+# ===== Pre-Phase 7 (G1): Embedding provider metrics =====
+embedding_request_total = Counter(
+    "embedding_request_total",
+    "Total embedding requests",
+    ["model_id", "operation"],  # operation: documents, query
+)
+
+embedding_error_total = Counter(
+    "embedding_error_total",
+    "Total embedding errors",
+    ["model_id", "error_type"],
+)
+
+embedding_latency_ms = Histogram(
+    "embedding_latency_ms",
+    "Embedding generation latency in milliseconds",
+    ["model_id", "operation"],
+    buckets=(10, 25, 50, 100, 250, 500, 1000, 2500, 5000),
+)
+
+# ===== Pre-Phase 7 (G1): Qdrant metrics =====
+qdrant_upsert_total = Counter(
+    "qdrant_upsert_total",
+    "Total Qdrant upsert operations",
+    ["collection_name", "status"],
+)
+
+qdrant_search_total = Counter(
+    "qdrant_search_total",
+    "Total Qdrant search operations",
+    ["collection_name", "status"],
+)
+
+qdrant_operation_latency_ms = Histogram(
+    "qdrant_operation_latency_ms",
+    "Qdrant operation latency in milliseconds",
+    ["collection_name", "operation"],  # operation: upsert, search
+    buckets=(1, 5, 10, 25, 50, 100, 250, 500, 1000),
+)
+
+# ===== Pre-Phase 7 (G1): Ranking metrics =====
+ranking_latency_ms = Histogram(
+    "ranking_latency_ms",
+    "Ranking operation latency in milliseconds",
+    buckets=(1, 5, 10, 25, 50, 100, 250, 500),
+)
+
+ranking_candidates_total = Histogram(
+    "ranking_candidates_total",
+    "Number of candidates ranked",
+    buckets=(1, 5, 10, 20, 50, 100, 200),
+)
+
+ranking_missing_vector_score_total = Counter(
+    "ranking_missing_vector_score_total",
+    "Total RRF ranking entries missing vector similarity metadata",
+    ["fallback"],
+)
+
+ranking_vector_score_distribution = Histogram(
+    "ranking_vector_score_distribution",
+    "Distribution of raw vector similarity scores seen during ranking",
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+
+ranking_semantic_score_distribution = Histogram(
+    "ranking_semantic_score_distribution",
+    "Distribution of normalized semantic confidence scores",
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+
+# ===== Ingestion: Semantic enrichment metrics =====
+semantic_enrichment_total = Counter(
+    "semantic_enrichment_total",
+    "Total semantic enrichment attempts grouped by provider and status.",
+    ["provider", "status"],  # status: success, error, skipped
+)
+
+semantic_enrichment_latency_ms = Histogram(
+    "semantic_enrichment_latency_ms",
+    "Latency of semantic enrichment in milliseconds.",
+    ["provider"],
+    buckets=(1, 5, 10, 25, 50, 100, 250, 500, 1000),
+)
+
+# ===== Phase 7C: Reranking metrics =====
+rerank_request_total = Counter(
+    "rerank_request_total",
+    "Total reranking requests",
+    ["model_id", "status"],
+)
+
+rerank_error_total = Counter(
+    "rerank_error_total",
+    "Total reranking errors",
+    ["model_id", "error_type"],
+)
+
+rerank_latency_ms = Histogram(
+    "rerank_latency_ms",
+    "Reranking latency in milliseconds",
+    ["model_id"],
+    buckets=(10, 25, 50, 100, 250, 500, 1000, 2500, 5000),
+)
+
+# ===== Pre-Phase 7 (G1): Response builder metrics =====
+response_builder_latency_ms = Histogram(
+    "response_builder_latency_ms",
+    "Response builder latency in milliseconds",
+    ["verbosity"],
+    buckets=(5, 10, 25, 50, 100, 250, 500, 1000),
+)
+
+response_builder_evidence_count = Histogram(
+    "response_builder_evidence_count",
+    "Number of evidence items in response",
+    ["verbosity"],
+    buckets=(1, 3, 5, 10, 20),
+)
+
 # ===== Vector search metrics =====
 vector_search_duration_seconds = Histogram(
     "vector_search_duration_seconds",
@@ -155,6 +275,63 @@ ingestion_duration_seconds = Histogram(
     "ingestion_duration_seconds",
     "Document ingestion duration in seconds",
     buckets=(0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0),
+)
+
+# ===== Phase 7E-4: Chunk quality metrics =====
+chunk_token_distribution = Histogram(
+    "chunk_token_distribution",
+    "Token count distribution for chunks",
+    buckets=(50, 100, 200, 300, 500, 700, 1000, 1500, 2000, 3000, 5000, 7900),
+)
+
+chunks_created_total = Counter(
+    "chunks_created_total",
+    "Total chunks created during ingestion",
+    ["document_id"],
+)
+
+chunks_oversized_total = Counter(
+    "chunks_oversized_total",
+    "Total oversized chunks (ZERO tolerance SLO)",
+    ["document_id"],
+)
+
+chunk_quality_score = Histogram(
+    "chunk_quality_score",
+    "Chunk quality scores (token count distribution)",
+    ["quality_band"],  # under_min, optimal, over_max
+    buckets=(0, 200, 500, 1000, 2000, 5000, 7900, 10000),
+)
+
+# ===== Phase 7E-4: Integrity check metrics =====
+integrity_checks_total = Counter(
+    "integrity_checks_total",
+    "Total integrity checks performed",
+    ["check_type"],  # sha256, dimension, schema
+)
+
+integrity_failures_total = Counter(
+    "integrity_failures_total",
+    "Total integrity check failures (ZERO tolerance SLO)",
+    ["check_type", "failure_reason"],
+)
+
+# ===== Phase 7E-4: Retrieval expansion metrics =====
+retrieval_expansion_total = Counter(
+    "retrieval_expansion_total",
+    "Total retrieval expansion events",
+    ["expansion_reason"],  # query_long, scores_close, forced, disabled
+)
+
+retrieval_expansion_chunks_added = Histogram(
+    "retrieval_expansion_chunks_added",
+    "Number of chunks added via expansion",
+    buckets=(0, 1, 2, 3, 5, 10, 20),
+)
+
+retrieval_expansion_rate_current = Gauge(
+    "retrieval_expansion_rate_current",
+    "Current expansion rate (rolling window)",
 )
 
 # ===== Reconciliation metrics =====

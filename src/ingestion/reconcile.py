@@ -63,6 +63,31 @@ class Reconciler:
             self.collection = collection_name
             self.version = embedding_version
 
+    def _vector_field_names(self) -> List[str]:
+        """
+        Return the configured named-vector fields for the active environment.
+        Falls back to ["content"] so that legacy single-vector deployments
+        remain functional.
+        """
+        if (
+            hasattr(self, "config")
+            and self.config
+            and hasattr(self.config, "search")
+            and hasattr(self.config.search, "hybrid")
+        ):
+            vector_fields = getattr(self.config.search.hybrid, "vector_fields", None)
+            if isinstance(vector_fields, dict) and vector_fields:
+                return list(vector_fields.keys())
+        return ["content"]
+
+    def _wrap_named_vectors(self, base_vector: List[float]) -> Dict[str, List[float]]:
+        """
+        Duplicate a single embedding across all named-vector slots required by
+        the collection so reconciliation can operate without additional model
+        invocations.
+        """
+        return {name: list(base_vector) for name in self._vector_field_names()}
+
     def _graph_section_ids(self) -> Set[str]:
         """Get all Section IDs from Neo4j with matching embedding_version (synchronous)."""
         cypher = """
@@ -147,7 +172,7 @@ class Reconciler:
 
     def _upsert_points(
         self,
-        records: List[Tuple[str, List[float], Dict]],
+        records: List[Tuple[str, Dict[str, List[float]], Dict]],
     ) -> int:
         if not records:
             return 0
@@ -162,7 +187,28 @@ class Reconciler:
             )
             for rec in records
         ]
-        self.qdrant.upsert(collection_name=self.collection, points=pts)
+
+        # Pre-Phase 7: Determine expected dimension from config or first vector
+        expected_dim: int | Dict[str, int] = 384  # Default fallback
+        if self.config and hasattr(self.config, "embedding"):
+            expected_dim = self.config.embedding.dims
+
+        if pts:
+            first_vector = pts[0].vector
+            if isinstance(first_vector, dict):
+                derived = {
+                    name: len(vec)
+                    for name, vec in first_vector.items()
+                    if isinstance(vec, list)
+                }
+                if derived:
+                    expected_dim = derived
+            elif isinstance(first_vector, list):
+                expected_dim = len(first_vector)
+
+        self.qdrant.upsert_validated(
+            collection_name=self.collection, points=pts, expected_dim=expected_dim
+        )
         return len(pts)
 
     def reconcile_sync(
@@ -202,7 +248,9 @@ class Reconciler:
                 s.id AS id,
                 coalesce(s.text, s.content, s.title, '') AS text,
                 coalesce(s.document_id, d.id) AS document_id,
-                d.source_uri AS source_uri
+                d.source_uri AS source_uri,
+                d.doc_tag AS doc_tag,
+                d.snapshot_scope AS snapshot_scope
             """
             with self.neo4j.session() as sess:
                 res = sess.run(cypher, {"ids": missing})
@@ -211,6 +259,7 @@ class Reconciler:
                         "text": rec["text"] or "",
                         "document_id": rec.get("document_id"),
                         "source_uri": rec.get("source_uri"),
+                        "doc_tag": rec.get("doc_tag"),
                     }
 
             upserts = []
@@ -219,6 +268,7 @@ class Reconciler:
                     sid, {"text": "", "document_id": None, "source_uri": None}
                 )
                 vec = emb_fn(meta["text"])
+                named_vecs = self._wrap_named_vectors(vec)
                 source_uri = meta.get("source_uri") or ""
                 document_uri = Path(source_uri).name if source_uri else source_uri
                 payload = {
@@ -227,9 +277,11 @@ class Reconciler:
                     "document_id": meta.get("document_id"),
                     "document_uri": document_uri,
                     "source_uri": source_uri,
+                    "doc_tag": meta.get("doc_tag"),
+                    "snapshot_scope": meta.get("snapshot_scope"),
                     "embedding_version": self.version,
                 }
-                upserts.append((sid, vec, payload))
+                upserts.append((sid, named_vecs, payload))
 
             added = self._upsert_points(upserts)
         else:

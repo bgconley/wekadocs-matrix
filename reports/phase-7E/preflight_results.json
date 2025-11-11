@@ -1,0 +1,158 @@
+{
+  "phase": "7E.0",
+  "timestamp": "2025-10-29T05:22:06.811607Z",
+  "overall_status": "PASS",
+  "checks": [
+    {
+      "name": "Neo4j Constraints",
+      "status": "PASS",
+      "details": "Found 15/15 required constraints",
+      "evidence": {
+        "found": 15,
+        "required": 15,
+        "constraints": [
+          "answer_id_unique",
+          "command_id_unique",
+          "component_id_unique",
+          "concept_id_unique",
+          "configuration_id_unique",
+          "document_id_unique",
+          "document_source_uri_unique",
+          "error_id_unique",
+          "example_id_unique",
+          "parameter_id_unique"
+        ]
+      }
+    },
+    {
+      "name": "Neo4j Property Indexes",
+      "status": "PASS",
+      "details": "Found 38 property indexes",
+      "evidence": {
+        "found": 38,
+        "critical_present": 6
+      }
+    },
+    {
+      "name": "Neo4j Vector Indexes (1024-D)",
+      "status": "PASS",
+      "details": "Found 2/2 vector indexes @1024-D cosine",
+      "evidence": {
+        "indexes": [
+          "chunk_embeddings_v2",
+          "section_embeddings_v2"
+        ],
+        "dimensions": 1024,
+        "similarity": "cosine"
+      }
+    },
+    {
+      "name": "Neo4j Schema Version",
+      "status": "PASS",
+      "details": "Schema vv2.1, 1024-D, jina-ai/jina-embeddings-v3",
+      "evidence": {
+        "version": "v2.1",
+        "dimensions": 1024,
+        "provider": "jina-ai",
+        "model": "jina-embeddings-v3"
+      }
+    },
+    {
+      "name": "Qdrant 'chunks' Collection",
+      "status": "PASS",
+      "details": "Collection 'exists': 1024-D Cosine",
+      "evidence": {
+        "collection": "chunks",
+        "size": 1024,
+        "distance": "Cosine",
+        "points": 0,
+        "action": "exists"
+      }
+    },
+    {
+      "name": "Qdrant Payload Indexes",
+      "status": "PASS",
+      "details": "Payload indexes: 3 present",
+      "evidence": {
+        "required": [
+          "document_id",
+          "parent_section_id",
+          "order"
+        ],
+        "existing": [
+          "parent_section_id",
+          "order",
+          "document_id"
+        ],
+        "created": []
+      }
+    },
+    {
+      "name": "Runtime Environment Variables",
+      "status": "PASS",
+      "details": "Environment variables checked. Note: May be configured in YAML (acceptable)",
+      "evidence": {
+        "checked": {
+          "EMBED_MODEL_ID": "jina-embeddings-v3",
+          "EMBED_PROVIDER": "jina-ai",
+          "EMBED_DIM": "1024"
+        },
+        "env_values": {
+          "EMBED_MODEL_ID": "NOT_SET",
+          "EMBED_PROVIDER": "NOT_SET",
+          "EMBED_DIM": "NOT_SET"
+        }
+      }
+    },
+    {
+      "name": "Config File Settings",
+      "status": "PASS",
+      "details": "Config file validated. Warnings: hybrid.method not set (will add), hybrid.rrf_k not set (will add), hybrid.fusion_alpha not set (will add), answer_context_max_tokens not set (will add)",
+      "evidence": {
+        "embed_config": {
+          "model_name": [
+            "jina-embeddings-v3",
+            "jina-embeddings-v3"
+          ],
+          "dims": [
+            1024,
+            1024
+          ],
+          "version": [
+            "jina-embeddings-v3",
+            "jina-embeddings-v3"
+          ],
+          "provider": [
+            "jina-ai",
+            "jina-ai"
+          ]
+        },
+        "hybrid_config": {
+          "method": [
+            "rrf",
+            "NOT_SET"
+          ],
+          "rrf_k": [
+            60,
+            "NOT_SET"
+          ],
+          "fusion_alpha": [
+            0.6,
+            "NOT_SET"
+          ]
+        },
+        "warnings": [
+          "hybrid.method not set (will add)",
+          "hybrid.rrf_k not set (will add)",
+          "hybrid.fusion_alpha not set (will add)",
+          "answer_context_max_tokens not set (will add)"
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "total": 8,
+    "pass_rate": "8/8 (100%)"
+  }
+}

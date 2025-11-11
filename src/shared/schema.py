@@ -15,9 +15,49 @@ from .observability import get_logger
 logger = get_logger(__name__)
 
 
+def parse_cypher_statements(script: str) -> list[str]:
+    """
+    Parse Cypher script handling multi-line statements and comments.
+
+    Properly handles:
+    - Multi-line statements (accumulated until semicolon)
+    - Comment blocks (// and -- style)
+    - Empty lines and whitespace
+
+    Args:
+        script: Cypher script text
+
+    Returns:
+        List of executable Cypher statements
+    """
+    statements = []
+    current_stmt = []
+
+    for line in script.split("\n"):
+        stripped = line.strip()
+
+        # Skip pure comment lines and empty lines
+        if not stripped or stripped.startswith("//") or stripped.startswith("--"):
+            continue
+
+        # Add line to current statement
+        current_stmt.append(line)
+
+        # Check if statement ends (semicolon at end of line)
+        if stripped.endswith(";"):
+            stmt = "\n".join(current_stmt).strip()
+            if stmt:
+                statements.append(stmt)
+            current_stmt = []
+
+    return statements
+
+
 def create_schema(driver: Driver, config: Config) -> Dict[str, any]:
     """
-    Create Neo4j schema including constraints, indexes, and vector indexes.
+    Create Neo4j schema v2.1 including constraints, indexes, and vector indexes.
+
+    Phase 7C: Uses complete standalone v2.1 schema DDL as single source of truth.
     Idempotent - can be run multiple times safely.
 
     Args:
@@ -27,83 +67,151 @@ def create_schema(driver: Driver, config: Config) -> Dict[str, any]:
     Returns:
         Dict with status and details
     """
+    schema_version = config.graph_schema.version if config else "v2.1"
     results = {
         "success": False,
+        "total_statements": 0,
+        "executed": 0,
         "constraints_created": 0,
         "indexes_created": 0,
         "vector_indexes_created": 0,
-        "schema_version": config.schema.version,
+        "schema_version": schema_version,
+        "schema_version_set": False,
+        "dual_labeled_sections": 0,
         "errors": [],
     }
 
     try:
         with driver.session() as session:
-            # Step 1: Execute base schema (constraints and regular indexes)
-            logger.info("Creating base schema (constraints and indexes)")
+            logger.info(
+                f"Applying complete {schema_version} schema (single source of truth)"
+            )
+
+            schema_filename = "create_graphrag_schema_v2_2_20251105_guard.cypher"
+            if schema_version.startswith("v2.1"):
+                schema_filename = "create_schema_v2_1_complete.cypher"
+
             cypher_script_path = (
                 Path(__file__).parent.parent.parent
                 / "scripts"
                 / "neo4j"
-                / "create_schema.cypher"
+                / schema_filename
             )
 
             if not cypher_script_path.exists():
                 raise FileNotFoundError(
-                    f"Schema script not found: {cypher_script_path}"
+                    f"Complete schema not found: {cypher_script_path}"
                 )
 
             with open(cypher_script_path, "r") as f:
                 cypher_script = f.read()
 
-            # Split script into individual statements (simple split on semicolon)
-            statements = [
-                stmt.strip()
-                for stmt in cypher_script.split(";")
-                if stmt.strip() and not stmt.strip().startswith("//")
-            ]
+            # Parse script into individual statements (handles multi-line + comments)
+            statements = parse_cypher_statements(cypher_script)
+            results["total_statements"] = len(statements)
 
-            for stmt in statements:
+            logger.info(
+                f"Parsed {len(statements)} statements from complete {schema_version} schema"
+            )
+
+            for idx, stmt in enumerate(statements, 1):
                 if not stmt:
                     continue
                 try:
-                    session.run(stmt)
+                    result = session.run(stmt)
+                    results["executed"] += 1
+
+                    # Count by type
                     if "CREATE CONSTRAINT" in stmt:
                         results["constraints_created"] += 1
-                    elif "CREATE INDEX" in stmt and "VECTOR" not in stmt.upper():
+                    elif "CREATE VECTOR INDEX" in stmt:
+                        results["vector_indexes_created"] += 1
+                    elif "CREATE INDEX" in stmt:
                         results["indexes_created"] += 1
+                    elif "MERGE (sv:SchemaVersion" in stmt:
+                        results["schema_version_set"] = True
+                    elif "SET s:Chunk" in stmt:
+                        summary = result.consume()
+                        results["dual_labeled_sections"] = summary.counters.labels_added
+
+                    # Log progress every 10 statements
+                    if idx % 10 == 0:
+                        logger.info(
+                            f"Progress: {idx}/{len(statements)} statements executed"
+                        )
+
                 except Exception as e:
-                    # Ignore already exists errors
+                    error_msg = str(e)
+                    # Ignore already exists errors (idempotent)
                     if (
-                        "already exists" not in str(e).lower()
-                        and "equivalent" not in str(e).lower()
+                        "already exists" in error_msg.lower()
+                        or "equivalent" in error_msg.lower()
                     ):
-                        logger.warning(f"Error executing statement: {str(e)[:100]}")
+                        logger.debug(f"Statement {idx} already exists (idempotent)")
+                        results["executed"] += 1
+                    else:
+                        logger.warning(
+                            f"Error executing statement {idx}: {error_msg[:100]}"
+                        )
+                        results["errors"].append(
+                            {"statement_num": idx, "error": error_msg[:200]}
+                        )
 
-            logger.info(
-                "Base schema created",
-                constraints=results["constraints_created"],
-                indexes=results["indexes_created"],
-            )
+            # Mark success if all statements executed
+            results["success"] = results["executed"] == results["total_statements"]
 
-            # Step 2: Create vector indexes using config-driven dimensions
-            logger.info("Creating vector indexes")
-            vector_indexes = create_vector_indexes(session, config)
-            results["vector_indexes_created"] = vector_indexes["created"]
-            results["vector_indexes_details"] = vector_indexes["details"]
-
-            # Step 3: Verify schema
-            logger.info("Verifying schema")
+            # Verify schema was applied correctly
+            logger.info("Verifying schema application")
             verification = verify_schema(session)
             results["verification"] = verification
-            results["success"] = True
 
-            logger.info("Schema creation completed successfully", results=results)
+            logger.info(
+                "Complete v2.1 schema application finished",
+                success=results["success"],
+                executed=results["executed"],
+                total=results["total_statements"],
+                constraints=results["constraints_created"],
+                indexes=results["indexes_created"],
+                vector_indexes=results["vector_indexes_created"],
+                schema_version_set=results["schema_version_set"],
+                errors=len(results["errors"]),
+            )
             return results
 
     except Exception as e:
         logger.error("Schema creation failed", error=str(e))
         results["errors"].append(str(e))
         return results
+
+
+def apply_schema_v2_1(session) -> Dict[str, any]:
+    """
+    Optionally apply schema v2.1 DDL (Pre-Phase 7, F2).
+
+    This function:
+    1. Checks if create_schema_v2_1.cypher exists
+    2. If exists, executes it (idempotent - safe to re-run)
+    3. If not, returns quietly (not an error)
+
+    Purpose: Prepare for Phase 7 without disrupting current operations.
+    Changes: Dual-label Sections, add Session/Query/Answer constraints.
+
+    Args:
+        session: Neo4j session
+
+    Returns:
+        Dict with execution status
+    """
+    result = {
+        "executed": False,
+        "dual_labeled_sections": 0,
+        "constraints_created": 0,
+        "schema_version": None,
+    }
+
+    logger.warning("apply_schema_v2_1() is deprecated; use create_schema() instead.")
+    result["reason"] = "deprecated"
+    return result
 
 
 def create_vector_indexes(session, config: Config) -> Dict[str, any]:
@@ -279,6 +387,33 @@ def verify_schema(session) -> Dict[str, any]:
         verification["error"] = str(e)
 
     return verification
+
+
+def ensure_schema_version(driver: Driver, expected_version: str) -> None:
+    """
+    Ensure the SchemaVersion node matches the expected value.
+
+    Raises:
+        RuntimeError: if the node is missing or versions mismatch
+    """
+    if not expected_version:
+        return
+
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (sv:SchemaVersion {id: 'singleton'}) RETURN sv.version AS version"
+        )
+        record = result.single()
+        if not record or not record["version"]:
+            raise RuntimeError(
+                "SchemaVersion node not found - run the Neo4j schema migration."
+            )
+
+        version = record["version"]
+        if version != expected_version:
+            raise RuntimeError(
+                f"SchemaVersion mismatch: expected {expected_version}, got {version}"
+            )
 
 
 def drop_schema(driver: Driver) -> Dict[str, any]:

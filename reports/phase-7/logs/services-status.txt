@@ -1,0 +1,8 @@
+NAME                     IMAGE                               COMMAND                  SERVICE             CREATED              STATUS                        PORTS
+weka-ingestion-service   wekadocs-matrix-ingestion-service   "python -m src.inges…"   ingestion-service   35 minutes ago       Up 34 minutes (healthy)       0.0.0.0:8081->8081/tcp, [::]:8081->8081/tcp
+weka-ingestion-worker    wekadocs-matrix-ingestion-worker    "python -m src.inges…"   ingestion-worker    29 minutes ago       Up 25 minutes
+weka-jaeger              jaegertracing/all-in-one:1.51       "/go/bin/all-in-one-…"   jaeger              7 days ago           Up 19 hours (healthy)         0.0.0.0:4317-4318->4317-4318/tcp, [::]:4317-4318->4317-4318/tcp, 0.0.0.0:16686->16686/tcp, [::]:16686->16686/tcp
+weka-mcp-server          wekadocs-matrix-mcp-server          "python -m uvicorn s…"   mcp-server          2 minutes ago        Up 30 seconds (healthy)       0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp
+weka-neo4j               neo4j:5.15-enterprise               "tini -g -- /startup…"   neo4j               About a minute ago   Up About a minute (healthy)   0.0.0.0:7474->7474/tcp, [::]:7474->7474/tcp, 0.0.0.0:7687->7687/tcp, [::]:7687->7687/tcp
+weka-qdrant              qdrant/qdrant:v1.7.4                "./entrypoint.sh"        qdrant              7 days ago           Up 2 days (healthy)           0.0.0.0:6333-6334->6333-6334/tcp, [::]:6333-6334->6333-6334/tcp
+weka-redis               redis:7.2-alpine                    "docker-entrypoint.s…"   redis               7 days ago           Up 2 days (healthy)           0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp

@@ -1,0 +1,66 @@
+{
+  "success": true,
+  "documents_validated": 5,
+  "violations": [],
+  "all_documents": [
+    {
+      "doc_id": "30a32ba39d73d63cf5af318b5d1ebc7763f8e86c9633338e9f90cbc9801241ae",
+      "doc_tokens": 456,
+      "section_tokens_sum": 456,
+      "section_count": 16,
+      "delta": 0,
+      "error_rate": 0.0
+    },
+    {
+      "doc_id": "bddeb4f860b99dbaf37a081678927552681a9008b1693356d61df6ede938e32f",
+      "doc_tokens": 1574,
+      "section_tokens_sum": 1574,
+      "section_count": 35,
+      "delta": 0,
+      "error_rate": 0.0
+    },
+    {
+      "doc_id": "4ba0ac8c8244f08f4de285bf33431f57eb8afce946e70124e829dc48dc8fc143",
+      "doc_tokens": 2836,
+      "section_tokens_sum": 2836,
+      "section_count": 24,
+      "delta": 0,
+      "error_rate": 0.0
+    },
+    {
+      "doc_id": "cdf3dff253f62cf2dd1a3e62dbf440f089ba365ff24b272e823fa82c36662114",
+      "doc_tokens": 3031,
+      "section_tokens_sum": 3031,
+      "section_count": 34,
+      "delta": 0,
+      "error_rate": 0.0
+    },
+    {
+      "doc_id": "ad685d7ad69fe8a20fbbdc340219872c2fface0bfe9b0626b8c10230fde1fc7b",
+      "doc_tokens": 40194,
+      "section_tokens_sum": 40194,
+      "section_count": 262,
+      "delta": 0,
+      "error_rate": 0.0
+    }
+  ],
+  "statistics": {
+    "total_documents": 5,
+    "violations_count": 0,
+    "violation_rate": 0.0,
+    "error_rate": {
+      "min": 0.0,
+      "max": 0.0,
+      "avg": 0.0,
+      "median": 0.0
+    },
+    "delta": {
+      "min": 0,
+      "max": 0,
+      "avg": 0.0
+    },
+    "threshold": 0.01
+  },
+  "duration_seconds": 0.046387,
+  "timestamp": "2025-10-28T00:32:40.189914"
+}

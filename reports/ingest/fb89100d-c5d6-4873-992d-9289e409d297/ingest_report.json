@@ -1,0 +1,32 @@
+{
+  "job_id": "fb89100d-c5d6-4873-992d-9289e409d297",
+  "tag": "test",
+  "timestamp_utc": "2025-10-18T23:01:41.924368Z",
+  "doc": {
+    "source_uri": "file:///private/var/folders/ly/5hgrbf0n3rz7hlqwlt1xn9mr0000gn/T/pytest-of-brennanconley/pytest-79/test_deterministic_ids0/watch/deterministic_test.md",
+    "checksum": "18fc2c4cb25b7800adc2a92bf5f9b2e67c222b66c86ec76191f1f09291bf1e83",
+    "sections": 2,
+    "title": "Deterministic Test"
+  },
+  "graph": {
+    "nodes_total": 703,
+    "rels_total": 0,
+    "sections_total": 0,
+    "documents_total": 0
+  },
+  "vector": {
+    "sot": "qdrant",
+    "sections_indexed": 700,
+    "embedding_version": "v1"
+  },
+  "drift_pct": 0.0,
+  "sample_queries": [],
+  "ready_for_queries": true,
+  "timings_ms": {
+    "parse": 0,
+    "extract": 0,
+    "graph": 1460,
+    "embed": 1224
+  },
+  "errors": []
+}

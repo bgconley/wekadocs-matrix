@@ -5,7 +5,7 @@
 
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from neo4j import Driver
 from qdrant_client import QdrantClient
@@ -106,6 +106,36 @@ class IncrementalUpdater:
             "unchanged": unchanged,
         }
 
+    def _vector_field_names(self) -> List[str]:
+        """
+        Determine which named vectors should be populated for compatibility with
+        the configured Qdrant collection. Defaults to ["content"] so incremental
+        updates remain backwards compatible in minimal environments.
+        """
+        if (
+            self.config
+            and hasattr(self.config, "search")
+            and hasattr(self.config.search, "hybrid")
+        ):
+            fields = getattr(self.config.search.hybrid, "vector_fields", None)
+            if isinstance(fields, dict) and fields:
+                return list(fields.keys())
+        return ["content"]
+
+    def _build_named_vectors(
+        self, base_vector: List[float], field_names: Optional[List[str]] = None
+    ) -> Dict[str, List[float]]:
+        """
+        Clone the supplied base vector across all configured named-vector slots.
+        This allows placeholder embeddings (or a single computed vector) to
+        satisfy the multi-vector schema without additional model invocations.
+        """
+        vectors: Dict[str, List[float]] = {}
+        names = field_names or self._vector_field_names()
+        for name in names:
+            vectors[name] = list(base_vector)
+        return vectors
+
     def apply_incremental_update(
         self, diff: Dict, sections: List[Dict], entities: Dict, mentions: List[Dict]
     ) -> Dict[str, Any]:
@@ -154,6 +184,7 @@ class IncrementalUpdater:
 
         # 2) Upsert added/modified sections
         to_upsert = internal_diff.adds + internal_diff.updates
+        doc_tag_value = None
         if to_upsert:
             with self.neo4j.session() as sess:
                 sess.run(
@@ -167,33 +198,67 @@ class IncrementalUpdater:
                         s.embedding_version = $v,
                         s.updated_at = datetime()
                     MERGE (d:Document {id: $doc})
+                    SET s.doc_tag = d.doc_tag,
+                        s.snapshot_scope = d.snapshot_scope
                     MERGE (d)-[:HAS_SECTION]->(s)
                     """,
                     {"rows": to_upsert, "doc": document_id, "v": self.version},
+                )
+                doc_tag_result = sess.run(
+                    "MATCH (d:Document {id:$doc}) RETURN d.doc_tag AS doc_tag, d.snapshot_scope AS snapshot_scope",
+                    {"doc": document_id},
+                ).single()
+                doc_tag_value = doc_tag_result["doc_tag"] if doc_tag_result else None
+                snapshot_scope_value = (
+                    doc_tag_result["snapshot_scope"] if doc_tag_result else None
                 )
                 upserted_count = len(to_upsert)
 
             # Upsert vectors (placeholder embeddings for tests)
             if self.qdrant:
                 points = []
+                # Pre-Phase 7: Use config-driven dimensions for placeholders
+                embedding_dims = 384  # Default fallback
+                if self.config and hasattr(self.config, "embedding"):
+                    embedding_dims = self.config.embedding.dims
+                zero_template = [0.0] * embedding_dims
+                vector_field_names = self._vector_field_names()
+                expected_dims = {name: embedding_dims for name in vector_field_names}
+
                 for sec in to_upsert:
+                    sec_doc_tag = sec.get("doc_tag", doc_tag_value)
+                    if sec_doc_tag:
+                        sec["doc_tag"] = sec_doc_tag
+                    sec_snapshot_scope = sec.get("snapshot_scope", snapshot_scope_value)
+                    if sec_snapshot_scope:
+                        sec["snapshot_scope"] = sec_snapshot_scope
                     point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, sec["id"]))
+                    vectors = self._build_named_vectors(
+                        zero_template, vector_field_names
+                    )
                     points.append(
                         PointStruct(
                             id=point_uuid,
-                            vector=[0.0] * 384,  # placeholder
+                            vector=vectors,  # config-driven placeholder across fields
                             payload={
                                 "node_id": sec["id"],
                                 "node_label": "Section",
                                 "document_id": document_id,
                                 "document_uri": sec.get("source_uri")
                                 or sec.get("document_uri"),
+                                "doc_tag": sec_doc_tag,
+                                "snapshot_scope": sec_snapshot_scope,
                                 "embedding_version": self.version,
                             },
                         )
                     )
                 if points:
-                    self.qdrant.upsert(collection_name=self.collection, points=points)
+                    # Pre-Phase 7: Use validated upsert with config-driven dimensions
+                    self.qdrant.upsert_validated(
+                        collection_name=self.collection,
+                        points=points,
+                        expected_dim=expected_dims or embedding_dims,
+                    )
 
         return {
             "sections_updated": upserted_count,

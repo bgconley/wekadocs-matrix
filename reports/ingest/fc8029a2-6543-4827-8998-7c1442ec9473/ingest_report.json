@@ -1,0 +1,59 @@
+{
+  "job_id": "fc8029a2-6543-4827-8998-7c1442ec9473",
+  "tag": "test",
+  "source_uri": "file:///private/var/folders/ly/5hgrbf0n3rz7hlqwlt1xn9mr0000gn/T/pytest-of-brennanconley/pytest-52/test_no_duplicate_work_on_resu0/watch/nodup_test.md",
+  "checksum": "nodup123",
+  "document_id": "ace234a893e7a71c1c58b3852976a02ecb15b3727d3ada8bfff142d6cdd58250",
+  "sections": 1,
+  "entities": 0,
+  "mentions": 0,
+  "drift_pct": 0.0,
+  "ready_for_queries": true,
+  "timings_ms": {
+    "parsing": {
+      "duration_ms": 1,
+      "sections_parsed": 1
+    },
+    "extracting": {
+      "duration_ms": 0,
+      "entities_extracted": 0,
+      "mentions_created": 0
+    },
+    "graphing": {
+      "duration_ms": 924,
+      "sections_upserted": 1,
+      "entities_upserted": 0,
+      "mentions_created": 0,
+      "incremental": false,
+      "changes": 1
+    },
+    "embedding": {
+      "duration_ms": 8,
+      "embeddings_computed": 1
+    },
+    "vectors": {
+      "duration_ms": 7,
+      "vectors_upserted": 1,
+      "primary_store": "qdrant",
+      "dual_write": false
+    },
+    "postchecks": {
+      "duration_ms": 35,
+      "reconciliation": {
+        "drift_pct": 0.0,
+        "repaired": 0,
+        "removed_orphans": 0,
+        "graph_sections_count": 564,
+        "total_in_vector_store": 564,
+        "duration_ms": 35
+      }
+    },
+    "reporting": {
+      "duration_ms": 0,
+      "report_path": "reports/ingest/fc8029a2-6543-4827-8998-7c1442ec9473/ingest_report.json"
+    }
+  },
+  "total_duration_ms": 975,
+  "started_at": 1760647709.441238,
+  "completed_at": 1760647711.227597
+}

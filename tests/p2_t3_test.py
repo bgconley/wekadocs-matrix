@@ -13,8 +13,12 @@ from neo4j import GraphDatabase
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 
-from src.query.hybrid_search import (HybridSearchEngine, Neo4jVectorStore,
-                                     QdrantVectorStore, SearchResult)
+from src.query.hybrid_search import (
+    HybridSearchEngine,
+    Neo4jVectorStore,
+    QdrantVectorStore,
+    SearchResult,
+)
 from src.query.ranking import rank_results
 from src.shared.config import get_config
 

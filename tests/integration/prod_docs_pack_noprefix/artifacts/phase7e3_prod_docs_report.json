@@ -1,0 +1,189 @@
+{
+  "generated_at": "2025-11-03T16:22:16.051476+00:00",
+  "exitstatus": 0,
+  "env": {
+    "VERBOSITY": "graph",
+    "TOP_K": 5,
+    "EMBED_VER": "jina-embeddings-v3"
+  },
+  "results": [
+    {
+      "tag": "PRODPACK-01",
+      "src_uri": "tests://prodpack/PRODPACK-01/additional-protocols_s3_s3-information-lifecycle-management_s3-information-lifecycle-management.md",
+      "filename": "additional-protocols_s3_s3-information-lifecycle-management_s3-information-lifecycle-management.md",
+      "query": "How do I configure or verify S3 lifecycle management policies PRODPACK-01",
+      "ingestion": {
+        "document_id": "c46e07fd1de4f3e509ab8e61467cd5825b693ad73d2b508954c0b86feb136640",
+        "sections_upserted": 1,
+        "entities_upserted": 12,
+        "mentions_created": 8,
+        "embeddings_computed": 1,
+        "vectors_upserted": 1,
+        "duration_ms": 3229,
+        "citation_units_upserted": 3,
+        "cache_invalidation": {
+          "mode": "epoch",
+          "document_id": "c46e07fd1de4f3e509ab8e61467cd5825b693ad73d2b508954c0b86feb136640",
+          "chunk_count": 1,
+          "success": true,
+          "keys_deleted": 0,
+          "epoch_bumped": true,
+          "doc_epoch": 2,
+          "chunk_epoch_total": 2
+        },
+        "chunk_metrics": {
+          "total_chunks": 1,
+          "total_tokens": 441,
+          "min_tokens": 441,
+          "max_tokens": 441,
+          "mean_tokens": 441.0,
+          "median_tokens": 441.0,
+          "percentiles": {
+            "p50": 441.0,
+            "p75": 441.0,
+            "p90": 441.0,
+            "p95": 441.0,
+            "p99": 441.0
+          },
+          "quality": {
+            "under_min_count": 0,
+            "over_max_count": 0,
+            "oversized_rate": 0.0
+          },
+          "timestamp": "2025-11-03T16:22:03.287388"
+        },
+        "ingestion_metrics": {
+          "document_id": "c46e07fd1de4f3e509ab8e61467cd5825b693ad73d2b508954c0b86feb136640",
+          "duration_seconds": 3.23,
+          "chunks_created": 1,
+          "total_tokens": 441,
+          "chunk_distribution": {
+            "total_chunks": 1,
+            "total_tokens": 441,
+            "min_tokens": 441,
+            "max_tokens": 441,
+            "mean_tokens": 441.0,
+            "median_tokens": 441.0,
+            "percentiles": {
+              "p50": 441.0,
+              "p75": 441.0,
+              "p90": 441.0,
+              "p95": 441.0,
+              "p99": 441.0
+            },
+            "quality": {
+              "under_min_count": 0,
+              "over_max_count": 0,
+              "oversized_rate": 0.0
+            },
+            "timestamp": "2025-11-03T16:22:03.287621"
+          },
+          "timestamp": "2025-11-03T16:22:03.287625"
+        },
+        "slo_metrics": {
+          "oversized_chunk_rate": 0.0
+        },
+        "slo_violations": []
+      },
+      "citations": [
+        "[1] Add a lifecycle rule",
+        "[2] View lifecycle rules",
+        "[3] Remove a lifecycle rule",
+        "[4] Remove all lifecycle rules",
+        "[5] Add a lifecycle rule",
+        "[6] View lifecycle rules"
+      ],
+      "answer_preview": "# Query Results\n**Query:** How do I configure or verify S3 lifecycle management policies PRODPACK-01\n**Intent:** search\n**Confidence:** 0.55\n## Answer\nFound 2 relevant sections. Top 2 results show information about this topic.\n## Evidence (2 sources)\n### 1. Chunk: 4af157f2aff86e49b8fa2a78\n> Manage S3 lifecycle rules using the GUI Using the GUI, you can: - Add a lifecycle rule - View lifecycle rules - Remove a lifecycle rule - Remove all lifecycle rules Add a lifecycle rule You can add a ...\n**Confidence:** 0.66\n### 2. Chunk: c69b82c825b351c451324e45\n> Manage S3 lifecycle rules using the GUI\n\nUsing the GUI, you can:\n\n- Add a lifecycle rule\n- View lifecycle rules\n- Remove a lifecycle rule\n- Remove all lifecycle rules\n\nAdd a lifecycle rule\n\nYou can ad...\n**Confidence:** 0.66\n## Top Results\n| Rank | Type | ID | Score |\n|------|------|-------|-------|\n| 1 | Chunk | `4af157f2aff86e49b8fa...` | 0.036 |\n| 2 | Chunk | `c69b82c825b351c45132...` | 0.036 |\n\n## Why These Results?\nTop result selected based on:\n- **Semantic similarity:** 0.66\n- **Graph proximity:** 0.00\n- **Recency:** 0.00\n- **Entity priority:** 1.00\n- **Coverage:** 0.00\n\n\n---\n### Context (chunk-stitched, budget-bounded)\n#### Rel",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "tag": "PRODPACK-02",
+      "src_uri": "tests://prodpack/PRODPACK-02/weka-filesystems-and-object-stores_attaching-detaching-object-stores-to-from-filesystems_attaching-detaching-object-stores-to-from-filesystems-1.md",
+      "filename": "weka-filesystems-and-object-stores_attaching-detaching-object-stores-to-from-filesystems_attaching-detaching-object-stores-to-from-filesystems-1.md",
+      "query": "How do I attach or detach an object store from a filesystem PRODPACK-02",
+      "ingestion": {
+        "document_id": "bcf1fc4ea7d5067a9b6a34722fcc153c22f6499af24b452e32404ff3f881a431",
+        "sections_upserted": 1,
+        "entities_upserted": 2,
+        "mentions_created": 0,
+        "embeddings_computed": 1,
+        "vectors_upserted": 1,
+        "duration_ms": 2220,
+        "citation_units_upserted": 2,
+        "cache_invalidation": {
+          "mode": "epoch",
+          "document_id": "bcf1fc4ea7d5067a9b6a34722fcc153c22f6499af24b452e32404ff3f881a431",
+          "chunk_count": 1,
+          "success": true,
+          "keys_deleted": 0,
+          "epoch_bumped": true,
+          "doc_epoch": 2,
+          "chunk_epoch_total": 2
+        },
+        "chunk_metrics": {
+          "total_chunks": 1,
+          "total_tokens": 393,
+          "min_tokens": 393,
+          "max_tokens": 393,
+          "mean_tokens": 393.0,
+          "median_tokens": 393.0,
+          "percentiles": {
+            "p50": 393.0,
+            "p75": 393.0,
+            "p90": 393.0,
+            "p95": 393.0,
+            "p99": 393.0
+          },
+          "quality": {
+            "under_min_count": 0,
+            "over_max_count": 0,
+            "oversized_rate": 0.0
+          },
+          "timestamp": "2025-11-03T16:22:10.400889"
+        },
+        "ingestion_metrics": {
+          "document_id": "bcf1fc4ea7d5067a9b6a34722fcc153c22f6499af24b452e32404ff3f881a431",
+          "duration_seconds": 2.22,
+          "chunks_created": 1,
+          "total_tokens": 393,
+          "chunk_distribution": {
+            "total_chunks": 1,
+            "total_tokens": 393,
+            "min_tokens": 393,
+            "max_tokens": 393,
+            "mean_tokens": 393.0,
+            "median_tokens": 393.0,
+            "percentiles": {
+              "p50": 393.0,
+              "p75": 393.0,
+              "p90": 393.0,
+              "p95": 393.0,
+              "p99": 393.0
+            },
+            "quality": {
+              "under_min_count": 0,
+              "over_max_count": 0,
+              "oversized_rate": 0.0
+            },
+            "timestamp": "2025-11-03T16:22:10.401091"
+          },
+          "timestamp": "2025-11-03T16:22:10.401094"
+        },
+        "slo_metrics": {
+          "oversized_chunk_rate": 0.0
+        },
+        "slo_violations": []
+      },
+      "citations": [
+        "[1] Attach an object store bucket to a filesystem",
+        "[2] Detach an object store bucket from a filesystem",
+        "[3] Attach an object store bucket to a filesystem",
+        "[4] Detach an object store bucket from a filesystem"
+      ],
+      "answer_preview": "# Query Results\n**Query:** How do I attach or detach an object store from a filesystem PRODPACK-02\n**Intent:** traverse\n**Confidence:** 0.58\n## Answer\nTraversal found 2 connected nodes across relationships.\n## Evidence (2 sources)\n### 1. Chunk: f8436b6ad4d37b11b1e58958\n> Attach or detach object store buckets using the CLI\n\nUsing the CLI, you can:\n\n- Attach an object store bucket to a filesystem\n- Detach an object store bucket from a filesystem\n\nAttach an object store ...\n**Confidence:** 0.59\n### 2. Chunk: 732d15b7142d76dec61cd7d0\n> Attach or detach object store buckets using the CLI Using the CLI, you can: - Attach an object store bucket to a filesystem - Detach an object store bucket from a filesystem Attach an object store buc...\n**Confidence:** 0.59\n## Top Results\n| Rank | Type | ID | Score |\n|------|------|-------|-------|\n| 1 | Chunk | `f8436b6ad4d37b11b1e5...` | 0.036 |\n| 2 | Chunk | `732d15b7142d76dec61c...` | 0.036 |\n\n## Why These Results?\nTop result selected based on:\n- **Semantic similarity:** 0.59\n- **Graph proximity:** 0.00\n- **Recency:** 0.00\n- **Entity priority:** 1.00\n- **Coverage:** 0.00\n\n\n---\n### Context (chunk-stitched, budget-bounded)\n## Attach or detach object s",
+      "passed": true,
+      "reason": ""
+    }
+  ]
+}

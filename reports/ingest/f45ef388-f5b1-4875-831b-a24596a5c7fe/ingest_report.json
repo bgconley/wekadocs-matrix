@@ -1,0 +1,32 @@
+{
+  "job_id": "f45ef388-f5b1-4875-831b-a24596a5c7fe",
+  "tag": "test",
+  "timestamp_utc": "2025-10-18T23:01:28.997301Z",
+  "doc": {
+    "source_uri": "/private/var/folders/ly/5hgrbf0n3rz7hlqwlt1xn9mr0000gn/T/pytest-of-brennanconley/pytest-79/test_state_progression0/watch/test.md",
+    "checksum": "f02a29830aa3a3e3f6a06445335548dbb91c4532c434dae8aff51e550b08ca31",
+    "sections": 2,
+    "title": "Test Document"
+  },
+  "graph": {
+    "nodes_total": 703,
+    "rels_total": 0,
+    "sections_total": 0,
+    "documents_total": 0
+  },
+  "vector": {
+    "sot": "qdrant",
+    "sections_indexed": 694,
+    "embedding_version": "v1"
+  },
+  "drift_pct": 0.0,
+  "sample_queries": [],
+  "ready_for_queries": true,
+  "timings_ms": {
+    "parse": 1,
+    "extract": 0,
+    "graph": 1440,
+    "embed": 1226
+  },
+  "errors": []
+}

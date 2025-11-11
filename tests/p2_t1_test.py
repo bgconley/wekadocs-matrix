@@ -3,8 +3,12 @@ Phase 2, Task 2.1 Tests: NL→Cypher Planner
 Tests templates-first query planning with NO MOCKS.
 """
 
-from src.query.planner import (EntityLinker, IntentClassifier, QueryPlanner,
-                               TemplateLibrary)
+from src.query.planner import (
+    EntityLinker,
+    IntentClassifier,
+    QueryPlanner,
+    TemplateLibrary,
+)
 
 
 class TestIntentClassifier:
@@ -175,3 +179,34 @@ class TestQueryPlanner:
         assert len(dangerous_patterns) == 0 or all(
             "section_ids" not in p for p in dangerous_patterns
         )
+
+    def test_fallback_plan_handles_missing_section_ids(self):
+        planner = QueryPlanner()
+        params = planner._build_params({})
+        plan = planner._fallback_plan("random", "search", params)
+
+        assert "coalesce($section_ids, [])" in plan.cypher
+        assert plan.params["section_ids"] is None
+
+    def test_inject_limits_preserves_lower_bounds(self):
+        planner = QueryPlanner()
+        params = {
+            "limit": 10,
+            "max_hops": planner.config.validator.max_depth,
+        }
+        cypher = "MATCH p=()-[:REL*2..10]->() RETURN p"
+        updated = planner._inject_limits_and_constraints(cypher, params)
+
+        assert "*2..$max_hops" in updated
+        assert "LIMIT $limit" in updated
+
+    def test_inject_limits_leaves_tight_bounds(self):
+        planner = QueryPlanner()
+        params = {
+            "limit": 5,
+            "max_hops": planner.config.validator.max_depth,
+        }
+        cypher = "MATCH p=()-[:REL*0..1]->() RETURN p"
+        updated = planner._inject_limits_and_constraints(cypher, params)
+
+        assert "*0..1" in updated

@@ -141,6 +141,188 @@ class CompatQdrantClient(QdrantClient):
             wait=True,
         )
 
+    def upsert_validated(
+        self,
+        collection_name: str,
+        points: Sequence,
+        expected_dim: int | Dict[str, int],
+        wait: bool = True,
+    ):
+        """
+        Pre-Phase 7: Upsert points with dimension validation.
+        Validates that all vectors match the expected dimension before upserting.
+
+        Args:
+            collection_name: The Qdrant collection to upsert to
+            points: List of PointStruct objects to upsert
+            expected_dim: Expected vector dimension
+            wait: Whether to wait for operation completion
+
+        Raises:
+            ValueError: If any vector dimension doesn't match expected_dim
+        """
+        # Pre-Phase 7 (G1): Metrics instrumentation
+        import time
+
+        from src.shared.observability.metrics import (
+            qdrant_operation_latency_ms,
+            qdrant_upsert_total,
+        )
+
+        start_time = time.time()
+        status = "success"
+
+        try:
+            # Validate all point vectors before upsert
+            for i, point in enumerate(points):
+                vectors = self._extract_point_vectors(point)
+                if vectors:
+                    if isinstance(vectors, dict):
+                        iterator = vectors.items()
+                    else:
+                        iterator = [(None, vectors)]
+
+                    for name, vec in iterator:
+                        if vec is None:
+                            continue
+                        expected = (
+                            expected_dim.get(name)
+                            if isinstance(expected_dim, dict)
+                            else expected_dim
+                        )
+                        if expected is None and isinstance(expected_dim, dict):
+                            expected = next(iter(expected_dim.values()), None)
+                        if expected and len(vec) != expected:
+                            label = name or "vector"
+                            raise ValueError(
+                                f"Dimension mismatch for vector '{label}' in point {i}: "
+                                f"expected {expected}, got {len(vec)}. "
+                                f"Point ID: {getattr(point, 'id', 'unknown')}"
+                            )
+                else:
+                    # Fall back to treating point.vector as a single unnamed vector
+                    raw_vector = getattr(point, "vector", None) or []
+                    actual_dim = len(raw_vector)
+                    if isinstance(expected_dim, dict):
+                        exp_dim = expected_dim.get("content") or next(
+                            iter(expected_dim.values())
+                        )
+                    else:
+                        exp_dim = expected_dim
+                    if exp_dim and actual_dim != exp_dim:
+                        raise ValueError(
+                            f"Dimension mismatch in point {i}: expected {exp_dim}, "
+                            f"got {actual_dim}. Point ID: {getattr(point, 'id', 'unknown')}"
+                        )
+
+            # All dimensions valid, proceed with upsert
+            result = super().upsert(
+                collection_name=collection_name,
+                points=points,
+                wait=wait,
+            )
+
+            # Record success metrics
+            latency_ms = (time.time() - start_time) * 1000
+            qdrant_upsert_total.labels(
+                collection_name=collection_name, status=status
+            ).inc()
+            qdrant_operation_latency_ms.labels(
+                collection_name=collection_name, operation="upsert"
+            ).observe(latency_ms)
+
+            return result
+
+        except Exception:
+            status = "error"
+            qdrant_upsert_total.labels(
+                collection_name=collection_name, status=status
+            ).inc()
+            raise
+
+    @staticmethod
+    def _extract_point_vectors(point: Any):
+        """
+        Normalize PointStruct vector payloads (single unnamed vectors or named
+        vector dictionaries) into a structure we can inspect.
+        """
+        candidate = None
+        if hasattr(point, "vector") and point.vector is not None:
+            candidate = point.vector
+        elif hasattr(point, "vectors") and point.vectors is not None:
+            candidate = point.vectors
+        elif isinstance(getattr(point, "payload", None), dict):
+            payload_vectors = point.payload.get("vectors")
+            if payload_vectors:
+                candidate = payload_vectors
+
+        if candidate is None:
+            return None
+
+        # Convert NamedVector structures into plain lists so len() reflects
+        # dimensionality instead of field count.
+        if isinstance(candidate, dict):
+            normalized = {}
+            for name, vec in candidate.items():
+                if hasattr(vec, "vector"):
+                    normalized[name] = list(vec.vector)
+                elif isinstance(vec, list):
+                    normalized[name] = vec
+                elif isinstance(vec, tuple):
+                    normalized[name] = list(vec)
+                else:
+                    normalized[name] = vec
+            return normalized
+
+        if hasattr(candidate, "vector"):
+            return list(candidate.vector)
+
+        return candidate
+
+    def create_collection_with_dims(
+        self,
+        collection_name: str,
+        size: int,
+        distance: str = "Cosine",
+    ):
+        """
+        Pre-Phase 7: Helper to create a collection with specific dimensions.
+        Supports blue/green collection pattern for dimension changes.
+
+        Args:
+            collection_name: Name for the new collection
+            size: Vector dimension size
+            distance: Distance metric (Cosine, Euclid, Dot)
+
+        Note: This helper prepares for future blue/green migrations
+              but does NOT execute them automatically.
+        """
+        from qdrant_client.models import Distance, VectorParams
+
+        # Map string distance to enum
+        distance_map = {
+            "cosine": Distance.COSINE,
+            "euclid": Distance.EUCLID,
+            "dot": Distance.DOT,
+        }
+        distance_enum = distance_map.get(distance.lower(), Distance.COSINE)
+
+        # Check if collection already exists
+        collections = self.get_collections()
+        if collection_name not in [c.name for c in collections.collections]:
+            logger.info(
+                f"Creating collection '{collection_name}' with "
+                f"size={size}, distance={distance}"
+            )
+            self.create_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(size=size, distance=distance_enum),
+            )
+        else:
+            logger.info(
+                f"Collection '{collection_name}' already exists, skipping creation"
+            )
+
 
 class ConnectionManager:
     """Manages connections to Neo4j, Qdrant, and Redis"""
@@ -167,6 +349,7 @@ class ConnectionManager:
                 max_connection_lifetime=3600,
                 max_connection_pool_size=50,
                 connection_acquisition_timeout=60,
+                connection_timeout=1.5,  # Phase 7a: 1500ms connection timeout
             )
             # Verify connectivity
             self._neo4j_driver.verify_connectivity()

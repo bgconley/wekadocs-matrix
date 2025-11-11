@@ -9,6 +9,8 @@ from datetime import datetime
 import uvicorn
 from fastapi import FastAPI, Request
 
+# Phase 7E-4: Health checks and SLO monitoring
+from src.monitoring.health import run_startup_health_checks
 from src.query.traversal import TraversalService
 from src.shared import (
     close_connections,
@@ -133,7 +135,37 @@ async def startup_event():
     """Initialize connections on startup"""
     logger.info("Starting MCP server", version=config.app.version)
     try:
+        # Initialize database connections
         await initialize_connections()
+        logger.info("Connections initialized successfully")
+
+        # Phase 7E-4: Run health checks if enabled
+        if config.monitoring.health_checks_enabled:
+            logger.info("Running startup health checks...")
+            from src.shared.connections import get_connection_manager
+
+            manager = get_connection_manager()
+            neo4j_driver = manager.get_neo4j_driver()
+            qdrant_client = manager.get_qdrant_client()
+
+            health = run_startup_health_checks(
+                neo4j_driver=neo4j_driver,
+                qdrant_client=qdrant_client,
+                embed_dim=config.embedding.dims,
+                embed_model=config.embedding.embedding_model,
+                embed_provider=config.embedding.provider,
+                qdrant_collection=config.search.vector.qdrant.collection_name,
+                fail_fast=config.monitoring.health_check_fail_fast,
+            )
+
+            if not health.is_ok():
+                failures = health.get_failures()
+                logger.warning(
+                    f"Health checks completed with {len(failures)} warning(s)"
+                )
+                for check in failures:
+                    logger.warning(f"  - {check.name}: {check.message}")
+
         logger.info("MCP server started successfully")
     except Exception as e:
         logger.error("Failed to start MCP server", error=str(e))

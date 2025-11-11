@@ -1,0 +1,32 @@
+{
+  "job_id": "f1e53714-ebb6-45f8-9dcf-bcda05db558f",
+  "tag": "test",
+  "timestamp_utc": "2025-10-18T23:01:48.881161Z",
+  "doc": {
+    "source_uri": "file:///private/var/folders/ly/5hgrbf0n3rz7hlqwlt1xn9mr0000gn/T/pytest-of-brennanconley/pytest-79/test_progress_percentages0/watch/monotonic_test.md",
+    "checksum": "2d544f138dd671d451813809f3bd1524f0eacca4a31dcdb0182c1debb6b49342",
+    "sections": 2,
+    "title": "Monotonic Test"
+  },
+  "graph": {
+    "nodes_total": 703,
+    "rels_total": 0,
+    "sections_total": 0,
+    "documents_total": 0
+  },
+  "vector": {
+    "sot": "qdrant",
+    "sections_indexed": 703,
+    "embedding_version": "v1"
+  },
+  "drift_pct": 0.0,
+  "sample_queries": [],
+  "ready_for_queries": true,
+  "timings_ms": {
+    "parse": 0,
+    "extract": 0,
+    "graph": 1326,
+    "embed": 1217
+  },
+  "errors": []
+}

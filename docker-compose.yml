@@ -14,6 +14,7 @@ volumes:
   neo4j-logs:
   qdrant-data:
   redis-data:
+  hf-cache:  # Phase 7C: HuggingFace tokenizer cache
 
 services:
   neo4j:
@@ -128,12 +129,41 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
+      - ./tests:/app/tests:ro
+      - hf-cache:/opt/hf-cache:ro
     environment:
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
+      # Phase 7C: Embedding Provider Configuration
+      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-jina-ai}
+      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-jina-embeddings-v3}
+      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
+      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-retrieval.passage}
+      - RERANK_PROVIDER=${RERANK_PROVIDER:-jina-ai}
+      - RERANK_MODEL=${RERANK_MODEL:-jina-reranker-v2-base-multilingual}
+      - JINA_API_KEY=${JINA_API_KEY}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
+      - ANSWER_MODEL=${ANSWER_MODEL:-search-result-formatting}
+      # Phase 7C Hotfix: Tokenizer Service Configuration
+      - TOKENIZER_BACKEND=hf
+      - HF_TOKENIZER_ID=jinaai/jina-embeddings-v3
+      - HF_CACHE=/opt/hf-cache
+      - TRANSFORMERS_OFFLINE=true
+      - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
+      - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
+      - SEGMENTER_TIMEOUT_MS=5000
+      - EMBED_MAX_TOKENS=${EMBED_MAX_TOKENS:-750}
+      - EMBED_TARGET_TOKENS=${EMBED_TARGET_TOKENS:-500}
+      - EMBED_OVERLAP_TOKENS=${EMBED_OVERLAP_TOKENS:-100}
+      - SPLIT_MIN_TOKENS=${SPLIT_MIN_TOKENS:-350}
+      - LOG_SPLIT_DECISIONS=true
+      - INTEGRITY_CHECK_SAMPLE_RATE=0.05
+      # Database connections
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=${NEO4J_USER:-neo4j}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - BM25_INDEX_NAME=${BM25_INDEX_NAME:-chunk_text_index_v2}
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - QDRANT_GRPC_PORT=6334
@@ -141,6 +171,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD}
+      # Auth & observability
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
@@ -180,12 +211,38 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./src:/app/src
+      - ./tools:/app/tools:ro
       - ./data:/app/data:ro
+      - hf-cache:/opt/hf-cache:ro
     environment:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
+      # Phase 7C: Embedding Provider Configuration
+      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-jina-ai}
+      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-jina-embeddings-v3}
+      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
+      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-retrieval.passage}
+      - RERANK_PROVIDER=${RERANK_PROVIDER:-jina-ai}
+      - RERANK_MODEL=${RERANK_MODEL:-jina-reranker-v2-base-multilingual}
+      - JINA_API_KEY=${JINA_API_KEY}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
+      # Phase 7C Hotfix: Tokenizer Service Configuration
+      - TOKENIZER_BACKEND=hf
+      - HF_TOKENIZER_ID=jinaai/jina-embeddings-v3
+      - HF_CACHE=/opt/hf-cache
+      - TRANSFORMERS_OFFLINE=true
+      - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
+      - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
+      - SEGMENTER_TIMEOUT_MS=5000
+      - EMBED_MAX_TOKENS=${EMBED_MAX_TOKENS:-750}
+      - EMBED_TARGET_TOKENS=${EMBED_TARGET_TOKENS:-500}
+      - EMBED_OVERLAP_TOKENS=${EMBED_OVERLAP_TOKENS:-100}
+      - SPLIT_MIN_TOKENS=${SPLIT_MIN_TOKENS:-350}
+      - LOG_SPLIT_DECISIONS=true
+      - INTEGRITY_CHECK_SAMPLE_RATE=0.05
+      # Database connections
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=${NEO4J_USER:-neo4j}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
@@ -195,6 +252,21 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD}
+      # Phase 7E-2: Chunk Assembler Configuration
+      - CHUNK_ASSEMBLER=${CHUNK_ASSEMBLER:-structured}
+      - COMBINE_MIN_TOKENS=${COMBINE_MIN_TOKENS:-350}
+      - COMBINE_TARGET_TOKENS=${COMBINE_TARGET_TOKENS:-500}
+      - COMBINE_MAX_TOKENS=${COMBINE_MAX_TOKENS:-750}
+      - COMBINE_MAX_SECTIONS=${COMBINE_MAX_SECTIONS:-4}
+      - COMBINE_RESPECT_MAJOR_LEVELS=${COMBINE_RESPECT_MAJOR_LEVELS:-true}
+      - COMBINE_STOP_AT_LEVEL=${COMBINE_STOP_AT_LEVEL:-2}
+      - COMBINE_BREAK_KEYWORDS=${COMBINE_BREAK_KEYWORDS:-faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting}
+      - COMBINE_DEBUG=${COMBINE_DEBUG:-false}
+      # Phase 7E-3: Cache Invalidation Configuration
+      - CACHE_MODE=epoch
+      - CACHE_NS=rag:v1
+      - CACHE_REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
+      # Auth & security
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -230,12 +302,59 @@ services:
       - ./config:/app/config:ro
       - ./src:/app/src
       - ./data:/app/data
+      - hf-cache:/opt/hf-cache:ro
     environment:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest
       - INGEST_WATCH_DIR=/app/data/ingest
       - INGEST_PORT=8081
       - ENV=${ENV:-development}
+      - CONFIG_PATH=/app/config/${ENV:-development}.yaml
+      # Phase 7C: Embedding Provider Configuration
+      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-jina-ai}
+      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-jina-embeddings-v3}
+      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
+      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-retrieval.passage}
+      - RERANK_PROVIDER=${RERANK_PROVIDER:-jina-ai}
+      - RERANK_MODEL=${RERANK_MODEL:-jina-reranker-v2-base-multilingual}
+      - JINA_API_KEY=${JINA_API_KEY}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
+      # Phase 7C Hotfix: Tokenizer Service Configuration
+      - TOKENIZER_BACKEND=hf
+      - HF_TOKENIZER_ID=jinaai/jina-embeddings-v3
+      - HF_CACHE=/opt/hf-cache
+      - TRANSFORMERS_OFFLINE=true
+      - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
+      - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
+      - SEGMENTER_TIMEOUT_MS=5000
+      - EMBED_MAX_TOKENS=${EMBED_MAX_TOKENS:-750}
+      - EMBED_TARGET_TOKENS=${EMBED_TARGET_TOKENS:-500}
+      - EMBED_OVERLAP_TOKENS=${EMBED_OVERLAP_TOKENS:-100}
+      - SPLIT_MIN_TOKENS=${SPLIT_MIN_TOKENS:-350}
+      - LOG_SPLIT_DECISIONS=true
+      - INTEGRITY_CHECK_SAMPLE_RATE=0.05
+      # Database connections
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      # Phase 7E-2: Chunk Assembler Configuration
+      - CHUNK_ASSEMBLER=${CHUNK_ASSEMBLER:-structured}
+      - COMBINE_MIN_TOKENS=${COMBINE_MIN_TOKENS:-350}
+      - COMBINE_TARGET_TOKENS=${COMBINE_TARGET_TOKENS:-500}
+      - COMBINE_MAX_TOKENS=${COMBINE_MAX_TOKENS:-750}
+      - COMBINE_MAX_SECTIONS=${COMBINE_MAX_SECTIONS:-4}
+      - COMBINE_RESPECT_MAJOR_LEVELS=${COMBINE_RESPECT_MAJOR_LEVELS:-true}
+      - COMBINE_STOP_AT_LEVEL=${COMBINE_STOP_AT_LEVEL:-2}
+      - COMBINE_BREAK_KEYWORDS=${COMBINE_BREAK_KEYWORDS:-faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting}
+      # Phase 7E-3: Cache Invalidation Configuration
+      - CACHE_MODE=epoch
+      - CACHE_NS=rag:v1
+      - CACHE_REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       redis:

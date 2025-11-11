@@ -9,8 +9,13 @@ import pytest
 
 from src.query.hybrid_search import SearchResult
 from src.query.ranking import RankedResult, RankingFeatures
-from src.query.response_builder import (Diagnostics, Evidence, Response,
-                                        ResponseBuilder, build_response)
+from src.query.response_builder import (
+    Diagnostics,
+    Evidence,
+    Response,
+    ResponseBuilder,
+    build_response,
+)
 
 
 @pytest.fixture

@@ -1,0 +1,32 @@
+{
+  "job_id": "531a3f24-f430-4f97-bea4-123f3d9332c7",
+  "tag": "test",
+  "timestamp_utc": "2025-10-18T23:01:39.038702Z",
+  "doc": {
+    "source_uri": "file:///private/var/folders/ly/5hgrbf0n3rz7hlqwlt1xn9mr0000gn/T/pytest-of-brennanconley/pytest-79/test_reingest_unchanged_doc0/watch/idempotent_test.md",
+    "checksum": "70ebf522685828f18395035f8f3a89ba354903c7e974e937ad08bc3c0ec808e5",
+    "sections": 2,
+    "title": "Idempotent Test"
+  },
+  "graph": {
+    "nodes_total": 703,
+    "rels_total": 0,
+    "sections_total": 0,
+    "documents_total": 0
+  },
+  "vector": {
+    "sot": "qdrant",
+    "sections_indexed": 698,
+    "embedding_version": "v1"
+  },
+  "drift_pct": 0.0,
+  "sample_queries": [],
+  "ready_for_queries": true,
+  "timings_ms": {
+    "parse": 0,
+    "extract": 0,
+    "graph": 1258,
+    "embed": 1269
+  },
+  "errors": []
+}

@@ -3,15 +3,31 @@ Ranking Module (Task 2.3)
 Blends multiple signals to rank search results.
 See: /docs/spec.md §4.1 (Hybrid retrieval - ranking)
 See: /docs/pseudocode-reference.md Phase 2, Task 2.3
+
+Pre-Phase 7 improvements:
+- Robust normalization for similarity vs distance
+- UTC handling for recency scoring
+- Tie-break stability with label priority
+- Entity focus hook (no-op until Phase 7)
 """
 
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from src.query.hybrid_search import SearchResult
 from src.shared.config import get_config
+from src.shared.observability import get_logger
+from src.shared.observability.metrics import (
+    ranking_candidates_total,
+    ranking_latency_ms,
+    ranking_missing_vector_score_total,
+    ranking_semantic_score_distribution,
+    ranking_vector_score_distribution,
+)
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -59,6 +75,7 @@ class Ranker:
         "Parameter": 0.75,
         "Component": 0.85,
         "Section": 1.0,  # Sections are primary units
+        "Chunk": 1.0,  # Pre-Phase 7: Treat Chunk as Section
         "Document": 0.5,  # Documents less important than sections
     }
 
@@ -96,6 +113,11 @@ class Ranker:
         if not results:
             return []
 
+        # Pre-Phase 7 (G1): Metrics instrumentation for ranking
+        import time
+
+        start_time = time.time()
+
         # Extract all features
         ranked = []
         for result in results:
@@ -112,6 +134,11 @@ class Ranker:
         # Deterministic tie-breaking for same scores
         ranked = self._break_ties(ranked)
 
+        # Record metrics
+        latency = (time.time() - start_time) * 1000
+        ranking_latency_ms.observe(latency)
+        ranking_candidates_total.observe(len(results))
+
         return ranked
 
     def _extract_features(
@@ -120,8 +147,39 @@ class Ranker:
         """Extract all ranking features for a result."""
         features = RankingFeatures()
 
-        # 1. Semantic score (from vector search)
-        features.semantic_score = self._normalize_score(result.score)
+        fusion_method = result.metadata.get("fusion_method")
+        vector_score = result.metadata.get("vector_score")
+        vector_score_kind = result.metadata.get("vector_score_kind")
+        bm25_score = result.metadata.get("bm25_score")
+
+        # Observe raw vector similarity distribution when available
+        if vector_score is not None:
+            ranking_vector_score_distribution.observe(vector_score)
+
+        if fusion_method == "rrf":
+            # Prefer original vector similarity; fall back to BM25 or fused score
+            fallback = "vector"
+            semantic_raw = vector_score
+            score_kind_for_norm = vector_score_kind or "similarity"
+            if semantic_raw is None:
+                if bm25_score is not None:
+                    semantic_raw = bm25_score
+                    fallback = "bm25"
+                    score_kind_for_norm = "similarity"
+                else:
+                    semantic_raw = result.score
+                    fallback = "fused"
+                    score_kind_for_norm = "similarity"
+            if fallback != "vector":
+                ranking_missing_vector_score_total.labels(fallback=fallback).inc()
+            features.semantic_score = self._normalize_score(
+                semantic_raw or 0.0, score_kind_for_norm
+            )
+        else:
+            score_kind = result.metadata.get("score_kind", "similarity")
+            features.semantic_score = self._normalize_score(result.score, score_kind)
+
+        ranking_semantic_score_distribution.observe(features.semantic_score)
 
         # 2. Graph distance score (closer = higher)
         features.graph_distance_score = self._distance_score(result.distance)
@@ -135,21 +193,74 @@ class Ranker:
         # 5. Coverage score (connections, mentions)
         features.coverage_score = self._coverage_score(result.metadata)
 
-        # Compute weighted final score
-        features.final_score = (
+        # Pre-Phase 7: Entity focus hook (returns 0.0 until Phase 7)
+        entity_focus_bonus = self._entity_focus_bonus(result, context)
+
+        base_score = (
             self.weights["semantic"] * features.semantic_score
             + self.weights["graph_distance"] * features.graph_distance_score
             + self.weights["recency"] * features.recency_score
             + self.weights["entity_priority"] * features.entity_priority_score
             + self.weights["coverage"] * features.coverage_score
+            + entity_focus_bonus
         )
+
+        if fusion_method == "rrf":
+            fused_primary = result.score or 0.0
+            features.final_score = fused_primary + 1e-6 * base_score
+        else:
+            features.final_score = base_score
 
         return features
 
-    def _normalize_score(self, score: float) -> float:
-        """Normalize semantic score to [0, 1]."""
-        # Vector scores are typically cosine similarity in [-1, 1] or [0, 1]
-        # Ensure [0, 1] range
+    def _normalize_score(self, score: float, score_kind: str = "similarity") -> float:
+        """
+        Pre-Phase 7: Robust normalization to similarity in [0, 1].
+        Handles both similarity and distance metrics.
+
+        Args:
+            score: Raw score from vector search
+            score_kind: "similarity" or "distance"
+
+        Returns:
+            Normalized similarity score in [0, 1]
+        """
+        if score is None:
+            return 0.0
+
+        kind = (score_kind or "similarity").lower()
+
+        if kind in {"distance", "l2", "euclidean"}:
+            # Distance metrics: lower is better
+            # Assume distance in [0, 2] for normalized vectors
+            # Convert to similarity: 1 - (distance/2)
+            distance = max(0.0, min(2.0, score))
+            similarity = 1.0 - (distance / 2.0)
+
+            # Log warning first time we see distance scores
+            if not hasattr(self, "_distance_warning_logged"):
+                logger.warning(
+                    "Distance-based scores detected, converting to similarity. "
+                    "Consider setting score_kind='similarity' at source."
+                )
+                self._distance_warning_logged = True
+
+            return similarity
+        if kind in {"cos", "cosine"}:
+            # Clamp cosine similarity to expected range [-1, 1]
+            clamped = max(-1.0, min(1.0, score))
+            return (clamped + 1.0) / 2.0
+        if kind in {"dot", "inner_product", "ip"}:
+            # Map unbounded dot products to (0,1) via logistic function
+            try:
+                return 1.0 / (1.0 + math.exp(-score))
+            except OverflowError:
+                return 0.0 if score < 0 else 1.0
+        if kind == "rrf":
+            # RRF scores are small positive values; scale linearly with a soft cap
+            return max(0.0, min(1.0, score * 50.0))
+
+        # Default similarity handling: clamp to [0,1]
         return max(0.0, min(1.0, score))
 
     def _distance_score(self, distance: int) -> float:
@@ -164,13 +275,13 @@ class Ranker:
 
     def _recency_score(self, metadata: Dict[str, Any]) -> float:
         """
-        Score based on document recency.
+        Pre-Phase 7: Score based on document recency with UTC handling.
         More recent documents get higher scores.
         """
-        # Try to get last_edited or updated_at timestamp
+        # Priority: updated_at > last_edited > created_at
         timestamp_str = (
-            metadata.get("last_edited")
-            or metadata.get("updated_at")
+            metadata.get("updated_at")
+            or metadata.get("last_edited")
             or metadata.get("created_at")
         )
 
@@ -180,24 +291,36 @@ class Ranker:
         try:
             # Parse timestamp (assume ISO format)
             if isinstance(timestamp_str, str):
-                timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+                # Handle ISO format with Z suffix or already has timezone
+                if timestamp_str.endswith("Z"):
+                    timestamp = datetime.fromisoformat(
+                        timestamp_str.replace("Z", "+00:00")
+                    )
+                else:
+                    timestamp = datetime.fromisoformat(timestamp_str)
             elif isinstance(timestamp_str, datetime):
                 timestamp = timestamp_str
             else:
                 return 0.5
 
-            # Calculate age in days
-            now = datetime.now(timestamp.tzinfo or None)
+            # Pre-Phase 7: Handle naive timestamps by assigning UTC
+            if timestamp.tzinfo is None:
+                logger.debug("Converting naive timestamp to UTC")
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+
+            # Calculate age in days using UTC
+            now = datetime.now(timezone.utc)
             age_days = (now - timestamp).days
 
             # Exponential decay: score = e^(-age_days / 365)
-            # Documents older than 1 year get low scores
+            # Documents older than 1 year get progressively lower scores
             decay_factor = 365.0
             score = math.exp(-age_days / decay_factor)
 
             return max(0.0, min(1.0, score))
 
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to parse timestamp: {e}")
             return 0.5  # Neutral score if parsing fails
 
     def _priority_score(self, label: str) -> float:
@@ -224,11 +347,30 @@ class Ranker:
 
         return min(1.0, score)
 
+    def _entity_focus_bonus(
+        self, result: SearchResult, context: Optional[Dict[str, Any]] = None
+    ) -> float:
+        """
+        Pre-Phase 7: No-op entity focus hook.
+        Will be implemented in Phase 7 to boost results matching focused entities.
+
+        Args:
+            result: Search result to evaluate
+            context: Query context with potential focused_entities
+
+        Returns:
+            Bonus score (0.0 until Phase 7)
+        """
+        # Phase 7 will check for focused_entities in context
+        # and boost results that match them
+        return 0.0
+
     def _break_ties(self, ranked: List[RankedResult]) -> List[RankedResult]:
         """
-        Break ties deterministically using node_id lexicographic order.
+        Pre-Phase 7: Enhanced tie-breaking with label priority then node_id.
+        Ensures stable, deterministic ordering.
         """
-        # Group by score
+        # Group by score (rounded to handle float precision)
         score_groups = {}
         for r in ranked:
             score = round(r.features.final_score, 6)  # Round to avoid float issues
@@ -236,11 +378,17 @@ class Ranker:
                 score_groups[score] = []
             score_groups[score].append(r)
 
-        # Sort each group by node_id
+        # Sort each group by label priority (desc) then node_id (asc)
         result = []
         for score in sorted(score_groups.keys(), reverse=True):
             group = score_groups[score]
-            group.sort(key=lambda r: r.result.node_id)
+            # Pre-Phase 7: Tie-break by priority then node_id
+            group.sort(
+                key=lambda r: (
+                    -self._priority_score(r.result.node_label),  # Higher priority first
+                    r.result.node_id,  # Then alphabetically by ID
+                )
+            )
             result.extend(group)
 
         # Reassign ranks

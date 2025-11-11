@@ -1,0 +1,249 @@
+--- /dev/null
++++ b/src/query/bm25_search.py
+@@
+"""
+BM25/Keyword Retriever (Phase 7E addition)
+-----------------------------------------
+Provides lexical candidate generation via Neo4j Fulltext index.
+
+- Uses CALL db.index.fulltext.queryNodes(index_name, $query)
+- Returns top_k candidates with their scores
+- Safe fallback if index is missing (returns empty list with a warning)
+
+Integration points:
+  - Used by HybridSearchEngine prior to fusion / reranking
+"""
+
+from dataclasses import dataclass
+from typing import List, Tuple, Optional
+import logging
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class BM25Hit:
+    id: str
+    score: float
+    rank: int
+    metadata: dict
+
+class BM25Searcher:
+    def __init__(self, neo4j_driver, index_name: str = "chunk_text_index"):
+        self.neo4j_driver = neo4j_driver
+        self.index_name = index_name
+
+    def search(self, query: str, top_k: int = 50, filter_document_id: Optional[str] = None) -> List[BM25Hit]:
+        cypher = f"""
+        CALL db.index.fulltext.queryNodes($index, $query)
+        YIELD node, score
+        RETURN node.id AS id, score, properties(node) AS props
+        ORDER BY score DESC
+        LIMIT $k
+        """
+        try:
+            with self.neo4j_driver.session() as session:
+                rows = session.run(cypher, index=self.index_name, query=query, k=top_k)
+                hits = []
+                for i, rec in enumerate(rows, start=1):
+                    # Optional filter by document_id if present and requested
+                    props = rec["props"] or {}
+                    if filter_document_id and props.get("document_id") != filter_document_id:
+                        continue
+                    hits.append(BM25Hit(
+                        id=rec["id"],
+                        score=float(rec["score"]),
+                        rank=i,
+                        metadata={"score_kind": "bm25", **props},
+                    ))
+                return hits[:top_k]
+        except Exception as e:
+            logger.warning(f"BM25 fulltext search failed or index missing: {e} (index={self.index_name})")
+            return []
+
+
+--- /dev/null
++++ b/src/query/rank_fusion.py
+@@
+"""
+Rank Fusion Utilities (RRF)
+---------------------------
+Implements Reciprocal Rank Fusion for combining ranked lists
+from heterogeneous retrieval sources (e.g., BM25 and Vector).
+"""
+from typing import Dict, List, Tuple
+
+def rrf_fuse(
+    vector_ranks: Dict[str, int],
+    bm25_ranks: Dict[str, int],
+    k: int = 60,
+) -> List[Tuple[str, float]]:
+    """
+    Compute RRF scores for the union of ids in the two rank maps.
+
+    Args:
+        vector_ranks: map of id -> 1-based rank from vector search
+        bm25_ranks: map of id -> 1-based rank from BM25 search
+        k: RRF constant (default 60)
+
+    Returns:
+        List of (id, rrf_score) sorted by score desc
+    """
+    ids = set(vector_ranks.keys()) | set(bm25_ranks.keys())
+    out = []
+    for cid in ids:
+        rv = 1.0 / (k + vector_ranks.get(cid, 10_000))
+        rb = 1.0 / (k + bm25_ranks.get(cid, 10_000))
+        out.append((cid, rv + rb))
+    out.sort(key=lambda x: x[1], reverse=True)
+    return out
+
+
+--- a/src/query/hybrid_search.py
++++ b/src/query/hybrid_search.py
+@@ -14,6 +14,8 @@
+ from src.providers.rerank.base import RerankProvider
+ from src.shared.config import get_config
+ from src.shared.observability import get_logger
++from src.query.bm25_search import BM25Searcher
++from src.query.rank_fusion import rrf_fuse
+
+ logger = get_logger(__name__)
+
+@@ -209,6 +211,14 @@
+
+         # Phase 7C: Reranking configuration
+         self.rerank_enabled = reranker is not None
++        # Phase 7E: BM25 + Vector + RRF knobs
++        self.vector_top_k = getattr(self.config.search.hybrid, 'vector_top_k', 50)
++        self.bm25_top_k = getattr(self.config.search.hybrid, 'bm25_top_k', 50)
++        self.rrf_k = getattr(self.config.search.hybrid, 'rrf_k', 60)
++        self.rerank_candidates = getattr(self.config.search.hybrid, 'rerank_candidates', 100)
++        self.rerank_top_k = getattr(self.config.search.hybrid, 'rerank_top_k', 20)
++        # Initialize BM25 searcher (Neo4j fulltext)
++        self.bm25 = BM25Searcher(self.neo4j_driver, index_name=getattr(self.config.search.vector.neo4j, 'index_name', 'chunk_text_index'))
+         self.rerank_k = 50  # Get more candidates for reranking
+         self.rerank_top_k = 20  # Narrow down to top 20 after reranking
+
+@@ -260,35 +270,71 @@
+         start_time = time.time()
+
+         # Step 1: Vector search for seed nodes
+-        # Phase 7C: Get more candidates (50) if reranking enabled
+-        vector_k = self.rerank_k if self.rerank_enabled else k
+-
+-        vector_start = time.time()
+-        # Pre-Phase 7 B5: Use provider's embed_query method for queries
+-        query_vector = self.embedder.embed_query(query_text)
+-        vector_seeds = self.vector_store.search(
+-            query_vector, k=vector_k, filters=filters
++# Step 1: Hybrid recall (Vector + BM25) with RRF fusion (Phase 7E)
++# Use higher candidate counts when reranking is enabled
++vector_k = self.rerank_candidates if self.rerank_enabled else self.vector_top_k
++bm25_k = self.rerank_candidates if self.rerank_enabled else self.bm25_top_k
++
++# 1a) Vector candidates
++vector_start = time.time()
++query_vector = self.embedder.embed_query(query_text)
++vector_hits = self.vector_store.search(query_vector, k=vector_k, filters=filters)
++vector_time_ms = (time.time() - vector_start) * 1000
++
++# 1b) BM25 candidates (Neo4j fulltext)
++bm25_start = time.time()
++bm25_hits = self.bm25.search(query_text, top_k=bm25_k)
++bm25_time_ms = (time.time() - bm25_start) * 1000
++
++# Convert to SearchResult list (union of both lists)
++results = []
++vector_ranks = {}
++bm25_ranks = {}
++
++# Vector results
++for rank, hit in enumerate(vector_hits, start=1):
++    metadata = dict(hit.get("metadata", {}))
++    metadata["score_kind"] = "similarity"
++    results.append(
++        SearchResult(
++            node_id=hit["id"],
++            node_label=hit.get("label", "Chunk"),
++            score=float(hit["score"]),
++            distance=float(hit.get("distance", 0)),
++            metadata=metadata,
+         )
+-        vector_time_ms = (time.time() - vector_start) * 1000
+-
+-        # Convert to SearchResult objects
+-        # Pre-Phase 7 (D3): Tag score kind for ranking normalization
+-        results = []
+-        for seed in vector_seeds:
+-            metadata = seed.get("metadata", {})
+-            # Tag the score kind as similarity (Qdrant cosine similarity)
+-            metadata["score_kind"] = "similarity"
+-            results.append(
+-                SearchResult(
+-                    node_id=seed["node_id"],
+-                    node_label=seed["node_label"],
+-                    score=seed["score"],
+-                    distance=0,  # Seeds have distance 0
+-                    metadata=metadata,
+-                )
+-            )
+-
+-        # Step 2: Reranking (Phase 7C)
++    )
++    vector_ranks[hit["id"]] = rank
++
++# BM25 results
++for h in bm25_hits:
++    results.append(
++        SearchResult(
++            node_id=h.id,
++            node_label=h.metadata.get("label", "Chunk"),
++            score=float(h.score),
++            distance=0.0,
++            metadata=h.metadata,
++        )
++    )
++    bm25_ranks[h.id] = h.rank
++
++# 1c) Reciprocal Rank Fusion (RRF) to produce a fused shortlist
++fused = rrf_fuse(vector_ranks, bm25_ranks, k=self.rrf_k)
++fused_ids = [cid for cid, _ in fused]
++
++# Deduplicate while preserving RRF order
++unique_by_id = {}
++for r in results:
++    if r.node_id not in unique_by_id and r.node_id in fused_ids:
++        unique_by_id[r.node_id] = r
++results = [unique_by_id[cid] for cid in fused_ids if cid in unique_by_id]
++
++# Truncate to rerank_candidates to bound reranker cost
++if self.rerank_enabled and len(results) > self.rerank_candidates:
++    results = results[: self.rerank_candidates]
++
++# Step 2: Reranking (Phase 7C)
+         rerank_time_ms = 0.0
+         if self.rerank_enabled and results:
+             rerank_start = time.time()
+
+--- a/src/shared/config.py
++++ b/src/shared/config.py
+@@ -90,6 +90,12 @@
+     vector_weight: float = 0.7
+     graph_weight: float = 0.3
+     top_k: int = 20
++    # Phase 7E: hybrid recall knobs
++    vector_top_k: int = 50
++    bm25_top_k: int = 50
++    rrf_k: int = 60
++    rerank_candidates: int = 100
++    rerank_top_k: int = 20
+
+
+ class SearchConfig(BaseModel):
+
+--- /dev/null
++++ b/scripts/neo4j/create_fulltext_index.cypher
+@@
+// Create fulltext index for BM25/keyword retrieval over combined chunks
+// Run in neo4j browser or via cypher-shell
+CREATE FULLTEXT INDEX chunk_text_index IF NOT EXISTS FOR (c:Chunk) ON EACH [c.text, c.heading];

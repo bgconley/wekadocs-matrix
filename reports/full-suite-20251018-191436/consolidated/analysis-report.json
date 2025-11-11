@@ -1,0 +1,195 @@
+{
+  "test_run_id": "20251018-191436",
+  "timestamp": "2025-10-18T19:18:21Z",
+  "summary": {
+    "total_tests": 411,
+    "passed": 384,
+    "failed": 6,
+    "errors": 12,
+    "skipped": 9,
+    "pass_rate_pct": 93.43,
+    "duration_seconds": 224.66,
+    "duration_formatted": "3m 44s"
+  },
+  "by_phase": {
+    "unknown": {
+      "total": 411,
+      "passed": 384,
+      "failed": 6,
+      "errors": 12,
+      "skipped": 9
+    }
+  },
+  "state_changes": {
+    "neo4j": {
+      "before": {
+        "nodes": 1557,
+        "relationships": 335,
+        "constraints": 13,
+        "indexes": 35
+      },
+      "after": {
+        "nodes": 715,
+        "relationships": 81,
+        "constraints": 13,
+        "indexes": 35,
+        "documents": 19,
+        "sections": 560
+      },
+      "delta_nodes": 715,
+      "delta_relationships": 81,
+      "schema_preserved": true
+    },
+    "qdrant": {
+      "before": {
+        "weka_sections": {
+          "vector_count": 713
+        }
+      },
+      "after": {
+        "weka_sections": {
+          "vector_count": 560
+        }
+      },
+      "delta_vectors": 560
+    },
+    "redis": {
+      "before": {
+        "db": 1,
+        "key_count": 41,
+        "sample_keys": [
+          "ingest:state:ae4839dd-504b-454b-944b-6349ba1a94dd",
+          "ingest:state:23e89772-c9e7-4fcc-b986-67774b8384f2",
+          "ingest:events:28c37bbd-053e-42ec-a998-b236ee1c7fec",
+          "ingest:state:f45ef388-f5b1-4875-831b-a24596a5c7fe",
+          "ingest:events:5082f8bc-7999-40d5-8dae-dc6d222c47ed",
+          "ingest:events:fb89100d-c5d6-4873-992d-9289e409d297",
+          "ingest:state:6ee8cb2f-da1e-46fc-9f64-faf2300afeaa",
+          "ingest:events:b1da7946-a937-48f9-8028-dfda975b1acf",
+          "ingest:state:28c37bbd-053e-42ec-a998-b236ee1c7fec",
+          "ingest:events:5794d4c2-2fed-4b4a-ba9e-a4ed706c3c54"
+        ]
+      },
+      "after": {
+        "db": 1,
+        "key_count": 34
+      },
+      "delta_keys": 34
+    }
+  },
+  "failures": [
+    {
+      "phase": "unknown",
+      "test": "tests.p1_t2_test::test_metrics_endpoint",
+      "file": "",
+      "message": "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "phase": "unknown",
+      "test": "tests.p1_t3_test::test_schema_creation",
+      "file": "",
+      "message": "AttributeError: 'function' object has no attribute 'version'"
+    },
+    {
+      "phase": "unknown",
+      "test": "tests.p1_t3_test::test_indexes_exist",
+      "file": "",
+      "message": "AssertionError: Index section_document_id not found\nassert 'section_document_id' in ['command_id_unique', 'component_id_unique', 'component_name', 'concept_id_unique', 'concept_term', 'configuration_i"
+    },
+    {
+      "phase": "unknown",
+      "test": "tests.p1_t3_test::test_schema_version_node",
+      "file": "",
+      "message": "AttributeError: 'function' object has no attribute 'version'"
+    },
+    {
+      "phase": "unknown",
+      "test": "tests.p1_t3_test::test_schema_idempotence",
+      "file": "",
+      "message": "AttributeError: 'function' object has no attribute 'version'"
+    },
+    {
+      "phase": "unknown",
+      "test": "tests.p4_t3_cache_perf_test::test_cold_to_warm_latency_improves_and_cache_key_exists",
+      "file": "",
+      "message": "requests.exceptions.HTTPError: 404 Client Error: Not Found for url: http://localhost:8000/mcp"
+    }
+  ],
+  "errors": [
+    {
+      "phase": "unknown",
+      "test": "tests.p2_t3_test.TestVectorSearch::test_vector_search_returns_results",
+      "file": "",
+      "message": "failed on setup with \"AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'\""
+    },
+    {
+      "phase": "unknown",
+      "test": "tests.p2_t3_test.TestVectorSearch::test_vector_search_ranked_by_score",
+      "file": "",
+      "message": "failed on setup with \"AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'\""
+    },
+    {
+      "phase": "unknown",
+      "test": "tests.p2_t3_test.TestVectorSearch::test_vector_search_respects_k",
+      "file": "",
+      "message": "failed on setup with \"AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'\""
+    },
+    {
+      "phase": "unknown",
+      "test": "tests.p2_t3_test.TestHybridSearch::test_hybrid_search_returns_results",
+      "file": "",
+      "message": "failed on setup with \"AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'\""
+    },
+    {
+      "phase": "unknown",
+      "test": "tests.p2_t3_test.TestHybridSearch::test_hybrid_search_with_expansion",
+      "file": "",
+      "message": "failed on setup with \"AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'\""
+    },
+    {
+      "phase": "unknown",
+      "test": "tests.p2_t3_test.TestHybridSearch::test_hybrid_search_distances",
+      "file": "",
+      "message": "failed on setup with \"AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'\""
+    },
+    {
+      "phase": "unknown",
+      "test": "tests.p2_t3_test.TestHybridSearch::test_hybrid_search_deduplicates",
+      "file": "",
+      "message": "failed on setup with \"AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'\""
+    },
+    {
+      "phase": "unknown",
+      "test": "tests.p2_t3_test.TestPerformance::test_hybrid_search_p95_latency_warmed",
+      "file": "",
+      "message": "failed on setup with \"AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'\""
+    },
+    {
+      "phase": "unknown",
+      "test": "tests.p2_t3_test.TestPerformance::test_vector_search_latency",
+      "file": "",
+      "message": "failed on setup with \"AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'\""
+    },
+    {
+      "phase": "unknown",
+      "test": "tests.p2_t3_test.TestPerformance::test_graph_expansion_bounded",
+      "file": "",
+      "message": "failed on setup with \"AttributeError: 'EmbeddingConfig' object has no attribute 'model_name'\""
+    }
+  ],
+  "docker_services": [
+    "weka-ingestion-service\tUp 43 minutes (healthy)",
+    "weka-ingestion-worker\tUp 27 hours",
+    "weka-mcp-server\tUp 3 days (healthy)",
+    "weka-redis\tUp 3 minutes (healthy)",
+    "weka-qdrant\tUp 3 minutes (healthy)",
+    "weka-jaeger\tUp 5 days (healthy)",
+    "weka-neo4j\tUp 5 days (healthy)"
+  ],
+  "data_consistency": {
+    "graph_sections": 560,
+    "vector_count": 560,
+    "parity": true,
+    "drift_pct": 0.0
+  }
+}

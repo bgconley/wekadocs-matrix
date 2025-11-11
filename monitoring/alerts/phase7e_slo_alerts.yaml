@@ -1,0 +1,187 @@
+# Phase 7E-4: SLO Alert Rules
+# Reference: Canonical Spec L4916-4976, L3513-3528
+# CRITICAL: These alerts enforce Phase 7E requirements
+
+groups:
+  - name: phase7e_slo_critical
+    interval: 10s
+    rules:
+      # ZERO-tolerance SLOs - Page immediately
+      - alert: OversizedChunksDetected
+        expr: sum(chunks_oversized_total) / sum(chunks_created_total) > 0
+        for: 0s
+        labels:
+          severity: page
+          slo: oversized_chunk_rate
+          phase: 7e
+        annotations:
+          summary: "CRITICAL: Oversized chunks detected (ZERO-tolerance SLO)"
+          description: "{{ $value | humanizePercentage }} of chunks exceed ABSOLUTE_MAX tokens. This is a ZERO-tolerance violation - investigate immediately."
+          runbook: "Check ingestion pipeline for splitter failures. Verify ABSOLUTE_MAX enforcement. Review recent document ingestions."
+
+      - alert: IntegrityFailuresDetected
+        expr: sum(integrity_failures_total) / sum(integrity_checks_total) > 0
+        for: 0s
+        labels:
+          severity: page
+          slo: integrity_failure_rate
+          phase: 7e
+        annotations:
+          summary: "CRITICAL: Integrity failures detected (ZERO-tolerance SLO)"
+          description: "{{ $value | humanizePercentage }} of integrity checks failed. This indicates data corruption - halt ingestion immediately."
+          runbook: "Review integrity check logs. Verify SHA256 verification logic. Check for storage/network issues."
+
+      # Range-based SLOs - Alert on violations
+      - alert: ExpansionRateTooLow
+        expr: sum(rate(graph_expansion_duration_seconds_count[5m])) / sum(rate(hybrid_search_duration_seconds_count[5m])) < 0.10
+        for: 5m
+        labels:
+          severity: alert
+          slo: expansion_rate
+          phase: 7e
+        annotations:
+          summary: "Expansion rate below 10% (SLO violation)"
+          description: "Expansion rate is {{ $value | humanizePercentage }}, below 10% minimum. Adjacency expansion may not be helping queries."
+          runbook: "Review expansion conditions (query token threshold, score delta). Check if NEXT_CHUNK relationships exist."
+
+      - alert: ExpansionRateTooHigh
+        expr: sum(rate(graph_expansion_duration_seconds_count[5m])) / sum(rate(hybrid_search_duration_seconds_count[5m])) > 0.40
+        for: 5m
+        labels:
+          severity: page
+          slo: expansion_rate
+          phase: 7e
+        annotations:
+          summary: "CRITICAL: Expansion rate above 40% (performance risk)"
+          description: "Expansion rate is {{ $value | humanizePercentage }}, above 40% maximum. This may degrade retrieval performance."
+          runbook: "Tighten expansion conditions. Check for misconfigured score delta threshold. Review expansion logs for patterns."
+
+  - name: phase7e_slo_performance
+    interval: 30s
+    rules:
+      # Target-based SLOs - Alert on threshold violations
+      - alert: RetrievalP95LatencyHigh
+        expr: histogram_quantile(0.95, rate(hybrid_search_duration_seconds_bucket[5m])) * 1000 > 600
+        for: 2m
+        labels:
+          severity: alert
+          slo: retrieval_p95_latency
+          phase: 7e
+        annotations:
+          summary: "Retrieval p95 latency exceeds alert threshold"
+          description: "Retrieval p95 latency is {{ $value | humanize }}ms (target: 500ms, alert: 600ms). Performance degradation detected."
+          runbook: "Check Qdrant/Neo4j performance. Review expansion rate. Check for slow network or high query complexity."
+
+      - alert: RetrievalP95LatencyCritical
+        expr: histogram_quantile(0.95, rate(hybrid_search_duration_seconds_bucket[5m])) * 1000 > 1000
+        for: 1m
+        labels:
+          severity: page
+          slo: retrieval_p95_latency
+          phase: 7e
+        annotations:
+          summary: "CRITICAL: Retrieval p95 latency exceeds page threshold"
+          description: "Retrieval p95 latency is {{ $value | humanize }}ms (target: 500ms, critical: 1000ms). User experience severely degraded."
+          runbook: "Immediate investigation required. Check database connection pools, index health, and system resources."
+
+      - alert: IngestionDurationHigh
+        expr: histogram_quantile(0.95, rate(ingestion_duration_seconds_bucket[5m])) > 15
+        for: 5m
+        labels:
+          severity: alert
+          slo: ingestion_per_doc
+          phase: 7e
+        annotations:
+          summary: "Ingestion p95 duration exceeds alert threshold"
+          description: "Ingestion p95 duration is {{ $value | humanize }}s (target: 10s, alert: 15s). Ingestion backlog may be building."
+          runbook: "Check embedding API latency. Review Qdrant upsert performance. Check Neo4j write latency."
+
+      - alert: IngestionDurationCritical
+        expr: histogram_quantile(0.95, rate(ingestion_duration_seconds_bucket[5m])) > 30
+        for: 2m
+        labels:
+          severity: page
+          slo: ingestion_per_doc
+          phase: 7e
+        annotations:
+          summary: "CRITICAL: Ingestion p95 duration exceeds page threshold"
+          description: "Ingestion p95 duration is {{ $value | humanize }}s (target: 10s, critical: 30s). Severe ingestion backlog."
+          runbook: "Immediate investigation. Check for API rate limits, database connection issues, or resource exhaustion."
+
+  - name: phase7e_health_checks
+    interval: 1m
+    rules:
+      - alert: SchemaVersionMismatch
+        expr: absent(schema_version{version="v2.1"}) or schema_version{version!="v2.1"}
+        for: 1m
+        labels:
+          severity: page
+          category: health
+          phase: 7e
+        annotations:
+          summary: "Schema version mismatch detected"
+          description: "Schema version is not v2.1. Phase 7E requires v2.1 schema."
+          runbook: "Run schema migration scripts. Verify SchemaVersion node in Neo4j."
+
+      - alert: VectorDimensionMismatch
+        expr: qdrant_vector_size != 1024
+        for: 1m
+        labels:
+          severity: page
+          category: health
+          phase: 7e
+        annotations:
+          summary: "Vector dimension mismatch detected"
+          description: "Qdrant vector size is {{ $value }} (expected: 1024). Phase 7E requires 1024-D vectors."
+          runbook: "Verify Qdrant collection configuration. Check EMBED_DIM config. May need to recreate collection."
+
+      - alert: EmbeddingProviderMismatch
+        expr: embedding_provider_info{provider!="jina-ai"} or embedding_model_info{model!="jina-embeddings-v3"}
+        for: 1m
+        labels:
+          severity: page
+          category: health
+          phase: 7e
+        annotations:
+          summary: "Embedding provider/model mismatch"
+          description: "Embedding configuration drift detected. Phase 7E requires jina-ai provider with jina-embeddings-v3."
+          runbook: "Verify config.embedding settings. Check EMBED_PROVIDER and EMBED_MODEL_ID environment variables."
+
+  - name: phase7e_quality
+    interval: 30s
+    rules:
+      - alert: CacheHitRateLow
+        expr: sum(rate(cache_operations_total{result="hit"}[5m])) / sum(rate(cache_operations_total[5m])) < 0.3
+        for: 10m
+        labels:
+          severity: alert
+          category: quality
+          phase: 7e
+        annotations:
+          summary: "Cache hit rate below 30%"
+          description: "Cache hit rate is {{ $value | humanizePercentage }}. Low cache effectiveness may impact performance."
+          runbook: "Review cache invalidation patterns. Check cache TTL settings. Verify epoch-based invalidation is working."
+
+      - alert: EmbeddingErrorRateHigh
+        expr: rate(embedding_error_total{model_id="jina-embeddings-v3"}[5m]) > 0.01
+        for: 2m
+        labels:
+          severity: alert
+          category: quality
+          phase: 7e
+        annotations:
+          summary: "Embedding API error rate elevated"
+          description: "Embedding errors at {{ $value | humanize }}/sec. May indicate API issues or invalid inputs."
+          runbook: "Check Jina AI API status. Review error logs for patterns. Verify input text preprocessing."
+
+      - alert: ReconciliationDriftHigh
+        expr: reconciliation_drift_percentage > 5
+        for: 5m
+        labels:
+          severity: alert
+          category: quality
+          phase: 7e
+        annotations:
+          summary: "Neo4j/Qdrant drift exceeds 5%"
+          description: "Reconciliation drift is {{ $value | humanizePercentage }}. Data stores may be out of sync."
+          runbook: "Run reconciliation repair. Check for failed ingestions. Verify dual-write logic is functioning."

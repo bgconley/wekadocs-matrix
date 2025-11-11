@@ -1,0 +1,18 @@
+{
+  "timestamp": "2025-10-29T00:11:00.644142",
+  "passed": true,
+  "stats": {
+    "neo4j_checked": 742,
+    "neo4j_valid": 742,
+    "neo4j_invalid": 0,
+    "qdrant_checked": 371,
+    "qdrant_valid": 371,
+    "qdrant_invalid": 0
+  },
+  "violations": [],
+  "total_violations": 0,
+  "summary": {
+    "neo4j_compliance": "100.0%",
+    "qdrant_compliance": "100.0%"
+  }
+}
