@@ -1,6 +1,6 @@
 """
 Jina AI rerank provider implementation.
-Phase 7C: Remote API provider for jina-reranker-v2-base-multilingual.
+Phase 7C: Remote API provider for jina-reranker models (v2/v3).
 
 Features:
 - Cross-attention based reranking for high precision
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 class JinaRerankProvider:
     """
-    Jina AI rerank provider using jina-reranker-v2-base-multilingual.
+    Jina AI rerank provider (supports jina-reranker-v2/v3 models).
 
     Applies cross-attention scoring to refine candidate ordering
     after initial ANN retrieval.
@@ -43,7 +43,7 @@ class JinaRerankProvider:
 
     def __init__(
         self,
-        model: str = "jina-reranker-v2-base-multilingual",
+        model: str = "jina-reranker-v3",
         api_key: Optional[str] = None,
         timeout: int = 30,
     ):
@@ -235,8 +235,29 @@ class JinaRerankProvider:
                 # Map back to original candidates with scores
                 reranked = []
                 for result in results:
-                    index = result["index"]
-                    score = result["relevance_score"]
+                    index = result.get("index")
+                    if index is None:
+                        index = result.get("document_index")
+                    try:
+                        index = int(index)
+                    except (TypeError, ValueError):
+                        index = None
+                    if index is None or index >= len(candidates):
+                        logger.warning(
+                            "Jina rerank response missing valid index",
+                            response=result,
+                        )
+                        continue
+
+                    score = result.get("relevance_score")
+                    if score is None:
+                        score = result.get("score")
+                    if score is None:
+                        logger.warning(
+                            "Jina rerank response missing score field",
+                            response=result,
+                        )
+                        continue
 
                     # Get original candidate
                     original = candidates[index].copy()

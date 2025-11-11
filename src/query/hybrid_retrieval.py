@@ -26,6 +26,8 @@ from qdrant_client.models import MatchValue
 
 # Phase 7E-4: Monitoring imports
 from src.monitoring.metrics import get_metrics_aggregator
+from src.providers.factory import ProviderFactory
+from src.providers.rerank.base import RerankProvider
 from src.providers.tokenizer_service import TokenizerService
 from src.shared.config import get_config
 from src.shared.observability import get_logger
@@ -101,6 +103,9 @@ class ChunkResult:
     title_vec_score: Optional[float] = None
     entity_vec_score: Optional[float] = None
     fused_score: Optional[float] = None  # Final fused score
+    rerank_score: Optional[float] = None
+    rerank_rank: Optional[int] = None
+    reranker: Optional[str] = None
 
     # Retrieval context metadata
     embedding_version: Optional[str] = None
@@ -735,11 +740,9 @@ class HybridRetriever:
         self.tokenizer = tokenizer or TokenizerService()
         self.reranker_config = getattr(config.search.hybrid, "reranker", None)
         self._reranker_enabled = bool(getattr(self.reranker_config, "enabled", False))
+        self._reranker: Optional[RerankProvider] = None
         if self._reranker_enabled:
-            logger.warning(
-                "HybridRetriever reranker config is enabled, but reranking is not "
-                "implemented in this Phase 7E build yet. Seeds will bypass reranking."
-            )
+            logger.info("HybridRetriever reranker enabled via configuration")
         self.context_group_cap = getattr(
             search_config.response, "max_sections_per_parent", 3
         )
@@ -1435,28 +1438,117 @@ class HybridRetriever:
     def _apply_reranker(
         self, query: str, seeds: List[ChunkResult], metrics: Dict[str, Any]
     ) -> List[ChunkResult]:
-        """Placeholder reranker hook.
-
-        Phase 7E keeps the configuration surface but does not yet wire in a
-        reranker implementation. This helper captures metrics so downstream
-        dashboards reflect the stubbed state instead of implying silent success.
-        """
-
         cfg = self.reranker_config
         if not cfg or not getattr(cfg, "enabled", False):
             metrics["reranker_applied"] = False
             metrics["reranker_reason"] = "disabled"
             return seeds
 
-        # Configuration requested reranking, but this build does not provide it.
-        metrics["reranker_applied"] = False
-        metrics["reranker_reason"] = "not_implemented"
-        logger.warning(
-            "HybridRetriever reranker setting is enabled for query '%s', but reranking "
-            "is not implemented in the Phase 7E retriever. Returning original seeds.",
-            query,
-        )
-        return seeds
+        reranker = self._get_reranker()
+        if reranker is None:
+            metrics["reranker_applied"] = False
+            metrics["reranker_reason"] = "not_available"
+            return seeds
+
+        candidates: List[Dict[str, Any]] = []
+        for chunk in seeds:
+            text = (chunk.text or "").strip()
+            if not text:
+                text = (chunk.heading or "").strip()
+            if not text:
+                continue
+
+            candidates.append(
+                {
+                    "id": chunk.chunk_id,
+                    "text": text,
+                    "original_result": chunk,
+                }
+            )
+
+        if not candidates:
+            metrics["reranker_applied"] = False
+            metrics["reranker_reason"] = "no_text"
+            return seeds
+
+        top_n = getattr(cfg, "top_n", None)
+        if not top_n or top_n <= 0:
+            top_n = len(candidates)
+        top_k = min(top_n, len(candidates))
+
+        start_time = time.time()
+        try:
+            reranked_payload = reranker.rerank(
+                query=query, candidates=candidates, top_k=top_k
+            )
+            latency_ms = (time.time() - start_time) * 1000
+        except Exception as exc:  # pragma: no cover - provider failure logging
+            logger.warning(
+                "Reranker call failed; returning fused ordering",
+                error=str(exc),
+            )
+            metrics["reranker_applied"] = False
+            metrics["reranker_reason"] = "provider_error"
+            return seeds
+
+        reranked_chunks: List[ChunkResult] = []
+        for payload in reranked_payload:
+            chunk = payload.get("original_result")
+            if not isinstance(chunk, ChunkResult):
+                continue
+
+            score = payload.get("rerank_score")
+            if score is not None:
+                chunk.fused_score = score
+                chunk.rerank_score = score
+
+            rank = payload.get("original_rank")
+            if rank is not None:
+                try:
+                    chunk.rerank_rank = int(rank)
+                except (TypeError, ValueError):
+                    chunk.rerank_rank = None
+
+            chunk.reranker = payload.get("reranker") or reranker.model_id
+            chunk.fusion_method = "rerank"
+            reranked_chunks.append(chunk)
+
+        if not reranked_chunks:
+            metrics["reranker_applied"] = False
+            metrics["reranker_reason"] = "no_results"
+            return seeds
+
+        reranked_chunks.sort(key=lambda c: c.fused_score or 0.0, reverse=True)
+        metrics["reranker_applied"] = True
+        metrics["reranker_reason"] = "ok"
+        metrics["reranker_model"] = reranker.model_id
+        metrics["reranker_time_ms"] = latency_ms
+        return reranked_chunks[:top_k]
+
+    def _get_reranker(self) -> Optional[RerankProvider]:
+        if not self.reranker_config or not getattr(
+            self.reranker_config, "enabled", False
+        ):
+            return None
+
+        if self._reranker is not None:
+            return self._reranker
+
+        try:
+            self._reranker = ProviderFactory.create_rerank_provider()
+            logger.info(
+                "HybridRetriever reranker initialized",
+                provider=self._reranker.provider_name,
+                model=self._reranker.model_id,
+            )
+        except Exception as exc:  # pragma: no cover - provider init logging
+            logger.warning(
+                "Unable to initialize reranker provider",
+                error=str(exc),
+            )
+            self._reranker = None
+
+        return self._reranker
 
     def _should_expand(
         self, query: str, seeds: List[ChunkResult], when: ExpandWhen

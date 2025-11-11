@@ -1207,9 +1207,8 @@ class GraphBuilder:
         return text[:256]
 
     def _compute_text_hash(self, text: str) -> str:
-        if not text:
-            return ""
-        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+        value = text or ""
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
     def _compute_shingle_hash(self, text: str, n: int = 8) -> str:
         if not text:

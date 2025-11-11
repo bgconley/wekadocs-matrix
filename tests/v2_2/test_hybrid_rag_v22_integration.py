@@ -122,11 +122,11 @@ def test_ingestion_populates_multi_vector_payloads(ingested_document, integratio
 
     expected_tag = ingested_document["document"]["doc_tag"]
     expected_tenant = ingested_document["document"]["tenant"]
-    total_original_sections = 0
+    seen_original_sections = set()
     for point in points:
         payload = point.payload or {}
         original_ids = payload.get("original_section_ids") or []
-        total_original_sections += len(original_ids)
+        seen_original_sections.update(original_ids)
 
         vectors = point.vector or {}
         assert {"content", "title"}.issubset(set(vectors.keys()))
@@ -142,7 +142,7 @@ def test_ingestion_populates_multi_vector_payloads(ingested_document, integratio
         assert payload.get("semantic_metadata") == {"entities": [], "topics": []}
         assert payload.get("text_hash")
 
-    assert total_original_sections == len(ingested_document["sections"])
+    assert len(seen_original_sections) == len(ingested_document["sections"])
 
 
 @pytest.mark.integration

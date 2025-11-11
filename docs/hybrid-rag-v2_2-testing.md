@@ -8,9 +8,11 @@ from scratch.
 
 1. Bring up the dev data stack (`docker-compose up -d neo4j qdrant redis`).
 2. Export the standard dev secrets (`NEO4J_PASSWORD`, `REDIS_PASSWORD`, `JINA_API_KEY`
-   if you want real embeddings). The new test suite can run air-gapped because it
+   if you want real embeddings/reranking). The new test suite can run air-gapped because it
    ships a deterministic embedding provider, but production parity runs should set
-   `EMBEDDINGS_PROVIDER=jina-ai`.
+   `EMBEDDINGS_PROVIDER=jina-ai` and, when exercising the reranker path, enable
+   `search.hybrid.reranker.enabled=true` plus `RERANK_PROVIDER=jina-ai`,
+   `RERANK_MODEL=jina-reranker-v3`.
 3. Ensure the HuggingFace tokenizer cache is present locally (see
    `config/development.yaml` → `embedding`). Set `TRANSFORMERS_OFFLINE=true` to avoid
    network fetches during CI.

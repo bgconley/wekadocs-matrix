@@ -59,6 +59,6 @@
 ## Open Follow-Ups (tracked separately)
 1. Replace the deterministic test embedder with the real Jina provider before release certification.
 2. Populate `semantic_metadata` + `entity` vectors once the semantic chunking pipeline is ready.
-3. Wire `_apply_reranker` to Jina reranker v3 and surface reranker metrics in Grafana.
+3. Wire `_apply_reranker` to Jina reranker v3 and surface reranker metrics in Grafana. *(DONE – implemented in `jina-reranker-implement` branch)*
 
 This change log should be updated again if additional sections of the v2.2 plan land or if new ADR decisions supersede the work summarized here.
