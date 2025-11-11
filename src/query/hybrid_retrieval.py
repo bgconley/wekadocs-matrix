@@ -734,6 +734,12 @@ class HybridRetriever:
         )
         self.tokenizer = tokenizer or TokenizerService()
         self.reranker_config = getattr(config.search.hybrid, "reranker", None)
+        self._reranker_enabled = bool(getattr(self.reranker_config, "enabled", False))
+        if self._reranker_enabled:
+            logger.warning(
+                "HybridRetriever reranker config is enabled, but reranking is not "
+                "implemented in this Phase 7E build yet. Seeds will bypass reranking."
+            )
         self.context_group_cap = getattr(
             search_config.response, "max_sections_per_parent", 3
         )
@@ -1429,15 +1435,27 @@ class HybridRetriever:
     def _apply_reranker(
         self, query: str, seeds: List[ChunkResult], metrics: Dict[str, Any]
     ) -> List[ChunkResult]:
+        """Placeholder reranker hook.
+
+        Phase 7E keeps the configuration surface but does not yet wire in a
+        reranker implementation. This helper captures metrics so downstream
+        dashboards reflect the stubbed state instead of implying silent success.
+        """
+
         cfg = self.reranker_config
         if not cfg or not getattr(cfg, "enabled", False):
             metrics["reranker_applied"] = False
+            metrics["reranker_reason"] = "disabled"
             return seeds
 
-        logger.warning(
-            "Reranker enabled, but no reranker implementation is wired in this build."
-        )
+        # Configuration requested reranking, but this build does not provide it.
         metrics["reranker_applied"] = False
+        metrics["reranker_reason"] = "not_implemented"
+        logger.warning(
+            "HybridRetriever reranker setting is enabled for query '%s', but reranking "
+            "is not implemented in the Phase 7E retriever. Returning original seeds.",
+            query,
+        )
         return seeds
 
     def _should_expand(

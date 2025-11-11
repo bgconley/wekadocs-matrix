@@ -163,6 +163,14 @@ class QueryService:
             qdrant_client = manager.get_qdrant_client()
             embedder = self._get_embedder()
 
+            reranker_cfg = getattr(self.config.search.hybrid, "reranker", None)
+            if reranker_cfg and getattr(reranker_cfg, "enabled", False):
+                logger.warning(
+                    "config.search.hybrid.reranker is enabled, but the Phase 7E "
+                    "HybridRetriever only exposes stub hooks today. Results will "
+                    "match non-reranked ordering until reranking is implemented."
+                )
+
             self._hybrid_retriever = HybridRetriever(
                 neo4j_driver=neo4j_driver,
                 qdrant_client=qdrant_client,

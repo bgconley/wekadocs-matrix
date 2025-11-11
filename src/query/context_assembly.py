@@ -123,7 +123,7 @@ class ContextAssembler:
         Args:
             tokenizer: Tokenizer service for accurate token counting
         """
-        self.tokenizer = tokenizer or TokenizerService()
+        self.tokenizer = tokenizer or get_default_tokenizer()
 
         # Load configuration
         config = get_config()
@@ -430,3 +430,13 @@ class ContextAssembler:
                 citation_index += 1
 
         return "".join(parts)
+
+
+_DEFAULT_TOKENIZER: Optional[TokenizerService] = None
+
+
+def get_default_tokenizer() -> TokenizerService:
+    global _DEFAULT_TOKENIZER
+    if _DEFAULT_TOKENIZER is None:
+        _DEFAULT_TOKENIZER = TokenizerService()
+    return _DEFAULT_TOKENIZER

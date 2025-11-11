@@ -231,9 +231,9 @@ class QueryPlanner:
         if filters:
             params.update(filters)
 
-        # For search intent, add empty section_ids if not provided
+        # Allow optional section scoping; None indicates "match all"
         if "section_ids" not in params:
-            params["section_ids"] = []
+            params["section_ids"] = None
 
         # For traverse intent, ensure rel_types is a list
         if "rel_types" not in params:
@@ -255,8 +255,23 @@ class QueryPlanner:
         if not re.search(r"\bLIMIT\b", cypher, re.IGNORECASE):
             cypher = cypher.rstrip(";") + "\nLIMIT $limit;"
 
-        # Ensure variable-length patterns use parameter
-        cypher = re.sub(r"\*(\d+)\.\.(\d+)", r"*1..$max_hops", cypher)
+        max_depth = getattr(self.config.validator, "max_depth", 3)
+
+        def _range_rewrite(match: re.Match) -> str:
+            min_hops = int(match.group(1))
+            max_hops = int(match.group(2))
+
+            # Preserve templates that already sit within validator bounds
+            if max_hops <= max_depth:
+                return match.group(0)
+
+            # Clamp upper bound to $max_hops while keeping author-provided minimum
+            if min_hops <= 1:
+                return "*1..$max_hops"
+
+            return f"*{min_hops}..$max_hops"
+
+        cypher = re.sub(r"\*(\d+)\.\.(\d+)", _range_rewrite, cypher)
 
         return cypher
 
@@ -267,7 +282,8 @@ class QueryPlanner:
         # Use basic search template as fallback
         fallback_cypher = """
         MATCH (s:Section)
-        WHERE s.id IN $section_ids
+        WITH s, coalesce($section_ids, []) AS allowed_ids
+        WHERE size(allowed_ids) = 0 OR s.id IN allowed_ids
         RETURN s
         ORDER BY s.document_id, s.order
         LIMIT $limit

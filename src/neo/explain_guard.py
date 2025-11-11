@@ -6,10 +6,12 @@ See: /docs/phase-7-integration-plan.md
 See: /docs/phase7-target-phase-tasklist.md Day 1
 """
 
+import re
 from typing import Any, Dict, Optional
 
 from neo4j import Driver
 
+from src.neo.schema import RELATIONSHIP_TYPES
 from src.shared.observability import get_logger
 
 logger = get_logger(__name__)
@@ -37,13 +39,15 @@ class ExplainGuard:
     MAX_ESTIMATED_ROWS = 10000
     MAX_DB_HITS = 100000
     ALLOWED_LABELS = {"Section", "Entity", "Chunk", "Document", "Topic"}
-    ALLOWED_RELATIONSHIPS = {"MENTIONS", "HAS_SECTION"}
+    ALLOWED_RELATIONSHIPS = RELATIONSHIP_TYPES
 
     # Dangerous operators that indicate unbounded expansion
     DANGEROUS_OPERATORS = {
         "Expand(All)",
         "VarLengthExpand(All)",
     }
+
+    RELATIONSHIP_PATTERN = re.compile(r"type: +'([A-Z0-9_]+)'")
 
     def __init__(
         self,
@@ -127,7 +131,7 @@ class ExplainGuard:
             "estimated_rows": 0,
             "db_hits": 0,
             "operators": [],
-            "identifiers": [],
+            "details": [],
         }
 
         def traverse_plan(node: Any, depth: int = 0):
@@ -149,11 +153,11 @@ class ExplainGuard:
                 if "DbHits" in args:
                     metadata["db_hits"] += int(args["DbHits"])
 
-                # Track identifiers for label validation
+                # Track identifiers/relationship details for validation
                 if "Details" in args:
                     details = args["Details"]
                     if isinstance(details, str):
-                        metadata["identifiers"].append(details)
+                        metadata["details"].append(details)
 
             # Traverse children
             if hasattr(node, "children"):
@@ -220,6 +224,25 @@ class ExplainGuard:
                     logger.warning(
                         f"NodeByLabelScan may use non-whitelisted label: {op}"
                     )
+
+        self._check_relationship_types(metadata)
+
+    def _check_relationship_types(self, metadata: Dict[str, Any]) -> None:
+        """Ensure traversed relationship types stay within the allow-list."""
+        details = metadata.get("details", [])
+        disallowed: set[str] = set()
+
+        for entry in details:
+            for rel_type in self.RELATIONSHIP_PATTERN.findall(entry):
+                if rel_type not in self.allowed_relationships:
+                    disallowed.add(rel_type)
+
+        if disallowed:
+            raise PlanRejected(
+                "Query rejected: uses non-whitelisted relationships "
+                f"{sorted(disallowed)}. Update src/neo/schema.py if these edges "
+                "are part of the supported schema."
+            )
 
 
 def validate_query_plan(

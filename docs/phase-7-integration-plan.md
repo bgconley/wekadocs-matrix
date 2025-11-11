@@ -400,12 +400,17 @@ procedure explain_guard(cypher: str, params: Map) -> ValidatedQuery
   if plan.has_expand_all_over(CONFIG.limits.expand_all_threshold): raise PlanTooExpensive
   if plan.estimated_rows > CONFIG.limits.estimated_rows_max: raise PlanTooExpensive
   if plan.uses_label_scans_outside(ALLOW_LABELS): raise PlanRejected
+  if plan.uses_relationships_outside(ALLOW_RELATIONSHIPS): raise PlanRejected
   return ValidatedQuery(query=cypher, params=params)
 
 procedure run_safe(cypher: str, params: Map, timeout_ms: int) -> Result
   v := explain_guard(cypher, params)
   return neo4j.RUN(v.query, v.params, timeout=timeout_ms)
 ```
+
+> **Implementation note:** `ALLOW_LABELS` / `ALLOW_RELATIONSHIPS` now live in
+> `src/neo/schema.py`. When ingestion adds a new node/relationship type update
+> that module so ExplainGuard (and the validator) stay aligned with the schema.
 
 ### 3) Frontier-gated traversal
 

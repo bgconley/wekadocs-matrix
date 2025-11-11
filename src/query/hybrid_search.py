@@ -7,6 +7,7 @@ See: /docs/pseudocode-reference.md Phase 2, Task 2.3
 Phase 7C: Integrated with reranking provider for post-ANN refinement.
 """
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -139,36 +140,42 @@ class Neo4jVectorStore(VectorStore):
         self, vector: List[float], k: int, filters: Optional[Dict] = None
     ) -> List[Dict[str, Any]]:
         """Search Neo4j vector index for top-k vectors."""
-        # Build WHERE clause from filters
-        where_clauses = []
+        config = get_config()
+
+        where_clauses = ["node.embedding_version = $embedding_version"]
+        params: Dict[str, Any] = {
+            "index_name": self.index_name,
+            "k": k,
+            "vector": vector,
+            "embedding_version": config.embedding.version,
+        }
+
         if filters:
+            dedupe: Dict[str, int] = {}
             for key, value in filters.items():
-                if isinstance(value, str):
-                    where_clauses.append(f"node.{key} = '{value}'")
-                else:
-                    where_clauses.append(f"node.{key} = {value}")
+                safe_key = re.sub(r"[^A-Za-z0-9_]", "_", key)
+                dedupe.setdefault(safe_key, 0)
+                dedupe[safe_key] += 1
+                suffix = dedupe[safe_key]
+                param_name = f"filter_{safe_key}_{suffix}"
+                where_clauses.append(f"node.{safe_key} = ${param_name}")
+                params[param_name] = value
 
-        where_clause = " AND " + " AND ".join(where_clauses) if where_clauses else ""
+        where_clause = " AND ".join(where_clauses)
 
-        query = f"""
+        query = """
         CALL db.index.vector.queryNodes($index_name, $k, $vector)
         YIELD node, score
-        WHERE node.embedding_version = $embedding_version{where_clause}
+        WHERE {where_clause}
         RETURN node.id AS id, score, node.document_id AS document_id,
                labels(node)[0] AS node_label, properties(node) AS metadata
         LIMIT $k
-        """
+        """.format(
+            where_clause=where_clause
+        )
 
         with self.driver.session() as session:
-            result = session.run(
-                query,
-                index_name=self.index_name,
-                k=k,
-                vector=vector,
-                embedding_version=get_config()
-                .get("embedding", {})
-                .get("version", "v1"),
-            )
+            result = session.run(query, **params)
 
             return [
                 {
@@ -393,8 +400,11 @@ class HybridSearchEngine:
                         )
                     )
         except Exception as e:
-            # Log error but don't fail the search
-            print(f"Graph expansion error: {e}")
+            logger.warning(
+                "Graph expansion error during hybrid search",
+                error=str(e),
+                seed_count=len(seeds),
+            )
 
         return expanded_results
 
@@ -441,8 +451,11 @@ class HybridSearchEngine:
                         )
                     )
         except Exception as e:
-            # Log error but don't fail the search
-            print(f"Path finding error: {e}")
+            logger.warning(
+                "Path finding error during hybrid search",
+                error=str(e),
+                seed_count=len(seeds),
+            )
 
         return bridge_results
 

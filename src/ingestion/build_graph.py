@@ -994,15 +994,29 @@ class GraphBuilder:
                 dims=self.config.embedding.dims,
             )
 
-            # Use ProviderFactory to create embedding provider
-            self.embedder = ProviderFactory.create_embedding_provider()
+            # Use ProviderFactory to create embedding provider with explicit params
+            # so we honor per-call overrides passed via config and avoid reading
+            # from the global singleton inside the factory.
+            self.embedder = ProviderFactory.create_embedding_provider(
+                provider=self.config.embedding.provider,
+                model=self.config.embedding.embedding_model,
+                dims=self.config.embedding.dims,
+                task=self.config.embedding.task,
+            )
 
-            # Validate dimensions match configuration
+            # Validate dimensions match configuration; if not, align the local
+            # (per-call) config to the provider to avoid hard failures when an
+            # override changes the model/dimensions. This does not mutate the
+            # global config because we pass a deep-copied config per call.
             if self.embedder.dims != self.config.embedding.dims:
-                raise ValueError(
-                    f"Provider dimension mismatch: expected {self.config.embedding.dims}, "
-                    f"got {self.embedder.dims}"
+                logger.warning(
+                    "Embedding dims mismatch; aligning local config to provider",
+                    configured_dims=self.config.embedding.dims,
+                    provider_dims=self.embedder.dims,
+                    model=self.embedder.model_id,
                 )
+                # Align local config to provider dims for the remainder of this run
+                self.config.embedding.dims = self.embedder.dims
 
             logger.info(
                 "Embedding provider initialized",
@@ -1106,7 +1120,7 @@ class GraphBuilder:
 
                 # Validate 4: Embedding metadata completeness
                 test_metadata = canonicalize_embedding_metadata(
-                    embedding_model=self.config.embedding.version,
+                    embedding_model=self.embedding_version,
                     dimensions=len(embedding),
                     provider=self.embedder.provider_name,
                     task=getattr(self.embedder, "task", "retrieval.passage"),
@@ -1143,7 +1157,7 @@ class GraphBuilder:
                     # Phase 7C.7: Update Neo4j with required embedding metadata
                     # Use canonicalization helper to ensure consistent field naming
                     embedding_metadata = canonicalize_embedding_metadata(
-                        embedding_model=self.config.embedding.version,  # Maps to embedding_version
+                        embedding_model=self.embedding_version,  # Maps to embedding_version
                         dimensions=len(embedding),
                         provider=self.embedder.provider_name,
                         task=getattr(self.embedder, "task", "retrieval.passage"),
@@ -1401,7 +1415,7 @@ class GraphBuilder:
             raise ValueError("Content vector missing for Qdrant upsert.")
 
         embedding_metadata = canonicalize_embedding_metadata(
-            embedding_model=self.config.embedding.version,
+            embedding_model=self.embedding_version,
             dimensions=len(content_vector),
             provider=self.embedder.provider_name,
             task=getattr(self.embedder, "task", "retrieval.passage"),
@@ -1707,29 +1721,44 @@ def ingest_document(
     from neo4j import GraphDatabase
 
     from src.ingestion.extract import extract_entities
+    from src.ingestion.parsers.html import parse_html
     from src.ingestion.parsers.markdown import parse_markdown
     from src.shared.config import get_config, get_settings
     from src.shared.connections import CompatQdrantClient
 
-    config = get_config()
+    config_global = get_config()
     settings = get_settings()
 
-    # Allow optional overrides prior to ingestion
+    # Work on a deep copy of the global config to avoid mutating
+    # process-wide state when per-call overrides are supplied.
+    try:
+        config = config_global.model_copy(deep=True)  # pydantic v2
+    except Exception:
+        # Fallback if model_copy is unavailable (defensive; not expected)
+        # Note: Our models are pydantic v2; this branch should not be hit.
+        import copy as _copy
+
+        config = _copy.deepcopy(config_global)
+
+    # Apply optional per-call overrides on the local config copy only
     if embedding_model:
         try:
-            config.embedding.model_name = embedding_model
-        except Exception:
+            # Correct attribute is `embedding_model` (alias `model_name` is for input)
+            config.embedding.embedding_model = embedding_model
+        except Exception as exc:
             logger.warning(
                 "Failed to override embedding model via ingest_document",
                 requested_model=embedding_model,
+                error=str(exc),
             )
     if embedding_version:
         try:
             config.embedding.version = embedding_version
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "Failed to override embedding version via ingest_document",
                 requested_version=embedding_version,
+                error=str(exc),
             )
 
     # Initialize clients
@@ -1749,6 +1778,8 @@ def ingest_document(
         # Parse document
         if format == "markdown":
             result = parse_markdown(source_uri, content)
+        elif format == "html":
+            result = parse_html(source_uri, content)
         else:
             raise ValueError(f"Unsupported format: {format}")
 
