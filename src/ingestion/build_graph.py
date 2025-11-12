@@ -1268,58 +1268,9 @@ class GraphBuilder:
                 c.name for c in self.qdrant_client.get_collections().collections
             }
             if collection not in collections:
-                self.qdrant_client.create_collection(
-                    collection_name=collection,
-                    vectors_config=vectors_config,
-                    hnsw_config=HnswConfigDiff(
-                        m=48,
-                        ef_construct=256,
-                        full_scan_threshold=10000,
-                        max_indexing_threads=0,
-                        on_disk=False,
-                    ),
-                    optimizer_config=OptimizersConfigDiff(
-                        default_segment_number=2,
-                        indexing_threshold=20000,
-                        deleted_threshold=0.2,
-                        vacuum_min_vector_number=2000,
-                        max_optimization_threads=1,
-                        flush_interval_sec=5,
-                    ),
-                    shard_number=1,
-                    replication_factor=1,
-                    write_consistency_factor=1,
-                    on_disk_payload=True,
-                )
-                logger.info("Created Qdrant collection", collection=collection)
+                self._create_qdrant_collection(collection, vectors_config)
             else:
-                try:
-                    self.qdrant_client.update_collection(
-                        collection_name=collection,
-                        hnsw_config=HnswConfigDiff(
-                            m=48,
-                            ef_construct=256,
-                            full_scan_threshold=10000,
-                        ),
-                        optimizer_config=OptimizersConfigDiff(
-                            default_segment_number=2,
-                            indexing_threshold=20000,
-                            deleted_threshold=0.2,
-                            vacuum_min_vector_number=2000,
-                            max_optimization_threads=1,
-                            flush_interval_sec=5,
-                        ),
-                    )
-                    logger.info(
-                        "Updated Qdrant collection config (non-destructive)",
-                        collection=collection,
-                    )
-                except Exception as exc:
-                    logger.debug(
-                        "Qdrant update_collection not supported; continuing",
-                        collection=collection,
-                        error=str(exc),
-                    )
+                self._reconcile_qdrant_collection(collection, vectors_config)
 
             self._ensure_qdrant_payload_indexes(collection)
         except Exception as e:
@@ -1364,6 +1315,141 @@ class GraphBuilder:
                 )
             except Exception:
                 continue
+
+    def _create_qdrant_collection(
+        self, collection: str, vectors_config: Dict[str, VectorParams]
+    ) -> None:
+        self.qdrant_client.create_collection(
+            collection_name=collection,
+            vectors_config=vectors_config,
+            hnsw_config=HnswConfigDiff(
+                m=48,
+                ef_construct=256,
+                full_scan_threshold=10000,
+                max_indexing_threads=0,
+                on_disk=False,
+            ),
+            optimizer_config=OptimizersConfigDiff(
+                default_segment_number=2,
+                indexing_threshold=20000,
+                deleted_threshold=0.2,
+                vacuum_min_vector_number=2000,
+                max_optimization_threads=1,
+                flush_interval_sec=5,
+            ),
+            shard_number=1,
+            replication_factor=1,
+            write_consistency_factor=1,
+            on_disk_payload=True,
+        )
+        logger.info("Created Qdrant collection", collection=collection)
+
+    def _reconcile_qdrant_collection(
+        self, collection: str, vectors_config: Dict[str, VectorParams]
+    ) -> None:
+        info_payload = self._get_qdrant_collection_payload(collection)
+        vectors_meta = (
+            info_payload.get("config", {}).get("params", {}).get("vectors", {})
+        )
+        existing_names, is_single = self._parse_qdrant_vectors_meta(vectors_meta)
+        desired_names = set(vectors_config.keys())
+        allow_recreate = getattr(
+            self.config.search.vector.qdrant, "allow_recreate", False
+        )
+
+        if is_single:
+            logger.warning(
+                "Qdrant collection %s uses single-vector schema; attempting upgrade",
+                collection,
+            )
+            if not self._update_qdrant_vectors_config(collection, vectors_config):
+                self._maybe_recreate_qdrant_collection(
+                    collection, vectors_config, allow_recreate
+                )
+            return
+
+        missing_names = desired_names - existing_names
+        if not missing_names:
+            return
+
+        missing_config = {name: vectors_config[name] for name in missing_names}
+        logger.info(
+            "Adding missing Qdrant named vectors",
+            collection=collection,
+            missing=sorted(missing_names),
+        )
+        if not self._update_qdrant_vectors_config(collection, missing_config):
+            self._maybe_recreate_qdrant_collection(
+                collection, vectors_config, allow_recreate
+            )
+
+    def _get_qdrant_collection_payload(self, collection: str) -> Dict[str, Any]:
+        try:
+            info = self.qdrant_client.get_collection(collection_name=collection)
+            if hasattr(info, "model_dump"):
+                return info.model_dump()
+            if hasattr(info, "dict"):
+                return info.dict()
+        except Exception as exc:
+            logger.debug(
+                "Unable to fetch Qdrant collection metadata",
+                collection=collection,
+                error=str(exc),
+            )
+        return {}
+
+    @staticmethod
+    def _parse_qdrant_vectors_meta(meta: Any) -> (set, bool):
+        """
+        Returns (vector_names, is_single_vector_schema)
+        """
+        if isinstance(meta, dict):
+            # Single-vector schema encodes fields like {"size": 1024, "distance": "Cosine", ...}
+            if "size" in meta:
+                return set(), True
+            return set(meta.keys()), False
+        return set(), True
+
+    def _update_qdrant_vectors_config(
+        self, collection: str, vectors_config: Dict[str, VectorParams]
+    ) -> bool:
+        try:
+            self.qdrant_client.update_collection(
+                collection_name=collection,
+                vectors_config=vectors_config,
+            )
+            logger.info(
+                "Updated Qdrant collection vectors",
+                collection=collection,
+                vectors=list(vectors_config.keys()),
+            )
+            return True
+        except Exception as exc:
+            logger.warning(
+                "Unable to update Qdrant vectors config",
+                collection=collection,
+                error=str(exc),
+            )
+            return False
+
+    def _maybe_recreate_qdrant_collection(
+        self,
+        collection: str,
+        vectors_config: Dict[str, VectorParams],
+        allow_recreate: bool,
+    ) -> None:
+        if not allow_recreate:
+            raise RuntimeError(
+                "Qdrant collection schema is incompatible with multi-vector layout. "
+                "Set search.vector.qdrant.allow_recreate=true to allow automatic "
+                "recreation or migrate the collection manually."
+            )
+        logger.warning(
+            "Recreating Qdrant collection with multi-vector schema",
+            collection=collection,
+        )
+        self.qdrant_client.delete_collection(collection_name=collection)
+        self._create_qdrant_collection(collection, vectors_config)
 
     def _upsert_to_qdrant(
         self,

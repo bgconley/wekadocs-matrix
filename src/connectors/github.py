@@ -5,6 +5,7 @@ Supports polling for changes and webhook-based real-time updates.
 
 import hashlib
 import hmac
+import json
 import logging
 import os
 from datetime import datetime
@@ -65,9 +66,10 @@ class GitHubConnector(BaseConnector):
             try:
                 # Fetch recent commits
                 commits_url = f"{self.base_url}/repos/{self.owner}/{self.repo}/commits"
+                since_iso, since_sha = self._parse_cursor(since)
                 params = {"per_page": self.config.batch_size}
-                if since:
-                    params["since"] = since
+                if since_iso:
+                    params["since"] = since_iso
 
                 response = await client.get(
                     commits_url,
@@ -78,12 +80,25 @@ class GitHubConnector(BaseConnector):
                 response.raise_for_status()
                 commits = response.json()
 
+                if since_sha:
+                    trimmed: List[Dict[str, Any]] = []
+                    for commit in commits:
+                        if commit.get("sha") == since_sha:
+                            break
+                        trimmed.append(commit)
+                    commits = trimmed
+
                 if not commits:
                     logger.debug("No new commits found")
                     return [], since
 
                 events = []
                 latest_sha = commits[0]["sha"] if commits else since
+                latest_timestamp = (
+                    commits[0].get("commit", {}).get("author", {}).get("date")
+                    if commits
+                    else None
+                )
 
                 # Check each commit for docs changes
                 for commit in commits:
@@ -147,7 +162,8 @@ class GitHubConnector(BaseConnector):
                     f"Fetched {len(events)} documentation changes from "
                     f"{len(commits)} commits"
                 )
-                return events, latest_sha
+                next_cursor = self._serialize_cursor(latest_timestamp, latest_sha)
+                return events, next_cursor
 
             except httpx.HTTPStatusError as e:
                 logger.error(
@@ -190,9 +206,7 @@ class GitHubConnector(BaseConnector):
         # Constant-time comparison
         return hmac.compare_digest(computed, expected_sig)
 
-    async def webhook_to_event(
-        self, payload: Dict[str, Any]
-    ) -> Optional[IngestionEvent]:
+    async def webhook_to_event(self, payload: Dict[str, Any]) -> List[IngestionEvent]:
         """
         Convert GitHub webhook payload to IngestionEvent.
 
@@ -208,7 +222,7 @@ class GitHubConnector(BaseConnector):
             # Only process push events
             if "commits" not in payload:
                 logger.debug("Ignoring non-push webhook event")
-                return None
+                return []
 
             # Extract commit info
             commits = payload.get("commits", [])
@@ -236,41 +250,67 @@ class GitHubConnector(BaseConnector):
 
             if not docs_files:
                 logger.debug("No documentation files changed in push")
-                return None
+                return []
 
-            # Create event for first changed doc
-            filename = docs_files[0]
-            if filename in removed:
-                event_type = "deleted"
-            elif filename in added:
-                event_type = "created"
-            else:
-                event_type = "updated"
-
-            event = IngestionEvent(
-                source_uri=f"https://github.com/{self.owner}/{self.repo}/blob/{commit_sha}/{filename}",
-                source_type="github",
-                event_type=event_type,
-                metadata={
-                    "owner": self.owner,
-                    "repo": self.repo,
-                    "filename": filename,
-                    "commit_sha": commit_sha,
-                    "commit_message": commit.get("message", ""),
-                    "author": commit.get("author", {}).get("username", "unknown"),
-                    "webhook": True,
-                },
-                timestamp=datetime.fromisoformat(
-                    commit["timestamp"].replace("Z", "+00:00")
-                ),
+            events: List[IngestionEvent] = []
+            commit_ts = datetime.fromisoformat(
+                commit["timestamp"].replace("Z", "+00:00")
             )
 
-            logger.info(f"Webhook event created for {filename}: {event_type}")
-            return event
+            for filename in docs_files:
+                if filename in removed:
+                    event_type = "deleted"
+                elif filename in added:
+                    event_type = "created"
+                else:
+                    event_type = "updated"
+
+                event = IngestionEvent(
+                    source_uri=f"https://github.com/{self.owner}/{self.repo}/blob/{commit_sha}/{filename}",
+                    source_type="github",
+                    event_type=event_type,
+                    metadata={
+                        "owner": self.owner,
+                        "repo": self.repo,
+                        "filename": filename,
+                        "commit_sha": commit_sha,
+                        "commit_message": commit.get("message", ""),
+                        "author": commit.get("author", {}).get("username", "unknown"),
+                        "webhook": True,
+                    },
+                    timestamp=commit_ts,
+                )
+                events.append(event)
+
+            logger.info(
+                "Webhook events created for %d documentation files", len(events)
+            )
+            return events
 
         except Exception as e:
             logger.error(
                 f"Error converting webhook payload to event: {e}",
                 exc_info=True,
             )
+            return []
+
+    def _parse_cursor(
+        self, cursor: Optional[str]
+    ) -> tuple[Optional[str], Optional[str]]:
+        if not cursor:
+            return None, None
+        try:
+            data = json.loads(cursor)
+            return data.get("since"), data.get("sha")
+        except Exception:
+            # Backward compatibility: cursor may be raw ISO timestamp or SHA
+            if "T" in cursor:
+                return cursor, None
+            return None, cursor
+
+    def _serialize_cursor(
+        self, timestamp_iso: Optional[str], sha: Optional[str]
+    ) -> Optional[str]:
+        if not timestamp_iso and not sha:
             return None
+        return json.dumps({"since": timestamp_iso, "sha": sha})

@@ -148,7 +148,7 @@ class ConnectorManager:
         while self.running:
             try:
                 # Check for backpressure
-                if self.queue.is_backpressure():
+                if await self.queue.is_backpressure():
                     logger.warning(
                         f"Queue backpressure detected, pausing {name} polling"
                     )
@@ -177,6 +177,6 @@ class ConnectorManager:
             stats.append(connector.get_stats())
         return stats
 
-    def get_queue_stats(self) -> Dict:
+    async def get_queue_stats(self) -> Dict:
         """Get ingestion queue statistics."""
-        return self.queue.get_stats()
+        return await self.queue.get_stats()

@@ -312,14 +312,30 @@ class ContextAssembler:
 
         parts = []
         first_chunk = chunks[0]
+        parts.extend(
+            self._build_group_prefix_parts(
+                first_chunk, current_document, current_parent
+            )
+        )
 
-        # Add document separator if switching documents
+        for idx, chunk in enumerate(chunks):
+            parts.extend(
+                self._build_chunk_parts(chunk, is_last=(idx == len(chunks) - 1))
+            )
+
+        return "\n".join(parts)
+
+    def _build_group_prefix_parts(
+        self,
+        first_chunk: ChunkResult,
+        current_document: Optional[str],
+        current_parent: Optional[str],
+    ) -> List[str]:
+        parts: List[str] = []
         if current_document and first_chunk.document_id != current_document:
             parts.append("\n---\n")
 
         is_microdoc_extra = getattr(first_chunk, "is_microdoc_extra", False)
-
-        # Add section heading if available and different from current
         if first_chunk.heading and first_chunk.parent_section_id != current_parent:
             if is_microdoc_extra:
                 display_heading = first_chunk.heading or "Related Document"
@@ -334,25 +350,21 @@ class ContextAssembler:
                 else:
                     parts.append(f"\n{header_line}\n")
             else:
-                heading_prefix = "#" * min(first_chunk.level + 1, 4)  # Cap at ####
+                heading_prefix = "#" * min(first_chunk.level + 1, 4)
                 if current_parent is None:
                     parts.append(f"{heading_prefix} {first_chunk.heading}\n")
                 else:
                     parts.append(f"\n{heading_prefix} {first_chunk.heading}\n")
+        return parts
 
-        # Add chunk texts
-        for chunk in chunks:
-            parts.append(chunk.text)
-
-            # Add expansion indicator if configured
-            if self.include_citations and chunk.is_expanded:
-                parts.append(f" [↪ expanded from {chunk.expansion_source}]")
-
-            # Add chunk boundary indicator for split chunks
-            if chunk.is_split and chunk != chunks[-1]:
-                parts.append(" [...] ")
-
-        return "\n".join(parts)
+    def _build_chunk_parts(self, chunk: ChunkResult, *, is_last: bool) -> List[str]:
+        parts = [chunk.text or ""]
+        if self.include_citations and getattr(chunk, "is_expanded", False):
+            source = getattr(chunk, "expansion_source", "seed")
+            parts.append(f" [↪ expanded from {source}]")
+        if chunk.is_split and not is_last:
+            parts.append(" [...] ")
+        return [part for part in parts if part]
 
     def _fit_partial_group(
         self,
@@ -373,28 +385,50 @@ class ContextAssembler:
         Returns:
             Tuple of (formatted text, included chunks)
         """
-        included = []
-        parts = []
+        included: List[ChunkResult] = []
+        rendered_parts: List[str] = []
+        tokens_used = 0
 
-        # Try to include chunks one by one
-        for i, chunk in enumerate(chunks):
-            # Format just this chunk
-            chunk_group = chunks[: i + 1]
-            text = self._format_group(chunk_group, current_document, current_parent)
-            tokens = self.tokenizer.count_tokens(text)
+        def try_append_sequence(sequence: List[str]) -> bool:
+            nonlocal tokens_used
+            if not sequence:
+                return True
+            base_count = len(rendered_parts)
+            pending_parts: List[str] = []
+            pending_tokens = 0
+            additions = 0
+            for part in sequence:
+                if not part:
+                    continue
+                addition_text = part if (base_count + additions) == 0 else f"\n{part}"
+                addition_tokens = self.tokenizer.count_tokens(addition_text)
+                if tokens_used + pending_tokens + addition_tokens > budget:
+                    return False
+                pending_parts.append(part)
+                pending_tokens += addition_tokens
+                additions += 1
+            rendered_parts.extend(pending_parts)
+            tokens_used += pending_tokens
+            return True
 
-            if tokens <= budget:
-                # Can fit this chunk
-                included = chunk_group
-                parts = [text]
+        prefix_parts = self._build_group_prefix_parts(
+            chunks[0], current_document, current_parent
+        )
+        if prefix_parts and not try_append_sequence(prefix_parts):
+            return "", []
+
+        for idx, chunk in enumerate(chunks):
+            seq = self._build_chunk_parts(chunk, is_last=(idx == len(chunks) - 1))
+            if not seq:
+                continue
+            if try_append_sequence(seq):
+                included = chunks[: idx + 1]
             else:
-                # Can't fit any more
                 break
 
         if included:
-            return "\n".join(parts), included
-        else:
-            return "", []
+            return "\n".join(rendered_parts), included
+        return "", []
 
     def format_with_citations(self, context: AssembledContext) -> str:
         """

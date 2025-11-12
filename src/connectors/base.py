@@ -179,14 +179,20 @@ class BaseConnector(ABC):
 
         try:
             # Convert webhook payload to ingestion event
-            event = await self.webhook_to_event(payload)
-            if event:
-                success = await self.queue.enqueue(event)
-                if success:
-                    self.stats["events_queued"] += 1
-                    return {"status": "success", "event": event.source_uri}
-                else:
-                    return {"status": "error", "error": "queue_full"}
+            events = await self.webhook_to_event(payload)
+            if events:
+                queued = 0
+                for event in events:
+                    success = await self.queue.enqueue(event)
+                    if success:
+                        queued += 1
+                    else:
+                        logger.warning(
+                            "Ingestion queue full while processing webhook event",
+                            extra={"source": event.source_uri},
+                        )
+                self.stats["events_queued"] += queued
+                return {"status": "success", "queued": queued}
             else:
                 return {"status": "ignored", "reason": "no_action_needed"}
 
@@ -198,12 +204,10 @@ class BaseConnector(ABC):
             return {"status": "error", "error": str(e)}
 
     @abstractmethod
-    async def webhook_to_event(
-        self, payload: Dict[str, Any]
-    ) -> Optional[IngestionEvent]:
+    async def webhook_to_event(self, payload: Dict[str, Any]) -> List[IngestionEvent]:
         """
         Convert webhook payload to IngestionEvent.
-        Returns None if event should be ignored.
+        Returns [] if event should be ignored.
         Must be implemented by subclasses.
         """
         pass

@@ -1914,16 +1914,26 @@ class HybridRetriever:
         text = (base.text or "").strip()
         if not text:
             return []
+        query_vector: Optional[List[float]] = None
         try:
-            vectors = self.vector_retriever.embedder.embed_documents([text])
-            if not vectors:
-                return []
-            query_vector = vectors[0]
+            query_vector = self.vector_retriever.embedder.embed_query(text)
         except Exception as exc:
             logger.debug(
-                "Microdoc embedding failed",
+                "Microdoc query embedding failed; falling back to passage embedding",
                 extra={"error": str(exc), "doc": base.document_id},
             )
+            try:
+                vectors = self.vector_retriever.embedder.embed_documents([text])
+                if vectors:
+                    query_vector = vectors[0]
+            except Exception as inner_exc:
+                logger.debug(
+                    "Microdoc embedding failed",
+                    extra={"error": str(inner_exc), "doc": base.document_id},
+                )
+                return []
+
+        if not query_vector:
             return []
 
         try:
@@ -2014,10 +2024,20 @@ class HybridRetriever:
         total = self.tokenizer.count_tokens(text)
         if total <= token_budget:
             return text, total
-        tokens = self.tokenizer.backend.encode(text)
-        truncated_tokens = tokens[:token_budget]
-        truncated_text = self.tokenizer.backend.decode(truncated_tokens)
-        return truncated_text, len(truncated_tokens)
+        if getattr(self.tokenizer, "supports_decode", False):
+            tokens = self.tokenizer.encode(text)
+            truncated_tokens = tokens[:token_budget]
+            truncated_text = self.tokenizer.decode_tokens(truncated_tokens)
+            return truncated_text, len(truncated_tokens)
+
+        logger.warning(
+            "Tokenizer backend %s does not support decode; truncating text approximately",
+            getattr(self.tokenizer, "backend_name", "unknown"),
+        )
+        ratio = token_budget / total if total else 0
+        approx_chars = max(1, int(len(text) * ratio))
+        truncated_text = text[:approx_chars]
+        return truncated_text, min(token_budget, total)
 
     def _chunk_from_props(self, props: Dict[str, Any]) -> ChunkResult:
         boundaries = props.get("boundaries_json", "{}")

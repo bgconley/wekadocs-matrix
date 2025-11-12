@@ -73,6 +73,8 @@ class QdrantVectorConfig(BaseModel):
     collection_name: str = "weka_sections"
     use_grpc: bool = False
     timeout: int = 30
+    allow_recreate: bool = False
+    query_vector_name: str = "content"
 
 
 class Neo4jVectorConfig(BaseModel):

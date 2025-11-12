@@ -352,6 +352,26 @@ class TokenizerService:
         """
         return self.backend.count_tokens(text)
 
+    @property
+    def supports_decode(self) -> bool:
+        return hasattr(self.backend, "decode") and not isinstance(
+            self.backend, JinaSegmenterBackend
+        )
+
+    def encode(self, text: str) -> List[int]:
+        if not hasattr(self.backend, "encode"):
+            raise RuntimeError(
+                f"Tokenizer backend {self.backend_name} does not support encode()."
+            )
+        return self.backend.encode(text)
+
+    def decode_tokens(self, token_ids: List[int]) -> str:
+        if not self.supports_decode:
+            raise NotImplementedError(
+                f"Tokenizer backend {self.backend_name} does not support decode()."
+            )
+        return self.backend.decode(token_ids)
+
     def needs_splitting(self, text: str) -> bool:
         """
         Check if text exceeds token limit.
@@ -447,7 +467,7 @@ class TokenizerService:
             )
 
         # Encode entire text to tokens
-        tokens = self.backend.encode(text)
+        tokens = self.encode(text)
         total_tokens = len(tokens)
 
         chunks = []
@@ -462,7 +482,7 @@ class TokenizerService:
             chunk_tokens = tokens[start_idx:end_idx]
 
             # Decode chunk tokens back to text
-            chunk_text = self.backend.decode(chunk_tokens)
+            chunk_text = self.decode_tokens(chunk_tokens)
 
             # Create chunk metadata
             chunk = {

@@ -142,8 +142,30 @@ class QueryService:
 
             if primary == "qdrant":
                 collection_name = self.config.search.vector.qdrant.collection_name
-                vector_store = QdrantVectorStore(qdrant_client, collection_name)
-                logger.info(f"Using Qdrant vector store: {collection_name}")
+                vector_fields = getattr(
+                    self.config.search.hybrid, "vector_fields", {"content": 1.0}
+                )
+                multi_vector_enabled = any(
+                    key != "content" and (weight or 0) > 0
+                    for key, weight in vector_fields.items()
+                )
+                query_vector_name = (
+                    getattr(
+                        self.config.search.vector.qdrant, "query_vector_name", "content"
+                    )
+                    or "content"
+                )
+                vector_store = QdrantVectorStore(
+                    qdrant_client,
+                    collection_name,
+                    query_vector_name=query_vector_name,
+                    use_named_vectors=multi_vector_enabled,
+                )
+                logger.info(
+                    "Using Qdrant vector store: %s (named_vectors=%s)",
+                    collection_name,
+                    "on" if multi_vector_enabled else "off",
+                )
             else:
                 # Neo4j vectors (if configured)
                 from src.query.hybrid_search import Neo4jVectorStore

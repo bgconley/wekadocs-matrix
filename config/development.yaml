@@ -42,6 +42,8 @@ search:
       collection_name: "chunks_multi"  # Phase 7E+: Multi-vector collection
       use_grpc: false
       timeout: 30
+      allow_recreate: false  # Set true to auto-rebuild collections during schema upgrades
+      query_vector_name: "content"
     neo4j:
       index_name: "section_embeddings_v2"  # Phase 7C: New 1024-D index
 

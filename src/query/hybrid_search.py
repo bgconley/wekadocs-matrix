@@ -57,9 +57,18 @@ class VectorStore:
 class QdrantVectorStore(VectorStore):
     """Qdrant vector store implementation."""
 
-    def __init__(self, qdrant_client, collection_name: str):
+    def __init__(
+        self,
+        qdrant_client,
+        collection_name: str,
+        *,
+        query_vector_name: str = "content",
+        use_named_vectors: bool = False,
+    ):
         self.client = qdrant_client
         self.collection_name = collection_name
+        self.query_vector_name = query_vector_name or "content"
+        self.use_named_vectors = use_named_vectors
 
     def search(
         self, vector: List[float], k: int, filters: Optional[Dict] = None
@@ -83,6 +92,7 @@ class QdrantVectorStore(VectorStore):
 
         from src.shared.observability.metrics import (
             qdrant_operation_latency_ms,
+            qdrant_schema_mismatch_total,
             qdrant_search_total,
         )
 
@@ -91,9 +101,17 @@ class QdrantVectorStore(VectorStore):
 
         try:
             # Search
+            query_vector_payload: Any
+            if isinstance(vector, dict):
+                query_vector_payload = vector
+            elif self.use_named_vectors:
+                query_vector_payload = {self.query_vector_name: vector}
+            else:
+                query_vector_payload = vector
+
             results = self.client.search(
                 collection_name=self.collection_name,
-                query_vector=vector,
+                query_vector=query_vector_payload,
                 limit=k,
                 query_filter=qdrant_filter,
                 with_payload=True,
@@ -108,11 +126,23 @@ class QdrantVectorStore(VectorStore):
                 collection_name=self.collection_name, operation="search"
             ).observe(latency_ms)
 
-        except Exception:
+        except Exception as exc:
             status = "error"
             qdrant_search_total.labels(
                 collection_name=self.collection_name, status=status
             ).inc()
+            if self.use_named_vectors:
+                message = str(exc).lower()
+                if "named vector" in message or "vector name" in message:
+                    qdrant_schema_mismatch_total.labels(
+                        collection_name=self.collection_name
+                    ).inc()
+                    logger.error(
+                        "Qdrant schema mismatch detected during search",
+                        collection=self.collection_name,
+                        use_named_vectors=self.use_named_vectors,
+                        error=str(exc),
+                    )
             raise
 
         # Convert to standard format

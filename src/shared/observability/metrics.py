@@ -121,6 +121,12 @@ qdrant_operation_latency_ms = Histogram(
     buckets=(1, 5, 10, 25, 50, 100, 250, 500, 1000),
 )
 
+qdrant_schema_mismatch_total = Counter(
+    "qdrant_schema_mismatch_total",
+    "Total Qdrant schema mismatch detections (e.g., unnamed vector query against multi-vector collection).",
+    ["collection_name"],
+)
+
 # ===== Pre-Phase 7 (G1): Ranking metrics =====
 ranking_latency_ms = Histogram(
     "ranking_latency_ms",

@@ -5,11 +5,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
 
-# Optional: use the same embedder as build_graph uses
-try:
-    from sentence_transformers import SentenceTransformer
-except Exception:
-    SentenceTransformer = None
+from src.providers.factory import ProviderFactory
 
 
 @dataclass
@@ -62,6 +58,7 @@ class Reconciler:
             self.qdrant = qdrant_client or config_or_qdrant
             self.collection = collection_name
             self.version = embedding_version
+        self._embedder = None
 
     def _vector_field_names(self) -> List[str]:
         """
@@ -87,6 +84,23 @@ class Reconciler:
         invocations.
         """
         return {name: list(base_vector) for name in self._vector_field_names()}
+
+    def _get_embedding_fn(self) -> Callable[[str], List[float]]:
+        if not self.config:
+            raise RuntimeError(
+                "Embedding configuration unavailable; provide embedding_fn explicitly."
+            )
+        if self._embedder is None:
+            factory = ProviderFactory()
+            self._embedder = factory.create_embedding_provider()
+
+        def embed(text: str) -> List[float]:
+            vectors = self._embedder.embed_documents([text or ""])
+            if not vectors:
+                raise RuntimeError("Embedding provider returned no vectors")
+            return vectors[0]
+
+        return embed
 
     def _graph_section_ids(self) -> Set[str]:
         """Get all Section IDs from Neo4j with matching embedding_version (synchronous)."""
@@ -137,38 +151,44 @@ class Reconciler:
     def _delete_points_by_node_ids(self, node_ids: List[str]) -> int:
         if not node_ids:
             return 0
-        # Convert section IDs to UUIDs before deleting
-        for nid in node_ids:
+        batch_size = 256
+        deleted = 0
+        for start in range(0, len(node_ids), batch_size):
+            batch = node_ids[start : start + batch_size]
+            if not batch:
+                continue
+            selector = {
+                "filter": {
+                    "must": [
+                        {"key": "node_id", "match": {"any": batch}},
+                        {
+                            "key": "embedding_version",
+                            "match": {"value": self.version},
+                        },
+                    ]
+                }
+            }
             try:
                 self.qdrant.delete(
                     collection_name=self.collection,
-                    points_selector={
-                        "filter": {
-                            "must": [
-                                {"key": "node_id", "match": {"value": nid}},
-                                {
-                                    "key": "embedding_version",
-                                    "match": {"value": self.version},
-                                },
-                            ]
-                        }
-                    },
+                    points_selector=selector,
                     wait=True,
                 )
             except Exception:
-                # Fall back to best-effort deletion without embedding filter
+                fallback_selector = {
+                    "filter": {
+                        "must": [
+                            {"key": "node_id", "match": {"any": batch}},
+                        ]
+                    }
+                }
                 self.qdrant.delete(
                     collection_name=self.collection,
-                    points_selector={
-                        "filter": {
-                            "must": [
-                                {"key": "node_id", "match": {"value": nid}},
-                            ]
-                        }
-                    },
+                    points_selector=fallback_selector,
                     wait=True,
                 )
-        return len(node_ids)
+            deleted += len(batch)
+        return deleted
 
     def _upsert_points(
         self,
@@ -229,13 +249,7 @@ class Reconciler:
         # Build embeddings for missing
         if missing:
             if embedding_fn is None:
-                if SentenceTransformer is None:
-                    raise RuntimeError("No embedding function available")
-                model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-
-                def emb_fn(t):
-                    return model.encode(t).tolist()
-
+                emb_fn = self._get_embedding_fn()
             else:
                 emb_fn = embedding_fn
 
