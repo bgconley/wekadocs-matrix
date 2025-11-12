@@ -32,7 +32,6 @@ class JinaRerankProvider:
     - Rate limiting: 500 RPM, 1M TPM (Jina API limits - standard tier)
     - Exponential backoff on errors
     - Circuit breaker for resilience
-    - Shared rate limiter across all rerank calls
     """
 
     API_URL = "https://api.jina.ai/v1/rerank"
@@ -170,6 +169,7 @@ class JinaRerankProvider:
             rerank_error_total.labels(
                 model_id=self._model_id, error_type=type(e).__name__
             ).inc()
+            rerank_request_total.labels(model_id=self._model_id, status="error").inc()
             logger.error(f"Failed to rerank with Jina: {e}")
             raise RuntimeError(f"Jina reranking failed: {e}")
 
@@ -244,8 +244,7 @@ class JinaRerankProvider:
                         index = None
                     if index is None or index >= len(candidates):
                         logger.warning(
-                            "Jina rerank response missing valid index",
-                            response=result,
+                            "Jina rerank response missing valid index: %s", result
                         )
                         continue
 
@@ -254,8 +253,7 @@ class JinaRerankProvider:
                         score = result.get("score")
                     if score is None:
                         logger.warning(
-                            "Jina rerank response missing score field",
-                            response=result,
+                            "Jina rerank response missing score field: %s", result
                         )
                         continue
 

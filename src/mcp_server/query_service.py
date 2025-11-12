@@ -98,20 +98,30 @@ class QueryService:
 
         Returns None if reranking is disabled (RERANK_PROVIDER=none).
         """
+        reranker_cfg = getattr(self.config.search.hybrid, "reranker", None)
+        if not reranker_cfg or not getattr(reranker_cfg, "enabled", False):
+            return None
+
         if self._reranker is None:
+            provider_hint = getattr(reranker_cfg, "provider", None)
+            model_hint = getattr(reranker_cfg, "model", None)
             try:
                 factory = ProviderFactory()
-                self._reranker = factory.create_rerank_provider()
+                self._reranker = factory.create_rerank_provider(
+                    provider=provider_hint,
+                    model=model_hint,
+                )
 
                 logger.info(
-                    f"Reranker loaded successfully: "
-                    f"provider={self._reranker.provider_name}, "
-                    f"model={self._reranker.model_id}"
+                    "Reranker loaded successfully: provider=%s, model=%s",
+                    self._reranker.provider_name,
+                    self._reranker.model_id,
                 )
             except Exception as e:
                 # If reranker initialization fails, log warning but continue without reranking
                 logger.warning(
-                    f"Reranker initialization failed: {e}. Continuing without reranking."
+                    "Reranker initialization failed: %s. Continuing without reranking.",
+                    e,
                 )
                 self._reranker = None
 
@@ -165,10 +175,12 @@ class QueryService:
 
             reranker_cfg = getattr(self.config.search.hybrid, "reranker", None)
             if reranker_cfg and getattr(reranker_cfg, "enabled", False):
-                logger.warning(
-                    "config.search.hybrid.reranker is enabled, but the Phase 7E "
-                    "HybridRetriever only exposes stub hooks today. Results will "
-                    "match non-reranked ordering until reranking is implemented."
+                provider_hint = getattr(reranker_cfg, "provider", None) or "auto"
+                model_hint = getattr(reranker_cfg, "model", None) or "auto"
+                logger.info(
+                    "config.search.hybrid.reranker enabled (provider=%s, model=%s)",
+                    provider_hint,
+                    model_hint,
                 )
 
             self._hybrid_retriever = HybridRetriever(

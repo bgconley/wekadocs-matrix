@@ -10,9 +10,10 @@ from scratch.
 2. Export the standard dev secrets (`NEO4J_PASSWORD`, `REDIS_PASSWORD`, `JINA_API_KEY`
    if you want real embeddings/reranking). The new test suite can run air-gapped because it
    ships a deterministic embedding provider, but production parity runs should set
-   `EMBEDDINGS_PROVIDER=jina-ai` and, when exercising the reranker path, enable
-   `search.hybrid.reranker.enabled=true` plus `RERANK_PROVIDER=jina-ai`,
-   `RERANK_MODEL=jina-reranker-v3`.
+   `EMBEDDINGS_PROVIDER=jina-ai` and, when exercising the reranker path, flip
+   `search.hybrid.reranker.enabled=true` in your config. You can also set
+   `search.hybrid.reranker.provider=jina-ai` / `search.hybrid.reranker.model=jina-reranker-v3`
+   (env overrides like `RERANK_PROVIDER` still work for one-off experiments).
 3. Ensure the HuggingFace tokenizer cache is present locally (see
    `config/development.yaml` → `embedding`). Set `TRANSFORMERS_OFFLINE=true` to avoid
    network fetches during CI.
@@ -103,7 +104,7 @@ line) capturing the signals we monitor in Grafana. Key fields:
 | `seed_gated` / `seeds_after_gate` | Counts how many ANN seeds were dropped when we enforce single-document focus. | Alert if gating suddenly spikes (possible doc_tag drift). |
 | `microdoc_extras` / `microdoc_tokens` | Number of microdoc chunks appended after the primary budget and their token cost. | Track microdoc reliance; spikes can indicate chunking regressions. |
 | `microdoc_present` / `microdoc_used` | Whether microdocs were available and how many made it into the final prompt. | Ensure microdocs don’t crowd out primaries; investigate if `present=1` but `used=0`. |
-| `reranker_applied` | Boolean placeholder that flips once the Jina reranker is wired. | Build a panel that proves reranking is active in prod. |
+| `reranker_applied` | 1 when the reranker successfully reorders seeds (`reranker_reason` explains skips). | Build a panel that spot-checks activation and alerts if it stays false while enabled. |
 | `expansion_reason`, `expansion_count`, `expansion_cap_hit` | Explain why graph expansion fired and whether it hit configured limits. | Feed into adjacency health dashboards. |
 
 ### Capturing the metrics
@@ -130,6 +131,6 @@ metrics samples and feed them into Grafana alerts. When wiring dashboards, filte
 `metrics.seed_gated`, `metrics.microdoc_present`, and `metrics.reranker_applied` to
 validate that the v2.2 changes are live.
 
-Future improvements (tracked in context files): wire an actual reranker once
-credentials arrive, and plug semantic chunk metadata into the ingestion hook so
-`semantic_metadata` holds real entities/topics.
+Future improvements (tracked in context files): expand the reranker dashboards
+with p95 latency/error ratios and plug semantic chunk metadata into the ingestion
+hook so `semantic_metadata` holds real entities/topics.

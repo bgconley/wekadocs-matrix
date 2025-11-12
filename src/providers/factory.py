@@ -143,9 +143,53 @@ class ProviderFactory:
             RERANK_MODEL: Model identifier
             JINA_API_KEY: Jina API key (required for jina-ai)
         """
-        # Get config from parameters or ENV
-        provider = provider or os.getenv("RERANK_PROVIDER", "jina-ai")
-        model = model or os.getenv("RERANK_MODEL", "jina-reranker-v3")
+        from src.shared.config import get_config
+
+        def _normalize_provider(value: Optional[str]) -> Optional[str]:
+            if value is None:
+                return None
+            normalized = value.strip().lower()
+            if not normalized:
+                return None
+            if normalized in {"jina", "jina-ai"}:
+                return "jina-ai"
+            if normalized in {"none", "disabled"}:
+                return "noop"
+            return normalized
+
+        def _normalize_model(value: Optional[str]) -> Optional[str]:
+            if value is None:
+                return None
+            normalized = value.strip()
+            return normalized or None
+
+        config = get_config()
+        reranker_cfg = getattr(
+            getattr(getattr(config, "search", None), "hybrid", None), "reranker", None
+        )
+        config_provider = (
+            _normalize_provider(getattr(reranker_cfg, "provider", None))
+            if reranker_cfg
+            else None
+        )
+        config_model = (
+            _normalize_model(getattr(reranker_cfg, "model", None))
+            if reranker_cfg
+            else None
+        )
+
+        env_provider = _normalize_provider(os.getenv("RERANK_PROVIDER"))
+        env_model = _normalize_model(os.getenv("RERANK_MODEL"))
+
+        provider = (
+            _normalize_provider(provider)
+            or env_provider
+            or config_provider
+            or "jina-ai"
+        )
+        model = (
+            _normalize_model(model) or env_model or config_model or "jina-reranker-v3"
+        )
 
         logger.info(f"Creating rerank provider: provider={provider}, model={model}")
 

@@ -10,10 +10,11 @@ class FakeRerankProvider:
 
     def rerank(self, query, candidates, top_k=10):
         sliced = list(candidates[:top_k])
+        for idx, cand in enumerate(sliced, start=1):
+            cand["original_rank"] = idx
         sliced.reverse()
         for idx, cand in enumerate(sliced, start=1):
             cand["rerank_score"] = 100.0 - idx
-            cand["original_rank"] = idx
             cand["reranker"] = self.model_id
         return sliced
 
@@ -64,6 +65,10 @@ def test_apply_reranker_reorders_and_sets_metadata(monkeypatch):
     assert reranked[0].chunk_id == "b"
     assert reranked[0].rerank_score is not None
     assert reranked[0].fusion_method == "rerank"
+    assert reranked[0].rerank_rank == 1
+    assert reranked[0].rerank_original_rank == 2
+    assert reranked[1].rerank_rank == 2
+    assert reranked[1].rerank_original_rank == 1
     assert metrics["reranker_applied"] is True
     assert metrics["reranker_reason"] == "ok"
     assert metrics["reranker_model"] == fake_reranker.model_id

@@ -1470,8 +1470,18 @@ class GraphBuilder:
         # CRITICAL: Store original node_id in payload for reconciliation
         # Parity checks will use payload.node_id to match with Neo4j
         text_value = payload.get("text", "")
-        payload["text_hash"] = self._compute_text_hash(text_value)
-        payload["shingle_hash"] = self._compute_shingle_hash(text_value)
+        existing_text_hash = section.get("text_hash")
+        payload["text_hash"] = (
+            existing_text_hash
+            if existing_text_hash
+            else self._compute_text_hash(text_value)
+        )
+        existing_shingle_hash = section.get("shingle_hash")
+        payload["shingle_hash"] = (
+            existing_shingle_hash
+            if existing_shingle_hash
+            else self._compute_shingle_hash(text_value)
+        )
         payload["semantic_metadata"] = self._extract_semantic_metadata(section)
 
         # qdrant-client expects the keyword `vector` even when we supply a named

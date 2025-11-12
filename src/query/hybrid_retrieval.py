@@ -105,6 +105,7 @@ class ChunkResult:
     fused_score: Optional[float] = None  # Final fused score
     rerank_score: Optional[float] = None
     rerank_rank: Optional[int] = None
+    rerank_original_rank: Optional[int] = None
     reranker: Optional[str] = None
 
     # Retrieval context metadata
@@ -1483,10 +1484,7 @@ class HybridRetriever:
             )
             latency_ms = (time.time() - start_time) * 1000
         except Exception as exc:  # pragma: no cover - provider failure logging
-            logger.warning(
-                "Reranker call failed; returning fused ordering",
-                error=str(exc),
-            )
+            logger.warning("Reranker call failed; returning fused ordering: %s", exc)
             metrics["reranker_applied"] = False
             metrics["reranker_reason"] = "provider_error"
             return seeds
@@ -1503,11 +1501,12 @@ class HybridRetriever:
                 chunk.rerank_score = score
 
             rank = payload.get("original_rank")
+            chunk.rerank_original_rank = None
             if rank is not None:
                 try:
-                    chunk.rerank_rank = int(rank)
+                    chunk.rerank_original_rank = int(rank)
                 except (TypeError, ValueError):
-                    chunk.rerank_rank = None
+                    chunk.rerank_original_rank = None
 
             chunk.reranker = payload.get("reranker") or reranker.model_id
             chunk.fusion_method = "rerank"
@@ -1519,6 +1518,9 @@ class HybridRetriever:
             return seeds
 
         reranked_chunks.sort(key=lambda c: c.fused_score or 0.0, reverse=True)
+        for idx, chunk in enumerate(reranked_chunks, start=1):
+            chunk.rerank_rank = idx
+
         metrics["reranker_applied"] = True
         metrics["reranker_reason"] = "ok"
         metrics["reranker_model"] = reranker.model_id
@@ -1534,18 +1536,21 @@ class HybridRetriever:
         if self._reranker is not None:
             return self._reranker
 
+        cfg_provider = getattr(self.reranker_config, "provider", None)
+        cfg_model = getattr(self.reranker_config, "model", None)
+
         try:
-            self._reranker = ProviderFactory.create_rerank_provider()
+            self._reranker = ProviderFactory.create_rerank_provider(
+                provider=cfg_provider,
+                model=cfg_model,
+            )
             logger.info(
-                "HybridRetriever reranker initialized",
-                provider=self._reranker.provider_name,
-                model=self._reranker.model_id,
+                "HybridRetriever reranker initialized: provider=%s, model=%s",
+                self._reranker.provider_name,
+                self._reranker.model_id,
             )
         except Exception as exc:  # pragma: no cover - provider init logging
-            logger.warning(
-                "Unable to initialize reranker provider",
-                error=str(exc),
-            )
+            logger.warning("Unable to initialize reranker provider: %s", exc)
             self._reranker = None
 
         return self._reranker
