@@ -24,6 +24,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from src.shared.config import get_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -303,7 +305,22 @@ class TokenizerService:
             ValueError: If backend is invalid
             RuntimeError: If backend initialization fails
         """
-        backend_name = os.getenv("TOKENIZER_BACKEND", "hf").lower()
+        backend_source = "env"
+        backend_name = os.getenv("TOKENIZER_BACKEND")
+        if not backend_name:
+            backend_source = "config"
+            backend_name = None
+            try:
+                config = get_config()
+                tokenizer_config = getattr(config, "tokenizer", None)
+                if tokenizer_config:
+                    backend_name = getattr(tokenizer_config, "backend", None)
+            except Exception:
+                backend_name = None
+        if not backend_name:
+            backend_source = "default"
+            backend_name = "hf"
+        backend_name = backend_name.lower()
 
         if backend_name == "hf":
             self.backend = HuggingFaceTokenizerBackend()
@@ -332,9 +349,9 @@ class TokenizerService:
         )
 
         logger.info(
-            f"TokenizerService initialized: backend={self.backend_name}, "
-            f"max_tokens={self.max_tokens}, target={self.target_tokens}, "
-            f"overlap={self.overlap_tokens}"
+            f"TokenizerService initialized: backend={self.backend_name} "
+            f"(source={backend_source}), max_tokens={self.max_tokens}, "
+            f"target={self.target_tokens}, overlap={self.overlap_tokens}"
         )
 
     def count_tokens(self, text: str) -> int:

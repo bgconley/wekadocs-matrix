@@ -136,6 +136,12 @@ class ContextAssembler:
 
         logger.info(f"ContextAssembler initialized: max_tokens={self.max_tokens}")
 
+        try:
+            newline_cost = self.tokenizer.count_tokens("\n")
+        except Exception:
+            newline_cost = 1
+        self._newline_token_cost = newline_cost if newline_cost > 0 else 1
+
     def assemble(
         self, chunks: List[ChunkResult], query: Optional[str] = None
     ) -> AssembledContext:
@@ -385,50 +391,76 @@ class ContextAssembler:
         Returns:
             Tuple of (formatted text, included chunks)
         """
-        included: List[ChunkResult] = []
-        rendered_parts: List[str] = []
-        tokens_used = 0
+        if not chunks:
+            return "", []
 
-        def try_append_sequence(sequence: List[str]) -> bool:
-            nonlocal tokens_used
-            if not sequence:
-                return True
-            base_count = len(rendered_parts)
-            pending_parts: List[str] = []
-            pending_tokens = 0
-            additions = 0
-            for part in sequence:
-                if not part:
-                    continue
-                addition_text = part if (base_count + additions) == 0 else f"\n{part}"
-                addition_tokens = self.tokenizer.count_tokens(addition_text)
-                if tokens_used + pending_tokens + addition_tokens > budget:
-                    return False
-                pending_parts.append(part)
-                pending_tokens += addition_tokens
-                additions += 1
-            rendered_parts.extend(pending_parts)
-            tokens_used += pending_tokens
-            return True
+        included: List[ChunkResult] = []
+        rendered_blocks: List[str] = []
+        tokens_used = 0
 
         prefix_parts = self._build_group_prefix_parts(
             chunks[0], current_document, current_parent
         )
-        if prefix_parts and not try_append_sequence(prefix_parts):
-            return "", []
+        prefix_text = self._join_parts(prefix_parts)
+        if prefix_text:
+            prefix_tokens = self.tokenizer.count_tokens(prefix_text)
+            if prefix_tokens > budget:
+                return "", []
+            tokens_used += prefix_tokens
+            rendered_blocks.append(prefix_text)
 
         for idx, chunk in enumerate(chunks):
-            seq = self._build_chunk_parts(chunk, is_last=(idx == len(chunks) - 1))
-            if not seq:
+            chunk_parts = self._build_chunk_parts(
+                chunk, is_last=(idx == len(chunks) - 1)
+            )
+            chunk_text = self._join_parts(chunk_parts)
+            if not chunk_text:
                 continue
-            if try_append_sequence(seq):
-                included = chunks[: idx + 1]
-            else:
+
+            chunk_tokens = self._estimate_chunk_tokens(
+                chunk, chunk_parts, has_existing_blocks=bool(rendered_blocks)
+            )
+            if tokens_used + chunk_tokens > budget:
                 break
 
-        if included:
-            return "\n".join(rendered_parts), included
-        return "", []
+            tokens_used += chunk_tokens
+            rendered_blocks.append(chunk_text)
+            included.append(chunk)
+
+        if not included:
+            return "", []
+
+        return "\n".join(rendered_blocks), included
+
+    @staticmethod
+    def _join_parts(parts: List[str]) -> str:
+        cleaned = [part for part in parts if part]
+        return "\n".join(cleaned) if cleaned else ""
+
+    def _estimate_chunk_tokens(
+        self,
+        chunk: ChunkResult,
+        parts: List[str],
+        *,
+        has_existing_blocks: bool,
+    ) -> int:
+        """Estimate tokens for a chunk using cached metadata."""
+        tokens = 0
+        has_segments = has_existing_blocks
+        for idx, part in enumerate(parts):
+            if not part:
+                continue
+            if has_segments:
+                tokens += self._newline_token_cost
+            if idx == 0:
+                chunk_tokens = int(chunk.token_count or 0)
+                if chunk_tokens <= 0:
+                    chunk_tokens = self.tokenizer.count_tokens(part)
+                tokens += chunk_tokens
+            else:
+                tokens += self.tokenizer.count_tokens(part)
+            has_segments = True
+        return tokens
 
     def format_with_citations(self, context: AssembledContext) -> str:
         """

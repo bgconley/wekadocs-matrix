@@ -32,6 +32,10 @@ embedding:
   batch_size: 32
   max_sequence_length: 8192  # Jina v3 supports longer sequences
 
+# Tokenizer configuration
+tokenizer:
+  backend: "hf"  # Options: hf, segmenter (overridden by TOKENIZER_BACKEND env)
+
 # Search configuration
 search:
   # Vector search settings
@@ -44,6 +48,7 @@ search:
       timeout: 30
       allow_recreate: false  # Set true to auto-rebuild collections during schema upgrades
       query_vector_name: "content"
+      query_strategy: "content_only"  # Options: content_only, weighted, max_field
     neo4j:
       index_name: "section_embeddings_v2"  # Phase 7C: New 1024-D index
 

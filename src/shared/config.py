@@ -4,6 +4,7 @@
 # Enhanced for Pre-Phase 7: Added validation for embedding configuration
 
 import logging
+from enum import Enum
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -69,12 +70,19 @@ class EmbeddingConfig(BaseModel):
         populate_by_name = True  # Allow both embedding_model and model_name
 
 
+class QdrantQueryStrategy(str, Enum):
+    CONTENT_ONLY = "content_only"
+    WEIGHTED = "weighted"
+    MAX_FIELD = "max_field"
+
+
 class QdrantVectorConfig(BaseModel):
     collection_name: str = "weka_sections"
     use_grpc: bool = False
     timeout: int = 30
     allow_recreate: bool = False
     query_vector_name: str = "content"
+    query_strategy: QdrantQueryStrategy = QdrantQueryStrategy.CONTENT_ONLY
 
 
 class Neo4jVectorConfig(BaseModel):
@@ -218,6 +226,12 @@ class ChunkStructureConfig(BaseModel):
     break_keywords: str = (
         "faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting"
     )
+
+
+class TokenizerConfig(BaseModel):
+    """Tokenizer configuration with backend selection."""
+
+    backend: str = "hf"
 
 
 class ChunkSplitConfig(BaseModel):
@@ -381,6 +395,7 @@ class Config(WekaBaseModel):
     app: AppConfig
     embedding: EmbeddingConfig
     search: SearchConfig
+    tokenizer: TokenizerConfig = Field(default_factory=TokenizerConfig)
     rate_limit: RateLimitConfig
     auth: AuthConfig
     audit: AuditConfig

@@ -16,14 +16,20 @@ from scratch.
    (env overrides like `RERANK_PROVIDER` still work for one-off experiments).
 3. Ensure the HuggingFace tokenizer cache is present locally (see
    `config/development.yaml` → `embedding`). Set `TRANSFORMERS_OFFLINE=true` to avoid
-   network fetches during CI.
+   network fetches during CI. The tokenizer backend can now be pinned via
+   `tokenizer.backend` (either `hf` or `segmenter`) when env `TOKENIZER_BACKEND`
+   isn’t set—use this to temporarily flip the segmenter backend during rollout
+   validation without touching deployment scripts.
 4. Multi-vector Qdrant collections are the default. When upgrading an environment
    that still has a single-vector collection, toggle
    `search.vector.qdrant.allow_recreate=true` during the migration window so the
    ingestion pipeline can rebuild the collection with the `{content,title,entity}`
-   schema automatically. The query side now respects
-   `search.vector.qdrant.query_vector_name` (default `content`) when selecting which
-   named vector to search.
+   schema automatically. Query routing is controlled via
+   `search.vector.qdrant.query_vector_name` (default `content`) and the new
+   `search.vector.qdrant.query_strategy` knob (`content_only`, `weighted`,
+   `max_field`). Use `weighted` to send scaled named vectors that mirror
+   `search.hybrid.vector_fields` weights, or `max_field` to force the heaviest field
+   when debugging collection drift.
 4. Verify schema + collection bootstrap via the existing tooling:
    - `python scripts/neo4j/create_graphrag_schema_v2_2_20251105_guard.cypher`
    - `python scripts/qdrant\ and\ helpers/qdrant_setup_chunks_multi-1546.py`

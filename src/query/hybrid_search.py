@@ -10,7 +10,7 @@ Phase 7C: Integrated with reranking provider for post-ANN refinement.
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from src.providers.rerank.base import RerankProvider
 from src.shared.config import get_config
@@ -48,7 +48,10 @@ class VectorStore:
     """Abstract interface for vector operations."""
 
     def search(
-        self, vector: List[float], k: int, filters: Optional[Dict] = None
+        self,
+        vector: Union[List[float], Dict[str, Any]],
+        k: int,
+        filters: Optional[Dict] = None,
     ) -> List[Dict[str, Any]]:
         """Search for top-k nearest neighbors."""
         raise NotImplementedError
@@ -71,7 +74,10 @@ class QdrantVectorStore(VectorStore):
         self.use_named_vectors = use_named_vectors
 
     def search(
-        self, vector: List[float], k: int, filters: Optional[Dict] = None
+        self,
+        vector: Union[List[float], Dict[str, Any]],
+        k: int,
+        filters: Optional[Dict] = None,
     ) -> List[Dict[str, Any]]:
         """Search Qdrant for top-k vectors."""
         from qdrant_client.models import FieldCondition, Filter, MatchValue
@@ -264,6 +270,15 @@ class HybridSearchEngine:
         else:
             logger.info("Reranking disabled (no reranker provided)")
 
+        hybrid_cfg = getattr(self.config.search, "hybrid", None)
+        vector_fields_cfg = getattr(hybrid_cfg, "vector_fields", {"content": 1.0})
+        self.vector_field_weights = dict(vector_fields_cfg or {"content": 1.0})
+        qdrant_cfg = getattr(self.config.search.vector, "qdrant", None)
+        self.qdrant_query_strategy = getattr(
+            qdrant_cfg, "query_strategy", "content_only"
+        )
+        self._max_vector_field = self._determine_max_vector_field()
+
     def search(
         self,
         query_text: str,
@@ -302,9 +317,10 @@ class HybridSearchEngine:
 
         vector_start = time.time()
         # Pre-Phase 7 B5: Use provider's embed_query method for queries
-        query_vector = self.embedder.embed_query(query_text)
+        base_query_vector = self.embedder.embed_query(query_text)
+        query_vector_payload = self._build_query_vector_payload(base_query_vector)
         vector_seeds = self.vector_store.search(
-            query_vector, k=vector_k, filters=filters
+            query_vector_payload, k=vector_k, filters=filters
         )
         vector_time_ms = (time.time() - vector_start) * 1000
 
@@ -387,6 +403,57 @@ class HybridSearchEngine:
             ranking_time_ms=ranking_time_ms,
             total_time_ms=total_time_ms,
         )
+
+    def _determine_max_vector_field(self) -> str:
+        """Select the dominant named vector for max_field strategy."""
+        fallback = getattr(self.vector_store, "query_vector_name", "content")
+        field_weights = self.vector_field_weights or {}
+        if not field_weights:
+            return fallback
+        field, weight = max(
+            field_weights.items(),
+            key=lambda item: item[1] if item[1] is not None else 0.0,
+        )
+        if weight is None or weight <= 0:
+            return fallback
+        return field
+
+    def _build_query_vector_payload(
+        self, base_vector: List[float]
+    ) -> Union[List[float], Dict[str, List[float]]]:
+        """Build query vector payload according to configured strategy."""
+        if not isinstance(self.vector_store, QdrantVectorStore):
+            return base_vector
+        if not getattr(self.vector_store, "use_named_vectors", False):
+            return base_vector
+
+        strategy_value = getattr(
+            self.qdrant_query_strategy, "value", self.qdrant_query_strategy
+        )
+        base_list = list(base_vector)
+
+        if strategy_value == "weighted":
+            payload: Dict[str, List[float]] = {}
+            for field, weight in self.vector_field_weights.items():
+                if weight is None or weight <= 0:
+                    continue
+                if weight == 1.0:
+                    payload[field] = list(base_list)
+                else:
+                    payload[field] = [val * weight for val in base_list]
+            if payload:
+                return payload
+            target_field = getattr(self.vector_store, "query_vector_name", "content")
+            return {target_field: base_list}
+
+        if strategy_value == "max_field":
+            target_field = self._max_vector_field or getattr(
+                self.vector_store, "query_vector_name", "content"
+            )
+            return {target_field: base_list}
+
+        target_field = getattr(self.vector_store, "query_vector_name", "content")
+        return {target_field: base_list}
 
     def _expand_from_seeds(self, seeds: List[SearchResult]) -> List[SearchResult]:
         """
