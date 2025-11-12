@@ -29,6 +29,7 @@ from src.monitoring.metrics import MetricsCollector
 from src.monitoring.slos import check_slos_and_log
 from src.shared.chunk_utils import (
     create_chunk_metadata,
+    remap_parent_section_ids,
     validate_chunk_schema,
 )
 from src.shared.config import Config
@@ -375,6 +376,20 @@ class GraphBuilder:
                     )
 
         # Use enriched sections for batch processing
+        remapped, missing = remap_parent_section_ids(sections)
+        if remapped:
+            logger.debug(
+                "Remapped parent_section_id values to canonical chunk IDs",
+                document_id=document_id,
+                remapped=remapped,
+            )
+        if missing:
+            logger.warning(
+                "Unable to resolve parent sections during chunk remap",
+                document_id=document_id,
+                missing_parents=missing,
+            )
+
         chunks = sections
 
         for i in range(0, len(chunks), batch_size):
