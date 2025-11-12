@@ -29,7 +29,6 @@ from src.monitoring.metrics import MetricsCollector
 from src.monitoring.slos import check_slos_and_log
 from src.shared.chunk_utils import (
     create_chunk_metadata,
-    remap_parent_section_ids,
     validate_chunk_schema,
 )
 from src.shared.config import Config
@@ -376,20 +375,6 @@ class GraphBuilder:
                     )
 
         # Use enriched sections for batch processing
-        remapped, missing = remap_parent_section_ids(sections)
-        if remapped:
-            logger.debug(
-                "Remapped parent_section_id values to canonical chunk IDs",
-                document_id=document_id,
-                remapped=remapped,
-            )
-        if missing:
-            logger.warning(
-                "Unable to resolve parent sections during chunk remap",
-                document_id=document_id,
-                missing_parents=missing,
-            )
-
         chunks = sections
 
         for i in range(0, len(chunks), batch_size):
@@ -406,6 +391,7 @@ class GraphBuilder:
                 s.order = chunk.order,
                 s.heading = chunk.heading,
                 s.parent_section_id = chunk.parent_section_id,
+                s.parent_section_original_id = chunk.parent_section_original_id,
                 s.text = chunk.text,
                 s.tokens = chunk.tokens,
                 s.token_count = chunk.token_count,
@@ -1303,6 +1289,7 @@ class GraphBuilder:
             ("document_id", PayloadSchemaType.KEYWORD),
             ("doc_id", PayloadSchemaType.KEYWORD),
             ("parent_section_id", PayloadSchemaType.KEYWORD),
+            ("parent_section_original_id", PayloadSchemaType.KEYWORD),
             ("order", PayloadSchemaType.INTEGER),
             ("heading", PayloadSchemaType.TEXT),
             ("updated_at", PayloadSchemaType.INTEGER),
@@ -1541,6 +1528,8 @@ class GraphBuilder:
             # Chunk-specific fields (Phase 7E-1)
             "id": node_id,
             "parent_section_id": section.get("parent_section_id"),
+            "parent_section_original_id": section.get("parent_section_original_id"),
+            "parent_chunk_id": section.get("parent_chunk_id"),
             "level": section.get("level", 3),
             "order": section.get("order", 0),
             "heading": section.get("title") or section.get("heading", ""),

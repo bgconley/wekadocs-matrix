@@ -1,7 +1,7 @@
-from src.shared.chunk_utils import remap_parent_section_ids
+from src.shared.chunk_utils import canonicalize_parent_ids
 
 
-def test_remap_parent_ids_updates_to_chunk_ids():
+def test_canonicalize_parent_ids_updates_to_chunk_ids():
     chunks = [
         {
             "id": "chunk-root",
@@ -15,14 +15,16 @@ def test_remap_parent_ids_updates_to_chunk_ids():
         },
     ]
 
-    remapped, missing = remap_parent_section_ids(chunks)
+    remapped, missing = canonicalize_parent_ids(chunks)
 
     assert remapped == 1
     assert missing == 0
     assert chunks[1]["parent_section_id"] == "chunk-root"
+    assert chunks[1]["parent_chunk_id"] == "chunk-root"
+    assert chunks[1]["parent_section_original_id"] == "orig-root"
 
 
-def test_remap_parent_ids_handles_missing_parent_gracefully():
+def test_canonicalize_parent_ids_handles_missing_parent_gracefully():
     chunks = [
         {
             "id": "orphan-chunk",
@@ -31,14 +33,16 @@ def test_remap_parent_ids_handles_missing_parent_gracefully():
         }
     ]
 
-    remapped, missing = remap_parent_section_ids(chunks)
+    remapped, missing = canonicalize_parent_ids(chunks)
 
     assert remapped == 0
     assert missing == 1
     assert chunks[0]["parent_section_id"] is None
+    assert chunks[0]["parent_chunk_id"] is None
+    assert chunks[0]["parent_section_original_id"] == "ghost-parent"
 
 
-def test_remap_parent_ids_supports_combined_chunks():
+def test_canonicalize_parent_ids_supports_combined_chunks():
     chunks = [
         {
             "id": "combined-parent",
@@ -52,8 +56,9 @@ def test_remap_parent_ids_supports_combined_chunks():
         },
     ]
 
-    remapped, missing = remap_parent_section_ids(chunks)
+    remapped, missing = canonicalize_parent_ids(chunks)
 
     assert remapped == 1
     assert missing == 0
     assert chunks[1]["parent_section_id"] == "combined-parent"
+    assert chunks[1]["parent_section_original_id"] == "orig-b"

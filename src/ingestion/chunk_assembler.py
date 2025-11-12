@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Protocol
 from src.ingestion.semantic import SemanticEnricher, get_semantic_enricher
 from src.providers.tokenizer_service import TokenizerService
 from src.shared.chunk_utils import (
+    canonicalize_parent_ids,
     create_chunk_metadata,
     create_combined_chunk_metadata,
     generate_chunk_id,
@@ -439,7 +440,7 @@ class GreedyCombinerV2:
             level = min(int(s.get("level", 3)) for s in group)
             order = int(group[0].get("order", 0))
             heading = first_heading
-            parent_section_id = group[0]["id"]
+            parent_section_id = group[0].get("parent_section_id")
 
             raw_sections = list(boundaries["sections"])
             clean_sections = []
@@ -666,6 +667,21 @@ class GreedyCombinerV2:
         if self.doc_fallback_enabled:
             chunks = self._apply_doc_fallback(document_id, chunks)
 
+        # Canonicalize parent references now that all chunk IDs are finalized
+        remapped, missing = canonicalize_parent_ids(chunks)
+        if remapped and self.debug:
+            log.debug(
+                "Canonicalized parent references",
+                document_id=document_id,
+                remapped=remapped,
+            )
+        if missing:
+            log.warning(
+                "Chunks missing parent references after canonicalization",
+                document_id=document_id,
+                missing_parents=missing,
+            )
+
         # Ensure deterministic order
         chunks.sort(key=lambda c: (int(c.get("order", 0)), c["id"]))
         return chunks
@@ -859,9 +875,7 @@ class GreedyCombinerV2:
         level = min(int(chunk.get("level", 6)) for chunk in chunks)
         order = int(chunks[0].get("order", 0))
         heading = self._select_heading(chunks)
-        parent_section_id = (
-            chunks[0].get("parent_section_id") or original_section_ids[0]
-        )
+        parent_section_id = chunks[0].get("parent_section_id")
 
         combined_text_parts: List[str] = []
         combined_citations: List[Dict] = []

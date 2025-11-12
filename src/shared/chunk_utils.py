@@ -236,15 +236,12 @@ def create_combined_chunk_metadata(
     }
 
 
-def remap_parent_section_ids(chunks: List[Dict]) -> Tuple[int, int]:
+def canonicalize_parent_ids(chunks: List[Dict]) -> Tuple[int, int]:
     """
-    Rewrite parent_section_id values to reference canonical chunk IDs.
-
-    Args:
-        chunks: Chunk dictionaries produced by the assembler.
+    Ensure parent references point to canonical chunk IDs.
 
     Returns:
-        Tuple of (remapped_count, missing_parent_count).
+        Tuple (remapped_count, missing_parent_count)
     """
     if not chunks:
         return 0, 0
@@ -255,9 +252,8 @@ def remap_parent_section_ids(chunks: List[Dict]) -> Tuple[int, int]:
         if not originals:
             originals = [chunk.get("id")]
         for original in originals:
-            if not original:
-                continue
-            original_to_chunk.setdefault(original, chunk.get("id"))
+            if original and original not in original_to_chunk:
+                original_to_chunk[original] = chunk.get("id")
 
     remapped = 0
     missing = 0
@@ -265,12 +261,16 @@ def remap_parent_section_ids(chunks: List[Dict]) -> Tuple[int, int]:
         parent_original = chunk.get("parent_section_id")
         if not parent_original:
             continue
+
+        chunk["parent_section_original_id"] = parent_original
         mapped_parent = original_to_chunk.get(parent_original)
         if mapped_parent:
+            chunk["parent_chunk_id"] = mapped_parent
+            chunk["parent_section_id"] = mapped_parent
             if mapped_parent != parent_original:
-                chunk["parent_section_id"] = mapped_parent
                 remapped += 1
         else:
+            chunk["parent_chunk_id"] = None
             chunk["parent_section_id"] = None
             missing += 1
 
