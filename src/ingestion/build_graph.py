@@ -650,13 +650,45 @@ class GraphBuilder:
             """,
         }
 
-        results: Dict[str, int] = {}
+        log_rel_counts = (
+            os.getenv(
+                "LOG_RELATIONSHIP_COUNTS", os.getenv("INGEST_LOG_REL_COUNTS", "false")
+            ).lower()
+            == "true"
+        )
+        results: Dict[str, Dict[str, int]] = {}
         for name, query in queries.items():
             try:
-                record = session.run(query, doc_id=document_id).single()
-                results[name] = (
-                    int(record["count"]) if record and "count" in record else 0
+                result = session.run(query, doc_id=document_id)
+                record = None
+                try:
+                    record = result.single()
+                except Exception:
+                    record = None
+                summary = result.consume()
+                counters = summary.counters
+                returned = int(record["count"]) if record and "count" in record else 0
+                created = counters.relationships_created if counters else 0
+                deleted = counters.relationships_deleted if counters else 0
+                verification = None
+                if log_rel_counts:
+                    verification = self._verify_relationship_count(
+                        session, name, document_id
+                    )
+                self._log_relationship_builder(
+                    builder=name,
+                    document_id=document_id,
+                    returned=returned,
+                    created=created,
+                    deleted=deleted,
+                    verification=verification,
                 )
+                results[name] = {
+                    "returned": returned,
+                    "created": created,
+                    "deleted": deleted,
+                    "verification": verification or 0,
+                }
             except Exception as exc:
                 logger.warning(
                     "Typed relationship builder failed",
@@ -664,14 +696,78 @@ class GraphBuilder:
                     builder=name,
                     error=str(exc),
                 )
-                results[name] = 0
+                results[name] = {
+                    "returned": 0,
+                    "created": 0,
+                    "deleted": 0,
+                    "verification": 0,
+                }
 
         logger.debug(
             "Typed relationship builders executed",
             document_id=document_id,
-            counts=results,
+            counts={
+                name: {
+                    "returned": data["returned"],
+                    "created": data["created"],
+                    "deleted": data["deleted"],
+                    "verification": data["verification"],
+                }
+                for name, data in results.items()
+            },
         )
-        return results
+
+    def _log_relationship_builder(
+        self,
+        *,
+        builder: str,
+        document_id: str,
+        returned: int,
+        created: int,
+        deleted: int,
+        verification: Optional[int],
+    ) -> None:
+        logger.debug(
+            "Relationship builder stats",
+            builder=builder,
+            document_id=document_id,
+            returned=returned,
+            created=created,
+            deleted=deleted,
+            verification=verification,
+        )
+
+    def _verify_relationship_count(
+        self, session, builder: str, document_id: str
+    ) -> int:
+        if builder == "child_of":
+            query = """
+            MATCH (c:Chunk)-[:CHILD_OF]->(:Section)
+            WHERE coalesce(c.document_id, c.doc_id) = $doc_id
+            RETURN count(*) AS count
+            """
+        elif builder == "parent_of":
+            query = """
+            MATCH (:Section)-[:PARENT_OF]->(child:Section)
+            WHERE coalesce(child.document_id, child.doc_id) = $doc_id
+            RETURN count(*) AS count
+            """
+        elif builder == "next_prev":
+            query = """
+            MATCH (c:Chunk)-[:NEXT]->(:Chunk)
+            WHERE coalesce(c.document_id, c.doc_id) = $doc_id
+            RETURN count(*) AS count
+            """
+        elif builder == "same_heading":
+            query = """
+            MATCH (c:Chunk)-[:SAME_HEADING]->(:Chunk)
+            WHERE coalesce(c.document_id, c.doc_id) = $doc_id
+            RETURN count(*) AS count
+            """
+        else:
+            return 0
+        record = session.run(query, doc_id=document_id).single()
+        return int(record["count"]) if record and "count" in record else 0
 
     def _repair_incorrect_combined_flags(self, session, document_id: str) -> int:
         """

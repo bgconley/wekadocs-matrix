@@ -629,6 +629,12 @@ docker-compose down -v && docker-compose up -d
 # Check configuration
 python -c "from src.shared.config import get_config; c=get_config(); print(f'Model: {c.embedding.embedding_model}, Dims: {c.embedding.dims}')"
 
+# Relationship-builder logging (optional)
+LOG_RELATIONSHIP_COUNTS=true docker compose up ingestion-worker
+#   When enabled, ingestion logs include both Neo4j mutation counters and optional
+#   verification MATCH counts for CHILD_OF / PARENT_OF / NEXT / SAME_HEADING builders.
+#   Disable (default) for normal operation to avoid extra MATCH queries.
+
 # Count everything
 docker exec -it weka-neo4j cypher-shell -u neo4j -p testpassword123 "MATCH (n) RETURN labels(n)[0] as type, count(*) as count ORDER BY count DESC"
 ```

@@ -284,6 +284,7 @@ class GreedyCombinerV2:
         if not sections:
             return []
 
+        self._annotate_parent_sections(sections)
         doc_total_tokens = sum(
             int(s.get("token_count") or s.get("tokens", 0)) for s in sections
         )
@@ -685,6 +686,21 @@ class GreedyCombinerV2:
         # Ensure deterministic order
         chunks.sort(key=lambda c: (int(c.get("order", 0)), c["id"]))
         return chunks
+
+    def _annotate_parent_sections(self, sections: List[Dict]) -> None:
+        """
+        Ensure each source section knows its parent by walking heading levels.
+        """
+        stack: List[tuple[int, str]] = []
+        for section in sections:
+            level = int(section.get("level", 3))
+            while stack and stack[-1][0] >= level:
+                stack.pop()
+            if not section.get("parent_section_id") and stack:
+                section["parent_section_id"] = stack[-1][1]
+            section_id = section.get("id")
+            if section_id:
+                stack.append((level, section_id))
 
     def _apply_microdoc_annotations(
         self, document_id: str, chunks: List[Dict], doc_total_tokens: int
