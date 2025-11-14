@@ -115,6 +115,12 @@ class ChunkResult:
 
     # Citation labels (order, title, level) derived from CitationUnits
     citation_labels: List[Tuple[int, str, int]] = field(default_factory=list)
+    # Graph enrichment (Phase 2.3 legacy parity)
+    graph_distance: int = 0
+    graph_score: float = 0.0
+    graph_path: Optional[List[str]] = None
+    connection_count: int = 0
+    mention_count: int = 0
 
     def __post_init__(self):
         """Ensure required fields are populated."""
@@ -724,22 +730,23 @@ class HybridRetriever:
         self.neo4j_driver = neo4j_driver
         self.bm25_retriever = BM25Retriever(neo4j_driver)
         search_config = config.search
+        hybrid_config = getattr(search_config, "hybrid", None)
 
         self.vector_field_weights = dict(
-            getattr(config.search.hybrid, "vector_fields", {"content": 1.0})
+            getattr(hybrid_config, "vector_fields", {"content": 1.0})
         )
         self.max_sources_to_expand = getattr(
-            getattr(search_config.hybrid, "expansion", {}), "max_sources", 5
+            getattr(hybrid_config, "expansion", {}), "max_sources", 5
         )
         self.vector_retriever = QdrantMultiVectorRetriever(
             qdrant_client,
             embedder,
             collection_name=config.search.vector.qdrant.collection_name,
             field_weights=self.vector_field_weights,
-            rrf_k=getattr(config.search.hybrid, "rrf_k", 60),
+            rrf_k=getattr(hybrid_config, "rrf_k", 60),
         )
         self.tokenizer = tokenizer or TokenizerService()
-        self.reranker_config = getattr(config.search.hybrid, "reranker", None)
+        self.reranker_config = getattr(hybrid_config, "reranker", None)
         self._reranker_enabled = bool(getattr(self.reranker_config, "enabled", False))
         self._reranker: Optional[RerankProvider] = None
         if self._reranker_enabled:
@@ -751,14 +758,12 @@ class HybridRetriever:
         # Load configuration
         # (already assigned above)
         # Fusion configuration
-        self.fusion_method = FusionMethod(
-            getattr(search_config.hybrid, "method", "rrf")
-        )
-        self.rrf_k = getattr(search_config.hybrid, "rrf_k", 60)
-        self.fusion_alpha = getattr(search_config.hybrid, "fusion_alpha", 0.6)
+        self.fusion_method = FusionMethod(getattr(hybrid_config, "method", "rrf"))
+        self.rrf_k = getattr(hybrid_config, "rrf_k", 60)
+        self.fusion_alpha = getattr(hybrid_config, "fusion_alpha", 0.6)
 
         # Expansion configuration
-        expansion_config = getattr(search_config.hybrid, "expansion", {})
+        expansion_config = getattr(hybrid_config, "expansion", {})
         if hasattr(expansion_config, "enabled"):
             self.expansion_enabled = expansion_config.enabled
             self.expansion_max_neighbors = getattr(expansion_config, "max_neighbors", 1)
@@ -774,6 +779,30 @@ class HybridRetriever:
             self.expansion_max_neighbors = 1
             self.expansion_query_min_tokens = 12
             self.expansion_score_delta_max = 0.02
+
+        # Graph enrichment configuration (Phase 2.3 parity)
+        graph_config = getattr(search_config, "graph", None)
+        self.graph_max_depth = (
+            getattr(graph_config, "max_depth", 3) if graph_config else 3
+        )
+        self.graph_max_related = (
+            getattr(graph_config, "max_related_per_seed", 20) if graph_config else 20
+        )
+        self.graph_weight = getattr(hybrid_config, "graph_weight", 0.3)
+        rels_env = os.getenv("GRAPH_REL_TYPES")
+        if rels_env:
+            self.graph_relationships = [
+                rel.strip() for rel in rels_env.split(",") if rel.strip()
+            ]
+        else:
+            self.graph_relationships = [
+                "MENTIONS",
+                "CONTAINS_STEP",
+                "HAS_PARAMETER",
+                "REQUIRES",
+                "AFFECTS",
+            ]
+        self.graph_enabled = self.graph_max_related > 0 and self.graph_max_depth > 0
 
         # Micro-doc stitching configuration
         self.micro_max_neighbors = int(os.getenv("MICRODOC_MAX_NEIGHBORS", "2"))
@@ -825,6 +854,7 @@ class HybridRetriever:
         """
         start_time = time.time()
         metrics = {}
+        doc_tag = filters.get("doc_tag") if filters else None
 
         # Step 1: Parallel BM25 and vector search
         # Retrieve more candidates for fusion (3x top_k)
@@ -873,13 +903,12 @@ class HybridRetriever:
             reverse=True,
         )
 
-        dt = filters.get("doc_tag") if filters else None
-        if dt:
+        if doc_tag:
             before = len(seeds)
-            seeds = [c for c in seeds if getattr(c, "doc_tag", None) == dt]
+            seeds = [c for c in seeds if getattr(c, "doc_tag", None) == doc_tag]
             metrics["seed_count"] = len(seeds)
             logger.info(
-                "Filtered seeds by doc_tag=%s: kept %d/%d", dt, len(seeds), before
+                "Filtered seeds by doc_tag=%s: kept %d/%d", doc_tag, len(seeds), before
             )
 
         # Step 4: Optional dominance gating before expansion (stabilize doc continuity)
@@ -916,12 +945,6 @@ class HybridRetriever:
                 return gated
             return cs
 
-        before_gate = len(seeds)
-        seeds = _gate_to_primary_document(seeds)
-        metrics["seed_gated"] = max(0, before_gate - len(seeds))
-        metrics["seeds_after_gate"] = len(seeds)
-        self._log_stage_snapshot("post-gate", seeds)
-
         microdoc_extras: List[ChunkResult] = []
         microdoc_tokens = 0
         if self.microdoc_enabled:
@@ -952,10 +975,11 @@ class HybridRetriever:
             expanded_results = self._bounded_expansion(query, seeds)
 
             # Enforce doc_tag and same-document continuity for neighbors
-            dt = filters.get("doc_tag") if filters else None
-            if dt:
+            if doc_tag:
                 expanded_results = [
-                    n for n in expanded_results if getattr(n, "doc_tag", None) == dt
+                    n
+                    for n in expanded_results
+                    if getattr(n, "doc_tag", None) == doc_tag
                 ]
             seed_docs = {c.chunk_id: c.document_id for c in seeds}
             expanded_results = [
@@ -989,9 +1013,23 @@ class HybridRetriever:
         ]
         self._hydrate_missing_citations(all_results)
 
-        dt = filters.get("doc_tag") if filters else None
-        if dt:
-            all_results = [c for c in all_results if getattr(c, "doc_tag", None) == dt]
+        graph_chunks, graph_stats = self._apply_graph_enrichment(
+            seeds, all_results, doc_tag
+        )
+        if graph_chunks:
+            all_results.extend(graph_chunks)
+            all_results = self._dedup_results(all_results)
+            all_results = [
+                c for c in all_results if not getattr(c, "is_microdoc_stub", False)
+            ]
+        metrics.update(graph_stats)
+
+        self._annotate_coverage(all_results)
+
+        if doc_tag:
+            all_results = [
+                c for c in all_results if getattr(c, "doc_tag", None) == doc_tag
+            ]
 
         primaries = [c for c in all_results if not c.is_microdoc_extra]
         extras = [c for c in all_results if c.is_microdoc_extra]
@@ -1722,6 +1760,9 @@ class HybridRetriever:
                             expansion_source=source_chunk_id,
                             fused_score=neighbor_score,
                             citation_labels=[],
+                            graph_distance=1,
+                            graph_score=1.0,
+                            graph_path=[source_chunk_id, neighbor_id],
                         )
                     )
 
@@ -1737,6 +1778,195 @@ class HybridRetriever:
             # Don't fail the whole search if expansion fails
 
         return expanded
+
+    def _apply_graph_enrichment(
+        self,
+        seeds: List[ChunkResult],
+        current_results: List[ChunkResult],
+        doc_tag: Optional[str],
+    ) -> Tuple[List[ChunkResult], Dict[str, int]]:
+        """Expand results with graph neighbors and annotate graph scores."""
+        stats = {
+            "graph_neighbors_considered": 0,
+            "graph_neighbors_added": 0,
+        }
+        if not self.graph_enabled or not seeds:
+            return [], stats
+
+        neighbors = self._fetch_graph_neighbors(seeds, doc_tag=doc_tag)
+        stats["graph_neighbors_considered"] = len(neighbors)
+        if not neighbors:
+            return [], stats
+
+        existing = {chunk.chunk_id: chunk for chunk in current_results}
+        added: List[ChunkResult] = []
+
+        for neighbor in neighbors:
+            current = existing.get(neighbor.chunk_id)
+            if current:
+                current.graph_score = max(current.graph_score, neighbor.graph_score)
+                if not current.graph_distance or (
+                    neighbor.graph_distance
+                    and neighbor.graph_distance < current.graph_distance
+                ):
+                    current.graph_distance = neighbor.graph_distance
+                    current.graph_path = neighbor.graph_path
+                if not current.expansion_source:
+                    current.expansion_source = neighbor.expansion_source
+                continue
+            added.append(neighbor)
+            existing[neighbor.chunk_id] = neighbor
+
+        stats["graph_neighbors_added"] = len(added)
+        return added, stats
+
+    def _fetch_graph_neighbors(
+        self, seeds: List[ChunkResult], doc_tag: Optional[str]
+    ) -> List[ChunkResult]:
+        """Fetch graph neighbors for the given seed chunks."""
+        if not self.graph_enabled:
+            return []
+
+        seed_lookup = {seed.chunk_id: seed for seed in seeds if seed.chunk_id}
+        if not seed_lookup:
+            return []
+
+        limit_per_seed = max(1, min(self.graph_max_related, 200))
+        rel_pattern = "|".join(self.graph_relationships)
+        query = f"""
+        UNWIND $seed_ids AS seed_id
+        MATCH (seed:Chunk {{id: seed_id}})
+        CALL {{
+            WITH seed
+            MATCH path=(seed)-[r:{rel_pattern}*1..{self.graph_max_depth}]-(target:Chunk)
+            WHERE seed.id <> target.id
+              AND ($doc_tag IS NULL OR target.doc_tag = $doc_tag)
+            WITH target, path
+            ORDER BY length(path) ASC
+            LIMIT $per_seed
+            RETURN target, path, length(path) AS dist
+        }}
+        RETURN seed.id AS seed_id,
+               target {{
+                   .id,
+                   .document_id,
+                   .parent_section_id,
+                   .order,
+                   .level,
+                   .heading,
+                   .text,
+                   token_count: coalesce(target.token_count, target.tokens, 0),
+                   .is_combined,
+                   .is_split,
+                   .original_section_ids,
+                   .boundaries_json,
+                   .doc_tag,
+                   .document_total_tokens,
+                   .source_path,
+                   .is_microdoc,
+                   .doc_is_microdoc,
+                   .is_microdoc_stub,
+                   .embedding_version,
+                   .tenant
+               }} AS props,
+               dist,
+               [node IN nodes(path) | node.id] AS path_nodes
+        """
+
+        best_by_id: Dict[str, ChunkResult] = {}
+        try:
+            with self.neo4j_driver.session() as session:
+                result = session.run(
+                    query,
+                    seed_ids=list(seed_lookup.keys()),
+                    per_seed=limit_per_seed,
+                    doc_tag=doc_tag,
+                )
+                for record in result:
+                    seed_id = record["seed_id"]
+                    source_chunk = seed_lookup.get(seed_id)
+                    if not source_chunk:
+                        continue
+
+                    props = record["props"] or {}
+                    if doc_tag and props.get("doc_tag") != doc_tag:
+                        continue
+                    if (
+                        source_chunk.document_id
+                        and props.get("document_id")
+                        and props["document_id"] != source_chunk.document_id
+                    ):
+                        continue
+
+                    chunk = self._chunk_from_props(props)
+                    chunk.is_expanded = True
+                    chunk.expansion_source = seed_id
+
+                    distance = int(record.get("dist") or 1)
+                    chunk.graph_distance = max(1, distance)
+                    chunk.graph_score = 1.0 / (chunk.graph_distance + 1)
+                    path_nodes = record.get("path_nodes") or []
+                    chunk.graph_path = [seed_id] + [
+                        str(node_id) for node_id in path_nodes if node_id != seed_id
+                    ]
+
+                    source_score = (
+                        source_chunk.fused_score
+                        or source_chunk.vector_score
+                        or source_chunk.bm25_score
+                        or 0.0
+                    )
+                    chunk.fused_score = max(
+                        chunk.fused_score or 0.0,
+                        (source_score * 0.5) + (self.graph_weight * chunk.graph_score),
+                    )
+
+                    existing = best_by_id.get(chunk.chunk_id)
+                    if existing and existing.graph_score >= chunk.graph_score:
+                        continue
+                    best_by_id[chunk.chunk_id] = chunk
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Graph enrichment failed: %s", exc)
+            return []
+
+        return list(best_by_id.values())
+
+    def _annotate_coverage(self, chunks: List[ChunkResult]) -> None:
+        """Attach connection/mention counts used by ranker coverage features."""
+        ids = {chunk.chunk_id for chunk in chunks if chunk.chunk_id}
+        if not ids:
+            return
+
+        coverage_query = """
+        UNWIND $ids AS cid
+        MATCH (c:Chunk {id: cid})
+        OPTIONAL MATCH (c)-[r]->()
+        WITH c, count(DISTINCT r) AS conn_count
+        OPTIONAL MATCH (c)-[:MENTIONS]->(e)
+        RETURN c.id AS id,
+               conn_count AS connection_count,
+               count(DISTINCT e) AS mention_count
+        """
+
+        coverage = {}
+        try:
+            with self.neo4j_driver.session() as session:
+                records = session.run(coverage_query, ids=list(ids))
+                for record in records:
+                    coverage[record["id"]] = {
+                        "connection_count": record.get("connection_count", 0),
+                        "mention_count": record.get("mention_count", 0),
+                    }
+        except Exception as exc:
+            logger.warning("Coverage enrichment failed: %s", exc)
+            return
+
+        for chunk in chunks:
+            data = coverage.get(chunk.chunk_id)
+            if not data:
+                continue
+            chunk.connection_count = int(data.get("connection_count") or 0)
+            chunk.mention_count = int(data.get("mention_count") or 0)
 
     def _neighbor_score(self, source_score: float) -> float:
         if source_score <= 0:
@@ -2045,6 +2275,9 @@ class HybridRetriever:
             boundaries_json = json.dumps(boundaries, separators=(",", ":"))
         else:
             boundaries_json = boundaries or "{}"
+        path_nodes = props.get("graph_path")
+        if path_nodes and not isinstance(path_nodes, list):
+            path_nodes = [path_nodes]
         return ChunkResult(
             chunk_id=props.get("id"),
             document_id=props.get("document_id", ""),
@@ -2067,6 +2300,11 @@ class HybridRetriever:
             embedding_version=props.get("embedding_version"),
             tenant=props.get("tenant"),
             citation_labels=[],
+            graph_distance=int(props.get("graph_distance", 0)),
+            graph_score=float(props.get("graph_score", 0.0)),
+            graph_path=[str(node) for node in path_nodes] if path_nodes else None,
+            connection_count=int(props.get("connection_count", 0)),
+            mention_count=int(props.get("mention_count", 0)),
         )
 
     def _path_prefix(self, source_path: Optional[str]) -> Optional[str]:
