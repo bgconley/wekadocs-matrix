@@ -3,7 +3,7 @@ Provider factory for ENV-selectable embedding and rerank providers.
 Phase 7C, Task 7C.1: Factory pattern for docker-compose friendly configuration.
 
 Supported providers:
-- Embedding: jina-ai, ollama, sentence-transformers
+- Embedding: jina-ai, sentence-transformers, bge-m3-service
 - Rerank: jina-ai, noop
 
 Configuration via environment variables:
@@ -19,10 +19,16 @@ See .env.example for full configuration options.
 
 import logging
 import os
-from typing import Optional
+from dataclasses import replace
+from typing import Callable, Dict, Optional
 
 from src.providers.embeddings.base import EmbeddingProvider
 from src.providers.rerank.base import RerankProvider
+from src.providers.settings import EmbeddingSettings as ProviderEmbeddingSettings
+from src.providers.settings import (
+    build_embedding_telemetry,
+)
+from src.shared.observability.metrics import embedding_provider_info
 
 logger = logging.getLogger(__name__)
 
@@ -34,90 +40,136 @@ class ProviderFactory:
     This enables docker-compose friendly provider selection without code changes.
     """
 
-    @staticmethod
+    _EMBEDDING_PROVIDER_CREATORS: Dict[
+        str, Callable[[ProviderEmbeddingSettings], EmbeddingProvider]
+    ] = {}
+    _EMBEDDING_PROVIDER_ALIASES = {
+        "bge-m3": "bge-m3-service",
+        "bge_m3": "bge-m3-service",
+        "bge_m3_service": "bge-m3-service",
+        "st_minilm": "sentence-transformers",
+        "st-minilm": "sentence-transformers",
+        "sentence_transformers": "sentence-transformers",
+        "huggingface": "sentence-transformers",
+        "hf": "sentence-transformers",
+    }
+
+    @classmethod
     def create_embedding_provider(
+        cls,
         provider: Optional[str] = None,
         model: Optional[str] = None,
         dims: Optional[int] = None,
         task: Optional[str] = None,
+        settings: Optional[ProviderEmbeddingSettings] = None,
         **kwargs,
     ) -> EmbeddingProvider:
         """
-        Create embedding provider from ENV config or parameters.
-
-        Priority: explicit parameters > ENV vars > config defaults
-
-        Args:
-            provider: Provider name (jina-ai, ollama, sentence-transformers)
-            model: Model identifier
-            dims: Embedding dimensions
-            task: Task type for Jina (retrieval.passage or retrieval.query)
-            **kwargs: Additional provider-specific parameters
-
-        Returns:
-            EmbeddingProvider instance
-
-        Raises:
-            ValueError: If provider unknown or configuration invalid
-            RuntimeError: If provider initialization fails
-
-        Environment variables:
-            EMBEDDINGS_PROVIDER: Provider name
-            EMBEDDINGS_MODEL: Model identifier
-            EMBEDDINGS_DIM: Embedding dimensions (integer)
-            EMBEDDINGS_TASK: Task type (Jina-specific)
-            JINA_API_KEY: Jina API key (required for jina-ai)
-            OLLAMA_BASE_URL: Ollama base URL (optional)
+        Create embedding provider from profile-driven settings, allowing legacy overrides.
         """
-        # Get config from parameters or ENV
-        from src.shared.config import get_config
+        from src.shared.config import get_embedding_settings
 
-        config = get_config()
-
-        provider = provider or os.getenv(
-            "EMBEDDINGS_PROVIDER", config.embedding.provider
-        )
-        model = model or os.getenv("EMBEDDINGS_MODEL", config.embedding.embedding_model)
-        dims = dims or int(os.getenv("EMBEDDINGS_DIM", str(config.embedding.dims)))
-        task = task or os.getenv("EMBEDDINGS_TASK", config.embedding.task)
-
-        logger.info(
-            f"Creating embedding provider: provider={provider}, model={model}, "
-            f"dims={dims}, task={task}"
-        )
-
-        # Create provider based on type
-        if provider == "jina-ai":
-            from src.providers.embeddings.jina import JinaEmbeddingProvider
-
-            api_key = kwargs.get("api_key") or os.getenv("JINA_API_KEY")
-            return JinaEmbeddingProvider(
-                model=model, dims=dims, api_key=api_key, task=task, **kwargs
+        settings = settings or get_embedding_settings()
+        if any([provider, model, dims, task]):
+            settings = cls._apply_legacy_overrides(
+                settings, provider, model, dims, task
             )
 
-        elif provider == "ollama":
-            from src.providers.embeddings.ollama import OllamaEmbeddingProvider
-
-            # Use pop to remove base_url from kwargs to avoid duplicate argument
-            base_url = kwargs.pop("base_url", None) or os.getenv("OLLAMA_BASE_URL")
-            return OllamaEmbeddingProvider(
-                model=model, dims=dims, base_url=base_url, **kwargs
-            )
-
-        elif provider == "sentence-transformers":
-            from src.providers.embeddings.sentence_transformers import (
-                SentenceTransformersProvider,
-            )
-
-            return SentenceTransformersProvider(
-                model_name=model, expected_dims=dims, **kwargs
-            )
-
-        else:
+        provider_key = cls._normalize_provider(settings.provider)
+        creator = cls._EMBEDDING_PROVIDER_CREATORS.get(provider_key)
+        if not creator:
             raise ValueError(
-                f"Unknown embedding provider: {provider}. "
-                f"Supported: jina-ai, ollama, sentence-transformers"
+                f"Unknown embedding provider: {settings.provider}. "
+                f"Supported: {sorted(cls._EMBEDDING_PROVIDER_CREATORS.keys())}"
             )
+
+        telemetry = build_embedding_telemetry(settings)
+        logger.info(
+            "Creating embedding provider",
+            extra={**telemetry, "task": settings.task},
+        )
+        embedding_provider_info.info(telemetry)
+
+        return creator(settings, **kwargs)
+
+    @classmethod
+    def _normalize_provider(cls, provider: Optional[str]) -> str:
+        base = (provider or "").strip().lower()
+        return cls._EMBEDDING_PROVIDER_ALIASES.get(base, base)
+
+    @staticmethod
+    def _apply_legacy_overrides(
+        settings: ProviderEmbeddingSettings,
+        provider_override: Optional[str],
+        model_override: Optional[str],
+        dims_override: Optional[int],
+        task_override: Optional[str],
+    ) -> ProviderEmbeddingSettings:
+        overrides = {}
+        if provider_override and provider_override != settings.provider:
+            logger.warning(
+                "create_embedding_provider(provider=...) overrides profile '%s'",
+                settings.profile,
+            )
+            overrides["provider"] = provider_override
+        if model_override and model_override != settings.model_id:
+            logger.warning(
+                "create_embedding_provider(model=...) overrides profile '%s'",
+                settings.profile,
+            )
+            overrides["model_id"] = model_override
+        if dims_override and dims_override != settings.dims:
+            logger.warning(
+                "create_embedding_provider(dims=...) overrides profile '%s'",
+                settings.profile,
+            )
+            overrides["dims"] = dims_override
+        if task_override and task_override != settings.task:
+            logger.warning(
+                "create_embedding_provider(task=...) overrides profile '%s'",
+                settings.profile,
+            )
+            overrides["task"] = task_override
+        if not overrides:
+            return settings
+        return replace(settings, **overrides)
+
+    @staticmethod
+    def _create_jina_embedding_provider(
+        settings: ProviderEmbeddingSettings, **kwargs
+    ) -> EmbeddingProvider:
+        from src.providers.embeddings.jina import JinaEmbeddingProvider
+
+        api_key = kwargs.get("api_key") or os.getenv("JINA_API_KEY")
+        return JinaEmbeddingProvider(
+            model=settings.model_id,
+            dims=settings.dims,
+            api_key=api_key,
+            task=settings.task,
+            **kwargs,
+        )
+
+    @staticmethod
+    def _create_sentence_transformers_provider(
+        settings: ProviderEmbeddingSettings, **kwargs
+    ) -> EmbeddingProvider:
+        from src.providers.embeddings.sentence_transformers import (
+            SentenceTransformersProvider,
+        )
+
+        return SentenceTransformersProvider(
+            model_name=settings.model_id,
+            expected_dims=settings.dims,
+            **kwargs,
+        )
+
+    @staticmethod
+    def _create_bge_m3_service_provider(
+        settings: ProviderEmbeddingSettings, **kwargs
+    ) -> EmbeddingProvider:
+        from src.providers.embeddings.bge_m3_service import BGEM3ServiceProvider
+
+        return BGEM3ServiceProvider(settings=settings, **kwargs)
 
     @staticmethod
     def create_rerank_provider(
@@ -234,28 +286,43 @@ class ProviderFactory:
 
         This provides visibility into which providers are active.
         """
-        from src.shared.config import get_config
-
-        config = get_config()
-
         # Get actual ENV values (may override config)
-        embedding_provider = os.getenv("EMBEDDINGS_PROVIDER", config.embedding.provider)
-        embedding_model = os.getenv(
-            "EMBEDDINGS_MODEL", config.embedding.embedding_model
-        )
-        embedding_dims = int(os.getenv("EMBEDDINGS_DIM", str(config.embedding.dims)))
+        from src.shared.config import get_embedding_settings, get_settings
+
+        embedding_settings = get_embedding_settings()
+        runtime_settings = get_settings()
 
         rerank_provider = os.getenv("RERANK_PROVIDER", "jina-ai")
         rerank_model = os.getenv("RERANK_MODEL", "jina-reranker-v3")
+
+        telemetry = build_embedding_telemetry(embedding_settings)
+        telemetry["embedding_namespace_mode"] = (
+            runtime_settings.embedding_namespace_mode or "none"
+        )
+        telemetry["embedding_strict_mode"] = (
+            "true" if runtime_settings.embedding_strict_mode else "false"
+        )
+        telemetry["embedding_profile_swappable"] = (
+            "true" if runtime_settings.embedding_profile_swappable else "false"
+        )
+        telemetry["embedding_profile_experiment"] = (
+            runtime_settings.embedding_profile_experiment or ""
+        )
+        embedding_provider_info.info(telemetry)
 
         logger.info(
             "=" * 60 + "\n"
             "Provider Configuration (Phase 7C)\n"
             "=" * 60 + "\n"
-            f"Embedding Provider: {embedding_provider}\n"
-            f"  Model: {embedding_model}\n"
-            f"  Dimensions: {embedding_dims}\n"
-            f"  Task: {config.embedding.task}\n"
+            f"Embedding Profile: {embedding_settings.profile}\n"
+            f"  Provider: {embedding_settings.provider}\n"
+            f"  Model: {embedding_settings.model_id}\n"
+            f"  Dimensions: {embedding_settings.dims}\n"
+            f"  Task: {embedding_settings.task}\n"
+            f"  Strict Mode: {runtime_settings.embedding_strict_mode}\n"
+            f"  Namespace Mode: {runtime_settings.embedding_namespace_mode}\n"
+            f"  Profile Swappable: {runtime_settings.embedding_profile_swappable}\n"
+            f"  Profile Experiment: {runtime_settings.embedding_profile_experiment}\n"
             f"\n"
             f"Rerank Provider: {rerank_provider}\n"
             f"  Model: {rerank_model}\n"
@@ -299,3 +366,24 @@ def create_default_providers() -> tuple[EmbeddingProvider, RerankProvider]:
     )
 
     return embedding_provider, rerank_provider
+
+
+def create_embedding_provider(*args, **kwargs) -> EmbeddingProvider:
+    """
+    Module-level convenience wrapper for ProviderFactory.create_embedding_provider.
+    """
+    return ProviderFactory.create_embedding_provider(*args, **kwargs)
+
+
+def create_rerank_provider(*args, **kwargs) -> RerankProvider:
+    """
+    Module-level convenience wrapper for ProviderFactory.create_rerank_provider.
+    """
+    return ProviderFactory.create_rerank_provider(*args, **kwargs)
+
+
+ProviderFactory._EMBEDDING_PROVIDER_CREATORS = {
+    "jina-ai": ProviderFactory._create_jina_embedding_provider,
+    "sentence-transformers": ProviderFactory._create_sentence_transformers_provider,
+    "bge-m3-service": ProviderFactory._create_bge_m3_service_provider,
+}
