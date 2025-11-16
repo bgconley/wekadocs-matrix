@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parents[1]
-test_path = HERE / "tests" / "test_phase7e3_prod_docs_pack.py"
+test_path = HERE / "tests" / "test_phase7e3_prod_docs_pack_noprefix.py"
 
 
 def main():

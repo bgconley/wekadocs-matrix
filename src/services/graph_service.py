@@ -226,6 +226,7 @@ class GraphService:
         MATCH (start {{id: start_id}})
         MATCH path=(start){pattern}(target)
         WITH target, path
+        ORDER BY target.id, length(path)
         WITH target,
              collect(path)[0] AS sample_path,
              min(length(path)) AS dist

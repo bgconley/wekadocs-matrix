@@ -199,7 +199,7 @@ class SessionTracker:
         LIMIT 20
         """
 
-        focused_entity_ids = []
+        focused_entity_ids: List[str] = []
 
         with self.driver.session() as session:
             result = session.run(query, query_lower=query_lower)
@@ -209,53 +209,61 @@ class SessionTracker:
                 logger.debug(f"No entity matches found for query: {query_text}")
                 return []
 
-            # Create FOCUSED_ON relationships for matched entities
+            entities_payload = []
             for record in matches:
                 entity_id = record["id"]
-                entity_name = record["name"]
+                entity_name = record["name"] or ""
                 entity_type = record["type"]
+                entity_name_lower = entity_name.lower()
 
-                # Calculate focus score based on match quality
-                # Exact match = 1.0, partial match = 0.7
-                if query_lower == entity_name.lower():
+                if query_lower == entity_name_lower:
                     score = 1.0
-                elif entity_name.lower() in query_lower:
+                elif entity_name_lower in query_lower:
                     score = 0.9
-                elif query_lower in entity_name.lower():
+                elif query_lower in entity_name_lower:
                     score = 0.8
                 else:
                     score = 0.7
 
-                # Create FOCUSED_ON relationship
-                focus_query = """
-                MATCH (q:Query {query_id: $query_id})
-                MATCH (e {id: $entity_id})
-                WHERE $entity_type IN labels(e)
-                MERGE (q)-[f:FOCUSED_ON]->(e)
-                ON CREATE SET
-                    f.score = $score,
-                    f.extraction_method = 'keyword',
-                    f.created_at = datetime()
-                RETURN e.id as entity_id
-                """
-
-                focus_result = session.run(
-                    focus_query,
-                    query_id=query_id,
-                    entity_id=entity_id,
-                    entity_type=entity_type,
-                    score=score,
+                entities_payload.append(
+                    {
+                        "entity_id": entity_id,
+                        "entity_type": entity_type,
+                        "score": score,
+                    }
                 )
 
-                if focus_result.single():
-                    focused_entity_ids.append(entity_id)
-                    logger.debug(
-                        f"Focused on {entity_type} '{entity_name}' "
-                        f"(score={score:.2f})"
-                    )
+            if not entities_payload:
+                return []
+
+            focus_query = """
+            MATCH (q:Query {query_id: $query_id})
+            UNWIND $entities AS entity
+            MATCH (e {id: entity.entity_id})
+            WHERE entity.entity_type IN labels(e)
+            MERGE (q)-[f:FOCUSED_ON]->(e)
+            ON CREATE SET
+                f.created_at = datetime()
+            SET
+                f.score = entity.score,
+                f.extraction_method = 'keyword',
+                f.updated_at = datetime()
+            RETURN collect(DISTINCT e.id) AS focused_ids
+            """
+
+            focus_result = session.run(
+                focus_query,
+                query_id=query_id,
+                entities=entities_payload,
+            )
+            record = focus_result.single()
+            if record:
+                focused_entity_ids = record["focused_ids"] or []
 
         logger.info(
-            f"Extracted {len(focused_entity_ids)} focused entities for query {query_id}"
+            "Extracted %d focused entities for query %s",
+            len(focused_entity_ids),
+            query_id,
         )
         return focused_entity_ids
 

@@ -135,7 +135,7 @@ Below is an *exhaustive* map of resources an implementing agent should be aware 
 * Critical scripts:
   * `scripts/create_schema_*.cypher` – up-to-date DDL.
   * `scripts/verify_embedding_fields.py` – schema drift detector.
-  * `scripts/test_qdrant.py` – connectivity test; extend to include payload filter by `doc_id`.
+  * `migration/qdrant_inspect.py` – connectivity test script; extend to include payload filter by `doc_id`.
 
 ### 5.6 Monitoring Stack (`monitoring/`)
 * Dashboards JSON – ingestion, retrieval, SLO overviews; new metrics must be added to `phase7e_retrieval.json`.

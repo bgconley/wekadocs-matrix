@@ -160,7 +160,10 @@ class BaseConnector(ABC):
             return {"status": "error", "error": str(e)}
 
     async def process_webhook(
-        self, payload: Dict[str, Any], signature: Optional[str] = None
+        self,
+        payload: Dict[str, Any],
+        signature: Optional[str] = None,
+        raw_body: Optional[bytes] = None,
     ) -> Dict[str, Any]:
         """
         Process incoming webhook event.
@@ -170,11 +173,21 @@ class BaseConnector(ABC):
             return {"status": "disabled"}
 
         # Verify signature if configured
-        if self.config.webhook_secret and signature:
-            if not await self.verify_webhook_signature(
-                str(payload).encode(), signature
-            ):
-                logger.warning(f"Invalid webhook signature for {self.config.name}")
+        if self.config.webhook_secret:
+            if not signature:
+                logger.warning(
+                    "Webhook signature required for %s but header missing",
+                    self.config.name,
+                )
+                return {"status": "error", "error": "missing_signature"}
+            if raw_body is None:
+                logger.error(
+                    "Raw request body required to verify webhook signature for %s",
+                    self.config.name,
+                )
+                return {"status": "error", "error": "raw_body_required"}
+            if not await self.verify_webhook_signature(raw_body, signature):
+                logger.warning("Invalid webhook signature for %s", self.config.name)
                 return {"status": "error", "error": "invalid_signature"}
 
         try:

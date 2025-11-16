@@ -483,12 +483,16 @@ class QueryService:
                         query=query,
                     )
 
-            # Add embedding_version to filters
-            filters.setdefault("embedding_version", self.embedding_settings.version)
-            logger.debug(
-                "Added embedding_version filter",
-                embedding_version=self.embedding_settings.version,
-            )
+            embedding_version = getattr(self.embedding_settings, "version", None)
+            if embedding_version:
+                filters.setdefault("embedding_version", embedding_version)
+                logger.debug(
+                    "Applied embedding_version filter",
+                    embedding_version=embedding_version,
+                )
+            else:
+                filters.pop("embedding_version", None)
+                logger.debug("Embedding version not set; skipping filter enforcement")
 
             use_phase7e = bool(
                 getattr(self.config.search.hybrid, "enabled", True)

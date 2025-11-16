@@ -6,7 +6,7 @@
 MATCH (e:Error)
 WHERE e.code = $error_code OR e.name = $error_name
 OPTIONAL MATCH (e)<-[:RESOLVES]-(proc:Procedure)
-OPTIONAL MATCH (proc)-[:CONTAINS_STEP {order}]->(step:Step)
+OPTIONAL MATCH (proc)-[:CONTAINS_STEP]->(step:Step)
 OPTIONAL MATCH (step)-[:EXECUTES]->(cmd:Command)
 RETURN e, proc, step, cmd
 ORDER BY step.order ASC

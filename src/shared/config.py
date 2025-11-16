@@ -508,6 +508,33 @@ class FeatureFlagsConfig(BaseModel):
     )
 
 
+class GitHubConnectorSettings(BaseModel):
+    enabled: bool = False
+    poll_interval_seconds: int = 300
+    batch_size: int = 50
+    max_retries: int = 3
+    backoff_base_seconds: float = 2.0
+    circuit_breaker_enabled: bool = True
+    circuit_breaker_failure_threshold: int = 5
+    circuit_breaker_timeout_seconds: int = 60
+    owner: Optional[str] = None
+    repo: Optional[str] = None
+    docs_path: str = "docs"
+    webhook_secret: Optional[str] = None
+
+    @validator("owner", "repo")
+    def _strip_owner_repo(cls, value):
+        if value is None:
+            return value
+        stripped = value.strip()
+        return stripped or None
+
+
+class ConnectorsConfig(BaseModel):
+    queue_max_size: int = 10000
+    github: Optional[GitHubConnectorSettings] = None
+
+
 class Config(WekaBaseModel):
     """Main configuration model"""
 
@@ -529,6 +556,7 @@ class Config(WekaBaseModel):
         default_factory=FeatureFlagsConfig
     )  # Phase 7C
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)  # Phase 7E-4
+    connectors: Optional[ConnectorsConfig] = None
 
     class Config:
         populate_by_name = True  # Allow both graph_schema and schema

@@ -481,20 +481,35 @@ class ResponseBuilder:
             # Why bi-directional: Sections may have incoming HAS_SECTION from Documents
             query = """
             MATCH (n {id: $node_id})-[r:MENTIONS|CONTAINS_STEP|REQUIRES|AFFECTS]-(e)
-            WHERE labels(e)[0] IN ['Command', 'Configuration', 'Step', 'Error', 'Concept']
+            WITH e,
+                 type(r) AS relationship,
+                 COALESCE(r.confidence, 1.0) AS confidence,
+                 [label IN labels(e) WHERE label IN $allowed_labels] AS matched_labels
+            WHERE size(matched_labels) > 0
             RETURN DISTINCT
                 e.id AS entity_id,
-                labels(e)[0] AS label,
-                e.name AS name,
-                type(r) AS relationship,
-                COALESCE(r.confidence, 1.0) AS confidence
+                matched_labels[0] AS label,
+                coalesce(e.name, e.title, e.term, e.message, e.heading, '') AS name,
+                relationship,
+                confidence
             ORDER BY confidence DESC
             LIMIT $max_entities
             """
 
             entities = []
             with self.neo4j_driver.session() as session:
-                result = session.run(query, node_id=node_id, max_entities=max_entities)
+                result = session.run(
+                    query,
+                    node_id=node_id,
+                    max_entities=max_entities,
+                    allowed_labels=[
+                        "Command",
+                        "Configuration",
+                        "Step",
+                        "Error",
+                        "Concept",
+                    ],
+                )
 
                 for record in result:
                     entities.append(

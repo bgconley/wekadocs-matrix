@@ -3,13 +3,17 @@
 # See: /docs/implementation-plan.md → Task 1.2 DoD & Tests
 # FastAPI MCP server with health, metrics, and MCP protocol endpoints
 
+import contextlib
 import time
 from datetime import datetime
+from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, Request
+from redis import Redis
 
 # Phase 7E-4: Health checks and SLO monitoring
+from src.connectors.manager import ConnectorManager
 from src.monitoring.health import run_startup_health_checks
 from src.query.traversal import TraversalService
 from src.shared import (
@@ -32,6 +36,7 @@ from src.shared.observability.metrics import (
     setup_metrics,
 )
 
+from . import webhooks
 from .models import (
     HealthResponse,
     MCPInitializeRequest,
@@ -55,6 +60,8 @@ app = FastAPI(
     version=config.app.version,
     description="WekaDocs GraphRAG MCP Server",
 )
+app.include_router(webhooks.router)
+app.state.connector_manager = None
 
 # Setup OpenTelemetry tracing
 setup_tracing(app, settings)
@@ -72,6 +79,71 @@ metrics_store = {
     "errors_total": 0,
     "latencies": [],
 }
+
+
+def _build_connector_manager() -> Optional[ConnectorManager]:
+    connectors_cfg = getattr(config, "connectors", None)
+    if not connectors_cfg:
+        logger.info(
+            "No connector configuration found; skipping connector manager startup"
+        )
+        return None
+
+    redis_password = settings.redis_password or None
+    redis_client = Redis(
+        host=settings.redis_host,
+        port=settings.redis_port,
+        password=redis_password,
+        decode_responses=False,
+    )
+
+    manager = ConnectorManager(
+        redis_client, {"queue_max_size": connectors_cfg.queue_max_size}
+    )
+    registered = 0
+
+    github_cfg = getattr(connectors_cfg, "github", None)
+    if github_cfg and github_cfg.enabled:
+        if github_cfg.owner and github_cfg.repo:
+            connector_config = {
+                "enabled": github_cfg.enabled,
+                "poll_interval_seconds": github_cfg.poll_interval_seconds,
+                "batch_size": github_cfg.batch_size,
+                "max_retries": github_cfg.max_retries,
+                "backoff_base_seconds": github_cfg.backoff_base_seconds,
+                "circuit_breaker_enabled": github_cfg.circuit_breaker_enabled,
+                "circuit_breaker_failure_threshold": github_cfg.circuit_breaker_failure_threshold,
+                "circuit_breaker_timeout_seconds": github_cfg.circuit_breaker_timeout_seconds,
+                "webhook_secret": github_cfg.webhook_secret,
+                "metadata": {
+                    "owner": github_cfg.owner,
+                    "repo": github_cfg.repo,
+                    "docs_path": github_cfg.docs_path,
+                },
+            }
+            try:
+                manager.register_connector("github", "github", connector_config)
+                registered += 1
+            except Exception as exc:
+                logger.error(
+                    "Failed to register GitHub connector",
+                    error=str(exc),
+                    exc_info=True,
+                )
+        else:
+            logger.warning(
+                "GitHub connector enabled but owner/repo not configured; skipping registration"
+            )
+
+    if registered == 0:
+        logger.info(
+            "Connector manager initialized with zero connectors; shutting down manager"
+        )
+        with contextlib.suppress(Exception):
+            manager.close()
+        return None
+
+    return manager
 
 
 @app.middleware("http")
@@ -169,6 +241,17 @@ async def startup_event():
                     logger.warning(f"  - {check.name}: {check.message}")
 
         logger.info("MCP server started successfully")
+
+        connector_manager = _build_connector_manager()
+        if connector_manager:
+            app.state.connector_manager = connector_manager
+            await connector_manager.start_polling()
+            logger.info(
+                "Connector manager started with %d connector(s)",
+                len(connector_manager.connectors),
+            )
+        else:
+            app.state.connector_manager = None
     except Exception as e:
         logger.error("Failed to start MCP server", error=str(e))
         raise
@@ -179,6 +262,12 @@ async def shutdown_event():
     """Close connections on shutdown"""
     logger.info("Shutting down MCP server")
     try:
+        connector_manager = getattr(app.state, "connector_manager", None)
+        if connector_manager:
+            await connector_manager.stop_polling()
+            with contextlib.suppress(Exception):
+                connector_manager.close()
+            app.state.connector_manager = None
         await close_connections()
         logger.info("MCP server shut down successfully")
     except Exception as e:

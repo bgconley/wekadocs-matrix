@@ -49,6 +49,51 @@ class GitHubConnector(BaseConnector):
             f"docs_path={self.docs_path}"
         )
 
+    @staticmethod
+    def _map_status_to_event(status: str) -> Optional[str]:
+        if status == "added":
+            return "created"
+        if status == "modified":
+            return "updated"
+        if status == "removed":
+            return "deleted"
+        return None
+
+    def _is_docs_file(self, filename: str) -> bool:
+        return filename.startswith(self.docs_path) and filename.endswith(
+            (".md", ".markdown", ".html")
+        )
+
+    def _create_event(
+        self,
+        *,
+        commit_sha: str,
+        filename: str,
+        event_type: str,
+        commit_message: str,
+        author: str,
+        timestamp: datetime,
+        webhook: bool = False,
+    ) -> IngestionEvent:
+        metadata = {
+            "owner": self.owner,
+            "repo": self.repo,
+            "filename": filename,
+            "commit_sha": commit_sha,
+            "commit_message": commit_message,
+            "author": author,
+        }
+        if webhook:
+            metadata["webhook"] = True
+
+        return IngestionEvent(
+            source_uri=f"https://github.com/{self.owner}/{self.repo}/blob/{commit_sha}/{filename}",
+            source_type="github",
+            event_type=event_type,
+            metadata=metadata,
+            timestamp=timestamp,
+        )
+
     async def fetch_changes(
         self, since: Optional[str] = None
     ) -> tuple[List[IngestionEvent], Optional[str]]:
@@ -64,23 +109,40 @@ class GitHubConnector(BaseConnector):
         """
         async with httpx.AsyncClient() as client:
             try:
-                # Fetch recent commits
                 commits_url = f"{self.base_url}/repos/{self.owner}/{self.repo}/commits"
                 since_iso, since_sha = self._parse_cursor(since)
                 params = {"per_page": self.config.batch_size}
                 if since_iso:
                     params["since"] = since_iso
 
-                response = await client.get(
-                    commits_url,
-                    headers=self.headers,
-                    params=params,
-                    timeout=30.0,
-                )
-                response.raise_for_status()
-                commits = response.json()
+                commits: List[Dict[str, Any]] = []
+                next_url: Optional[str] = commits_url
+                next_params = params
 
-                if since_sha:
+                while next_url:
+                    response = await client.get(
+                        next_url,
+                        headers=self.headers,
+                        params=next_params,
+                        timeout=30.0,
+                    )
+                    response.raise_for_status()
+                    batch = response.json()
+                    if not batch:
+                        break
+                    commits.extend(batch)
+
+                    if since_sha and any(c.get("sha") == since_sha for c in batch):
+                        break
+
+                    link_next = response.links.get("next")
+                    if link_next and link_next.get("url"):
+                        next_url = link_next["url"]
+                        next_params = None
+                    else:
+                        break
+
+                if since_sha and commits:
                     trimmed: List[Dict[str, Any]] = []
                     for commit in commits:
                         if commit.get("sha") == since_sha:
@@ -102,61 +164,7 @@ class GitHubConnector(BaseConnector):
 
                 # Check each commit for docs changes
                 for commit in commits:
-                    commit_sha = commit["sha"]
-                    commit_url = commit["url"]
-
-                    # Fetch commit details to see changed files
-                    commit_response = await client.get(
-                        commit_url, headers=self.headers, timeout=30.0
-                    )
-                    commit_response.raise_for_status()
-                    commit_detail = commit_response.json()
-
-                    # Filter files in docs path
-                    for file in commit_detail.get("files", []):
-                        filename = file["filename"]
-
-                        # Only process docs files
-                        if not filename.startswith(self.docs_path):
-                            continue
-                        if not filename.endswith((".md", ".markdown", ".html")):
-                            continue
-
-                        # Determine event type
-                        status = file["status"]
-                        if status == "added":
-                            event_type = "created"
-                        elif status == "modified":
-                            event_type = "updated"
-                        elif status == "removed":
-                            event_type = "deleted"
-                        else:
-                            continue
-
-                        # Create ingestion event
-                        event = IngestionEvent(
-                            source_uri=f"https://github.com/{self.owner}/{self.repo}/blob/{commit_sha}/{filename}",
-                            source_type="github",
-                            event_type=event_type,
-                            metadata={
-                                "owner": self.owner,
-                                "repo": self.repo,
-                                "filename": filename,
-                                "commit_sha": commit_sha,
-                                "commit_message": commit.get("commit", {}).get(
-                                    "message", ""
-                                ),
-                                "author": commit.get("commit", {})
-                                .get("author", {})
-                                .get("name", "unknown"),
-                            },
-                            timestamp=datetime.fromisoformat(
-                                commit["commit"]["author"]["date"].replace(
-                                    "Z", "+00:00"
-                                )
-                            ),
-                        )
-                        events.append(event)
+                    events.extend(await self._events_from_commit(client, commit))
 
                 logger.info(
                     f"Fetched {len(events)} documentation changes from "
@@ -219,7 +227,6 @@ class GitHubConnector(BaseConnector):
             IngestionEvent or None if no action needed
         """
         try:
-            # Only process push events
             if "commits" not in payload:
                 logger.debug("Ignoring non-push webhook event")
                 return []
@@ -229,61 +236,55 @@ class GitHubConnector(BaseConnector):
             if not commits:
                 return None
 
-            # Use most recent commit
-            commit = commits[-1]
-            commit_sha = commit["id"]
-
-            # Check for docs changes
-            added = commit.get("added", [])
-            modified = commit.get("modified", [])
-            removed = commit.get("removed", [])
-
-            all_files = added + modified + removed
-
-            # Filter for docs
-            docs_files = [
-                f
-                for f in all_files
-                if f.startswith(self.docs_path)
-                and f.endswith((".md", ".markdown", ".html"))
-            ]
-
-            if not docs_files:
-                logger.debug("No documentation files changed in push")
-                return []
-
             events: List[IngestionEvent] = []
-            commit_ts = datetime.fromisoformat(
-                commit["timestamp"].replace("Z", "+00:00")
-            )
+            for commit in commits:
+                commit_sha = commit.get("id") or commit.get("sha")
+                if not commit_sha:
+                    continue
 
-            for filename in docs_files:
-                if filename in removed:
-                    event_type = "deleted"
-                elif filename in added:
-                    event_type = "created"
-                else:
-                    event_type = "updated"
+                added = commit.get("added", []) or []
+                modified = commit.get("modified", []) or []
+                removed = commit.get("removed", []) or []
+                all_files = added + modified + removed
 
-                event = IngestionEvent(
-                    source_uri=f"https://github.com/{self.owner}/{self.repo}/blob/{commit_sha}/{filename}",
-                    source_type="github",
-                    event_type=event_type,
-                    metadata={
-                        "owner": self.owner,
-                        "repo": self.repo,
-                        "filename": filename,
-                        "commit_sha": commit_sha,
-                        "commit_message": commit.get("message", ""),
-                        "author": commit.get("author", {}).get("username", "unknown"),
-                        "webhook": True,
-                    },
-                    timestamp=commit_ts,
+                docs_files = [f for f in all_files if self._is_docs_file(f)]
+                if not docs_files:
+                    continue
+
+                commit_ts_str = commit.get("timestamp")
+                commit_ts = (
+                    datetime.fromisoformat(commit_ts_str.replace("Z", "+00:00"))
+                    if commit_ts_str
+                    else datetime.utcnow()
                 )
-                events.append(event)
+                commit_message = commit.get("message", "")
+                author = commit.get("author", {}).get("username") or commit.get(
+                    "author", {}
+                ).get("name", "unknown")
+
+                for filename in docs_files:
+                    if filename in removed:
+                        event_type = "deleted"
+                    elif filename in added:
+                        event_type = "created"
+                    else:
+                        event_type = "updated"
+
+                    event = self._create_event(
+                        commit_sha=commit_sha,
+                        filename=filename,
+                        event_type=event_type,
+                        commit_message=commit_message,
+                        author=author,
+                        timestamp=commit_ts,
+                        webhook=True,
+                    )
+                    events.append(event)
 
             logger.info(
-                "Webhook events created for %d documentation files", len(events)
+                "Webhook events created for %d documentation files across %d commits",
+                len(events),
+                len(commits),
             )
             return events
 
@@ -314,3 +315,50 @@ class GitHubConnector(BaseConnector):
         if not timestamp_iso and not sha:
             return None
         return json.dumps({"since": timestamp_iso, "sha": sha})
+
+    async def _events_from_commit(
+        self, client: httpx.AsyncClient, commit: Dict[str, Any]
+    ) -> List[IngestionEvent]:
+        commit_sha = commit["sha"]
+        commit_url = commit["url"]
+
+        commit_response = await client.get(
+            commit_url, headers=self.headers, timeout=30.0
+        )
+        commit_response.raise_for_status()
+        commit_detail = commit_response.json()
+
+        commit_message = commit_detail.get("commit", {}).get("message", "")
+        commit_author = (
+            commit_detail.get("commit", {}).get("author", {}).get("name", "unknown")
+        )
+        commit_date = (
+            commit_detail.get("commit", {}).get("author", {}).get("date") or ""
+        )
+        commit_ts = (
+            datetime.fromisoformat(commit_date.replace("Z", "+00:00"))
+            if commit_date
+            else datetime.utcnow()
+        )
+
+        events: List[IngestionEvent] = []
+        for file in commit_detail.get("files", []):
+            filename = file.get("filename")
+            if not filename or not self._is_docs_file(filename):
+                continue
+            status = file.get("status")
+            event_type = self._map_status_to_event(status or "")
+            if not event_type:
+                continue
+
+            events.append(
+                self._create_event(
+                    commit_sha=commit_sha,
+                    filename=filename,
+                    event_type=event_type,
+                    commit_message=commit_message,
+                    author=commit_author,
+                    timestamp=commit_ts,
+                )
+            )
+        return events
