@@ -13,10 +13,66 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
 from src.providers.rerank.base import RerankProvider
+from src.providers.settings import EmbeddingSettings
 from src.shared.config import get_config
 from src.shared.observability import get_logger
 
 logger = get_logger(__name__)
+
+METADATA_TEXT_LIMIT = 1000
+SAFE_METADATA_FIELDS = [
+    "chunk_id",
+    "section_id",
+    "document_id",
+    "parent_section_id",
+    "doc_tag",
+    "doc_status",
+    "snapshot_scope",
+    "source_path",
+    "document_uri",
+    "title",
+    "heading",
+    "name",
+    "description",
+    "anchor",
+    "level",
+    "order",
+    "tokens",
+    "token_count",
+    "document_total_tokens",
+    "chunk_order",
+    "chunk_kind",
+    "is_combined",
+    "is_split",
+    "is_microdoc",
+    "doc_is_microdoc",
+    "is_microdoc_extra",
+    "is_microdoc_stub",
+    "expansion_source",
+    "is_expanded",
+    "citation_labels",
+    "original_section_ids",
+    "boundaries_json",
+    "entity_type",
+    "procedure_type",
+    "command_type",
+    "configuration_type",
+]
+
+
+def build_metadata_projection(alias: str) -> str:
+    """
+    Construct a Cypher map projection that whitelists metadata fields and truncates text.
+    """
+
+    field_expr = ", ".join(f".{field}" for field in SAFE_METADATA_FIELDS)
+    text_expr = (
+        f"text: CASE WHEN {alias}.text IS NULL THEN NULL "
+        f"ELSE substring({alias}.text, 0, $metadata_text_limit) END"
+    )
+    if field_expr:
+        return f"{alias}{{{field_expr}, {text_expr}}}"
+    return f"{alias}{{{text_expr}}}"
 
 
 @dataclass
@@ -168,22 +224,29 @@ class QdrantVectorStore(VectorStore):
 class Neo4jVectorStore(VectorStore):
     """Neo4j vector store implementation."""
 
-    def __init__(self, driver, index_name: str):
+    def __init__(
+        self,
+        driver,
+        index_name: str,
+        *,
+        embedding_version: Optional[str] = None,
+    ):
         self.driver = driver
         self.index_name = index_name
+        self.embedding_version = embedding_version
 
     def search(
         self, vector: List[float], k: int, filters: Optional[Dict] = None
     ) -> List[Dict[str, Any]]:
         """Search Neo4j vector index for top-k vectors."""
-        config = get_config()
+        version = self.embedding_version or get_config().embedding.version
 
         where_clauses = ["node.embedding_version = $embedding_version"]
         params: Dict[str, Any] = {
             "index_name": self.index_name,
             "k": k,
             "vector": vector,
-            "embedding_version": config.embedding.version,
+            "embedding_version": version,
         }
 
         if filters:
@@ -199,16 +262,16 @@ class Neo4jVectorStore(VectorStore):
 
         where_clause = " AND ".join(where_clauses)
 
-        query = """
+        metadata_projection = build_metadata_projection("node")
+        query = f"""
         CALL db.index.vector.queryNodes($index_name, $k, $vector)
         YIELD node, score
         WHERE {where_clause}
         RETURN node.id AS id, score, node.document_id AS document_id,
-               labels(node)[0] AS node_label, properties(node) AS metadata
+               labels(node)[0] AS node_label, {metadata_projection} AS metadata
         LIMIT $k
-        """.format(
-            where_clause=where_clause
-        )
+        """
+        params["metadata_text_limit"] = METADATA_TEXT_LIMIT
 
         with self.driver.session() as session:
             result = session.run(query, **params)
@@ -239,11 +302,13 @@ class HybridSearchEngine:
         neo4j_driver,
         embedder,
         reranker: Optional[RerankProvider] = None,
+        embedding_settings: Optional[EmbeddingSettings] = None,
     ):
         self.vector_store = vector_store
         self.neo4j_driver = neo4j_driver
         self.embedder = embedder
         self.reranker = reranker  # Phase 7C: Optional reranker
+        self.embedding_settings = embedding_settings
         self.config = get_config()
 
         # Get search configuration
@@ -255,11 +320,37 @@ class HybridSearchEngine:
         self.rerank_k = 50  # Get more candidates for reranking
         self.rerank_top_k = 20  # Narrow down to top 20 after reranking
 
+        if (
+            self.embedding_settings
+            and hasattr(embedder, "dims")
+            and embedder.dims != self.embedding_settings.dims
+        ):
+            raise ValueError(
+                f"HybridSearchEngine embedder dims ({getattr(embedder, 'dims', 'unknown')}) "
+                f"do not match embedding profile dims ({self.embedding_settings.dims})."
+            )
+
         # Pre-Phase 7: Log embedder info once at init
-        logger.info(
-            f"HybridSearchEngine initialized with embedder: "
-            f"model_id={embedder.model_id}, dims={embedder.dims}"
-        )
+        if self.embedding_settings:
+            logger.info(
+                "HybridSearchEngine initialized with embedder",
+                profile=self.embedding_settings.profile,
+                provider=self.embedding_settings.provider,
+                model_id=embedder.model_id,
+                dims=embedder.dims,
+                tokenizer_backend=self.embedding_settings.tokenizer_backend,
+                supports_sparse=getattr(
+                    self.embedding_settings.capabilities, "supports_sparse", None
+                ),
+                supports_colbert=getattr(
+                    self.embedding_settings.capabilities, "supports_colbert", None
+                ),
+            )
+        else:
+            logger.info(
+                f"HybridSearchEngine initialized with embedder: "
+                f"model_id={embedder.model_id}, dims={embedder.dims}"
+            )
 
         # Phase 7C: Log reranker info
         if self.reranker:
@@ -466,6 +557,7 @@ class HybridSearchEngine:
 
         # Controlled expansion query with depth limit
         # Note: max_hops must be a literal in the pattern, not a parameter
+        metadata_projection = build_metadata_projection("target")
         expansion_query = f"""
         UNWIND $seed_ids AS seed_id
         MATCH (seed {{id: seed_id}})
@@ -474,7 +566,7 @@ class HybridSearchEngine:
         WITH DISTINCT target, min(length(path)) AS dist, seed.id AS seed_id
         WHERE dist <= {self.max_hops}
         RETURN target.id AS id, dist, labels(target)[0] AS label,
-               properties(target) AS metadata, seed_id
+               {metadata_projection} AS metadata, seed_id
         ORDER BY dist ASC
         LIMIT 50
         """
@@ -483,7 +575,11 @@ class HybridSearchEngine:
 
         try:
             with self.neo4j_driver.session() as session:
-                result = session.run(expansion_query, seed_ids=seed_ids)
+                result = session.run(
+                    expansion_query,
+                    seed_ids=seed_ids,
+                    metadata_text_limit=METADATA_TEXT_LIMIT,
+                )
 
                 for record in result:
                     expanded_results.append(
@@ -515,7 +611,9 @@ class HybridSearchEngine:
         seed_ids = [s.node_id for s in seeds[:5]]  # Limit to top 5
 
         # Find shortest paths between seeds
-        path_query = """
+        metadata_projection = build_metadata_projection("node")
+        path_query = (
+            """
         UNWIND $ids AS a
         UNWIND $ids AS b
         WITH DISTINCT a, b WHERE a < b
@@ -527,15 +625,22 @@ class HybridSearchEngine:
         WITH DISTINCT node, min(len) AS min_dist
         WHERE node.id NOT IN $ids  // Don't return seeds again
         RETURN node.id AS id, labels(node)[0] AS label,
-               properties(node) AS metadata, min_dist AS dist
+               """
+            + metadata_projection
+            + """ AS metadata, min_dist AS dist
         LIMIT 30
         """
+        )
 
         bridge_results = []
 
         try:
             with self.neo4j_driver.session() as session:
-                result = session.run(path_query, ids=seed_ids)
+                result = session.run(
+                    path_query,
+                    ids=seed_ids,
+                    metadata_text_limit=METADATA_TEXT_LIMIT,
+                )
 
                 for record in result:
                     bridge_results.append(

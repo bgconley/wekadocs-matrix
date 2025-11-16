@@ -22,7 +22,6 @@ from typing import Dict, List, Optional
 
 import redis
 from neo4j import Driver
-from sentence_transformers import SentenceTransformer
 
 from src.ingestion.build_graph import GraphBuilder
 from src.ingestion.extract import extract_entities
@@ -31,7 +30,8 @@ from src.ingestion.parsers.html import parse_html
 from src.ingestion.parsers.markdown import parse_markdown
 from src.ingestion.parsers.notion import parse_notion
 from src.ingestion.reconcile import Reconciler
-from src.shared.config import Config
+from src.providers.factory import ProviderFactory
+from src.shared.config import Config, get_embedding_settings
 from src.shared.embedding_fields import (
     canonicalize_embedding_metadata,
     ensure_no_embedding_model_in_payload,
@@ -134,7 +134,8 @@ class Orchestrator:
         self.qdrant = qdrant_client
 
         # Initialize embedder lazily
-        self.embedder: Optional[SentenceTransformer] = None
+        self.embedding_settings = get_embedding_settings(self.config)
+        self.embedder = None
 
         logger.info("Orchestrator initialized")
 
@@ -460,9 +461,14 @@ class Orchestrator:
         # Initialize embedder lazily
         if not self.embedder:
             logger.info(
-                "Loading embedding model", model=self.config.embedding.embedding_model
+                "Initializing auto-ingestion embedder",
+                provider=self.embedding_settings.provider,
+                model=self.embedding_settings.model_id,
+                profile=self.embedding_settings.profile,
             )
-            self.embedder = SentenceTransformer(self.config.embedding.embedding_model)
+            self.embedder = ProviderFactory.create_embedding_provider(
+                settings=self.embedding_settings
+            )
 
         # Compute embeddings for sections
         embeddings_computed = 0
@@ -473,7 +479,10 @@ class Orchestrator:
             text_to_embed = f"{title}\n\n{text}" if title else text
 
             # Compute embedding
-            embedding = self.embedder.encode(text_to_embed).tolist()
+            vectors = self.embedder.embed_documents([text_to_embed])
+            if not vectors:
+                raise RuntimeError("Embedding provider returned no vectors")
+            embedding = vectors[0]
 
             # Store in section (not yet persisted to vector store)
             section["vector_embedding"] = embedding
@@ -485,7 +494,7 @@ class Orchestrator:
             section.setdefault("lang", state.document.get("lang"))
             section.setdefault("version", state.document.get("version"))
             section.setdefault("semantic_metadata", {"entities": [], "topics": []})
-            section["embedding_version"] = self.config.embedding.version
+            section["embedding_version"] = self.embedding_settings.version
             embeddings_computed += 1
 
         # Save to state
@@ -830,7 +839,7 @@ class Orchestrator:
             {"key": "node_label", "match": {"value": "Section"}},
             {
                 "key": "embedding_version",
-                "match": {"value": self.config.embedding.version},
+                "match": {"value": self.embedding_settings.version},
             },
         ]
 
@@ -886,10 +895,11 @@ class Orchestrator:
 
             text_value = section.get("text", "")
             embedding_metadata = canonicalize_embedding_metadata(
-                embedding_model=self.config.embedding.version,
+                embedding_model=self.embedding_settings.version,
                 dimensions=len(embedding),
-                provider=self.config.embedding.provider,
-                task="retrieval.passage",
+                provider=self.embedding_settings.provider,
+                task=self.embedding_settings.task,
+                profile=self.embedding_settings.profile,
                 timestamp=datetime.utcnow(),
             )
 

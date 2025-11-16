@@ -485,8 +485,8 @@ Result:
 - ✅ Tasks 7C.1 and 7C.2 complete (from Session 02)
 - ✅ Provider factory functional
 - ✅ Index registry operational
-- ✅ Jina API key available (if using jina-ai provider)
-- ✅ Ollama running (if using ollama provider)
+- ✅ Jina API key available (if using jina-ai profile)
+- ✅ BGE-M3 service reachable + client path configured (if using `bge_m3` profile)
 
 ### Deployment Steps
 
@@ -543,7 +543,7 @@ MATCH (s:Section)
 WHERE s.embedding_dimensions IS NOT NULL
 RETURN s.embedding_dimensions, s.embedding_provider, count(s)
 
-// Should see: 1024, jina-ai (or ollama), <count>
+// Should see: 1024, <active provider>, <count>
 ```
 
 ---

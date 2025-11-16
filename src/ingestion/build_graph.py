@@ -10,15 +10,15 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import redis
 from neo4j import Driver
-from qdrant_client.http.models import PayloadSchemaType
+from qdrant_client.http.models import PayloadSchemaType, SparseVector
 from qdrant_client.models import (
-    Distance,
     HnswConfigDiff,
     OptimizersConfigDiff,
+    SparseVectorParams,
     VectorParams,
 )
 
@@ -27,11 +27,12 @@ from src.ingestion.chunk_assembler import get_chunk_assembler
 # Phase 7E-4: Monitoring imports
 from src.monitoring.metrics import MetricsCollector
 from src.monitoring.slos import check_slos_and_log
+from src.providers.factory import ProviderFactory
 from src.shared.chunk_utils import (
     create_chunk_metadata,
     validate_chunk_schema,
 )
-from src.shared.config import Config
+from src.shared.config import Config, get_embedding_settings, get_settings
 from src.shared.embedding_fields import (
     canonicalize_embedding_metadata,
     ensure_no_embedding_model_in_payload,
@@ -42,8 +43,10 @@ from src.shared.observability.metrics import (
     chunk_token_distribution,
     chunks_created_total,
     chunks_oversized_total,
+    embedding_profile_guard_events_total,
     ingestion_duration_seconds,
 )
+from src.shared.qdrant_schema import build_qdrant_schema
 from src.shared.schema import ensure_schema_version
 
 logger = get_logger(__name__)
@@ -52,7 +55,13 @@ logger = get_logger(__name__)
 class GraphBuilder:
     """Builds graph from parsed documents, sections, and entities."""
 
-    def __init__(self, driver: Driver, config: Config, qdrant_client=None):
+    def __init__(
+        self,
+        driver: Driver,
+        config: Config,
+        qdrant_client=None,
+        strict_mode: Optional[bool] = None,
+    ):
         self.driver = driver
         self.config = config
 
@@ -73,13 +82,16 @@ class GraphBuilder:
             self.qdrant_client = None
 
         self.embedder = None
-        self.embedding_version = config.embedding.version
+        self.embedding_settings = get_embedding_settings(config)
+        self.embedding_version = self.embedding_settings.version
+        self.embedding_dims = self.embedding_settings.dims or 0
         self.vector_primary = config.search.vector.primary
         self.dual_write = config.search.vector.dual_write
         self.expected_schema_version = (
             getattr(config.graph_schema, "version", None) if config else None
         )
         self._schema_version_verified = False
+        self._profile_alignment_verified = False
         self.include_entity_vector = (
             os.getenv("QDRANT_INCLUDE_ENTITY_VECTOR", "true").lower() == "true"
         )
@@ -90,6 +102,11 @@ class GraphBuilder:
         # Ensure Qdrant collections exist if using Qdrant
         if self.qdrant_client and (self.vector_primary == "qdrant" or self.dual_write):
             self._ensure_qdrant_collection()
+
+        if strict_mode is None:
+            runtime_settings = get_settings()
+            strict_mode = runtime_settings.embedding_strict_mode
+        self._strict_mode_enabled = bool(strict_mode)
 
     def _validate_schema_version(self, session) -> None:
         """
@@ -106,6 +123,45 @@ class GraphBuilder:
 
         ensure_schema_version(self.driver, self.expected_schema_version)
         self._schema_version_verified = True
+
+    def _enforce_profile_guard(self) -> None:
+        """Detect and optionally block ingestion if legacy embeddings persist."""
+        if self._profile_alignment_verified:
+            return
+        mismatched_ids: List[str] = []
+        query = """
+        MATCH (s:Section)
+        WHERE s.embedding_version IS NOT NULL AND s.embedding_version <> $version
+        RETURN s.id AS id
+        LIMIT 5
+        """
+        with self.driver.session() as session:
+            result = session.run(query, version=self.embedding_settings.version)
+            mismatched_ids = [record["id"] for record in result]
+
+        if mismatched_ids:
+            message = (
+                "Embedding metadata drift detected for current profile "
+                f"{self.embedding_settings.profile}: found Sections with older "
+                f"embedding_version values (examples: {', '.join(mismatched_ids)}). "
+                "Re-ingest or reconcile existing data before proceeding."
+            )
+            outcome = "blocked" if self._strict_mode_enabled else "warned"
+            embedding_profile_guard_events_total.labels(
+                profile=self.embedding_settings.profile or "legacy",
+                outcome=outcome,
+            ).inc()
+            if self._strict_mode_enabled:
+                raise RuntimeError(
+                    message + " EMBEDDING_STRICT_MODE blocked ingestion."
+                )
+            logger.warning(message)
+        else:
+            embedding_profile_guard_events_total.labels(
+                profile=self.embedding_settings.profile or "legacy",
+                outcome="clean",
+            ).inc()
+        self._profile_alignment_verified = True
 
     def upsert_document(
         self,
@@ -170,6 +226,7 @@ class GraphBuilder:
         with self.driver.session() as session:
             # Fail fast if schema version drifts from configuration
             self._validate_schema_version(session)
+            self._enforce_profile_guard()
 
             # Step 1: Upsert Document node
             self._upsert_document_node(session, document)
@@ -1082,38 +1139,26 @@ class GraphBuilder:
 
         # Phase 7C.7: Initialize embedding provider from factory
         if not self.embedder:
-            from src.providers.factory import ProviderFactory
-
             logger.info(
                 "Initializing embedding provider",
-                provider=self.config.embedding.provider,
-                model=self.config.embedding.embedding_model,
-                dims=self.config.embedding.dims,
+                provider=self.embedding_settings.provider,
+                model=self.embedding_settings.model_id,
+                dims=self.embedding_settings.dims,
+                profile=self.embedding_settings.profile,
             )
 
-            # Use ProviderFactory to create embedding provider with explicit params
-            # so we honor per-call overrides passed via config and avoid reading
-            # from the global singleton inside the factory.
             self.embedder = ProviderFactory.create_embedding_provider(
-                provider=self.config.embedding.provider,
-                model=self.config.embedding.embedding_model,
-                dims=self.config.embedding.dims,
-                task=self.config.embedding.task,
+                settings=self.embedding_settings
             )
 
-            # Validate dimensions match configuration; if not, align the local
-            # (per-call) config to the provider to avoid hard failures when an
-            # override changes the model/dimensions. This does not mutate the
-            # global config because we pass a deep-copied config per call.
-            if self.embedder.dims != self.config.embedding.dims:
+            if self.embedder.dims != self.embedding_dims:
                 logger.warning(
-                    "Embedding dims mismatch; aligning local config to provider",
-                    configured_dims=self.config.embedding.dims,
+                    "Embedding dims mismatch; aligning local settings to provider",
+                    configured_dims=self.embedding_dims,
                     provider_dims=self.embedder.dims,
                     model=self.embedder.model_id,
                 )
-                # Align local config to provider dims for the remainder of this run
-                self.config.embedding.dims = self.embedder.dims
+                self.embedding_dims = self.embedder.dims
 
             logger.info(
                 "Embedding provider initialized",
@@ -1185,19 +1230,53 @@ class GraphBuilder:
             # Generate embeddings using configured provider (Jina v3 @ 1024-D)
             content_embeddings = self.embedder.embed_documents(content_texts)
             title_embeddings = self.embedder.embed_documents(title_texts)
+            sparse_embeddings = None
+            if getattr(
+                self.embedding_settings.capabilities, "supports_sparse", False
+            ) and hasattr(self.embedder, "embed_sparse"):
+                try:
+                    sparse_embeddings = self.embedder.embed_sparse(content_texts)
+                except Exception as exc:
+                    logger.warning(
+                        "Sparse embedding generation failed; continuing without sparse vectors",
+                        error=str(exc),
+                    )
+                    sparse_embeddings = None
+            colbert_embeddings = None
+            if getattr(
+                self.embedding_settings.capabilities, "supports_colbert", False
+            ) and hasattr(self.embedder, "embed_colbert"):
+                try:
+                    colbert_embeddings = self.embedder.embed_colbert(content_texts)
+                except Exception as exc:
+                    logger.warning(
+                        "ColBERT embedding generation failed; continuing without ColBERT vectors",
+                        error=str(exc),
+                    )
+                    colbert_embeddings = None
 
             # Process each section with its embeddings
             for idx, section in enumerate(sections_to_embed):
                 embedding = content_embeddings[idx]
                 title_embedding = title_embeddings[idx]
+                sparse_vector = (
+                    sparse_embeddings[idx]
+                    if sparse_embeddings and idx < len(sparse_embeddings)
+                    else None
+                )
+                colbert_vector = (
+                    colbert_embeddings[idx]
+                    if colbert_embeddings and idx < len(colbert_embeddings)
+                    else None
+                )
 
                 # Phase 7E-1: CRITICAL - Comprehensive validation layer
 
                 # Validate 1: Dimension check (1024-D for Jina v3)
-                if len(embedding) != self.config.embedding.dims:
+                if len(embedding) != self.embedding_dims:
                     raise ValueError(
                         f"Embedding dimension mismatch for section {section['id']}: "
-                        f"expected {self.config.embedding.dims}-D, got {len(embedding)}-D. "
+                        f"expected {self.embedding_dims}-D, got {len(embedding)}-D. "
                         "Ingestion blocked - dimension safety enforced."
                     )
 
@@ -1217,14 +1296,20 @@ class GraphBuilder:
 
                 # Validate 4: Embedding metadata completeness
                 test_metadata = canonicalize_embedding_metadata(
-                    embedding_model=self.embedding_version,
+                    embedding_model=self.embedding_settings.version,
                     dimensions=len(embedding),
                     provider=self.embedder.provider_name,
-                    task=getattr(self.embedder, "task", "retrieval.passage"),
+                    task=getattr(self.embedder, "task", self.embedding_settings.task),
+                    profile=self.embedding_settings.profile,
                     timestamp=datetime.utcnow(),
                 )
 
-                if not validate_embedding_metadata(test_metadata):
+                if not validate_embedding_metadata(
+                    test_metadata,
+                    expected_dimensions=self.embedding_dims,
+                    expected_provider=self.embedding_settings.provider,
+                    expected_version=self.embedding_settings.version,
+                ):
                     raise ValueError(
                         f"Section {section['id']} has invalid embedding metadata. "
                         "Ingestion blocked - metadata validation failed."
@@ -1247,17 +1332,26 @@ class GraphBuilder:
                         vectors["entity"] = embedding
 
                     self._upsert_to_qdrant(
-                        section["id"], vectors, section, document, "Section"
+                        section["id"],
+                        vectors,
+                        section,
+                        document,
+                        "Section",
+                        sparse_vector=sparse_vector,
+                        colbert_vectors=colbert_vector,
                     )
                     stats["upserted"] += 1
 
                     # Phase 7C.7: Update Neo4j with required embedding metadata
                     # Use canonicalization helper to ensure consistent field naming
                     embedding_metadata = canonicalize_embedding_metadata(
-                        embedding_model=self.embedding_version,  # Maps to embedding_version
+                        embedding_model=self.embedding_settings.version,
                         dimensions=len(embedding),
                         provider=self.embedder.provider_name,
-                        task=getattr(self.embedder, "task", "retrieval.passage"),
+                        task=getattr(
+                            self.embedder, "task", self.embedding_settings.task
+                        ),
+                        profile=self.embedding_settings.profile,
                         timestamp=datetime.utcnow(),
                     )
                     self._upsert_section_embedding_metadata(
@@ -1279,7 +1373,13 @@ class GraphBuilder:
                         if self.include_entity_vector:
                             vectors["entity"] = embedding
                         self._upsert_to_qdrant(
-                            section["id"], vectors, section, document, "Section"
+                            section["id"],
+                            vectors,
+                            section,
+                            document,
+                            "Section",
+                            sparse_vector=sparse_vector,
+                            colbert_vectors=colbert_vector,
                         )
 
         logger.info("Embeddings processed", stats=stats)
@@ -1342,34 +1442,38 @@ class GraphBuilder:
         Ensure Qdrant collection exists with multi-vector schema + payload indexes.
         """
         collection = self.config.search.vector.qdrant.collection_name
-        dimensions = self.config.embedding.dims
 
         try:
-            vectors_config = {
-                "content": VectorParams(
-                    size=dimensions,
-                    distance=Distance.COSINE,
+            schema_plan = build_qdrant_schema(
+                self.embedding_settings,
+                include_entity=self.include_entity_vector,
+                enable_sparse=getattr(
+                    self.config.search.vector.qdrant, "enable_sparse", False
                 ),
-                "title": VectorParams(
-                    size=dimensions,
-                    distance=Distance.COSINE,
+                enable_colbert=getattr(
+                    self.config.search.vector.qdrant, "enable_colbert", False
                 ),
-            }
-            if self.include_entity_vector:
-                vectors_config["entity"] = VectorParams(
-                    size=dimensions,
-                    distance=Distance.COSINE,
-                )
+            )
+            vectors_config = schema_plan.vectors_config
+            sparse_vectors_config = schema_plan.sparse_vectors_config
+            payload_fields = schema_plan.payload_indexes
+            if schema_plan.notes:
+                for note in schema_plan.notes:
+                    logger.info("Qdrant schema note", note=note)
 
             collections = {
                 c.name for c in self.qdrant_client.get_collections().collections
             }
             if collection not in collections:
-                self._create_qdrant_collection(collection, vectors_config)
+                self._create_qdrant_collection(
+                    collection, vectors_config, sparse_vectors_config
+                )
             else:
-                self._reconcile_qdrant_collection(collection, vectors_config)
+                self._reconcile_qdrant_collection(
+                    collection, vectors_config, sparse_vectors_config
+                )
 
-            self._ensure_qdrant_payload_indexes(collection)
+            self._ensure_qdrant_payload_indexes(collection, payload_fields)
         except Exception as e:
             logger.error(
                 "Failed to ensure Qdrant collection",
@@ -1378,32 +1482,10 @@ class GraphBuilder:
             )
             raise
 
-    def _ensure_qdrant_payload_indexes(self, collection: str) -> None:
+    def _ensure_qdrant_payload_indexes(
+        self, collection: str, fields: Sequence[tuple[str, PayloadSchemaType]]
+    ) -> None:
         """Ensure payload indexes exist for canonical hybrid fields."""
-        fields = [
-            ("id", PayloadSchemaType.KEYWORD),
-            ("document_id", PayloadSchemaType.KEYWORD),
-            ("doc_id", PayloadSchemaType.KEYWORD),
-            ("parent_section_id", PayloadSchemaType.KEYWORD),
-            ("parent_section_original_id", PayloadSchemaType.KEYWORD),
-            ("order", PayloadSchemaType.INTEGER),
-            ("heading", PayloadSchemaType.TEXT),
-            ("updated_at", PayloadSchemaType.INTEGER),
-            ("doc_tag", PayloadSchemaType.KEYWORD),
-            ("snapshot_scope", PayloadSchemaType.KEYWORD),
-            ("is_microdoc", PayloadSchemaType.BOOL),
-            ("token_count", PayloadSchemaType.INTEGER),
-            ("tenant", PayloadSchemaType.KEYWORD),
-            ("lang", PayloadSchemaType.KEYWORD),
-            ("version", PayloadSchemaType.KEYWORD),
-            ("source_path", PayloadSchemaType.KEYWORD),
-            ("embedding_version", PayloadSchemaType.KEYWORD),
-            ("embedding_provider", PayloadSchemaType.KEYWORD),
-            ("embedding_dimensions", PayloadSchemaType.INTEGER),
-            ("text_hash", PayloadSchemaType.KEYWORD),
-            ("shingle_hash", PayloadSchemaType.KEYWORD),
-        ]
-
         for field_name, schema in fields:
             try:
                 self.qdrant_client.create_payload_index(
@@ -1415,19 +1497,22 @@ class GraphBuilder:
                 continue
 
     def _create_qdrant_collection(
-        self, collection: str, vectors_config: Dict[str, VectorParams]
+        self,
+        collection: str,
+        vectors_config: Dict[str, VectorParams],
+        sparse_vectors_config: Optional[Dict[str, SparseVectorParams]] = None,
     ) -> None:
-        self.qdrant_client.create_collection(
-            collection_name=collection,
-            vectors_config=vectors_config,
-            hnsw_config=HnswConfigDiff(
+        kwargs = {
+            "collection_name": collection,
+            "vectors_config": vectors_config,
+            "hnsw_config": HnswConfigDiff(
                 m=48,
                 ef_construct=256,
                 full_scan_threshold=10000,
                 max_indexing_threads=0,
                 on_disk=False,
             ),
-            optimizer_config=OptimizersConfigDiff(
+            "optimizer_config": OptimizersConfigDiff(
                 default_segment_number=2,
                 indexing_threshold=20000,
                 deleted_threshold=0.2,
@@ -1435,15 +1520,28 @@ class GraphBuilder:
                 max_optimization_threads=1,
                 flush_interval_sec=5,
             ),
-            shard_number=1,
-            replication_factor=1,
-            write_consistency_factor=1,
-            on_disk_payload=True,
-        )
+            "shard_number": 1,
+            "replication_factor": 1,
+            "write_consistency_factor": 1,
+            "on_disk_payload": True,
+        }
+        if sparse_vectors_config:
+            kwargs["sparse_vectors_config"] = sparse_vectors_config
+        try:
+            self.qdrant_client.create_collection(**kwargs)
+        except AssertionError as exc:
+            if "optimizer_config" in str(exc):
+                kwargs.pop("optimizer_config", None)
+                self.qdrant_client.create_collection(**kwargs)
+            else:
+                raise
         logger.info("Created Qdrant collection", collection=collection)
 
     def _reconcile_qdrant_collection(
-        self, collection: str, vectors_config: Dict[str, VectorParams]
+        self,
+        collection: str,
+        vectors_config: Dict[str, VectorParams],
+        sparse_vectors_config: Optional[Dict[str, SparseVectorParams]] = None,
     ) -> None:
         info_payload = self._get_qdrant_collection_payload(collection)
         vectors_meta = (
@@ -1462,7 +1560,10 @@ class GraphBuilder:
             )
             if not self._update_qdrant_vectors_config(collection, vectors_config):
                 self._maybe_recreate_qdrant_collection(
-                    collection, vectors_config, allow_recreate
+                    collection,
+                    vectors_config,
+                    allow_recreate,
+                    sparse_vectors_config=sparse_vectors_config,
                 )
             return
 
@@ -1478,7 +1579,10 @@ class GraphBuilder:
         )
         if not self._update_qdrant_vectors_config(collection, missing_config):
             self._maybe_recreate_qdrant_collection(
-                collection, vectors_config, allow_recreate
+                collection,
+                vectors_config,
+                allow_recreate,
+                sparse_vectors_config=sparse_vectors_config,
             )
 
     def _get_qdrant_collection_payload(self, collection: str) -> Dict[str, Any]:
@@ -1535,6 +1639,7 @@ class GraphBuilder:
         collection: str,
         vectors_config: Dict[str, VectorParams],
         allow_recreate: bool,
+        sparse_vectors_config: Optional[Dict[str, SparseVectorParams]] = None,
     ) -> None:
         if not allow_recreate:
             raise RuntimeError(
@@ -1547,7 +1652,9 @@ class GraphBuilder:
             collection=collection,
         )
         self.qdrant_client.delete_collection(collection_name=collection)
-        self._create_qdrant_collection(collection, vectors_config)
+        self._create_qdrant_collection(
+            collection, vectors_config, sparse_vectors_config
+        )
 
     def _upsert_to_qdrant(
         self,
@@ -1556,6 +1663,9 @@ class GraphBuilder:
         section: Dict,
         document: Dict,
         label: str,
+        *,
+        sparse_vector: Optional[Dict[str, List[float]]] = None,
+        colbert_vectors: Optional[List[List[float]]] = None,
     ):
         """
         Upsert embedding to Qdrant with deterministic UUID mapping.
@@ -1598,10 +1708,11 @@ class GraphBuilder:
             raise ValueError("Content vector missing for Qdrant upsert.")
 
         embedding_metadata = canonicalize_embedding_metadata(
-            embedding_model=self.embedding_version,
+            embedding_model=self.embedding_settings.version,
             dimensions=len(content_vector),
             provider=self.embedder.provider_name,
-            task=getattr(self.embedder, "task", "retrieval.passage"),
+            task=getattr(self.embedder, "task", self.embedding_settings.task),
+            profile=self.embedding_settings.profile,
             timestamp=datetime.utcnow(),
         )
 
@@ -1650,6 +1761,27 @@ class GraphBuilder:
             **embedding_metadata,
         }
 
+        vectors_payload = dict(vectors)
+
+        if sparse_vector:
+            indices = (
+                sparse_vector.get("indices")
+                if isinstance(sparse_vector, dict)
+                else None
+            )
+            values = (
+                sparse_vector.get("values") if isinstance(sparse_vector, dict) else None
+            )
+            if indices and values:
+                vectors_payload["text-sparse"] = SparseVector(
+                    indices=list(indices), values=list(values)
+                )
+        if colbert_vectors:
+            vectors_payload["late-interaction"] = [
+                list(vector) for vector in colbert_vectors
+            ]
+            payload["colbert_vector_count"] = len(colbert_vectors)
+
         # Ensure no legacy embedding_model field in payload
         payload = ensure_no_embedding_model_in_payload(payload)
 
@@ -1673,11 +1805,13 @@ class GraphBuilder:
         # qdrant-client expects the keyword `vector` even when we supply a named
         # vector dictionary. Passing `vectors=` raises a validation error on older
         # client builds, so always map to `vector`.
-        point = PointStruct(id=point_uuid, vector=vectors, payload=payload)
+        point = PointStruct(id=point_uuid, vector=vectors_payload, payload=payload)
 
-        expected_dims = {
-            name: len(vec) for name, vec in vectors.items() if isinstance(vec, list)
-        }
+        expected_dims = {}
+        for name, vec in vectors_payload.items():
+            dim = self._vector_expected_dim(vec)
+            if dim:
+                expected_dims[name] = dim
 
         # Use validated upsert with dimension checking
         self.qdrant_client.upsert_validated(
@@ -1696,6 +1830,18 @@ class GraphBuilder:
             is_combined=payload["is_combined"],
             original_section_count=len(payload["original_section_ids"]),
         )
+
+    @staticmethod
+    def _vector_expected_dim(vector: Any) -> Optional[int]:
+        """Return the expected dimension for validation (if applicable)."""
+        if isinstance(vector, list):
+            if not vector:
+                return None
+            first = vector[0]
+            if isinstance(first, list):
+                return len(first)
+            return len(vector)
+        return None
 
     def _upsert_to_neo4j_vector(self, node_id: str, embedding: List[float], label: str):
         """Upsert embedding to Neo4j vector property."""
@@ -1756,7 +1902,12 @@ class GraphBuilder:
             metadata: Dict with embedding metadata fields (all required)
         """
         # Validate metadata using canonicalization helper
-        if not validate_embedding_metadata(metadata):
+        if not validate_embedding_metadata(
+            metadata,
+            expected_dimensions=self.embedding_dims,
+            expected_provider=self.embedding_settings.provider,
+            expected_version=self.embedding_settings.version,
+        ):
             raise ValueError(
                 f"Section {node_id} has invalid embedding metadata. "
                 "Ingestion blocked - metadata validation failed."

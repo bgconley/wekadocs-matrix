@@ -34,6 +34,7 @@ def _bootstrap_retriever(reranker_enabled=True):
     hr.tokenizer = DummyTokenizer()
     hr.reranker_config = types.SimpleNamespace(enabled=reranker_enabled, top_n=2)
     hr._reranker_enabled = reranker_enabled
+    hr.rerank_top_n = 2 if reranker_enabled else 0
     hr._reranker = None
     return hr
 
@@ -58,6 +59,7 @@ def test_apply_reranker_reorders_and_sets_metadata(monkeypatch):
     monkeypatch.setattr(hr, "_reranker", fake_reranker)
 
     seeds = [_chunk("a", "first chunk", 0.1), _chunk("b", "second chunk", 0.2)]
+    original_scores = {chunk.chunk_id: chunk.fused_score for chunk in seeds}
     metrics = {}
 
     reranked = hr._apply_reranker("query", seeds, metrics)
@@ -69,6 +71,8 @@ def test_apply_reranker_reorders_and_sets_metadata(monkeypatch):
     assert reranked[0].rerank_original_rank == 2
     assert reranked[1].rerank_rank == 2
     assert reranked[1].rerank_original_rank == 1
+    assert reranked[0].fused_score == original_scores["b"]
+    assert reranked[1].fused_score == original_scores["a"]
     assert metrics["reranker_applied"] is True
     assert metrics["reranker_reason"] == "ok"
     assert metrics["reranker_model"] == fake_reranker.model_id
@@ -94,6 +98,20 @@ def test_apply_reranker_skips_when_no_text(monkeypatch):
 
     chunk = _chunk("a", "", 0.1)
     chunk.heading = ""
+    metrics = {}
+
+    reranked = hr._apply_reranker("query", [chunk], metrics)
+    assert reranked == [chunk]
+    assert metrics["reranker_reason"] == "no_text"
+
+
+def test_apply_reranker_skips_zero_token_headings(monkeypatch):
+    hr = _bootstrap_retriever(reranker_enabled=True)
+    monkeypatch.setattr(hr, "_reranker", FakeRerankProvider())
+
+    chunk = _chunk("a", "", 0.1)
+    chunk.heading = "Heading only"
+    chunk.token_count = 0
     metrics = {}
 
     reranked = hr._apply_reranker("query", [chunk], metrics)

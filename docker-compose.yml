@@ -136,6 +136,7 @@ services:
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
       # Phase 7C: Embedding Provider Configuration
+      - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-jina_v3}
       - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-jina-ai}
       - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-jina-embeddings-v3}
       - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
@@ -143,7 +144,6 @@ services:
       - RERANK_PROVIDER=${RERANK_PROVIDER:-jina-ai}
       - RERANK_MODEL=${RERANK_MODEL:-jina-reranker-v2-base-multilingual}
       - JINA_API_KEY=${JINA_API_KEY}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
       - ANSWER_MODEL=${ANSWER_MODEL:-search-result-formatting}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
@@ -220,6 +220,7 @@ services:
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
       # Phase 7C: Embedding Provider Configuration
+      - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-jina_v3}
       - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-jina-ai}
       - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-jina-embeddings-v3}
       - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
@@ -227,7 +228,6 @@ services:
       - RERANK_PROVIDER=${RERANK_PROVIDER:-jina-ai}
       - RERANK_MODEL=${RERANK_MODEL:-jina-reranker-v2-base-multilingual}
       - JINA_API_KEY=${JINA_API_KEY}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
       - HF_TOKENIZER_ID=jinaai/jina-embeddings-v3
@@ -311,6 +311,7 @@ services:
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
       # Phase 7C: Embedding Provider Configuration
+      - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-jina_v3}
       - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-jina-ai}
       - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-jina-embeddings-v3}
       - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
@@ -318,7 +319,6 @@ services:
       - RERANK_PROVIDER=${RERANK_PROVIDER:-jina-ai}
       - RERANK_MODEL=${RERANK_MODEL:-jina-reranker-v2-base-multilingual}
       - JINA_API_KEY=${JINA_API_KEY}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
       - HF_TOKENIZER_ID=jinaai/jina-embeddings-v3

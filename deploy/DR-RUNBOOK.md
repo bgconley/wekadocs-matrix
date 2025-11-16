@@ -37,6 +37,13 @@ Disaster recovery procedures for WekaDocs GraphRAG MCP production system.
    kubectl get pods -n wekadocs
    curl http://mcp-server:8000/health
    ```
+5. **Verify BGE-M3 Embedding Service** (Target: 5 min)
+   ```bash
+   export BGE_M3_API_URL=${BGE_M3_API_URL:-http://127.0.0.1:9000}
+   curl $BGE_M3_API_URL/healthz
+   # Optional Prometheus scrape
+   curl $BGE_M3_API_URL/metrics | head -20
+   ```
 
 5. **Update DNS** (Target: 5 min)
    - Point domain to DR cluster load balancer

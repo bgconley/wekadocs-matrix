@@ -185,6 +185,9 @@ class CompatQdrantClient(QdrantClient):
                     for name, vec in iterator:
                         if vec is None:
                             continue
+                        actual_dim = self._resolve_vector_dim(vec)
+                        if actual_dim is None:
+                            continue
                         expected = (
                             expected_dim.get(name)
                             if isinstance(expected_dim, dict)
@@ -192,24 +195,24 @@ class CompatQdrantClient(QdrantClient):
                         )
                         if expected is None and isinstance(expected_dim, dict):
                             expected = next(iter(expected_dim.values()), None)
-                        if expected and len(vec) != expected:
+                        if expected and actual_dim != expected:
                             label = name or "vector"
                             raise ValueError(
                                 f"Dimension mismatch for vector '{label}' in point {i}: "
-                                f"expected {expected}, got {len(vec)}. "
+                                f"expected {expected}, got {actual_dim}. "
                                 f"Point ID: {getattr(point, 'id', 'unknown')}"
                             )
                 else:
                     # Fall back to treating point.vector as a single unnamed vector
                     raw_vector = getattr(point, "vector", None) or []
-                    actual_dim = len(raw_vector)
+                    actual_dim = self._resolve_vector_dim(raw_vector)
                     if isinstance(expected_dim, dict):
                         exp_dim = expected_dim.get("content") or next(
                             iter(expected_dim.values())
                         )
                     else:
                         exp_dim = expected_dim
-                    if exp_dim and actual_dim != exp_dim:
+                    if exp_dim and actual_dim and actual_dim != exp_dim:
                         raise ValueError(
                             f"Dimension mismatch in point {i}: expected {exp_dim}, "
                             f"got {actual_dim}. Point ID: {getattr(point, 'id', 'unknown')}"
@@ -278,6 +281,28 @@ class CompatQdrantClient(QdrantClient):
             return list(candidate.vector)
 
         return candidate
+
+    @staticmethod
+    def _resolve_vector_dim(vector: Any) -> Optional[int]:
+        """Return a comparable dimension for dense/multivector entries."""
+        if vector is None:
+            return None
+        if hasattr(vector, "indices") and hasattr(vector, "values"):
+            # Sparse vector; skip validation to avoid false mismatches
+            return None
+        if isinstance(vector, list):
+            if not vector:
+                return None
+            first = vector[0]
+            if isinstance(first, list):
+                return len(first)
+            return len(vector)
+        if hasattr(vector, "__len__") and not isinstance(vector, (str, bytes)):
+            try:
+                return len(vector)
+            except TypeError:
+                return None
+        return None
 
     def create_collection_with_dims(
         self,

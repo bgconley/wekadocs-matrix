@@ -20,8 +20,8 @@ CALL {
   RETURN b
 }
 RETURN a, b,
-  properties(a) AS props_a,
-  properties(b) AS props_b
+  a{.id, .name, .title, .heading, .doc_tag, .level, .anchor} AS props_a,
+  b{.id, .name, .title, .heading, .doc_tag, .level, .anchor} AS props_b
 LIMIT 1;
 
 -- Version 2: Configuration comparison with dependencies

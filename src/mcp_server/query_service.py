@@ -10,7 +10,7 @@ Task 7C.8: Integrated with SessionTracker for multi-turn conversation support.
 import json
 import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.providers.embeddings.base import EmbeddingProvider
 from src.providers.factory import ProviderFactory
@@ -28,7 +28,7 @@ from src.query.response_builder import (
     build_response,
 )
 from src.query.session_tracker import SessionTracker
-from src.shared.config import get_config
+from src.shared.config import get_config, get_embedding_settings
 from src.shared.connections import get_connection_manager
 from src.shared.observability import get_logger
 from src.shared.observability.metrics import (
@@ -47,6 +47,7 @@ class QueryService:
 
     def __init__(self):
         self.config = get_config()
+        self.embedding_settings = get_embedding_settings()
         self._embedder: Optional[EmbeddingProvider] = None
         self._reranker: Optional[RerankProvider] = None  # Phase 7C: Reranker cache
         self._search_engine: Optional[HybridSearchEngine] = None
@@ -59,22 +60,50 @@ class QueryService:
 
         logger.info("QueryService initialized")
 
+    def _embedding_diag(self) -> Dict[str, Any]:
+        diag = {
+            "embedding_profile": self.embedding_settings.profile,
+            "embedding_provider": self.embedding_settings.provider,
+            "embedding_model": self.embedding_settings.model_id,
+            "embedding_dims": self.embedding_settings.dims,
+            "tokenizer_backend": self.embedding_settings.tokenizer_backend,
+            "tokenizer_model_id": self.embedding_settings.tokenizer_model_id,
+            "embedding_task": self.embedding_settings.task,
+        }
+        caps = getattr(self.embedding_settings, "capabilities", None)
+        if caps:
+            diag.update(
+                {
+                    "supports_dense": caps.supports_dense,
+                    "supports_sparse": caps.supports_sparse,
+                    "supports_colbert": caps.supports_colbert,
+                    "supports_long_sequences": caps.supports_long_sequences,
+                    "normalized_output": caps.normalized_output,
+                    "multilingual": caps.multilingual,
+                }
+            )
+        return diag
+
     def _get_embedder(self) -> EmbeddingProvider:
         """
         Get or initialize the cached embedder.
         Phase 7C Task 7C.1: Uses ProviderFactory for ENV-selectable providers.
         """
         if self._embedder is None:
-            expected_dims = self.config.embedding.dims
+            settings = self.embedding_settings
+            expected_dims = settings.dims
 
             logger.info(
-                f"Loading embedding provider from config: provider={self.config.embedding.provider}, "
-                f"model={self.config.embedding.embedding_model}, dims={expected_dims}"
+                "Loading embedding provider from profile",
+                profile=settings.profile,
+                provider=settings.provider,
+                model=settings.model_id,
+                dims=expected_dims,
             )
 
-            # Phase 7C: Use provider factory for ENV-based selection
+            # Phase 7C: Use provider factory for ENV-based selection / profile overrides
             factory = ProviderFactory()
-            self._embedder = factory.create_embedding_provider()
+            self._embedder = factory.create_embedding_provider(settings=settings)
 
             # Validate dimensions match configuration
             if self._embedder.dims != expected_dims:
@@ -84,10 +113,15 @@ class QueryService:
                 )
 
             logger.info(
-                f"Embedding provider loaded successfully: "
-                f"provider={self._embedder.provider_name}, "
-                f"model={self._embedder.model_id}, "
-                f"dims={self._embedder.dims}"
+                "Embedding provider loaded successfully",
+                provider=self._embedder.provider_name,
+                model=self._embedder.model_id,
+                dims=self._embedder.dims,
+                profile=settings.profile,
+                supports_sparse=getattr(settings.capabilities, "supports_sparse", None),
+                supports_colbert=getattr(
+                    settings.capabilities, "supports_colbert", None
+                ),
             )
         return self._embedder
 
@@ -171,7 +205,11 @@ class QueryService:
                 from src.query.hybrid_search import Neo4jVectorStore
 
                 index_name = self.config.search.vector.neo4j.index_name
-                vector_store = Neo4jVectorStore(neo4j_driver, index_name)
+                vector_store = Neo4jVectorStore(
+                    neo4j_driver,
+                    index_name,
+                    embedding_version=self.embedding_settings.version,
+                )
                 logger.info(f"Using Neo4j vector store: {index_name}")
 
             # Phase 7C: Get reranker (may be None if disabled)
@@ -182,6 +220,7 @@ class QueryService:
                 neo4j_driver=neo4j_driver,
                 embedder=embedder,
                 reranker=reranker,  # Phase 7C: Pass reranker
+                embedding_settings=self.embedding_settings,
             )
             logger.info("Search engine initialized with reranking support")
 
@@ -210,11 +249,31 @@ class QueryService:
                 qdrant_client=qdrant_client,
                 embedder=embedder,
                 tokenizer=TokenizerService(),
+                embedding_settings=self.embedding_settings,
             )
 
             logger.info("Phase 7E HybridRetriever initialized")
 
         return self._hybrid_retriever
+
+    def search_sections_light(
+        self,
+        query: str,
+        *,
+        fetch_k: int,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[ChunkResult], Dict[str, Any]]:
+        """
+        Lightweight helper that returns raw ChunkResult objects for section-level tools.
+        """
+        retriever = self._get_7e_retriever()
+        chunks, metrics = retriever.retrieve(
+            query=query,
+            top_k=fetch_k,
+            filters=filters or {},
+            expand=True,
+        )
+        return chunks, metrics
 
     def _get_context_assembler(self) -> ContextAssembler:
         """Get or initialize the context assembler for stitched responses."""
@@ -263,6 +322,14 @@ class QueryService:
                 "vector_score_kind": chunk.vector_score_kind,
                 "bm25_rank": chunk.bm25_rank,
                 "vector_rank": chunk.vector_rank,
+                "graph_score": chunk.graph_score,
+                "graph_distance": chunk.graph_distance,
+                "graph_path": chunk.graph_path,
+                "connection_count": chunk.connection_count,
+                "mention_count": chunk.mention_count,
+                "rerank_score": chunk.rerank_score,
+                "rerank_rank": chunk.rerank_rank,
+                "reranker": chunk.reranker,
             }
 
             metadata["anchor"] = getattr(chunk, "anchor", None)
@@ -271,8 +338,9 @@ class QueryService:
                 node_id=chunk.chunk_id,
                 node_label="Chunk",
                 score=score,
-                distance=0,
+                distance=int(chunk.graph_distance or 0),
                 metadata=metadata,
+                path=chunk.graph_path,
             )
 
             features = ranker._extract_features(search_result)
@@ -416,9 +484,10 @@ class QueryService:
                     )
 
             # Add embedding_version to filters
-            filters.setdefault("embedding_version", self.config.embedding.version)
+            filters.setdefault("embedding_version", self.embedding_settings.version)
             logger.debug(
-                f"Added embedding_version filter: {self.config.embedding.version}"
+                "Added embedding_version filter",
+                embedding_version=self.embedding_settings.version,
             )
 
             use_phase7e = bool(
@@ -474,20 +543,31 @@ class QueryService:
 
                 ranked_results = self._wrap_chunks_as_ranked(chunks)
 
+                embedding_diag = self._embedding_diag()
+
                 retrieval_sections = [
                     {
                         "section_id": chunk.chunk_id,
                         "rank": idx + 1,
                         "score_vec": float(chunk.vector_score or 0.0),
                         "score_text": float(chunk.bm25_score or 0.0),
-                        "score_graph": 0.0,
+                        "score_graph": float(chunk.graph_score or 0.0),
                         "score_combined": float(
                             chunk.fused_score
                             or chunk.vector_score
                             or chunk.bm25_score
                             or 0.0
                         ),
+                        "graph_distance": int(chunk.graph_distance or 0),
                         "retrieval_method": "hybrid_phase7e",
+                        "rerank_score": (
+                            float(chunk.rerank_score)
+                            if chunk.rerank_score is not None
+                            else None
+                        ),
+                        "rerank_rank": chunk.rerank_rank,
+                        "reranker": chunk.reranker,
+                        **embedding_diag,
                     }
                     for idx, chunk in enumerate(chunks)
                 ]
@@ -503,6 +583,7 @@ class QueryService:
                         "total_time_ms", (time.time() - start_time) * 1000
                     ),
                 }
+                timing.update(embedding_diag)
 
                 logger.info(
                     "Phase 7E hybrid retrieval completed: results=%d, time=%.1fms",
@@ -529,6 +610,8 @@ class QueryService:
                     f"Search completed: {search_results.total_found} results in {search_time*1000:.1f}ms"
                 )
 
+                embedding_diag = self._embedding_diag()
+
                 retrieval_sections = [
                     {
                         "section_id": result.node_id,
@@ -536,8 +619,10 @@ class QueryService:
                         "score_vec": getattr(result, "vector_score", 0.0),
                         "score_text": getattr(result, "text_score", 0.0),
                         "score_graph": getattr(result, "graph_score", 0.0),
+                        "graph_distance": getattr(result, "distance", 0),
                         "score_combined": result.score,
                         "retrieval_method": "hybrid",
+                        **embedding_diag,
                     }
                     for idx, result in enumerate(search_results.results)
                 ]
@@ -556,6 +641,7 @@ class QueryService:
                     "ranking_ms": rank_time * 1000,
                     "total_ms": (time.time() - start_time) * 1000,
                 }
+                timing.update(embedding_diag)
                 assembled_md = None
 
             # Task 7C.8: Track retrieval if session tracking is active
@@ -634,9 +720,7 @@ class QueryService:
             "embedder_loaded": self._embedder is not None,
             "search_engine_initialized": self._search_engine is not None,
             "planner_initialized": self._planner is not None,
-            "model_name": (
-                self.config.embedding.embedding_model if self._embedder else None
-            ),
+            "embedding": self._embedding_diag(),
         }
 
 

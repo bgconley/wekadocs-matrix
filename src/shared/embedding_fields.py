@@ -31,6 +31,7 @@ def canonicalize_embedding_metadata(
     provider: Optional[str] = None,
     task: Optional[str] = None,
     timestamp: Optional[datetime] = None,
+    profile: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Create canonical embedding metadata for persistence.
@@ -47,13 +48,16 @@ def canonicalize_embedding_metadata(
     Returns:
         Dict with canonical fields for persistence
     """
-    return {
+    metadata = {
         "embedding_version": embedding_model,  # Map model -> version
         "embedding_dimensions": dimensions,
         "embedding_provider": provider or CANONICAL_PROVIDER,
         "embedding_task": task or CANONICAL_TASK,
         "embedding_timestamp": (timestamp or datetime.utcnow()).isoformat() + "Z",
     }
+    if profile:
+        metadata["embedding_profile"] = profile
+    return metadata
 
 
 def read_embedding_version_with_fallback(
@@ -90,7 +94,12 @@ def read_embedding_version_with_fallback(
     return None
 
 
-def validate_embedding_metadata(metadata: Dict[str, Any]) -> bool:
+def validate_embedding_metadata(
+    metadata: Dict[str, Any],
+    expected_dimensions: Optional[int] = None,
+    expected_provider: Optional[str] = None,
+    expected_version: Optional[str] = None,
+) -> bool:
     """
     Validate that embedding metadata meets canonical requirements.
 
@@ -113,26 +122,30 @@ def validate_embedding_metadata(metadata: Dict[str, Any]) -> bool:
             logger.error(f"Missing required embedding field: {field}")
             return False
 
-    # Validate dimensions
-    if metadata["embedding_dimensions"] != CANONICAL_DIMENSIONS:
+    dimensions = metadata["embedding_dimensions"]
+    provider = metadata["embedding_provider"]
+    version = metadata["embedding_version"]
+
+    if expected_dimensions and dimensions != expected_dimensions:
         logger.error(
-            f"Invalid dimensions: expected {CANONICAL_DIMENSIONS}, "
-            f"got {metadata['embedding_dimensions']}"
+            "Invalid embedding dimensions: expected %s, got %s",
+            expected_dimensions,
+            dimensions,
         )
         return False
 
-    # Validate provider
-    if metadata["embedding_provider"] != CANONICAL_PROVIDER:
+    if expected_provider and provider != expected_provider:
         logger.warning(
-            f"Non-canonical provider: expected {CANONICAL_PROVIDER}, "
-            f"got {metadata['embedding_provider']}"
+            "Embedding provider %s differs from expected %s",
+            provider,
+            expected_provider,
         )
 
-    # Validate version format
-    if metadata["embedding_version"] != CANONICAL_VERSION:
+    if expected_version and version != expected_version:
         logger.warning(
-            f"Non-canonical version: expected {CANONICAL_VERSION}, "
-            f"got {metadata['embedding_version']}"
+            "Embedding version %s differs from expected %s",
+            version,
+            expected_version,
         )
 
     return True
@@ -164,9 +177,9 @@ def ensure_no_embedding_model_in_payload(payload: Dict[str, Any]) -> Dict[str, A
 def create_write_payload(
     node_id: str,
     embedding_version: str,
-    dimensions: int = CANONICAL_DIMENSIONS,
-    provider: str = CANONICAL_PROVIDER,
-    task: str = CANONICAL_TASK,
+    dimensions: int,
+    provider: str,
+    task: str,
     **extra_fields,
 ) -> Dict[str, Any]:
     """

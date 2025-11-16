@@ -57,6 +57,7 @@ class HealthResponse(BaseModel):
     status: str
     timestamp: str
     version: str
+    embedding: Optional[Dict[str, Any]] = None
 
 
 class ReadinessResponse(BaseModel):

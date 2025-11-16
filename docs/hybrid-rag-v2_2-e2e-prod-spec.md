@@ -145,7 +145,7 @@ Tests:
 - Expansion sanity: `expansion_count > 0` when adjacency exists and config enabled; `expansion_cap_hit` behavior.
 - Budgeting: `total_tokens ≤ 4500`, microdoc extras not outranking primaries.
 
-Note: reranker is a hook and remains disabled—tests assert `metrics["reranker_applied"] == False`.
+Note: reranking support exists but remains disabled by default—metrics (`reranker_applied`) should stay false unless explicitly toggled on, so the hybrid BM25/vector ordering is unchanged.
 
 ---
 

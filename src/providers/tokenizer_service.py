@@ -24,7 +24,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from src.shared.config import get_config
+from src.providers.settings import build_embedding_telemetry
+from src.shared.config import get_config, get_embedding_settings
 
 logger = logging.getLogger(__name__)
 
@@ -102,13 +103,26 @@ class HuggingFaceTokenizerBackend(TokenizerBackend):
         try:
             from transformers import AutoTokenizer
 
-            model_id = os.getenv("HF_TOKENIZER_ID", "jinaai/jina-embeddings-v3")
+            embedding_settings = get_embedding_settings()
+            default_model_id = (
+                embedding_settings.tokenizer_model_id or embedding_settings.model_id
+            )
+            model_id = os.getenv(
+                "HF_TOKENIZER_ID", default_model_id or "jinaai/jina-embeddings-v3"
+            )
             cache_dir = os.getenv("HF_CACHE", "/opt/hf-cache")
             offline = os.getenv("TRANSFORMERS_OFFLINE", "true").lower() == "true"
 
+            telemetry = build_embedding_telemetry(embedding_settings)
+            log_extra = {
+                **telemetry,
+                "hf_model_id": model_id,
+                "hf_cache": cache_dir,
+                "hf_offline": offline,
+            }
             logger.info(
-                f"Loading HuggingFace tokenizer: {model_id} "
-                f"(cache={cache_dir}, offline={offline})"
+                "Loading HuggingFace tokenizer with profile-aware settings",
+                extra=log_extra,
             )
 
             self.tokenizer = AutoTokenizer.from_pretrained(
@@ -305,8 +319,12 @@ class TokenizerService:
             ValueError: If backend is invalid
             RuntimeError: If backend initialization fails
         """
-        backend_source = "env"
         backend_name = os.getenv("TOKENIZER_BACKEND")
+        backend_source = "env" if backend_name else None
+        if not backend_name:
+            embedding_settings = get_embedding_settings()
+            backend_name = embedding_settings.tokenizer_backend
+            backend_source = "profile"
         if not backend_name:
             backend_source = "config"
             backend_name = None

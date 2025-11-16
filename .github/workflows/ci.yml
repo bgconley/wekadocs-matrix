@@ -5,6 +5,9 @@ on:
     branches: [main, master, develop]
   pull_request:
     branches: [main, master]
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -59,6 +62,143 @@ jobs:
         with:
           name: test-reports
           path: reports/
+
+  profile-matrix-smoke:
+    name: Real Provider Smoke
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    env:
+      RUN_PROFILE_MATRIX_INTEGRATION: "1"
+      QDRANT_URL: http://127.0.0.1:6333
+      JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+      BGE_M3_API_URL: ${{ secrets.BGE_M3_API_URL }}
+      BGE_M3_CLIENT_REPO: ${{ secrets.BGE_M3_CLIENT_REPO }}
+      BGE_M3_CLIENT_REF: ${{ secrets.BGE_M3_CLIENT_REF }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate integration secrets
+        id: guard
+        run: |
+          echo "should_run=false" >> "$GITHUB_OUTPUT"
+          missing=()
+          [[ -z "${JINA_API_KEY}" ]] && missing+=("JINA_API_KEY")
+          [[ -z "${BGE_M3_API_URL}" ]] && missing+=("BGE_M3_API_URL")
+          [[ -z "${BGE_M3_CLIENT_REPO}" ]] && missing+=("BGE_M3_CLIENT_REPO")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            printf '::notice::Skipping real-provider smoke tests; missing: %s\n' "${missing[*]}"
+            exit 0
+          fi
+          echo "should_run=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        if: steps.guard.outputs.should_run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        if: steps.guard.outputs.should_run == 'true'
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Start Qdrant
+        if: steps.guard.outputs.should_run == 'true'
+        run: docker run -d --name qdrant-ci -p 6333:6333 qdrant/qdrant:latest
+
+      - name: Wait for Qdrant
+        if: steps.guard.outputs.should_run == 'true'
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:6333/collections >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Qdrant did not start in time" >&2
+          exit 1
+
+      - name: Clone canonical BGE-M3 client
+        if: steps.guard.outputs.should_run == 'true'
+        run: |
+          git clone "$BGE_M3_CLIENT_REPO" bge-m3-custom
+          if [[ -n "${BGE_M3_CLIENT_REF}" ]]; then
+            cd bge-m3-custom
+            git checkout "$BGE_M3_CLIENT_REF"
+            cd ..
+          fi
+          echo "BGE_M3_CLIENT_PATH=$GITHUB_WORKSPACE/bge-m3-custom/src" >> "$GITHUB_ENV"
+
+      - name: Run real-provider smoke tests
+        if: steps.guard.outputs.should_run == 'true'
+        env:
+          RUN_PROFILE_MATRIX_INTEGRATION: "1"
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+          BGE_M3_API_URL: ${{ secrets.BGE_M3_API_URL }}
+        run: |
+          set -e
+          pytest \
+            tests/integration/test_profile_matrix_integration.py \
+            tests/integration/test_profile_ingestion_retrieval.py \
+            -v
+
+      - name: Stop Qdrant
+        if: always()
+        run: |
+          docker ps -a
+          docker stop qdrant-ci 2>/dev/null || true
+          docker rm qdrant-ci 2>/dev/null || true
+
+  eval-harness:
+    name: Evaluation Harness
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    concurrency:
+      group: eval-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Start services
+        run: docker compose up -d
+
+      - name: Wait for services
+        run: |
+          timeout 120 bash -c 'until curl -sf http://localhost:8000/health; do sleep 2; done'
+
+      - name: Run evaluation harness
+        env:
+          EMBEDDINGS_PROFILE: bge_m3
+        run: |
+          mkdir -p reports/eval/runs
+          python scripts/eval/run_eval.py \
+            --gold reports/eval/gold_sets/bge_m3/sample.yaml \
+            --top-k 20 \
+            --output reports/eval/runs/run_${{ github.run_id }}.jsonl
+
+      - name: Upload evaluation results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results
+          path: reports/eval/runs/run_${{ github.run_id }}.jsonl
+
+      - name: Stop services
+        if: always()
+        run: docker compose down
 
   build:
     name: Build Docker Image

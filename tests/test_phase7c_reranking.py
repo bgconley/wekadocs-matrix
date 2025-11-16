@@ -14,10 +14,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.mcp_server.query_service import QueryService
 from src.providers.factory import ProviderFactory
 from src.providers.rerank.base import RerankProvider
 from src.providers.rerank.jina import JinaRerankProvider
 from src.providers.rerank.noop import NoopReranker
+from src.query.hybrid_retrieval import ChunkResult
 
 
 class TestRerankProviderFactory:
@@ -354,6 +356,37 @@ class TestNoopReranker:
 
         assert reranker.provider_name == "noop"
         assert reranker.model_id == "noop"
+
+
+class TestRerankMetadataPropagation:
+    """Ensure rerank metadata is preserved in QueryService diagnostics."""
+
+    def test_wrap_chunks_includes_rerank_metadata(self):
+        service = QueryService()
+        chunk = ChunkResult(
+            chunk_id="chunk-1",
+            document_id="doc-1",
+            parent_section_id="parent-1",
+            order=1,
+            level=2,
+            heading="Heading",
+            text="Body text",
+            token_count=50,
+        )
+        chunk.fused_score = 0.42
+        chunk.bm25_score = 0.33
+        chunk.vector_score = 0.55
+        chunk.graph_score = 0.05
+        chunk.rerank_score = 0.91
+        chunk.rerank_rank = 1
+        chunk.reranker = "jina-reranker-v3"
+
+        ranked = service._wrap_chunks_as_ranked([chunk])
+        metadata = ranked[0].result.metadata
+
+        assert metadata["rerank_score"] == chunk.rerank_score
+        assert metadata["rerank_rank"] == chunk.rerank_rank
+        assert metadata["reranker"] == chunk.reranker
 
 
 if __name__ == "__main__":

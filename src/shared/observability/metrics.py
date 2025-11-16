@@ -101,6 +101,17 @@ embedding_latency_ms = Histogram(
     buckets=(10, 25, 50, 100, 250, 500, 1000, 2500, 5000),
 )
 
+embedding_provider_info = Info(
+    "embedding_provider_info",
+    "Metadata for the active embedding profile/provider combination.",
+)
+
+embedding_profile_guard_events_total = Counter(
+    "embedding_profile_guard_events_total",
+    "Total embedding profile guard events (clean passes, drift warnings, strict-mode blocks).",
+    ["profile", "outcome"],
+)
+
 # ===== Pre-Phase 7 (G1): Qdrant metrics =====
 qdrant_upsert_total = Counter(
     "qdrant_upsert_total",
@@ -198,6 +209,63 @@ response_builder_latency_ms = Histogram(
     "Response builder latency in milliseconds",
     ["verbosity"],
     buckets=(5, 10, 25, 50, 100, 250, 500, 1000),
+)
+
+# ===== Graph RAG v2 metrics =====
+projection_violations_total = Counter(
+    "projection_violations_total",
+    "Total projection whitelist violations in graph queries",
+    ["field"],
+)
+
+partial_responses_total = Counter(
+    "partial_responses_total",
+    "Partial tool responses grouped by limit reason",
+    ["tool_name", "reason"],
+)
+
+cursor_returned_total = Counter(
+    "cursor_returned_total",
+    "Graph tool responses that returned a next_cursor",
+    ["tool_name"],
+)
+
+duplicates_suppressed_total = Counter(
+    "duplicates_suppressed_total",
+    "Total deduplicated nodes/edges per tool",
+    ["tool_name"],
+)
+
+over_budget_attempts_total = Counter(
+    "over_budget_attempts_total",
+    "Responses capped due to token/byte guardrails",
+    ["tool_name", "reason"],
+)
+
+summary_calls_total = Counter(
+    "summary_calls_total",
+    "Summarization/context bundle tool invocations",
+    ["tool_name", "status"],
+)
+
+tool_response_bytes = Histogram(
+    "mcp_tool_response_bytes",
+    "Bytes returned per MCP tool call",
+    ["tool_name"],
+    buckets=(
+        256,
+        512,
+        1024,
+        2048,
+        4096,
+        8192,
+        16384,
+        32768,
+        65536,
+        131072,
+        262144,
+        524288,
+    ),
 )
 
 response_builder_evidence_count = Histogram(

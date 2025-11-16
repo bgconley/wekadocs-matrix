@@ -18,6 +18,7 @@ from src.shared import (
     init_config,
     initialize_connections,
 )
+from src.shared.config import get_embedding_settings
 from src.shared.observability import (
     get_correlation_id,
     get_logger,
@@ -147,13 +148,14 @@ async def startup_event():
             manager = get_connection_manager()
             neo4j_driver = manager.get_neo4j_driver()
             qdrant_client = manager.get_qdrant_client()
+            embedding_settings = get_embedding_settings()
 
             health = run_startup_health_checks(
                 neo4j_driver=neo4j_driver,
                 qdrant_client=qdrant_client,
-                embed_dim=config.embedding.dims,
-                embed_model=config.embedding.embedding_model,
-                embed_provider=config.embedding.provider,
+                embed_dim=embedding_settings.dims,
+                embed_model=embedding_settings.model_id,
+                embed_provider=embedding_settings.provider,
                 qdrant_collection=config.search.vector.qdrant.collection_name,
                 fail_fast=config.monitoring.health_check_fail_fast,
             )
@@ -189,10 +191,32 @@ async def shutdown_event():
 @app.get("/health", response_model=HealthResponse)
 async def health():
     """Health check endpoint"""
+    embedding_settings = get_embedding_settings()
+    capabilities = getattr(embedding_settings, "capabilities", None)
+    capability_info = {
+        "supports_dense": capabilities.supports_dense if capabilities else None,
+        "supports_sparse": capabilities.supports_sparse if capabilities else None,
+        "supports_colbert": capabilities.supports_colbert if capabilities else None,
+        "supports_long_sequences": (
+            capabilities.supports_long_sequences if capabilities else None
+        ),
+        "normalized_output": capabilities.normalized_output if capabilities else None,
+        "multilingual": capabilities.multilingual if capabilities else None,
+    }
     return HealthResponse(
         status="healthy",
         timestamp=datetime.utcnow().isoformat(),
         version=config.app.version,
+        embedding={
+            "profile": embedding_settings.profile,
+            "provider": embedding_settings.provider,
+            "model": embedding_settings.model_id,
+            "dims": embedding_settings.dims,
+            "task": embedding_settings.task,
+            "tokenizer_backend": embedding_settings.tokenizer_backend,
+            "tokenizer_model_id": embedding_settings.tokenizer_model_id,
+            "capabilities": capability_info,
+        },
     )
 
 
