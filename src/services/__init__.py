@@ -1,0 +1,21 @@
+"""
+Service layer modules for the agentic retrieval stack.
+
+Each service encapsulates a narrowly scoped concern (graph, text, budgeting,
+delta caching, etc.) so that MCP handlers can remain thin wrappers that enforce
+schemas and budgeting.  See docs/cdx-outputs/retrieval_fix.json for the
+approved architecture.
+"""
+
+from .context_budget_manager import BudgetExceeded, ContextBudgetManager  # noqa: F401
+from .delta_cache import SessionDeltaCache  # noqa: F401
+from .graph_service import GraphService  # noqa: F401
+from .text_service import TextService  # noqa: F401
+
+__all__ = [
+    "BudgetExceeded",
+    "ContextBudgetManager",
+    "GraphService",
+    "SessionDeltaCache",
+    "TextService",
+]
