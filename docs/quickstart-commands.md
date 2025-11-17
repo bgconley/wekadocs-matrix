@@ -76,8 +76,8 @@ print(f'Provider: {config.embedding.provider}')
 ```bash
 export EMBEDDINGS_PROFILE=jina_v3
 # For BGE-M3 profiles also export:
-# export BGE_M3_API_URL=http://127.0.0.1:9000
-# export BGE_M3_CLIENT_PATH=/path/to/bge-m3-custom/src
+export BGE_M3_API_URL=http://127.0.0.1:9000
+# (Client is now vendored in src/clients; no BGE_M3_CLIENT_PATH required.)
 ```
 
 3. Run the verification helper to confirm requirements and provider wiring:
@@ -91,7 +91,7 @@ python scripts/verify_providers.py
 
 ### Profile Matrix Integration Test
 
-To run the real-provider smoke test (hits Jina/BGE endpoints), ensure the required env vars are set (`JINA_API_KEY`, `BGE_M3_API_URL`, `BGE_M3_CLIENT_PATH`) and run:
+To run the real-provider smoke test (hits Jina/BGE endpoints), ensure the required env vars are set (`JINA_API_KEY`, `BGE_M3_API_URL`) and run:
 
 ```bash
 RUN_PROFILE_MATRIX_INTEGRATION=1 pytest tests/integration/test_profile_matrix_integration.py -k profile

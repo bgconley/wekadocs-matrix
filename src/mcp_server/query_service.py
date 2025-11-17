@@ -441,6 +441,7 @@ class QueryService:
 
             if session_id:
                 tracker = self._get_session_tracker()
+                tracker.ensure_session(session_id)
 
                 # Create query node
                 query_id = tracker.create_query(session_id, query, turn or 1)
@@ -658,7 +659,9 @@ class QueryService:
 
             # Build response with verbosity mode
             manager = get_connection_manager()
-            neo4j_driver = manager.get_neo4j_driver()
+            neo4j_driver = None
+            if expand_graph or verb_enum == Verbosity.GRAPH:
+                neo4j_driver = manager.get_neo4j_driver()
 
             # Task 7C.8: Pass session tracking info to response builder
             response = build_response(

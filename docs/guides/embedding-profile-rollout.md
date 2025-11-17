@@ -42,7 +42,7 @@ Assume you are moving from `jina_v3` → `bge_m3` as the primary profile.
 
 1. **Prepare the manifest and secrets**
    - Ensure `config/embedding_profiles.yaml` has a valid `bge_m3` entry (dims, tokenizer, requirements).
-   - Export provider secrets for the target profile (e.g. `BGE_M3_API_URL`, `BGE_M3_CLIENT_PATH`).
+   - Export provider secrets for the target profile (e.g. `BGE_M3_API_URL`).
    - Verify the matrix:
      ```bash
      python scripts/verify_providers.py

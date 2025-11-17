@@ -125,11 +125,25 @@ class HuggingFaceTokenizerBackend(TokenizerBackend):
                 extra=log_extra,
             )
 
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                model_id,
-                cache_dir=cache_dir,
-                local_files_only=offline,
-            )
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    model_id,
+                    cache_dir=cache_dir,
+                    local_files_only=offline,
+                )
+            except Exception as first_err:
+                if offline:
+                    logger.warning(
+                        "Tokenizer cache miss in offline mode; retrying with network",
+                        extra=log_extra,
+                    )
+                    self.tokenizer = AutoTokenizer.from_pretrained(
+                        model_id,
+                        cache_dir=cache_dir,
+                        local_files_only=False,
+                    )
+                else:
+                    raise first_err
 
             # Test tokenizer works
             test_tokens = self.tokenizer.encode("test", add_special_tokens=False)
@@ -341,8 +355,16 @@ class TokenizerService:
         backend_name = backend_name.lower()
 
         if backend_name == "hf":
-            self.backend = HuggingFaceTokenizerBackend()
-            self.backend_name = "huggingface"
+            try:
+                self.backend = HuggingFaceTokenizerBackend()
+                self.backend_name = "huggingface"
+            except Exception as exc:
+                logger.warning(
+                    "HuggingFace tokenizer initialization failed; falling back to Jina Segmenter",
+                    exc_info=exc,
+                )
+                self.backend = JinaSegmenterBackend()
+                self.backend_name = "jina-segmenter"
         elif backend_name == "segmenter":
             self.backend = JinaSegmenterBackend()
             self.backend_name = "jina-segmenter"

@@ -70,6 +70,16 @@ def main():
     print(f"  Model ID: {settings.model_id}")
     print(f"  Dims: {settings.dims}")
     print(f"  Tokenizer: {settings.tokenizer_backend} :: {settings.tokenizer_model_id}")
+    caps = settings.capabilities
+    print(
+        "  Capabilities: "
+        f"dense:{caps.supports_dense} "
+        f"sparse:{caps.supports_sparse} "
+        f"colbert:{caps.supports_colbert} "
+        f"long_seq:{caps.supports_long_sequences} "
+        f"normalized:{caps.normalized_output} "
+        f"multilingual:{caps.multilingual}"
+    )
     if settings.extra:
         extras = ", ".join(f"{k}={v}" for k, v in settings.extra.items())
         print(f"  Legacy overrides: {extras}")

@@ -377,7 +377,7 @@ class Orchestrator:
             self.config,
             self.qdrant,
             collection_name=self.config.search.vector.qdrant.collection_name,
-            embedding_version=self.config.embedding.version,
+            embedding_version=get_embedding_settings(self.config).version,
         )
 
         # Compute diff to detect changes
@@ -978,7 +978,7 @@ class Orchestrator:
                     query,
                     section_id=section["id"],
                     embedding=embedding,
-                    version=self.config.embedding.version,
+                    version=get_embedding_settings(self.config).version,
                 )
 
         return len([s for s in sections if s.get("vector_embedding")])
@@ -994,7 +994,7 @@ class Orchestrator:
                 session.run(
                     query,
                     section_id=section["id"],
-                    version=self.config.embedding.version,
+                    version=get_embedding_settings(self.config).version,
                 )
 
     def _build_report(self, state: JobState) -> Dict:

@@ -95,12 +95,19 @@ class GraphBuilder:
         self.include_entity_vector = (
             os.getenv("QDRANT_INCLUDE_ENTITY_VECTOR", "true").lower() == "true"
         )
+        self.manage_qdrant_on_init = (
+            os.getenv("MANAGE_QDRANT_SCHEMA_ON_INIT", "false").lower() == "true"
+        )
 
         # Phase 7C.7: Fresh start with 1024-D (Session 06-08)
         # No dual-write complexity - starting fresh with Jina v4 @ 1024-D
 
         # Ensure Qdrant collections exist if using Qdrant
-        if self.qdrant_client and (self.vector_primary == "qdrant" or self.dual_write):
+        if (
+            self.qdrant_client
+            and (self.vector_primary == "qdrant" or self.dual_write)
+            and (self.manage_qdrant_on_init or "PYTEST_CURRENT_TEST" not in os.environ)
+        ):
             self._ensure_qdrant_collection()
 
         if strict_mode is None:

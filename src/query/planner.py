@@ -291,11 +291,12 @@ class QueryPlanner:
             if max_hops <= max_depth:
                 return match.group(0)
 
-            # Clamp upper bound to $max_hops while keeping author-provided minimum
+            # Clamp upper bound to literal max_depth while keeping author-provided minimum
+            clamped_max = max_depth
             if min_hops <= 1:
-                return "*1..$max_hops"
+                return f"*1..{clamped_max}"
 
-            return f"*{min_hops}..$max_hops"
+            return f"*{min_hops}..{clamped_max}"
 
         cypher = re.sub(r"\*(\d+)\.\.(\d+)", _range_rewrite, cypher)
 

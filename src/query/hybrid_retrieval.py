@@ -42,6 +42,7 @@ from src.shared.observability.metrics import (
     retrieval_expansion_rate_current,
     retrieval_expansion_total,
 )
+from src.shared.qdrant_schema import validate_qdrant_schema
 from src.shared.schema import ensure_schema_version
 
 logger = get_logger(__name__)
@@ -1041,7 +1042,7 @@ class HybridRetriever:
             tokenizer: Tokenizer service for token counting (optional)
         """
         config = get_config()
-        self.embedding_settings = embedding_settings
+        self.embedding_settings = embedding_settings or get_embedding_settings()
 
         self.expected_schema_version = getattr(config.graph_schema, "version", None)
         if self.expected_schema_version:
@@ -1063,6 +1064,21 @@ class HybridRetriever:
         hybrid_config = getattr(search_config, "hybrid", None)
         qdrant_vector_cfg = getattr(search_config.vector, "qdrant", None)
 
+        # Validate collection schema against active profile
+        effective_settings = self.embedding_settings or get_embedding_settings()
+        self.embedding_settings = effective_settings
+        qdrant_collection = getattr(
+            getattr(search_config.vector, "qdrant", None), "collection_name", None
+        )
+        if qdrant_collection and qdrant_client:
+            validate_qdrant_schema(
+                qdrant_client,
+                qdrant_collection,
+                self.embedding_settings,
+                require_sparse=getattr(qdrant_vector_cfg, "enable_sparse", False),
+                require_colbert=getattr(qdrant_vector_cfg, "enable_colbert", False),
+            )
+
         self.vector_field_weights = dict(
             getattr(hybrid_config, "vector_fields", {"content": 1.0})
         )
@@ -1072,7 +1088,8 @@ class HybridRetriever:
         self.vector_retriever = QdrantMultiVectorRetriever(
             qdrant_client,
             embedder,
-            collection_name=config.search.vector.qdrant.collection_name,
+            collection_name=qdrant_collection
+            or config.search.vector.qdrant.collection_name,
             field_weights=self.vector_field_weights,
             rrf_k=getattr(hybrid_config, "rrf_k", 60),
             embedding_settings=self.embedding_settings,

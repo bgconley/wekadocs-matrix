@@ -50,7 +50,9 @@ class IncrementalUpdater:
             if hasattr(config.search.vector, "qdrant"):
                 self.collection = config.search.vector.qdrant.collection_name
             self.version = (
-                config.embedding.version if hasattr(config, "embedding") else "v1"
+                get_embedding_settings(config).version
+                if hasattr(config, "embedding")
+                else "v1"
             )
         self._schema_plan = None
         self._dense_vector_names: Optional[List[str]] = None
@@ -255,8 +257,8 @@ class IncrementalUpdater:
                 points = []
                 # Pre-Phase 7: Use config-driven dimensions for placeholders
                 embedding_dims = 384  # Default fallback
-                if self.config and hasattr(self.config, "embedding"):
-                    embedding_dims = self.config.embedding.dims
+                if self.config:
+                    embedding_dims = get_embedding_settings(self.config).dims
                 zero_template = [0.0] * embedding_dims
                 vector_field_names = self._vector_field_names()
 

@@ -40,7 +40,9 @@ class PostIngestVerifier:
         self.config = config
         self.qdrant_client = qdrant_client
         self.search_engine = search_engine
-        self.embedding_version = config.embedding.version
+        from src.shared.config import get_embedding_settings
+
+        self.embedding_version = get_embedding_settings(config).version
         self.vector_primary = config.search.vector.primary
 
     def verify_ingestion(self, job_id: str, parsed: Dict, tag: str = "default") -> Dict:

@@ -5,7 +5,7 @@ Implements polling, webhooks, queue-based ingestion, and circuit breaker integra
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -41,6 +41,7 @@ class ConnectorConfig:
     circuit_breaker_failure_threshold: int
     circuit_breaker_timeout_seconds: int
     webhook_secret: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

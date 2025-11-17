@@ -488,7 +488,14 @@ class ResponseBuilder:
             WHERE size(matched_labels) > 0
             RETURN DISTINCT
                 e.id AS entity_id,
-                matched_labels[0] AS label,
+                CASE
+                    WHEN 'Command' IN matched_labels THEN 'Command'
+                    WHEN 'Configuration' IN matched_labels THEN 'Configuration'
+                    WHEN 'Step' IN matched_labels THEN 'Step'
+                    WHEN 'Error' IN matched_labels THEN 'Error'
+                    WHEN 'Concept' IN matched_labels THEN 'Concept'
+                    ELSE matched_labels[0]
+                END AS label,
                 coalesce(e.name, e.title, e.term, e.message, e.heading, '') AS name,
                 relationship,
                 confidence

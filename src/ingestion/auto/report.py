@@ -29,7 +29,9 @@ class ReportGenerator:
         self.driver = driver
         self.config = config
         self.qdrant_client = qdrant_client
-        self.embedding_version = config.embedding.version
+        from src.shared.config import get_embedding_settings
+
+        self.embedding_version = get_embedding_settings(config).version
         self.vector_primary = config.search.vector.primary
 
     def generate_report(

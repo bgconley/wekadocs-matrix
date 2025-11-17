@@ -213,7 +213,8 @@ class ContextAssembler:
                     if partial_text:
                         context_parts.append(partial_text)
                         included_chunks.extend(partial_chunks)
-                        total_tokens = self.max_tokens
+                        partial_tokens = self.tokenizer.count_tokens(partial_text)
+                        total_tokens += partial_tokens
                         truncated = True
                         break
                 else:

@@ -335,10 +335,13 @@ connectors:
     repo: null
     webhook_secret: null
 
-  # Testing helpers
-  use_mock_embeddings: false
-  deterministic_ids: true
+# Testing helpers
+use_mock_embeddings: false
+deterministic_ids: true
 
-  # Hot reload
-  watch_config: true
-  reload_on_change: false
+# Hot reload
+watch_config: true
+reload_on_change: false
+
+  # Testing helpers
+  # (moved to root; kept comment as reminder)

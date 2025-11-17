@@ -106,3 +106,69 @@ def build_qdrant_schema(
         payload_indexes=payload_indexes,
         notes=notes,
     )
+
+
+def validate_qdrant_schema(
+    client,
+    collection_name: str,
+    settings: EmbeddingSettings,
+    *,
+    require_sparse: Optional[bool] = None,
+    require_colbert: Optional[bool] = None,
+) -> None:
+    """
+    Validate Qdrant collection against embedding settings and expected capabilities.
+
+    Raises RuntimeError on mismatch.
+    """
+    require_sparse = (
+        settings.capabilities.supports_sparse
+        if require_sparse is None
+        else require_sparse
+    )
+    require_colbert = (
+        settings.capabilities.supports_colbert
+        if require_colbert is None
+        else require_colbert
+    )
+
+    try:
+        info = client.get_collection(collection_name)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise RuntimeError(
+            f"Qdrant collection '{collection_name}' not found or unreachable: {exc}"
+        ) from exc
+
+    vectors = info.config.params.vectors
+    sparse = info.config.params.sparse_vectors
+
+    # Validate dense vector dims for primary content vector
+    primary_vec = None
+    if isinstance(vectors, dict):
+        primary_vec = vectors.get("content")
+    else:
+        primary_vec = vectors
+    if primary_vec is None or getattr(primary_vec, "size", None) != settings.dims:
+        raise RuntimeError(
+            f"Qdrant collection '{collection_name}' vector dims mismatch: "
+            f"expected content size {settings.dims}, got {getattr(primary_vec, 'size', None)}"
+        )
+
+    if require_sparse:
+        if not sparse or "text-sparse" not in sparse:
+            raise RuntimeError(
+                f"Qdrant collection '{collection_name}' missing required sparse vector 'text-sparse'"
+            )
+
+    if require_colbert:
+        if isinstance(vectors, dict):
+            colbert_vec = vectors.get("late-interaction")
+            if not colbert_vec or getattr(colbert_vec, "size", None) != settings.dims:
+                raise RuntimeError(
+                    f"Qdrant collection '{collection_name}' missing ColBERT multivector "
+                    f"or size mismatch (expected {settings.dims})"
+                )
+        else:
+            raise RuntimeError(
+                f"Qdrant collection '{collection_name}' missing ColBERT multivector"
+            )

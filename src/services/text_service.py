@@ -49,7 +49,7 @@ class TextService:
             )
 
         query = """
-        MATCH (s)
+        MATCH (s:Section)
         WHERE s.id IN $section_ids
         RETURN s.id AS id,
                coalesce(s.title, s.name, s.heading, '') AS title,

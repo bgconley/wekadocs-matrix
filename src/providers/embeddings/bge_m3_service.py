@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import importlib
 import logging
 import os
-import sys
-from pathlib import Path
 from typing import List, Optional, Sequence, Tuple, Type
 
 from src.providers.embeddings.base import EmbeddingProvider
@@ -18,8 +15,6 @@ from src.providers.settings import EmbeddingSettings as ProviderEmbeddingSetting
 
 logger = logging.getLogger(__name__)
 
-BGE_M3_CLIENT_PATH_ENV = "BGE_M3_CLIENT_PATH"
-DEFAULT_CLIENT_PATH = "/Users/brennanconley/vibecode/bge-m3-custom/src"
 _EMBEDDING_CLIENT_CACHE: Optional[Tuple[Type[object], Optional[Type[Exception]]]] = None
 
 
@@ -46,16 +41,6 @@ def _to_multivector(
     return MultiVectorEmbedding(vectors=vectors)
 
 
-def _candidate_client_paths() -> Sequence[str]:
-    """Yield potential paths that contain the canonical embedding client."""
-    env_path = os.getenv(BGE_M3_CLIENT_PATH_ENV)
-    candidates: List[str] = []
-    if env_path:
-        candidates.append(env_path)
-    candidates.append(DEFAULT_CLIENT_PATH)
-    return candidates
-
-
 def _load_embedding_client_symbols() -> Tuple[Type[object], Optional[Type[Exception]]]:
     """
     Import the EmbeddingClient from the external bge-m3-custom repository.
@@ -68,37 +53,10 @@ def _load_embedding_client_symbols() -> Tuple[Type[object], Optional[Type[Except
     if _EMBEDDING_CLIENT_CACHE is not None:
         return _EMBEDDING_CLIENT_CACHE
 
-    module_name = "clients.embedding_client"
-    module = None
+    from src.clients.embedding_client import EmbeddingClient, EmbeddingClientError
 
-    try:
-        module = importlib.import_module(module_name)
-    except ImportError:
-        # Append candidate paths until the module imports successfully.
-        for candidate in _candidate_client_paths():
-            if not candidate:
-                continue
-            candidate_path = Path(candidate).expanduser()
-            if not candidate_path.is_dir():
-                continue
-            candidate_str = str(candidate_path)
-            if candidate_str not in sys.path:
-                logger.debug("Adding BGE-M3 client path to sys.path: %s", candidate_str)
-                sys.path.append(candidate_str)
-            try:
-                module = importlib.import_module(module_name)
-                break
-            except ImportError:
-                continue
-
-    if module is None:
-        raise RuntimeError(
-            "Unable to import clients.embedding_client. "
-            "Set BGE_M3_CLIENT_PATH to the embedder repo's src directory."
-        )
-
-    embedding_client_cls = getattr(module, "EmbeddingClient")
-    embedding_client_error = getattr(module, "EmbeddingClientError", None)
+    embedding_client_cls = EmbeddingClient
+    embedding_client_error = EmbeddingClientError
     _EMBEDDING_CLIENT_CACHE = (embedding_client_cls, embedding_client_error)
     return _EMBEDDING_CLIENT_CACHE
 

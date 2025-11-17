@@ -168,6 +168,7 @@ class GraphService:
             limit_reason = exc.limit_reason
             tokens_estimate = exc.usage.get("tokens", 0)
             bytes_estimate = exc.usage.get("bytes", 0)
+
         return GraphResult(
             payload=payload,
             partial=partial,
@@ -226,16 +227,30 @@ class GraphService:
         MATCH (start {{id: start_id}})
         MATCH path=(start){pattern}(target)
         WITH target, path
-        ORDER BY target.id, length(path)
+        ORDER BY length(path) ASC
+        WITH target, collect(path) AS paths
         WITH target,
-             collect(path)[0] AS sample_path,
-             min(length(path)) AS dist
+             paths[0] AS sample_path,
+             length(paths[0]) AS dist
         ORDER BY dist ASC, target.id ASC
         SKIP $skip
         LIMIT $limit_plus_one
         RETURN
             target.id AS id,
-            labels(target)[0] AS label,
+            CASE
+                WHEN 'Section' IN labels(target) THEN 'Section'
+                WHEN 'Document' IN labels(target) THEN 'Document'
+                WHEN 'Procedure' IN labels(target) THEN 'Procedure'
+                WHEN 'Step' IN labels(target) THEN 'Step'
+                WHEN 'Command' IN labels(target) THEN 'Command'
+                WHEN 'Configuration' IN labels(target) THEN 'Configuration'
+                WHEN 'Error' IN labels(target) THEN 'Error'
+                WHEN 'Concept' IN labels(target) THEN 'Concept'
+                WHEN 'Example' IN labels(target) THEN 'Example'
+                WHEN 'Parameter' IN labels(target) THEN 'Parameter'
+                WHEN 'Component' IN labels(target) THEN 'Component'
+                ELSE head(labels(target))
+            END AS label,
             coalesce(target.title, target.name, target.heading, '') AS title,
             target.level AS level,
             target.tokens AS tokens,
