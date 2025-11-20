@@ -36,9 +36,9 @@ from src.providers.rerank.base import RerankProvider
 from src.providers.settings import EmbeddingSettings
 from src.providers.tokenizer_service import TokenizerService
 from src.shared.config import (
-    _slugify_identifier,
     get_config,
     get_embedding_settings,
+    get_expected_namespace_suffix,
     get_settings,
 )
 from src.shared.observability import get_logger
@@ -1182,13 +1182,9 @@ class HybridRetriever:
             getattr(search_config.vector, "qdrant", None), "collection_name", None
         )
         namespace_mode = getattr(settings, "embedding_namespace_mode", "none")
-        namespace_suffix = ""
-        if namespace_mode.lower() not in ("", "none", "disabled"):
-            namespace_suffix = _slugify_identifier(
-                self.embedding_settings.version
-                or getattr(self.embedding_settings, "profile", None)
-                or ""
-            )
+        namespace_suffix = get_expected_namespace_suffix(
+            self.embedding_settings, namespace_mode
+        )
         bm25_namespaced = bool(
             namespace_suffix
             and self.bm25_retriever.index_name

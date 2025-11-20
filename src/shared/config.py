@@ -1098,6 +1098,39 @@ def _slugify_identifier(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
 
 
+def get_expected_namespace_suffix(
+    settings: ProviderEmbeddingSettings, mode: str
+) -> str:
+    """
+    Deterministic namespace suffix (single source of truth).
+
+    Priority:
+    1) Explicit mode selection (profile/version/model)
+    2) Fallback: profile, else version, else model_id
+    3) If namespacing is disabled/empty, return ""
+    """
+
+    normalized = (mode or "").lower()
+    if normalized in {"", "none", "disabled"}:
+        return ""
+
+    if normalized == "profile" and getattr(settings, "profile", None):
+        return _slugify_identifier(settings.profile)
+    if normalized == "version" and getattr(settings, "version", None):
+        return _slugify_identifier(settings.version)
+    if normalized == "model" and getattr(settings, "model_id", None):
+        return _slugify_identifier(settings.model_id)
+
+    # Fallback safety: prefer profile, then version, then model_id
+    if getattr(settings, "profile", None):
+        return _slugify_identifier(settings.profile)
+    if getattr(settings, "version", None):
+        return _slugify_identifier(settings.version)
+    if getattr(settings, "model_id", None):
+        return _slugify_identifier(settings.model_id)
+    return ""
+
+
 def namespace_identifier(base: str, suffix: Optional[str]) -> str:
     """Append a slugified suffix to the base identifier if provided."""
     if not suffix:

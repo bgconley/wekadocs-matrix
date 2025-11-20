@@ -34,8 +34,8 @@ from src.shared.chunk_utils import (
 )
 from src.shared.config import (
     Config,
-    _slugify_identifier,
     get_embedding_settings,
+    get_expected_namespace_suffix,
     get_settings,
 )
 from src.shared.embedding_fields import (
@@ -1543,21 +1543,14 @@ class GraphBuilder:
         Ensure Qdrant collection exists with multi-vector schema + payload indexes.
         """
         collection = self.config.search.vector.qdrant.collection_name
-        runtime_settings = get_settings()
-        resolved_namespace = getattr(
-            runtime_settings, "embedding_namespace_mode", "none"
+        expected_suffix = get_expected_namespace_suffix(
+            self.embedding_settings, self.namespace_mode
         )
-        if resolved_namespace.lower() not in ("", "none", "disabled"):
-            expected_suffix = _slugify_identifier(
-                getattr(self.embedding_settings, "profile", None)
-                or self.embedding_settings.version
-                or ""
-            )
-            if expected_suffix and isinstance(collection, str):
-                if not collection.endswith(expected_suffix):
-                    raise RuntimeError(
-                        f"Qdrant collection {collection!r} does not match expected namespace suffix {expected_suffix!r}"
-                    )
+        if expected_suffix and isinstance(collection, str):
+            if not collection.endswith(expected_suffix):
+                raise RuntimeError(
+                    f"Qdrant collection {collection!r} does not match expected namespace suffix {expected_suffix!r}"
+                )
 
         try:
             schema_plan = build_qdrant_schema(
@@ -1900,21 +1893,14 @@ class GraphBuilder:
             label: Node label (Section/Chunk)
         """
         collection = self.config.search.vector.qdrant.collection_name
-        runtime_settings = get_settings()
-        resolved_namespace = getattr(
-            runtime_settings, "embedding_namespace_mode", "none"
+        expected_suffix = get_expected_namespace_suffix(
+            self.embedding_settings, self.namespace_mode
         )
-        if resolved_namespace.lower() not in ("", "none", "disabled"):
-            expected_suffix = _slugify_identifier(
-                self.embedding_settings.version
-                or getattr(self.embedding_settings, "profile", None)
-                or ""
-            )
-            if expected_suffix and isinstance(collection, str):
-                if not collection.endswith(expected_suffix):
-                    raise RuntimeError(
-                        f"Qdrant collection {collection!r} does not match expected namespace suffix {expected_suffix!r}"
-                    )
+        if expected_suffix and isinstance(collection, str):
+            if not collection.endswith(expected_suffix):
+                raise RuntimeError(
+                    f"Qdrant collection {collection!r} does not match expected namespace suffix {expected_suffix!r}"
+                )
 
         if not self.qdrant_client:
             logger.warning("Qdrant client not available")
@@ -1949,12 +1935,8 @@ class GraphBuilder:
             task=getattr(self.embedder, "task", self.embedding_settings.task),
             profile=self.embedding_settings.profile,
             timestamp=datetime.utcnow(),
-            namespace_mode=resolved_namespace,
-            namespace_suffix=_slugify_identifier(
-                self.embedding_settings.version
-                or getattr(self.embedding_settings, "profile", None)
-                or ""
-            ),
+            namespace_mode=self.namespace_mode,
+            namespace_suffix=expected_suffix,
             collection_name=collection,
         )
 
