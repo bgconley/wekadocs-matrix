@@ -143,11 +143,7 @@ class GraphBuilder:
         # No dual-write complexity - starting fresh with Jina v4 @ 1024-D
 
         # Ensure Qdrant collections exist if using Qdrant
-        if (
-            self.qdrant_client
-            and (self.vector_primary == "qdrant" or self.dual_write)
-            and (self.manage_qdrant_on_init or "PYTEST_CURRENT_TEST" not in os.environ)
-        ):
+        if self.qdrant_client and (self.vector_primary == "qdrant" or self.dual_write):
             self._ensure_qdrant_collection()
 
         if strict_mode is None:
@@ -1549,8 +1545,8 @@ class GraphBuilder:
         )
         if resolved_namespace.lower() not in ("", "none", "disabled"):
             expected_suffix = _slugify_identifier(
-                self.embedding_settings.version
-                or getattr(self.embedding_settings, "profile", None)
+                getattr(self.embedding_settings, "profile", None)
+                or self.embedding_settings.version
                 or ""
             )
             if expected_suffix and isinstance(collection, str):

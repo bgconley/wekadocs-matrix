@@ -536,6 +536,11 @@ class QdrantMultiVectorRetriever:
         schema_supports_sparse: bool = False,
         schema_supports_colbert: bool = False,
     ):
+        settings = get_settings()
+        env = (
+            getattr(settings, "env", None) or os.getenv("ENV", "development")
+        ).lower()
+        strict_env = env not in ("development", "dev", "test")
         self.client = qdrant_client
         self.embedder = embedder
         self.collection = collection_name
@@ -557,6 +562,36 @@ class QdrantMultiVectorRetriever:
         self.schema_supports_colbert = schema_supports_colbert or bool(
             getattr(caps, "supports_colbert", False)
         )
+        if self.schema_supports_colbert and not self.use_query_api:
+            message = (
+                "Configuration error: ColBERT enabled but Query API is disabled. "
+                "Enable search.vector.qdrant.use_query_api or disable enable_colbert."
+            )
+            if strict_env:
+                raise ValueError(message)
+            logger.warning("%s Auto-enabling Query API in non-strict env.", message)
+            self.use_query_api = True
+        # Capability guardrails
+        if self.schema_supports_sparse and not hasattr(self.embedder, "embed_sparse"):
+            message = (
+                "Configuration error: Sparse vectors enabled but embedder "
+                "does not support embed_sparse."
+            )
+            if strict_env:
+                raise ValueError(message)
+            logger.warning("%s Disabling sparse support in non-strict env.", message)
+            self.schema_supports_sparse = False
+        if self.schema_supports_colbert and not hasattr(
+            self.embedder, "embed_query_all"
+        ):
+            message = (
+                "Configuration error: ColBERT enabled but embedder "
+                "does not support embed_query_all/multivector."
+            )
+            if strict_env:
+                raise ValueError(message)
+            logger.warning("%s Disabling ColBERT in non-strict env.", message)
+            self.schema_supports_colbert = False
         self.last_stats: Dict[str, Any] = {}
         self.field_weights = {
             name: float(weight)
@@ -1164,13 +1199,29 @@ class HybridRetriever:
             and qdrant_collection
             and str(qdrant_collection).endswith(namespace_suffix)
         )
+        strict_env = getattr(settings, "env", "development").lower() not in (
+            "development",
+            "dev",
+            "test",
+        )
         if qdrant_namespaced and not bm25_namespaced:
+            message = (
+                "BM25 index appears global while Qdrant collection is namespaced. "
+                "Set search.bm25.index_name to the namespaced value or allow override."
+            )
+            override = os.getenv("ALLOW_NAMESPACE_MISMATCH", "false").lower() == "true"
+            if strict_env and not override:
+                raise RuntimeError(
+                    f"{message} bm25_index={self.bm25_retriever.index_name} "
+                    f"qdrant_collection={qdrant_collection}"
+                )
             logger.warning(
-                "BM25 index appears global while Qdrant collection is namespaced",
+                message,
                 extra={
                     "bm25_index_name": self.bm25_retriever.index_name,
                     "qdrant_collection_name": qdrant_collection,
                     "namespace_mode": namespace_mode,
+                    "override": override,
                 },
             )
         self.namespace_mode = namespace_mode
@@ -1283,6 +1334,33 @@ class HybridRetriever:
             ),
             schema_supports_sparse=getattr(qdrant_vector_cfg, "enable_sparse", False),
             schema_supports_colbert=getattr(qdrant_vector_cfg, "enable_colbert", False),
+        )
+        dense_active = True
+        sparse_active = bool(
+            self.vector_retriever.supports_sparse
+            and self.vector_retriever.schema_supports_sparse
+            and (
+                not self.vector_retriever.sparse_field_name
+                or self.vector_retriever.field_weights.get(
+                    self.vector_retriever.sparse_field_name, 0
+                )
+                > 0
+            )
+        )
+        colbert_active = bool(
+            self.vector_retriever.supports_colbert
+            and self.vector_retriever.schema_supports_colbert
+            and self.vector_retriever.use_query_api
+        )
+        logger.info(
+            "Retrieval modes resolved",
+            extra={
+                "dense_active": dense_active,
+                "sparse_active": sparse_active,
+                "colbert_active": colbert_active,
+                "colbert_query_api": self.vector_retriever.use_query_api,
+                "has_sparse_field": bool(self.vector_retriever.sparse_field_name),
+            },
         )
         self.tokenizer = tokenizer or TokenizerService()
         self.reranker_config = getattr(hybrid_config, "reranker", None)

@@ -755,6 +755,7 @@ def apply_embedding_profile(config: Config, settings: Settings, config_path: Pat
             )
 
     profile = profiles[profile_name]
+    strict_env = env not in ("development", "dev", "test")
     overrides = {
         "profile": profile_name,
         "embedding_model": profile.model_id,
@@ -792,6 +793,46 @@ def apply_embedding_profile(config: Config, settings: Settings, config_path: Pat
         if bm25_cfg and hasattr(bm25_cfg, "index_name"):
             bm25_cfg.index_name = namespace_identifier(
                 bm25_cfg.index_name, suffix_source
+            )
+
+    if qdrant_cfg:
+        if getattr(qdrant_cfg, "enable_sparse", False) and not getattr(
+            profile.capabilities, "supports_sparse", False
+        ):
+            message = (
+                f"Profile '{profile_name}' does not support sparse embeddings but "
+                "enable_sparse is True."
+            )
+            if strict_env:
+                raise ValueError(message)
+            logger.warning("%s Disabling sparse for this run.", message)
+            qdrant_cfg.enable_sparse = False
+        if getattr(qdrant_cfg, "enable_colbert", False) and not getattr(
+            profile.capabilities, "supports_colbert", False
+        ):
+            message = (
+                f"Profile '{profile_name}' does not support ColBERT but "
+                "enable_colbert is True."
+            )
+            if strict_env:
+                raise ValueError(message)
+            logger.warning("%s Disabling ColBERT for this run.", message)
+            qdrant_cfg.enable_colbert = False
+        if getattr(qdrant_cfg, "enable_colbert", False) and not getattr(
+            qdrant_cfg, "use_query_api", False
+        ):
+            message = (
+                "ColBERT requires search.vector.qdrant.use_query_api=True; it is "
+                "currently False."
+            )
+            if strict_env:
+                raise ValueError(message)
+            logger.warning("%s Auto-enabling Query API for this run.", message)
+            qdrant_cfg.use_query_api = True
+        # Ensure namespaced names reflect profile slug (not version) to stay consistent with runtime validation
+        if suffix_source and hasattr(qdrant_cfg, "collection_name"):
+            qdrant_cfg.collection_name = namespace_identifier(
+                qdrant_cfg.collection_name, suffix_source
             )
 
     missing_req = [req for req in profile.requirements if not os.getenv(req)]

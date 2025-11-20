@@ -46,9 +46,9 @@ search:
       use_grpc: false
       timeout: 30
       allow_recreate: false  # Set true to auto-rebuild collections during schema upgrades
-      enable_sparse: false
-      enable_colbert: false
-      use_query_api: false
+      enable_sparse: true
+      enable_colbert: true
+      use_query_api: true
       query_api_dense_limit: 200
       query_api_sparse_limit: 200
       query_api_candidate_limit: 200

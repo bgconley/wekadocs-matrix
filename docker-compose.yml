@@ -136,11 +136,13 @@ services:
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
       # Phase 7C: Embedding Provider Configuration
-      - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-jina_v3}
-      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-jina-ai}
-      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-jina-embeddings-v3}
-      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
-      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-retrieval.passage}
+      - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
+      - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
+      # Legacy vars cleared to avoid override; set blank to prefer profile-driven config
+      - EMBEDDINGS_PROVIDER=
+      - EMBEDDINGS_MODEL=
+      - EMBEDDINGS_DIM=
+      - EMBEDDINGS_TASK=
       - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-jina-ai}
       - RERANK_MODEL=${RERANK_MODEL:-jina-reranker-v2-base-multilingual}
@@ -220,11 +222,12 @@ services:
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
       # Phase 7C: Embedding Provider Configuration
-      - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-jina_v3}
-      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-jina-ai}
-      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-jina-embeddings-v3}
-      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
-      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-retrieval.passage}
+      - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
+      - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
+      - EMBEDDINGS_PROVIDER=
+      - EMBEDDINGS_MODEL=
+      - EMBEDDINGS_DIM=
+      - EMBEDDINGS_TASK=
       - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-jina-ai}
       - RERANK_MODEL=${RERANK_MODEL:-jina-reranker-v2-base-multilingual}
@@ -311,11 +314,12 @@ services:
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
       # Phase 7C: Embedding Provider Configuration
-      - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-jina_v3}
-      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-jina-ai}
-      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-jina-embeddings-v3}
-      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
-      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-retrieval.passage}
+      - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
+      - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
+      - EMBEDDINGS_PROVIDER=
+      - EMBEDDINGS_MODEL=
+      - EMBEDDINGS_DIM=
+      - EMBEDDINGS_TASK=
       - RERANK_PROVIDER=${RERANK_PROVIDER:-jina-ai}
       - RERANK_MODEL=${RERANK_MODEL:-jina-reranker-v2-base-multilingual}
       - JINA_API_KEY=${JINA_API_KEY}
