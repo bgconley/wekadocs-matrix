@@ -146,6 +146,10 @@ class GraphBuilder:
         if self.qdrant_client and (self.vector_primary == "qdrant" or self.dual_write):
             self._ensure_qdrant_collection()
 
+        # Ensure Neo4j vector index and schema metadata align with active profile
+        self._ensure_neo4j_vector_index()
+        self._reconcile_schema_version_embedding_metadata()
+
         if strict_mode is None:
             strict_mode = runtime_settings.embedding_strict_mode
         self._strict_mode_enabled = bool(strict_mode)
@@ -1593,6 +1597,103 @@ class GraphBuilder:
                 error=str(e),
             )
             raise
+
+    def _ensure_neo4j_vector_index(self) -> None:
+        """
+        Auto-provision the namespaced Neo4j vector index for the active profile.
+
+        Drops conflicting vector indexes on Section.vector_embedding to avoid dual index issues.
+        """
+        if not self.driver:
+            return
+
+        index_name = getattr(self.config.search.vector.neo4j, "index_name", None)
+        dims = self.embedding_dims
+        if not index_name or not dims:
+            return
+
+        with self.driver.session() as session:
+            try:
+                # Drop conflicting vector indexes on Section.vector_embedding
+                check_query = """
+                SHOW INDEXES
+                YIELD name, type, entityType, labelsOrTypes, properties
+                WHERE type = 'VECTOR'
+                  AND entityType = 'NODE'
+                  AND 'Section' IN labelsOrTypes
+                  AND 'vector_embedding' IN properties
+                RETURN name
+                """
+                existing = [r["name"] for r in session.run(check_query)]
+                for existing_name in existing:
+                    if existing_name != index_name:
+                        logger.info(
+                            "Dropping conflicting Neo4j vector index",
+                            extra={"index": existing_name},
+                        )
+                        session.run(f"DROP INDEX {existing_name} IF EXISTS")
+
+                create_query = f"""
+                CREATE VECTOR INDEX `{index_name}` IF NOT EXISTS
+                FOR (s:Section) ON (s.vector_embedding)
+                OPTIONS {{
+                  indexConfig: {{
+                    `vector.dimensions`: {dims},
+                    `vector.similarity_function`: 'COSINE',
+                    `vector.hnsw.m`: 16,
+                    `vector.hnsw.ef_construction`: 100,
+                    `vector.quantization.enabled`: true
+                  }}
+                }}
+                """
+                session.run(create_query)
+                logger.info(
+                    "Ensured Neo4j vector index exists",
+                    extra={"index": index_name, "dimensions": dims},
+                )
+            except Exception as exc:  # pragma: no cover - defensive log path
+                logger.warning(
+                    "Failed to auto-create Neo4j vector index",
+                    extra={"index": index_name, "error": str(exc)},
+                )
+
+    def _reconcile_schema_version_embedding_metadata(self) -> None:
+        """
+        Update SchemaVersion node to reflect the active embedding profile.
+        """
+        if not self.driver:
+            return
+
+        settings = self.embedding_settings
+        version_id = settings.version or settings.profile or "unknown"
+
+        query = """
+        MERGE (s:SchemaVersion {id: 'singleton'})
+        SET s.embedding_provider = $provider,
+            s.embedding_model    = $model,
+            s.version            = $version,
+            s.vector_dimensions  = $dims,
+            s.updated_at         = datetime()
+        """
+
+        try:
+            with self.driver.session() as session:
+                session.run(
+                    query,
+                    provider=getattr(settings, "provider", None),
+                    model=getattr(settings, "model_id", None),
+                    version=version_id,
+                    dims=self.embedding_dims,
+                )
+                logger.info(
+                    "Updated SchemaVersion embedding metadata",
+                    extra={"version": version_id, "dimensions": self.embedding_dims},
+                )
+        except Exception as exc:  # pragma: no cover - defensive log path
+            logger.warning(
+                "Failed to update SchemaVersion metadata",
+                extra={"error": str(exc)},
+            )
 
     def _ensure_qdrant_payload_indexes(
         self, collection: str, fields: Sequence[tuple[str, PayloadSchemaType]]
