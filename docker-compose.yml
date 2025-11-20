@@ -131,7 +131,7 @@ services:
       - ./src:/app/src:ro
       - ./scripts:/app/scripts:ro
       - ./tests:/app/tests:ro
-      - hf-cache:/opt/hf-cache
+      - ./hf-cache:/opt/hf-cache
     environment:
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
@@ -215,7 +215,7 @@ services:
       - ./src:/app/src
       - ./tools:/app/tools:ro
       - ./data:/app/data:ro
-      - hf-cache:/opt/hf-cache
+      - ./hf-cache:/opt/hf-cache
     environment:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest
@@ -305,7 +305,7 @@ services:
       - ./config:/app/config:ro
       - ./src:/app/src
       - ./data:/app/data
-      - hf-cache:/opt/hf-cache
+      - ./hf-cache:/opt/hf-cache
     environment:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest
