@@ -119,6 +119,41 @@ class BGEM3ServiceProvider(EmbeddingProvider):
     def provider_name(self) -> str:
         return self._provider_name
 
+    def _embed_with_retry(
+        self, texts: List[str], method_name: str, batch_idx: str = "0"
+    ):
+        """
+        Call embedding client with split-on-400 retry. Keeps chunks intact.
+        """
+        if not texts:
+            raise ValueError("Cannot embed an empty batch of documents.")
+
+        batch_size = len(texts)
+        client_fn = getattr(self._client, method_name)
+
+        try:
+            return client_fn(texts)
+        except Exception as exc:
+            is_client_err = (
+                self._client_error_cls
+                and isinstance(exc, self._client_error_cls)
+                and ("HTTP 400" in str(exc) or "400" in str(exc))
+            )
+            if is_client_err and batch_size > 1:
+                logger.warning(
+                    "Embedding batch rejected (HTTP 400); splitting batch",
+                    extra={
+                        "method": method_name,
+                        "batch_idx": batch_idx,
+                        "size": batch_size,
+                    },
+                )
+                mid = batch_size // 2
+                head = self._embed_with_retry(texts[:mid], method_name, f"{batch_idx}a")
+                tail = self._embed_with_retry(texts[mid:], method_name, f"{batch_idx}b")
+                return head + tail
+            raise
+
     @property
     def capabilities(self):
         return self._capabilities
@@ -138,9 +173,7 @@ class BGEM3ServiceProvider(EmbeddingProvider):
             close_fn()
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        if not texts:
-            raise ValueError("Cannot embed an empty batch of documents.")
-        vectors = self._client.embed_dense(texts)
+        vectors = self._embed_with_retry(texts, "embed_dense")
         self._validate_dimensions(vectors)
         return vectors
 
@@ -151,15 +184,11 @@ class BGEM3ServiceProvider(EmbeddingProvider):
 
     def embed_sparse(self, texts: List[str]) -> List[dict]:
         """Return sparse representations using the sparse endpoint."""
-        if not texts:
-            raise ValueError("Cannot embed an empty batch of documents.")
-        return self._client.embed_sparse(texts)
+        return self._embed_with_retry(texts, "embed_sparse")
 
     def embed_colbert(self, texts: List[str]) -> List[List[List[float]]]:
         """Return ColBERT multi-vectors for downstream consumers."""
-        if not texts:
-            raise ValueError("Cannot embed an empty batch of documents.")
-        return self._client.embed_colbert(texts)
+        return self._embed_with_retry(texts, "embed_colbert")
 
     def embed_documents_all(self, texts: List[str]) -> List[DocumentEmbeddingBundle]:
         """Return dense + sparse + multivector bundles for each document."""

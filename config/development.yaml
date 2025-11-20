@@ -10,28 +10,26 @@ app:
   version: "2.0.0"
 
 # Embedding configuration - critical for vector operations
-# Phase 7C: Updated to Jina v3 @ 1024-D by default
+# Default to BGE-M3 (dense + sparse + ColBERT)
 embedding:
-  profile: "jina_v3"
+  profile: "bge_m3"
   # Model configuration (ENV overrideable via EMBEDDINGS_MODEL)
-  model_name: "jina-embeddings-v3"  # Phase 7C: Stable v3 model
-  dims: 1024  # Phase 7C: v3 defaults to 1024-D
+  model_name: "BAAI/bge-m3"
+  dims: 1024
   similarity: "cosine"  # Options: cosine, dot, euclidean
 
   # Version tracking for provenance
-  # This ensures we can filter vectors by the model version used
-  # For Jina models, the model name IS the version (they don't use dated tags)
-  version: "jina-embeddings-v3"  # Phase 7C: Actual Jina model identifier
+  version: "BAAI/bge-m3"
 
   # Provider configuration (ENV overrideable via EMBEDDINGS_PROVIDER)
-  provider: "jina-ai"  # Phase 7C: Changed from sentence-transformers
+  provider: "bge-m3-service"
 
-  # Task configuration (Jina-specific)
-  task: "retrieval.passage"  # Options: retrieval.passage, retrieval.query
+  # Task configuration
+  task: "symmetric"  # Options: symmetric (BGE-M3), retrieval.passage, retrieval.query
 
   # Performance settings
   batch_size: 32
-  max_sequence_length: 8192  # Jina v3 supports longer sequences
+  max_sequence_length: 4096  # BGE-M3 service default
 
 # Tokenizer configuration
 tokenizer:

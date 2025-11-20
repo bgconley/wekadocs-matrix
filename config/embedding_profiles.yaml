@@ -23,8 +23,8 @@ profiles:
   bge_m3:
     description: "BGE-M3 (multi-head: dense + sparse + ColBERT) served via custom BGEM3FlagModel service."
     provider: "bge-m3-service"
-    model_id: "bge-m3"
-    version: "bge-m3"
+    model_id: "BAAI/bge-m3"
+    version: "BAAI/bge-m3"
     dims: 1024
     similarity: "cosine"
     task: "symmetric"
@@ -40,7 +40,6 @@ profiles:
       multilingual: true
     requirements:
       - "BGE_M3_API_URL"
-      - "BGE_M3_CLIENT_PATH"
 
   st_minilm:
     description: "SentenceTransformers MiniLM (384-D, fast baseline)."

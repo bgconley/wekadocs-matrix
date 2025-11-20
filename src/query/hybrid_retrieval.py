@@ -26,7 +26,7 @@ from qdrant_client.http.models import (
 from qdrant_client.http.models import SparseVector as QdrantSparseVector
 from qdrant_client.models import FieldCondition
 from qdrant_client.models import Filter as QdrantFilter
-from qdrant_client.models import Fusion, FusionQuery, MatchValue, Prefetch
+from qdrant_client.models import Fusion, FusionQuery, MatchAny, MatchValue, Prefetch
 
 # Phase 7E-4: Monitoring imports
 from src.monitoring.metrics import get_metrics_aggregator
@@ -35,7 +35,12 @@ from src.providers.factory import ProviderFactory
 from src.providers.rerank.base import RerankProvider
 from src.providers.settings import EmbeddingSettings
 from src.providers.tokenizer_service import TokenizerService
-from src.shared.config import get_config, get_embedding_settings
+from src.shared.config import (
+    _slugify_identifier,
+    get_config,
+    get_embedding_settings,
+    get_settings,
+)
 from src.shared.observability import get_logger
 from src.shared.observability.metrics import (
     retrieval_expansion_chunks_added,
@@ -46,6 +51,7 @@ from src.shared.qdrant_schema import validate_qdrant_schema
 from src.shared.schema import ensure_schema_version
 
 logger = get_logger(__name__)
+HYBRID_INIT_LOGGED = False
 
 
 try:
@@ -142,11 +148,24 @@ class BM25Retriever:
     Neo4j's full-text search uses Lucene under the hood, providing BM25 scoring.
     """
 
-    def __init__(self, neo4j_driver: Driver, index_name: Optional[str] = None):
+    def __init__(
+        self,
+        neo4j_driver: Driver,
+        index_name: Optional[str] = None,
+        *,
+        timeout_seconds: float = 2.0,
+        allow_index_migration: bool = False,
+    ):
         self.driver = neo4j_driver
-        self.index_name = index_name or os.getenv(
-            "BM25_FT_INDEX_NAME", "chunk_text_index_v3"
-        )
+        env_index_name = os.getenv("BM25_FT_INDEX_NAME")
+        if env_index_name:
+            self.index_name = env_index_name
+        elif index_name:
+            self.index_name = index_name
+        else:
+            self.index_name = "chunk_text_index_v3"
+        self.timeout_seconds = timeout_seconds
+        self.allow_index_migration = allow_index_migration
         self._ensure_fulltext_index()
 
     def _list_indexes(self, session) -> List[Dict[str, Any]]:
@@ -189,43 +208,68 @@ class BM25Retriever:
 
         with self.driver.session() as session:
             defn = None
+            compatible_name: Optional[str] = None
             rows = self._list_indexes(session)
             for row in rows:
-                if row.get("name") == self.index_name:
+                labels = set(row.get("labelsOrTypes") or [])
+                props = set(row.get("properties") or [])
+                idx_type = (row.get("type") or "").upper()
+                name = row.get("name")
+                if labels == desired_labels and desired_props.issubset(props):
+                    compatible_name = compatible_name or name
+                if name == self.index_name:
                     defn = {
-                        "type": (row.get("type") or "").upper(),
-                        "labels": set(row.get("labelsOrTypes") or []),
-                        "properties": set(row.get("properties") or []),
+                        "type": idx_type,
+                        "labels": labels,
+                        "properties": props,
                         "state": row.get("state"),
                         "raw": row,
                     }
-                    break
+
+            # Reuse any compatible index, even if the name differs
+            if defn is None and compatible_name:
+                logger.info(
+                    "Reusing existing full-text index for BM25",
+                    extra={
+                        "requested_name": self.index_name,
+                        "existing_name": compatible_name,
+                    },
+                )
+                self.index_name = compatible_name
+                return
 
             need_create = False
             if defn is None:
                 need_create = True
             else:
-                if (
+                mismatch = (
                     defn["type"] != "FULLTEXT"
                     or defn["labels"] != desired_labels
                     or not desired_props.issubset(defn["properties"])
-                ):
+                )
+                if mismatch and not self.allow_index_migration:
+                    logger.error(
+                        "Full-text index mismatch detected",
+                        extra={
+                            "name": self.index_name,
+                            "current": defn.get("raw"),
+                            "expected_labels": list(desired_labels),
+                            "expected_props": list(desired_props),
+                        },
+                    )
+                    raise RuntimeError(
+                        f"Full-text index {self.index_name} mismatched; "
+                        "set HYBRID_ALLOW_INDEX_MIGRATION=true to recreate"
+                    )
+                if mismatch and self.allow_index_migration:
                     logger.warning(
                         "Dropping mismatched full-text index",
                         extra={"name": self.index_name, "current": defn.get("raw")},
                     )
-                    dropped = False
-                    try:
-                        session.run(f"DROP INDEX {self.index_name} IF EXISTS")
-                        dropped = True
-                    except Exception:
-                        pass
-
-                    if not dropped:
-                        session.run(
-                            "CALL db.index.fulltext.drop($name)", name=self.index_name
-                        )
+                    session.run(f"DROP INDEX {self.index_name} IF EXISTS")
                     need_create = True
+                if not mismatch:
+                    return
 
             if need_create:
                 logger.info(
@@ -236,23 +280,10 @@ class BM25Retriever:
                         "props": list(desired_props),
                     },
                 )
-                created = False
-                try:
-                    session.run(
-                        f"CREATE FULLTEXT INDEX {self.index_name} "
-                        "FOR (n:Chunk|CitationUnit) ON EACH [n.text, n.heading]"
-                    )
-                    created = True
-                except Exception:
-                    pass
-
-                if not created:
-                    session.run(
-                        "CALL db.index.fulltext.createNodeIndex($name, $labels, $props)",
-                        name=self.index_name,
-                        labels=["Chunk", "CitationUnit"],
-                        props=["text", "heading"],
-                    )
+                session.run(
+                    f"CREATE FULLTEXT INDEX {self.index_name} "
+                    "FOR (n:Chunk|CitationUnit) ON EACH [n.text, n.heading]"
+                )
 
             # Wait for the index to come online (best effort)
             try:
@@ -283,17 +314,19 @@ class BM25Retriever:
         start_time = time.time()
 
         # Build WHERE clause for filters (apply to resolved chunk)
-        where_clauses = []
         params: Dict[str, Any] = {
             "query": query,
             "limit": max(top_k, 1),
             "index_name": self.index_name,
         }
-
+        where_clauses: List[str] = []
         if filters:
             for key, value in filters.items():
                 param_name = f"filter_{key}"
-                where_clauses.append(f"chunk.{key} = ${param_name}")
+                if isinstance(value, list):
+                    where_clauses.append(f"chunk.{key} IN ${param_name}")
+                else:
+                    where_clauses.append(f"chunk.{key} = ${param_name}")
                 params[param_name] = value
 
         where_clause = " AND " + " AND ".join(where_clauses) if where_clauses else ""
@@ -347,7 +380,9 @@ LIMIT $limit
 
         try:
             with self.driver.session() as session:
-                records = session.run(search_query, params)
+                records = session.run(
+                    search_query, params, timeout=self.timeout_seconds
+                )
                 for record in records:
                     chunk_id = record["chunk_id"]
                     entry = aggregates.get(chunk_id)
@@ -514,8 +549,14 @@ class QdrantMultiVectorRetriever:
         self.query_api_sparse_limit = query_api_sparse_limit
         self.query_api_candidate_limit = query_api_candidate_limit
         self.primary_vector_name = primary_vector_name or "content"
-        self.schema_supports_sparse = schema_supports_sparse
-        self.schema_supports_colbert = schema_supports_colbert
+        # Prefer explicit flags; otherwise infer from embedding capabilities
+        caps = getattr(embedding_settings, "capabilities", None)
+        self.schema_supports_sparse = schema_supports_sparse or bool(
+            getattr(caps, "supports_sparse", False)
+        )
+        self.schema_supports_colbert = schema_supports_colbert or bool(
+            getattr(caps, "supports_colbert", False)
+        )
         self.last_stats: Dict[str, Any] = {}
         self.field_weights = {
             name: float(weight)
@@ -550,12 +591,17 @@ class QdrantMultiVectorRetriever:
             "text_hash",
             "shingle_hash",
         ]
-        self.supports_sparse = hasattr(self.embedder, "embed_sparse")
-        self.supports_colbert = hasattr(self.embedder, "embed_colbert")
+        self.supports_sparse = (
+            hasattr(self.embedder, "embed_sparse") and self.schema_supports_sparse
+        )
+        self.supports_colbert = (
+            hasattr(self.embedder, "embed_colbert") and self.schema_supports_colbert
+        )
         self.sparse_query_name = "text-sparse"
         self.sparse_field_name = None
         for field_name in self.field_weights.keys():
-            if field_name.lower() in {"lexical", "sparse"}:
+            lname = field_name.lower()
+            if lname in {"lexical", "sparse"} or field_name == self.sparse_query_name:
                 self.sparse_field_name = field_name
                 break
         if self.sparse_field_name and not self.supports_sparse:
@@ -728,6 +774,8 @@ class QdrantMultiVectorRetriever:
         self, filters: Optional[Dict[str, Any]]
     ) -> Optional[QdrantFilter]:
         must: List[FieldCondition] = []
+        filters = dict(filters or {})
+        filters.pop("embedding_version", None)
         if self.embedding_version:
             must.append(
                 FieldCondition(
@@ -736,7 +784,17 @@ class QdrantMultiVectorRetriever:
                 )
             )
         for key, value in filters.items() if filters else []:
-            must.append(FieldCondition(key=key, match=MatchValue(value=value)))
+            if isinstance(value, list):
+                if not value:
+                    continue
+                try:
+                    must.append(FieldCondition(key=key, match=MatchAny(any=value)))
+                except Exception:
+                    # Fallback: include as OR of separate matches
+                    for v in value:
+                        must.append(FieldCondition(key=key, match=MatchValue(value=v)))
+            else:
+                must.append(FieldCondition(key=key, match=MatchValue(value=value)))
         return QdrantFilter(must=must) if must else None
 
     def _search_single(
@@ -796,8 +854,7 @@ class QdrantMultiVectorRetriever:
             return []
         return self.client.search(
             collection_name=self.collection,
-            query_vector=None,
-            query_sparse_vector=named_sparse,
+            query_vector=named_sparse,
             limit=top_k,
             query_filter=query_filter,
             with_payload=True,
@@ -1042,6 +1099,7 @@ class HybridRetriever:
             tokenizer: Tokenizer service for token counting (optional)
         """
         config = get_config()
+        settings = get_settings()
         self.embedding_settings = embedding_settings or get_embedding_settings()
 
         self.expected_schema_version = getattr(config.graph_schema, "version", None)
@@ -1058,11 +1116,96 @@ class HybridRetriever:
                 f"do not match embedding profile dims ({self.embedding_settings.dims})."
             )
 
+        hybrid_config = getattr(config.search, "hybrid", None)
+        qdrant_vector_cfg = getattr(config.search.vector, "qdrant", None)
+        bm25_config = getattr(config.search, "bm25", None)
+        # Timeouts and index migration toggle (set early for downstream use)
+        timeout_ms = getattr(hybrid_config, "bm25_timeout_ms", None)
+        self.bm25_timeout_seconds = (
+            float(timeout_ms) / 1000.0 if timeout_ms is not None else 2.0
+        )
+        expansion_timeout_ms = getattr(hybrid_config, "expansion_timeout_ms", None)
+        self.expansion_timeout_seconds = (
+            float(expansion_timeout_ms) / 1000.0
+            if expansion_timeout_ms is not None
+            else 2.0
+        )
+        self.allow_index_migration = (
+            os.getenv("HYBRID_ALLOW_INDEX_MIGRATION", "false").lower() == "true"
+        )
+
         self.neo4j_driver = neo4j_driver
-        self.bm25_retriever = BM25Retriever(neo4j_driver)
+        bm25_index_name = getattr(bm25_config, "index_name", None)
+        self.bm25_retriever = BM25Retriever(
+            neo4j_driver,
+            index_name=bm25_index_name,
+            timeout_seconds=self.bm25_timeout_seconds,
+            allow_index_migration=self.allow_index_migration,
+        )
         search_config = config.search
-        hybrid_config = getattr(search_config, "hybrid", None)
-        qdrant_vector_cfg = getattr(search_config.vector, "qdrant", None)
+        qdrant_collection = getattr(
+            getattr(search_config.vector, "qdrant", None), "collection_name", None
+        )
+        namespace_mode = getattr(settings, "embedding_namespace_mode", "none")
+        namespace_suffix = ""
+        if namespace_mode.lower() not in ("", "none", "disabled"):
+            namespace_suffix = _slugify_identifier(
+                self.embedding_settings.version
+                or getattr(self.embedding_settings, "profile", None)
+                or ""
+            )
+        bm25_namespaced = bool(
+            namespace_suffix
+            and self.bm25_retriever.index_name
+            and str(self.bm25_retriever.index_name).endswith(namespace_suffix)
+        )
+        qdrant_namespaced = bool(
+            namespace_suffix
+            and qdrant_collection
+            and str(qdrant_collection).endswith(namespace_suffix)
+        )
+        if qdrant_namespaced and not bm25_namespaced:
+            logger.warning(
+                "BM25 index appears global while Qdrant collection is namespaced",
+                extra={
+                    "bm25_index_name": self.bm25_retriever.index_name,
+                    "qdrant_collection_name": qdrant_collection,
+                    "namespace_mode": namespace_mode,
+                },
+            )
+        self.namespace_mode = namespace_mode
+        self.qdrant_collection_name = qdrant_collection
+        global HYBRID_INIT_LOGGED
+        if not HYBRID_INIT_LOGGED:
+            logger.info(
+                "HybridRetriever initialized",
+                extra={
+                    "embedding_profile": getattr(
+                        self.embedding_settings, "profile", None
+                    ),
+                    "embedding_provider": getattr(
+                        self.embedding_settings, "provider", None
+                    ),
+                    "embedding_model": getattr(
+                        self.embedding_settings, "model_id", None
+                    ),
+                    "embedding_version": getattr(
+                        self.embedding_settings, "version", None
+                    ),
+                    "embedding_namespace_mode": namespace_mode,
+                    "bm25_index_name": self.bm25_retriever.index_name,
+                    "qdrant_collection_name": qdrant_collection,
+                },
+            )
+            HYBRID_INIT_LOGGED = True
+        self.filter_allowlist: Dict[str, str] = {
+            "doc_tag": "doc_tag",
+            "snapshot_scope": "snapshot_scope",
+            "document_id": "document_id",
+            "embedding_version": "embedding_version",
+            "tenant": "tenant",
+            "lang": "lang",
+        }
 
         # Validate collection schema against active profile
         effective_settings = self.embedding_settings or get_embedding_settings()
@@ -1070,6 +1213,21 @@ class HybridRetriever:
         qdrant_collection = getattr(
             getattr(search_config.vector, "qdrant", None), "collection_name", None
         )
+        include_entity_vector = (
+            os.getenv("QDRANT_INCLUDE_ENTITY_VECTOR", "true").lower() == "true"
+        )
+        strict_validation = bool(
+            settings.embedding_strict_mode
+            and getattr(settings, "env", "development").lower()
+            not in ("development", "dev", "test")
+        )
+        payload_fields = [
+            "embedding_version",
+            "embedding_provider",
+            "embedding_dimensions",
+            "tenant",
+            "document_id",
+        ]
         if qdrant_collection and qdrant_client:
             validate_qdrant_schema(
                 qdrant_client,
@@ -1077,7 +1235,24 @@ class HybridRetriever:
                 self.embedding_settings,
                 require_sparse=getattr(qdrant_vector_cfg, "enable_sparse", False),
                 require_colbert=getattr(qdrant_vector_cfg, "enable_colbert", False),
+                include_entity=include_entity_vector,
+                require_payload_fields=payload_fields,
+                strict=strict_validation,
             )
+
+        timeout_ms = getattr(hybrid_config, "bm25_timeout_ms", None)
+        self.bm25_timeout_seconds = (
+            float(timeout_ms) / 1000.0 if timeout_ms is not None else 2.0
+        )
+        expansion_timeout_ms = getattr(hybrid_config, "expansion_timeout_ms", None)
+        self.expansion_timeout_seconds = (
+            float(expansion_timeout_ms) / 1000.0
+            if expansion_timeout_ms is not None
+            else 2.0
+        )
+        self.allow_index_migration = (
+            os.getenv("HYBRID_ALLOW_INDEX_MIGRATION", "false").lower() == "true"
+        )
 
         self.vector_field_weights = dict(
             getattr(hybrid_config, "vector_fields", {"content": 1.0})
@@ -1212,6 +1387,72 @@ class HybridRetriever:
                 ),
             )
 
+    def _normalize_filter_value(self, value: Any) -> Optional[Any]:
+        """Normalize filter values to scalar or non-empty list."""
+        if value is None:
+            return None
+        if isinstance(value, (list, tuple, set)):
+            items = [v for v in value if v is not None]
+            if not items:
+                return None
+            if len(items) == 1:
+                return items[0]
+            return list(items)
+        return value
+
+    def _normalize_filters(
+        self, raw_filters: Optional[Dict[str, Any]], caller: str = "hybrid"
+    ) -> Dict[str, Any]:
+        """Apply allowlist, value normalization, and embedding/tenant gating."""
+        filters = dict(raw_filters or {})
+        normalized: Dict[str, Any] = {}
+
+        # Enforce embedding_version from active settings
+        active_version = getattr(self.embedding_settings, "version", None)
+        incoming_version = filters.get("embedding_version")
+        if active_version:
+            if incoming_version and incoming_version != active_version:
+                logger.error(
+                    "Embedding version mismatch; overriding with active profile",
+                    extra={
+                        "caller": caller,
+                        "incoming": incoming_version,
+                        "active": active_version,
+                    },
+                )
+            filters["embedding_version"] = active_version
+
+        for key, value in filters.items():
+            if key not in self.filter_allowlist:
+                logger.warning(
+                    "Ignoring unsupported filter key",
+                    extra={"caller": caller, "key": key},
+                )
+                continue
+            normalized_value = self._normalize_filter_value(value)
+            if normalized_value is None:
+                continue
+            normalized[key] = normalized_value
+
+        return normalized
+
+    def _build_bm25_predicates(
+        self, filters: Dict[str, Any]
+    ) -> Tuple[List[str], Dict[str, Any]]:
+        """Build WHERE predicates and params for BM25 search."""
+        where_clauses: List[str] = []
+        params: Dict[str, Any] = {}
+
+        for key, value in filters.items():
+            param_name = f"filter_{key}"
+            if isinstance(value, list):
+                where_clauses.append(f"chunk.{key} IN ${param_name}")
+                params[param_name] = value
+            else:
+                where_clauses.append(f"chunk.{key} = ${param_name}")
+                params[param_name] = value
+        return where_clauses, params
+
     def retrieve(
         self,
         query: str,
@@ -1233,12 +1474,28 @@ class HybridRetriever:
             Tuple of (results, metrics) where metrics contains timing and diagnostic info
         """
         start_time = time.time()
-        metrics = {}
+        metrics: Dict[str, Any] = {
+            "namespace_mode": getattr(self, "namespace_mode", None),
+            "bm25_index_name": getattr(self.bm25_retriever, "index_name", None),
+            "qdrant_collection_name": getattr(
+                getattr(self, "vector_retriever", None),
+                "collection_name",
+                getattr(self, "qdrant_collection_name", None),
+            ),
+        }
         if self.embedding_settings:
             metrics["embedding_profile"] = self.embedding_settings.profile
             metrics["embedding_provider"] = self.embedding_settings.provider
             metrics["embedding_model"] = self.embedding_settings.model_id
-        doc_tag = filters.get("doc_tag") if filters else None
+        normalized_filters = self._normalize_filters(
+            filters or {}, caller="hybrid.retrieve"
+        )
+        raw_doc_tag = normalized_filters.get("doc_tag")
+        doc_tag = (
+            raw_doc_tag[0]
+            if isinstance(raw_doc_tag, list) and raw_doc_tag
+            else raw_doc_tag
+        )
 
         # Step 1: Parallel BM25 and vector search
         # Retrieve more candidates for fusion (3x top_k)
@@ -1246,13 +1503,17 @@ class HybridRetriever:
 
         # BM25 search
         bm25_start = time.time()
-        bm25_results = self.bm25_retriever.search(query, candidate_k, filters)
+        bm25_results = self.bm25_retriever.search(
+            query, candidate_k, normalized_filters
+        )
         metrics["bm25_time_ms"] = (time.time() - bm25_start) * 1000
         metrics["bm25_count"] = len(bm25_results)
 
         # Vector search
         vec_start = time.time()
-        vec_results = self.vector_retriever.search(query, candidate_k, filters)
+        vec_results = self.vector_retriever.search(
+            query, candidate_k, normalized_filters
+        )
         vector_stats = getattr(self.vector_retriever, "last_stats", {}) or {}
         metrics["vector_path"] = vector_stats.get("path", "legacy")
         metrics["vec_time_ms"] = vector_stats.get(
@@ -1693,6 +1954,9 @@ class HybridRetriever:
             min_score = min(scores)
             max_score = max(scores)
             if max_score == min_score:
+                for r in results:
+                    if getattr(r, score_attr, 0):
+                        setattr(r, f"norm_{score_attr}", 1.0)
                 return
 
             for r in results:
@@ -1750,7 +2014,8 @@ class HybridRetriever:
             share = counts.get(doc_id, 0) / total if doc_id else 0.0
             multiplier = 1.0 + alpha * share
             adjusted = metric * multiplier
-            c.fused_score = adjusted
+            # Clamp to keep fusion contract in [0, 1]
+            c.fused_score = min(adjusted, 1.0)
             boosted.append(c)
 
         boosted.sort(
@@ -2162,7 +2427,11 @@ class HybridRetriever:
 
         try:
             with self.neo4j_driver.session() as session:
-                result = session.run(expansion_query, chunk_ids=chunk_ids_to_expand)
+                result = session.run(
+                    expansion_query,
+                    chunk_ids=chunk_ids_to_expand,
+                    timeout=self.expansion_timeout_seconds,
+                )
 
                 for record in result:
                     neighbor_id = record["chunk_id"]
@@ -2343,6 +2612,7 @@ class HybridRetriever:
                     seed_ids=list(seed_lookup.keys()),
                     per_seed=limit_per_seed,
                     doc_tag=doc_tag,
+                    timeout=self.expansion_timeout_seconds,
                 )
                 for record in result:
                     seed_id = record["seed_id"]
@@ -2388,7 +2658,10 @@ class HybridRetriever:
                         continue
                     best_by_id[chunk.chunk_id] = chunk
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning("Graph enrichment failed: %s", exc)
+            logger.warning(
+                "Graph enrichment failed (expansion)",
+                extra={"error": str(exc)},
+            )
             return []
 
         return list(best_by_id.values())

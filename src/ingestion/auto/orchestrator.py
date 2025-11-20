@@ -31,7 +31,11 @@ from src.ingestion.parsers.markdown import parse_markdown
 from src.ingestion.parsers.notion import parse_notion
 from src.ingestion.reconcile import Reconciler
 from src.providers.factory import ProviderFactory
-from src.shared.config import Config, get_embedding_settings
+from src.shared.config import (
+    Config,
+    _slugify_identifier,
+    get_embedding_settings,
+)
 from src.shared.embedding_fields import (
     canonicalize_embedding_metadata,
     ensure_no_embedding_model_in_payload,
@@ -540,6 +544,14 @@ class Orchestrator:
         # Determine vector store strategy
         primary = self.config.search.vector.primary
         dual_write = self.config.search.vector.dual_write
+        qdrant_collection = getattr(
+            getattr(self.config.search.vector, "qdrant", None), "collection_name", None
+        )
+        expected_suffix = _slugify_identifier(
+            getattr(self.config.embedding, "version", None)
+            or getattr(self.config.embedding, "profile", None)
+            or ""
+        )
 
         # Purge existing vectors for this document to prevent drift
         self._purge_existing_vectors(state.document_id, state.source_uri)
@@ -559,6 +571,15 @@ class Orchestrator:
 
             # Dual write to Qdrant if enabled
             if dual_write and self.qdrant:
+                if (
+                    expected_suffix
+                    and isinstance(qdrant_collection, str)
+                    and not qdrant_collection.endswith(expected_suffix)
+                ):
+                    raise RuntimeError(
+                        f"Qdrant dual-write collection {qdrant_collection!r} "
+                        f"does not match expected namespace suffix {expected_suffix!r}"
+                    )
                 self._upsert_to_qdrant(
                     state.sections, state.document, state.document_id
                 )

@@ -741,3 +741,9 @@ def get_query_service() -> QueryService:
     if _query_service is None:
         _query_service = QueryService()
     return _query_service
+
+
+def reset_query_service() -> None:
+    """Reset the cached QueryService so it will be rebuilt with fresh config/settings."""
+    global _query_service
+    _query_service = None

@@ -32,6 +32,9 @@ def canonicalize_embedding_metadata(
     task: Optional[str] = None,
     timestamp: Optional[datetime] = None,
     profile: Optional[str] = None,
+    namespace_mode: Optional[str] = None,
+    namespace_suffix: Optional[str] = None,
+    collection_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Create canonical embedding metadata for persistence.
@@ -57,6 +60,12 @@ def canonicalize_embedding_metadata(
     }
     if profile:
         metadata["embedding_profile"] = profile
+    if namespace_mode:
+        metadata["namespace_mode"] = namespace_mode
+    if namespace_suffix:
+        metadata["namespace_suffix"] = namespace_suffix
+    if collection_name:
+        metadata["collection_name"] = collection_name
     return metadata
 
 

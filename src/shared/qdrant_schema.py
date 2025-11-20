@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from qdrant_client.models import (
     Distance,
@@ -15,6 +16,8 @@ from qdrant_client.models import (
 )
 
 from src.providers.settings import EmbeddingSettings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -115,6 +118,9 @@ def validate_qdrant_schema(
     *,
     require_sparse: Optional[bool] = None,
     require_colbert: Optional[bool] = None,
+    include_entity: Optional[bool] = None,
+    require_payload_fields: Optional[Sequence[str]] = None,
+    strict: bool = False,
 ) -> None:
     """
     Validate Qdrant collection against embedding settings and expected capabilities.
@@ -131,6 +137,14 @@ def validate_qdrant_schema(
         if require_colbert is None
         else require_colbert
     )
+    include_entity = bool(include_entity)
+    required_payload_fields = list(require_payload_fields or [])
+    expected_plan = build_qdrant_schema(
+        settings,
+        include_entity=include_entity,
+        enable_sparse=require_sparse,
+        enable_colbert=require_colbert,
+    )
 
     try:
         info = client.get_collection(collection_name)
@@ -139,20 +153,41 @@ def validate_qdrant_schema(
             f"Qdrant collection '{collection_name}' not found or unreachable: {exc}"
         ) from exc
 
-    vectors = info.config.params.vectors
-    sparse = info.config.params.sparse_vectors
+    params = getattr(info, "config", None)
+    params = getattr(params, "params", params)
+    vectors = getattr(params, "vectors", None)
+    sparse = getattr(params, "sparse_vectors", None)
+    payload_schema = (
+        getattr(params, "payload_schema", None)
+        or getattr(info, "payload_schema", None)
+        or {}
+    )
 
-    # Validate dense vector dims for primary content vector
-    primary_vec = None
+    # Validate dense vector dims for primary content vector and companions
     if isinstance(vectors, dict):
-        primary_vec = vectors.get("content")
+        for vec_name, vec_params in expected_plan.vectors_config.items():
+            observed = vectors.get(vec_name)
+            if observed is None:
+                raise RuntimeError(
+                    f"Qdrant collection '{collection_name}' missing required vector '{vec_name}'"
+                )
+            if getattr(observed, "size", None) != getattr(vec_params, "size", None):
+                raise RuntimeError(
+                    f"Qdrant collection '{collection_name}' vector dims mismatch for '{vec_name}': "
+                    f"expected {getattr(vec_params, 'size', None)}, "
+                    f"got {getattr(observed, 'size', None)}"
+                )
     else:
         primary_vec = vectors
-    if primary_vec is None or getattr(primary_vec, "size", None) != settings.dims:
-        raise RuntimeError(
-            f"Qdrant collection '{collection_name}' vector dims mismatch: "
-            f"expected content size {settings.dims}, got {getattr(primary_vec, 'size', None)}"
-        )
+        if primary_vec is None or getattr(primary_vec, "size", None) != settings.dims:
+            raise RuntimeError(
+                f"Qdrant collection '{collection_name}' vector dims mismatch: "
+                f"expected content size {settings.dims}, got {getattr(primary_vec, 'size', None)}"
+            )
+        if strict and len(expected_plan.vectors_config) > 1:
+            raise RuntimeError(
+                f"Qdrant collection '{collection_name}' missing named vector map for expected vectors"
+            )
 
     if require_sparse:
         if not sparse or "text-sparse" not in sparse:
@@ -171,4 +206,21 @@ def validate_qdrant_schema(
         else:
             raise RuntimeError(
                 f"Qdrant collection '{collection_name}' missing ColBERT multivector"
+            )
+
+    if required_payload_fields:
+        missing_payload = [
+            f for f in required_payload_fields if f not in payload_schema
+        ]
+        if missing_payload and strict:
+            raise RuntimeError(
+                f"Qdrant collection '{collection_name}' missing required payload fields: {missing_payload}"
+            )
+        if missing_payload and not strict:
+            logger.warning(
+                "Qdrant collection missing optional payload indexes",
+                extra={
+                    "collection": collection_name,
+                    "missing_payload_fields": missing_payload,
+                },
             )

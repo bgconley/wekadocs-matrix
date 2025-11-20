@@ -27,7 +27,7 @@ logging.basicConfig(level=logging.WARNING, format="%(message)s", stream=sys.stde
 
 from src.ingestion.auto.progress import JobStage, ProgressReader  # noqa: E402
 from src.ingestion.auto.queue import JobQueue  # noqa: E402
-from src.shared.config import get_config  # noqa: E402
+from src.shared.config import get_config, reload_config  # noqa: E402
 from src.shared.observability import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
@@ -858,6 +858,8 @@ def cmd_report(args):
 
 def main():
     """Main CLI entry point."""
+    # Refresh config on startup to honor current env for long-lived processes
+    reload_config()
     parser = argparse.ArgumentParser(
         prog="ingestctl",
         description="CLI for auto-ingestion system",

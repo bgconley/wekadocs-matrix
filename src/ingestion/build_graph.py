@@ -32,7 +32,12 @@ from src.shared.chunk_utils import (
     create_chunk_metadata,
     validate_chunk_schema,
 )
-from src.shared.config import Config, get_embedding_settings, get_settings
+from src.shared.config import (
+    Config,
+    _slugify_identifier,
+    get_embedding_settings,
+    get_settings,
+)
 from src.shared.embedding_fields import (
     canonicalize_embedding_metadata,
     ensure_no_embedding_model_in_payload,
@@ -50,6 +55,7 @@ from src.shared.qdrant_schema import build_qdrant_schema
 from src.shared.schema import ensure_schema_version
 
 logger = get_logger(__name__)
+GRAPH_BUILDER_INIT_LOGGED = False
 
 
 class GraphBuilder:
@@ -85,6 +91,10 @@ class GraphBuilder:
         self.embedding_settings = get_embedding_settings(config)
         self.embedding_version = self.embedding_settings.version
         self.embedding_dims = self.embedding_settings.dims or 0
+        runtime_settings = get_settings()
+        self.namespace_mode = getattr(
+            runtime_settings, "embedding_namespace_mode", "none"
+        )
         self.vector_primary = config.search.vector.primary
         self.dual_write = config.search.vector.dual_write
         self.expected_schema_version = (
@@ -98,6 +108,36 @@ class GraphBuilder:
         self.manage_qdrant_on_init = (
             os.getenv("MANAGE_QDRANT_SCHEMA_ON_INIT", "false").lower() == "true"
         )
+        global GRAPH_BUILDER_INIT_LOGGED
+        if not GRAPH_BUILDER_INIT_LOGGED:
+            search_cfg = getattr(config, "search", None)
+            logger.info(
+                "GraphBuilder initialized",
+                extra={
+                    "embedding_profile": getattr(
+                        self.embedding_settings, "profile", None
+                    ),
+                    "embedding_provider": getattr(
+                        self.embedding_settings, "provider", None
+                    ),
+                    "embedding_model": getattr(
+                        self.embedding_settings, "model_id", None
+                    ),
+                    "embedding_version": getattr(
+                        self.embedding_settings, "version", None
+                    ),
+                    "embedding_namespace_mode": self.namespace_mode,
+                    "bm25_index_name": getattr(
+                        getattr(search_cfg, "bm25", None), "index_name", None
+                    ),
+                    "qdrant_collection_name": getattr(
+                        getattr(getattr(search_cfg, "vector", None), "qdrant", None),
+                        "collection_name",
+                        None,
+                    ),
+                },
+            )
+            GRAPH_BUILDER_INIT_LOGGED = True
 
         # Phase 7C.7: Fresh start with 1024-D (Session 06-08)
         # No dual-write complexity - starting fresh with Jina v4 @ 1024-D
@@ -111,7 +151,6 @@ class GraphBuilder:
             self._ensure_qdrant_collection()
 
         if strict_mode is None:
-            runtime_settings = get_settings()
             strict_mode = runtime_settings.embedding_strict_mode
         self._strict_mode_enabled = bool(strict_mode)
 
@@ -134,6 +173,15 @@ class GraphBuilder:
     def _enforce_profile_guard(self) -> None:
         """Detect and optionally block ingestion if legacy embeddings persist."""
         if self._profile_alignment_verified:
+            return
+        # When namespace isolation is enabled, we don’t enforce cross-profile drift
+        # because each profile is intended to have its own storage “home”.
+        if str(self.namespace_mode).lower() not in {"", "none", "disabled"}:
+            self._profile_alignment_verified = True
+            embedding_profile_guard_events_total.labels(
+                profile=self.embedding_settings.profile or "legacy",
+                outcome="namespaced",
+            ).inc()
             return
         mismatched_ids: List[str] = []
         query = """
@@ -1232,35 +1280,81 @@ class GraphBuilder:
             title_texts.append(self._build_title_text_for_embedding(section))
             sections_to_embed.append(section)
 
-        # Generate embeddings in batch
+        # Generate embeddings with token-budgeted micro-batches (do not split chunks)
         if sections_to_embed:
-            # Generate embeddings using configured provider (Jina v3 @ 1024-D)
-            content_embeddings = self.embedder.embed_documents(content_texts)
-            title_embeddings = self.embedder.embed_documents(title_texts)
-            sparse_embeddings = None
-            if getattr(
-                self.embedding_settings.capabilities, "supports_sparse", False
-            ) and hasattr(self.embedder, "embed_sparse"):
-                try:
-                    sparse_embeddings = self.embedder.embed_sparse(content_texts)
-                except Exception as exc:
-                    logger.warning(
-                        "Sparse embedding generation failed; continuing without sparse vectors",
-                        error=str(exc),
-                    )
-                    sparse_embeddings = None
-            colbert_embeddings = None
-            if getattr(
-                self.embedding_settings.capabilities, "supports_colbert", False
-            ) and hasattr(self.embedder, "embed_colbert"):
-                try:
-                    colbert_embeddings = self.embedder.embed_colbert(content_texts)
-                except Exception as exc:
-                    logger.warning(
-                        "ColBERT embedding generation failed; continuing without ColBERT vectors",
-                        error=str(exc),
-                    )
-                    colbert_embeddings = None
+            batch_budget = int(os.getenv("EMBED_BATCH_MAX_TOKENS", "7000") or "7000")
+            if batch_budget <= 0:
+                batch_budget = 7000
+
+            batches: List[List[int]] = []
+            current: List[int] = []
+            current_tokens = 0
+            for idx, section in enumerate(sections_to_embed):
+                tokens = (
+                    section.get("token_count")
+                    or section.get("tokens")
+                    or len(content_texts[idx].split())
+                )
+                if current and current_tokens + tokens > batch_budget:
+                    batches.append(current)
+                    current = [idx]
+                    current_tokens = tokens
+                else:
+                    current.append(idx)
+                    current_tokens += tokens
+            if current:
+                batches.append(current)
+
+            content_embeddings: List[List[float]] = []
+            title_embeddings: List[List[float]] = []
+            sparse_embeddings: Optional[List[dict]] = (
+                []
+                if getattr(
+                    self.embedding_settings.capabilities, "supports_sparse", False
+                )
+                else None
+            )
+            colbert_embeddings: Optional[List[List[List[float]]]] = (
+                []
+                if getattr(
+                    self.embedding_settings.capabilities, "supports_colbert", False
+                )
+                else None
+            )
+
+            for batch in batches:
+                batch_content = [content_texts[i] for i in batch]
+                batch_title = [title_texts[i] for i in batch]
+                content_embeddings.extend(self.embedder.embed_documents(batch_content))
+                title_embeddings.extend(self.embedder.embed_documents(batch_title))
+
+                if sparse_embeddings is not None and hasattr(
+                    self.embedder, "embed_sparse"
+                ):
+                    try:
+                        sparse_embeddings.extend(
+                            self.embedder.embed_sparse(batch_content)
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Sparse embedding generation failed; continuing without sparse vectors",
+                            error=str(exc),
+                        )
+                        sparse_embeddings = None
+
+                if colbert_embeddings is not None and hasattr(
+                    self.embedder, "embed_colbert"
+                ):
+                    try:
+                        colbert_embeddings.extend(
+                            self.embedder.embed_colbert(batch_content)
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "ColBERT embedding generation failed; continuing without ColBERT vectors",
+                            error=str(exc),
+                        )
+                        colbert_embeddings = None
 
             # Process each section with its embeddings
             for idx, section in enumerate(sections_to_embed):
@@ -1268,12 +1362,12 @@ class GraphBuilder:
                 title_embedding = title_embeddings[idx]
                 sparse_vector = (
                     sparse_embeddings[idx]
-                    if sparse_embeddings and idx < len(sparse_embeddings)
+                    if sparse_embeddings is not None and idx < len(sparse_embeddings)
                     else None
                 )
                 colbert_vector = (
                     colbert_embeddings[idx]
-                    if colbert_embeddings and idx < len(colbert_embeddings)
+                    if colbert_embeddings is not None and idx < len(colbert_embeddings)
                     else None
                 )
 
@@ -1449,6 +1543,21 @@ class GraphBuilder:
         Ensure Qdrant collection exists with multi-vector schema + payload indexes.
         """
         collection = self.config.search.vector.qdrant.collection_name
+        runtime_settings = get_settings()
+        resolved_namespace = getattr(
+            runtime_settings, "embedding_namespace_mode", "none"
+        )
+        if resolved_namespace.lower() not in ("", "none", "disabled"):
+            expected_suffix = _slugify_identifier(
+                self.embedding_settings.version
+                or getattr(self.embedding_settings, "profile", None)
+                or ""
+            )
+            if expected_suffix and isinstance(collection, str):
+                if not collection.endswith(expected_suffix):
+                    raise RuntimeError(
+                        f"Qdrant collection {collection!r} does not match expected namespace suffix {expected_suffix!r}"
+                    )
 
         try:
             schema_plan = build_qdrant_schema(
@@ -1686,6 +1795,23 @@ class GraphBuilder:
             document: Document data
             label: Node label (Section/Chunk)
         """
+        collection = self.config.search.vector.qdrant.collection_name
+        runtime_settings = get_settings()
+        resolved_namespace = getattr(
+            runtime_settings, "embedding_namespace_mode", "none"
+        )
+        if resolved_namespace.lower() not in ("", "none", "disabled"):
+            expected_suffix = _slugify_identifier(
+                self.embedding_settings.version
+                or getattr(self.embedding_settings, "profile", None)
+                or ""
+            )
+            if expected_suffix and isinstance(collection, str):
+                if not collection.endswith(expected_suffix):
+                    raise RuntimeError(
+                        f"Qdrant collection {collection!r} does not match expected namespace suffix {expected_suffix!r}"
+                    )
+
         if not self.qdrant_client:
             logger.warning("Qdrant client not available")
             return
@@ -1693,8 +1819,6 @@ class GraphBuilder:
         import uuid
 
         from qdrant_client.models import PointStruct
-
-        collection = self.config.search.vector.qdrant.collection_name
 
         source_uri = document.get("source_uri", "")
         source_path = str(Path(source_uri).parent) if source_uri else ""
@@ -1721,6 +1845,13 @@ class GraphBuilder:
             task=getattr(self.embedder, "task", self.embedding_settings.task),
             profile=self.embedding_settings.profile,
             timestamp=datetime.utcnow(),
+            namespace_mode=resolved_namespace,
+            namespace_suffix=_slugify_identifier(
+                self.embedding_settings.version
+                or getattr(self.embedding_settings, "profile", None)
+                or ""
+            ),
+            collection_name=collection,
         )
 
         # Phase 7E-1: Build payload with canonical chunk fields
@@ -1813,6 +1944,21 @@ class GraphBuilder:
         # vector dictionary. Passing `vectors=` raises a validation error on older
         # client builds, so always map to `vector`.
         point = PointStruct(id=point_uuid, vector=vectors_payload, payload=payload)
+
+        # Optional debug: dump the exact payload structure we're sending to Qdrant.
+        # Disabled by default; enable by setting LOG_QDRANT_DEBUG_PAYLOAD=true (not recommended in production).
+        if os.getenv("LOG_QDRANT_DEBUG_PAYLOAD", "false").lower() == "true":
+            try:  # pragma: no cover - debug aid
+                from qdrant_client.models import PointsList
+
+                points_list = PointsList(points=[point])
+                logger.error(
+                    "Qdrant debug upsert payload",
+                    collection=collection,
+                    points_list=points_list.model_dump(),
+                )
+            except Exception as exc:  # pragma: no cover - best-effort logging
+                logger.error("Qdrant debug payload logging failed", error=str(exc))
 
         expected_dims = {}
         for name, vec in vectors_payload.items():

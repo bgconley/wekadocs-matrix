@@ -24,7 +24,7 @@ from .models import WekaBaseModel
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_EMBEDDING_PROFILE = "jina_v3"
+DEFAULT_EMBEDDING_PROFILE = "bge_m3"
 DEFAULT_PROFILE_FILENAME = "embedding_profiles.yaml"
 
 
@@ -60,6 +60,11 @@ class EmbeddingConfig(BaseModel):
     supports_colbert: bool = False
     supports_long_sequences: bool = True
     normalized_output: bool = False
+
+    @property
+    def model_name(self) -> Optional[str]:
+        """Backward-compatible accessor for embedding_model."""
+        return self.embedding_model
 
     @validator("similarity")
     def validate_similarity(cls, v):
@@ -220,6 +225,7 @@ class BM25Config(BaseModel):
 
     enabled: bool = True
     top_k: int = 50
+    index_name: str = "chunk_text_index_v3"
 
 
 class ExpansionConfig(BaseModel):
@@ -252,6 +258,8 @@ class HybridSearchConfig(BaseModel):
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
     bm25: BM25Config = Field(default_factory=BM25Config)  # Phase 7E
     expansion: ExpansionConfig = Field(default_factory=ExpansionConfig)  # Phase 7E
+    bm25_timeout_ms: int = 2000
+    expansion_timeout_ms: int = 2000
 
 
 class ResponseConfig(BaseModel):
@@ -272,6 +280,7 @@ class GraphSearchConfig(BaseModel):
 
 class SearchConfig(BaseModel):
     vector: VectorSearchConfig
+    bm25: BM25Config = Field(default_factory=BM25Config)
     hybrid: HybridSearchConfig
     graph: GraphSearchConfig = Field(default_factory=GraphSearchConfig)
     response: ResponseConfig = Field(default_factory=ResponseConfig)  # Phase 7E-2
@@ -768,9 +777,10 @@ def apply_embedding_profile(config: Config, settings: Settings, config_path: Pat
     suffix_source = _resolve_namespace_suffix(
         profile_name, profile, settings.embedding_namespace_mode
     )
+    qdrant_cfg = getattr(config.search.vector, "qdrant", None)
+    neo4j_cfg = getattr(config.search.vector, "neo4j", None)
+    bm25_cfg = getattr(config.search, "bm25", None)
     if suffix_source:
-        qdrant_cfg = getattr(config.search.vector, "qdrant", None)
-        neo4j_cfg = getattr(config.search.vector, "neo4j", None)
         if qdrant_cfg and hasattr(qdrant_cfg, "collection_name"):
             qdrant_cfg.collection_name = namespace_identifier(
                 qdrant_cfg.collection_name, suffix_source
@@ -778,6 +788,10 @@ def apply_embedding_profile(config: Config, settings: Settings, config_path: Pat
         if neo4j_cfg and hasattr(neo4j_cfg, "index_name"):
             neo4j_cfg.index_name = namespace_identifier(
                 neo4j_cfg.index_name, suffix_source
+            )
+        if bm25_cfg and hasattr(bm25_cfg, "index_name"):
+            bm25_cfg.index_name = namespace_identifier(
+                bm25_cfg.index_name, suffix_source
             )
 
     missing_req = [req for req in profile.requirements if not os.getenv(req)]
@@ -787,6 +801,17 @@ def apply_embedding_profile(config: Config, settings: Settings, config_path: Pat
             profile_name,
             missing_req,
         )
+
+    logger.info(
+        "Embedding profile applied",
+        extra={
+            "embedding_profile": profile_name,
+            "embedding_namespace_mode": settings.embedding_namespace_mode,
+            "bm25_index_name": getattr(bm25_cfg, "index_name", None),
+            "qdrant_collection_name": getattr(qdrant_cfg, "collection_name", None),
+            "neo4j_vector_index_name": getattr(neo4j_cfg, "index_name", None),
+        },
+    )
 
     _ensure_embedding_resolved(config.embedding)
 
@@ -1016,6 +1041,13 @@ def get_settings() -> Settings:
 
 def init_config() -> tuple[Config, Settings]:
     """Initialize and cache global config instances"""
+    global _config, _settings
+    _config, _settings = load_config()
+    return _config, _settings
+
+
+def reload_config() -> tuple[Config, Settings]:
+    """Force reload of config/settings from disk and environment."""
     global _config, _settings
     _config, _settings = load_config()
     return _config, _settings

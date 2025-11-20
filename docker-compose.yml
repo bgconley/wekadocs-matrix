@@ -18,7 +18,7 @@ volumes:
 
 services:
   neo4j:
-    image: neo4j:5.15-enterprise
+    image: neo4j:2025.10.1-community
     container_name: weka-neo4j
     networks:
       - weka-net
@@ -58,7 +58,7 @@ services:
       start_period: 30s
 
   qdrant:
-    image: qdrant/qdrant:v1.7.4
+    image: qdrant/qdrant:v1.16.0
     container_name: weka-qdrant
     networks:
       - weka-net
@@ -141,13 +141,13 @@ services:
       - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-jina-embeddings-v3}
       - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
       - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-retrieval.passage}
+      - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-jina-ai}
       - RERANK_MODEL=${RERANK_MODEL:-jina-reranker-v2-base-multilingual}
       - JINA_API_KEY=${JINA_API_KEY}
       - ANSWER_MODEL=${ANSWER_MODEL:-search-result-formatting}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
-      - HF_TOKENIZER_ID=jinaai/jina-embeddings-v3
       - HF_CACHE=/opt/hf-cache
       - TRANSFORMERS_OFFLINE=true
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
@@ -225,12 +225,12 @@ services:
       - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-jina-embeddings-v3}
       - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
       - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-retrieval.passage}
+      - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-jina-ai}
       - RERANK_MODEL=${RERANK_MODEL:-jina-reranker-v2-base-multilingual}
       - JINA_API_KEY=${JINA_API_KEY}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
-      - HF_TOKENIZER_ID=jinaai/jina-embeddings-v3
       - HF_CACHE=/opt/hf-cache
       - TRANSFORMERS_OFFLINE=true
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment

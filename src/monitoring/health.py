@@ -75,8 +75,8 @@ class HealthChecker:
     # Canonical requirements from Phase 7E spec
     REQUIRED_SCHEMA_VERSION = "v2.2"
     REQUIRED_EMBED_DIM = 1024
-    REQUIRED_EMBED_MODEL = "jina-embeddings-v3"
-    REQUIRED_EMBED_PROVIDER = "jina-ai"
+    REQUIRED_EMBED_MODEL = "BAAI/bge-m3"
+    REQUIRED_EMBED_PROVIDER = "bge-m3-service"
     REQUIRED_DISTANCE = "cosine"
 
     def __init__(

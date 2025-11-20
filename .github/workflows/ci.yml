@@ -64,12 +64,13 @@ jobs:
           path: reports/
 
   profile-matrix-smoke:
-    name: Real Provider Smoke
+    name: Real Provider Smoke (dense + sparse/ColBERT opt-in)
     runs-on: ubuntu-latest
     needs: test
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     env:
       RUN_PROFILE_MATRIX_INTEGRATION: "1"
+      RUN_SPARSE_PROFILE_MATRIX: "1"
       QDRANT_URL: http://127.0.0.1:6333
       JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
       BGE_M3_API_URL: ${{ secrets.BGE_M3_API_URL }}
@@ -124,6 +125,7 @@ jobs:
         if: steps.guard.outputs.should_run == 'true'
         env:
           RUN_PROFILE_MATRIX_INTEGRATION: "1"
+          RUN_SPARSE_PROFILE_MATRIX: "1"
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
           BGE_M3_API_URL: ${{ secrets.BGE_M3_API_URL }}
         run: |
@@ -132,6 +134,8 @@ jobs:
           pytest \
             tests/integration/test_profile_matrix_integration.py \
             tests/integration/test_profile_ingestion_retrieval.py \
+            tests/integration/test_sparse_colbert_integration.py \
+            tests/query/test_multivector_sparse_colbert.py \
             -v
 
       - name: Stop Qdrant
