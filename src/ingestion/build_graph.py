@@ -1665,13 +1665,17 @@ class GraphBuilder:
             return
 
         settings = self.embedding_settings
-        version_id = settings.version or settings.profile or "unknown"
+        schema_version = (
+            self.expected_schema_version
+            or getattr(self.config.graph_schema, "version", None)
+            or "v2.2"
+        )
 
         query = """
         MERGE (s:SchemaVersion {id: 'singleton'})
         SET s.embedding_provider = $provider,
             s.embedding_model    = $model,
-            s.version            = $version,
+            s.version            = $schema_version,
             s.vector_dimensions  = $dims,
             s.updated_at         = datetime()
         """
@@ -1682,12 +1686,15 @@ class GraphBuilder:
                     query,
                     provider=getattr(settings, "provider", None),
                     model=getattr(settings, "model_id", None),
-                    version=version_id,
+                    schema_version=schema_version,
                     dims=self.embedding_dims,
                 )
                 logger.info(
                     "Updated SchemaVersion embedding metadata",
-                    extra={"version": version_id, "dimensions": self.embedding_dims},
+                    extra={
+                        "version": schema_version,
+                        "dimensions": self.embedding_dims,
+                    },
                 )
         except Exception as exc:  # pragma: no cover - defensive log path
             logger.warning(
