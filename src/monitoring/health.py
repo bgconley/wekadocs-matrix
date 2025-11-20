@@ -15,6 +15,8 @@ from typing import Dict, List
 from neo4j import Driver
 from qdrant_client import QdrantClient
 
+from src.shared.config import get_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -305,13 +307,23 @@ class HealthChecker:
 
     def _check_neo4j_vector_indexes(self) -> HealthCheckResult:
         """Verify vector indexes are 1024-D with cosine distance."""
+        # Allow namespacing: section index name is derived from config.search.vector.neo4j.index_name
+        # while chunk index remains legacy/non-namespaced for now.
         required_vector_indexes = {
-            "section_embeddings_v2": {
+            "section": {
+                "names": [
+                    getattr(
+                        get_config().search.vector.neo4j,
+                        "index_name",
+                        "section_embeddings_v2",
+                    )
+                ],
                 "label": "Section",
                 "property": "vector_embedding",
                 "dimensions": 1024,
             },
-            "chunk_embeddings_v2": {
+            "chunk": {
+                "names": ["chunk_embeddings_v2"],
                 "label": "Chunk",
                 "property": "vector_embedding",
                 "dimensions": 1024,
@@ -345,12 +357,18 @@ class HealthChecker:
                     }
 
                 issues = []
-                for name, spec in required_vector_indexes.items():
-                    if name not in existing_indexes:
-                        issues.append(f"{name} missing")
+                for logical_name, spec in required_vector_indexes.items():
+                    names = spec["names"]
+                    matched_name = next(
+                        (n for n in names if n in existing_indexes), None
+                    )
+                    if not matched_name:
+                        issues.append(
+                            f"{logical_name} missing (tried {', '.join(names)})"
+                        )
                         continue
 
-                    idx = existing_indexes[name]
+                    idx = existing_indexes[matched_name]
                     options = idx.get("options", {})
 
                     # Check dimensions (in indexConfig)
@@ -358,7 +376,7 @@ class HealthChecker:
                     dims = index_config.get("vector.dimensions")
                     if dims != spec["dimensions"]:
                         issues.append(
-                            f"{name} has {dims}D (expected {spec['dimensions']}D)"
+                            f"{matched_name} has {dims}D (expected {spec['dimensions']}D)"
                         )
 
                     # Check similarity (cosine expected)
@@ -366,14 +384,16 @@ class HealthChecker:
                         "vector.similarity_function", ""
                     ).lower()
                     if similarity and "cosine" not in similarity:
-                        issues.append(f"{name} uses {similarity} (expected cosine)")
+                        issues.append(
+                            f"{matched_name} uses {similarity} (expected cosine)"
+                        )
 
                 if not issues:
                     return HealthCheckResult(
                         name="neo4j_vector_indexes",
                         status=HealthStatus.HEALTHY,
                         message=f"All {len(required_vector_indexes)} vector indexes are 1024-D cosine",
-                        details={"indexes": list(required_vector_indexes.keys())},
+                        details={"indexes": required_vector_indexes},
                     )
                 else:
                     return HealthCheckResult(
