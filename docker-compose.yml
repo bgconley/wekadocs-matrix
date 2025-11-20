@@ -131,7 +131,7 @@ services:
       - ./src:/app/src:ro
       - ./scripts:/app/scripts:ro
       - ./tests:/app/tests:ro
-      - hf-cache:/opt/hf-cache:ro
+      - hf-cache:/opt/hf-cache
     environment:
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
@@ -151,7 +151,7 @@ services:
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
       - HF_CACHE=/opt/hf-cache
-      - TRANSFORMERS_OFFLINE=true
+      - TRANSFORMERS_OFFLINE=false
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000
@@ -215,7 +215,7 @@ services:
       - ./src:/app/src
       - ./tools:/app/tools:ro
       - ./data:/app/data:ro
-      - hf-cache:/opt/hf-cache:ro
+      - hf-cache:/opt/hf-cache
     environment:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest
@@ -235,7 +235,7 @@ services:
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
       - HF_CACHE=/opt/hf-cache
-      - TRANSFORMERS_OFFLINE=true
+      - TRANSFORMERS_OFFLINE=false
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000
@@ -305,7 +305,7 @@ services:
       - ./config:/app/config:ro
       - ./src:/app/src
       - ./data:/app/data
-      - hf-cache:/opt/hf-cache:ro
+      - hf-cache:/opt/hf-cache
     environment:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest
@@ -327,7 +327,7 @@ services:
       - TOKENIZER_BACKEND=hf
       - HF_TOKENIZER_ID=jinaai/jina-embeddings-v3
       - HF_CACHE=/opt/hf-cache
-      - TRANSFORMERS_OFFLINE=true
+      - TRANSFORMERS_OFFLINE=false
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000

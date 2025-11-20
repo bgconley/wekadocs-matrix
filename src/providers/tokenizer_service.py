@@ -354,17 +354,29 @@ class TokenizerService:
             backend_name = "hf"
         backend_name = backend_name.lower()
 
+        # Fallback allowance: default to disallow segmenter fallback for BGE-M3 unless explicitly enabled
+        embedding_profile = getattr(get_embedding_settings(), "profile", "") or ""
+        allow_segmenter_fallback = (
+            os.getenv("TOKENIZER_ALLOW_SEGMENTER_FALLBACK", "").lower() == "true"
+        ) or embedding_profile.lower() not in {"bge_m3", "bge-m3", "bge-m3-service"}
+
         if backend_name == "hf":
             try:
                 self.backend = HuggingFaceTokenizerBackend()
                 self.backend_name = "huggingface"
             except Exception as exc:
-                logger.warning(
-                    "HuggingFace tokenizer initialization failed; falling back to Jina Segmenter",
-                    exc_info=exc,
-                )
-                self.backend = JinaSegmenterBackend()
-                self.backend_name = "jina-segmenter"
+                if allow_segmenter_fallback:
+                    logger.warning(
+                        "HuggingFace tokenizer initialization failed; falling back to Jina Segmenter",
+                        exc_info=exc,
+                    )
+                    self.backend = JinaSegmenterBackend()
+                    self.backend_name = "jina-segmenter"
+                else:
+                    raise RuntimeError(
+                        "HuggingFace tokenizer initialization failed and segmenter fallback is disabled "
+                        f"for profile '{embedding_profile}'"
+                    ) from exc
         elif backend_name == "segmenter":
             self.backend = JinaSegmenterBackend()
             self.backend_name = "jina-segmenter"
