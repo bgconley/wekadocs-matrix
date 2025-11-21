@@ -45,16 +45,19 @@ def parse_file_uri(uri: str) -> str:
     if path.startswith("/app/"):
         return path
 
-    # Convert host path to container path
-    # Host paths contain the project root, which maps to /app in container
-    # Example: /Users/.../wekadocs-matrix/data/... -> /app/data/...
-    if "/data/" in path:
-        # Extract everything from /data/ onwards
-        data_idx = path.index("/data/")
-        container_path = "/app" + path[data_idx:]
-        return container_path
+    # Robust host->container mapping: anchor to project root if present
+    # Default project root on host is the repo root; in container it's /app
+    repo_marker = "/wekadocs-matrix/"
+    if repo_marker in path:
+        idx = path.index(repo_marker)
+        return "/app" + path[idx + len(repo_marker) - 1 :]
 
-    # If no /data/ in path, assume it's already relative to /app
+    # Fallback: if /data/ segment exists, strip to last occurrence
+    if "/data/" in path:
+        data_idx = path.rfind("/data/")
+        return "/app" + path[data_idx:]
+
+    # If no markers, assume already container-relative
     return path
 
 

@@ -853,8 +853,7 @@ class GreedyCombinerV2:
                 out.append(cur)
                 i += 2
             else:
-                cur = self._enrich_chunk(cur)
-                cur = post_process_chunk(cur)
+                # No merge: chunk was already enriched in the main assembly; avoid duplicate work
                 out.append(cur)
                 i += 1
         return out
