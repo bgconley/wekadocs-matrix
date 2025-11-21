@@ -1040,16 +1040,12 @@ class QdrantMultiVectorRetriever:
             and bundle.sparse.indices
             and bundle.sparse.values
         ):
-            named_sparse = NamedSparseVector(
-                name=self.sparse_query_name,
-                vector=QdrantSparseVector(
-                    indices=list(bundle.sparse.indices),
-                    values=list(bundle.sparse.values),
-                ),
+            sparse_query = QdrantSparseVector(
+                indices=list(bundle.sparse.indices), values=list(bundle.sparse.values)
             )
             entries.append(
                 Prefetch(
-                    query=named_sparse,
+                    query=sparse_query,
                     using=self.sparse_query_name,
                     limit=min(candidate_limit, self.query_api_sparse_limit),
                     filter=qdrant_filter,
@@ -1066,10 +1062,16 @@ class QdrantMultiVectorRetriever:
             and bundle.multivector.vectors
         ):
             return (
-                [list(vec) for vec in bundle.multivector.vectors],
+                {
+                    "name": "late-interaction",
+                    "vector": [list(vec) for vec in bundle.multivector.vectors],
+                },
                 "late-interaction",
             )
-        return list(bundle.dense), self.primary_vector_name
+        return {
+            "name": self.primary_vector_name,
+            "vector": list(bundle.dense),
+        }, self.primary_vector_name
 
     def _query_api_supported(self) -> bool:
         return hasattr(self.client, "query_points")
