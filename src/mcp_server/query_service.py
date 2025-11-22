@@ -285,10 +285,11 @@ class QueryService:
     def _wrap_chunks_as_ranked(self, chunks: List[ChunkResult]) -> List[RankedResult]:
         """Adapt ChunkResult objects to RankedResult instances for response building."""
 
-        ranked: List[RankedResult] = []
         ranker = Ranker()
 
-        for index, chunk in enumerate(chunks):
+        search_results: List[SearchResult] = []
+
+        for chunk in chunks:
             score = float(
                 chunk.fused_score
                 if chunk.fused_score is not None
@@ -334,22 +335,18 @@ class QueryService:
 
             metadata["anchor"] = getattr(chunk, "anchor", None)
 
-            search_result = SearchResult(
-                node_id=chunk.chunk_id,
-                node_label="Chunk",
-                score=score,
-                distance=int(chunk.graph_distance or 0),
-                metadata=metadata,
-                path=chunk.graph_path,
+            search_results.append(
+                SearchResult(
+                    node_id=chunk.chunk_id,
+                    node_label="Chunk",
+                    score=score,
+                    distance=int(chunk.graph_distance or 0),
+                    metadata=metadata,
+                    path=chunk.graph_path,
+                )
             )
 
-            features = ranker._extract_features(search_result)
-
-            ranked.append(
-                RankedResult(result=search_result, features=features, rank=index + 1)
-            )
-
-        return ranked
+        return ranker.rank(search_results)
 
     def _get_planner(self) -> QueryPlanner:
         """Get or initialize the query planner."""

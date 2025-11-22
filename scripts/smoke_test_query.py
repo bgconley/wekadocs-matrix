@@ -45,7 +45,9 @@ async def run_test():
         print("\n--- Top Evidence ---")
         for i, ev in enumerate(response.answer_json.evidence[:3]):
             print(
-                f"{i+1}. heading={ev.get('heading')} score={ev.get('score')} source={ev.get('source_uri')}"
+                f"{i+1}. title={getattr(ev, 'title', None)} "
+                f"confidence={getattr(ev, 'confidence', None)} "
+                f"source={getattr(getattr(ev, 'metadata', {}), 'get', lambda k: None)('source_uri')}"
             )
     except Exception as e:
         print(f"\nERROR: Search failed: {e}")

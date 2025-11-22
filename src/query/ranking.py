@@ -118,10 +118,24 @@ class Ranker:
 
         start_time = time.time()
 
+        # Pre-compute max vector scores per kind (for relative normalization)
+        max_scores_by_kind: Dict[str, float] = {}
+        for res in results:
+            kind = (res.metadata.get("vector_score_kind") or "").lower()
+            score = res.metadata.get("vector_score")
+            if score is None:
+                score = res.score
+            if kind and score is not None:
+                prev = max_scores_by_kind.get(kind, 0.0)
+                if score > prev:
+                    max_scores_by_kind[kind] = score
+
         # Extract all features
         ranked = []
         for result in results:
-            features = self._extract_features(result, query_context)
+            features = self._extract_features(
+                result, query_context, max_scores_by_kind=max_scores_by_kind
+            )
             ranked.append(RankedResult(result=result, features=features))
 
         # Sort by final score (descending)
@@ -142,7 +156,10 @@ class Ranker:
         return ranked
 
     def _extract_features(
-        self, result: SearchResult, context: Optional[Dict[str, Any]] = None
+        self,
+        result: SearchResult,
+        context: Optional[Dict[str, Any]] = None,
+        max_scores_by_kind: Optional[Dict[str, float]] = None,
     ) -> RankingFeatures:
         """Extract all ranking features for a result."""
         features = RankingFeatures()
@@ -173,11 +190,23 @@ class Ranker:
             if fallback != "vector":
                 ranking_missing_vector_score_total.labels(fallback=fallback).inc()
             features.semantic_score = self._normalize_score(
-                semantic_raw or 0.0, score_kind_for_norm
+                semantic_raw or 0.0,
+                score_kind_for_norm,
+                max_scores_by_kind=max_scores_by_kind,
             )
         else:
-            score_kind = result.metadata.get("score_kind", "similarity")
-            features.semantic_score = self._normalize_score(result.score, score_kind)
+            # Prefer the vector score and its kind when present
+            semantic_raw = vector_score if vector_score is not None else result.score
+            score_kind = (
+                vector_score_kind
+                or result.metadata.get("score_kind", "similarity")
+                or "similarity"
+            )
+            features.semantic_score = self._normalize_score(
+                semantic_raw,
+                score_kind,
+                max_scores_by_kind=max_scores_by_kind,
+            )
 
         ranking_semantic_score_distribution.observe(features.semantic_score)
 
@@ -213,7 +242,12 @@ class Ranker:
 
         return features
 
-    def _normalize_score(self, score: float, score_kind: str = "similarity") -> float:
+    def _normalize_score(
+        self,
+        score: float,
+        score_kind: str = "similarity",
+        max_scores_by_kind: Optional[Dict[str, float]] = None,
+    ) -> float:
         """
         Pre-Phase 7: Robust normalization to similarity in [0, 1].
         Handles both similarity and distance metrics.
@@ -256,12 +290,25 @@ class Ranker:
                 return 1.0 / (1.0 + math.exp(-score))
             except OverflowError:
                 return 0.0 if score < 0 else 1.0
+        if kind in {"late-interaction", "colbert"}:
+            # ColBERT late-interaction sums per-token max sims; scores are unbounded and query-length dependent.
+            # Normalize relative to the max score for this kind in the current batch to preserve ordering.
+            safe = max(0.0, score)
+            if max_scores_by_kind:
+                max_kind_score = max_scores_by_kind.get(
+                    "late-interaction"
+                ) or max_scores_by_kind.get("colbert")
+                if max_kind_score and max_kind_score > 0:
+                    return min(1.0, safe / max_kind_score)
+            # Fallback: gentle squash to [0,1)
+            return math.tanh(safe / 10.0)
         if kind == "rrf":
             # RRF scores are small positive values; scale linearly with a soft cap
             return max(0.0, min(1.0, score * 50.0))
 
-        # Default similarity handling: clamp to [0,1]
-        return max(0.0, min(1.0, score))
+        # Default similarity handling: treat as cosine-like [-1,1] -> [0,1]
+        clamped = max(-1.0, min(1.0, score))
+        return (clamped + 1.0) / 2.0
 
     def _distance_score(self, distance: int) -> float:
         """

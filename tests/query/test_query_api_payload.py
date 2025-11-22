@@ -72,6 +72,5 @@ def test_query_payload_colbert_and_dense():
 
     payload, using_name = retriever._build_query_api_query(bundle)
     assert using_name == "late-interaction"
-    assert payload["name"] == "late-interaction"
-    assert isinstance(payload.get("vector"), list)
-    assert payload["vector"] == [[0.1, 0.2], [0.3, 0.4]]
+    assert isinstance(payload, list)
+    assert payload == [[0.1, 0.2], [0.3, 0.4]]

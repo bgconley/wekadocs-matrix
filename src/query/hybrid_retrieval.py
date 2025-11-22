@@ -1061,17 +1061,8 @@ class QdrantMultiVectorRetriever:
             and bundle.multivector
             and bundle.multivector.vectors
         ):
-            return (
-                {
-                    "name": "late-interaction",
-                    "vector": [list(vec) for vec in bundle.multivector.vectors],
-                },
-                "late-interaction",
-            )
-        return {
-            "name": self.primary_vector_name,
-            "vector": list(bundle.dense),
-        }, self.primary_vector_name
+            return [list(vec) for vec in bundle.multivector.vectors], "late-interaction"
+        return list(bundle.dense), self.primary_vector_name
 
     def _query_api_supported(self) -> bool:
         return hasattr(self.client, "query_points")
