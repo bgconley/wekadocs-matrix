@@ -59,8 +59,10 @@ search:
 
   # Hybrid search settings (Phase 7E: RRF + BM25)
   hybrid:
+    # Architecture mode: legacy (BM25+RRF) or bge_reranker (vector-only + cross-encoder)
+    mode: "bge_reranker"
     enabled: true  # Phase 7E: Enable hybrid retrieval
-    method: "rrf"  # Phase 7E: Options: rrf (default), weighted
+    method: "weighted"  # Architecture 2: magnitude-preserving fusion
 
     # RRF (Reciprocal Rank Fusion) settings
     rrf_k: 60  # Phase 7E: RRF constant (default: 60)
@@ -71,6 +73,11 @@ search:
     # Legacy weights (for backward compatibility)
     vector_weight: 0.7  # Weight for vector similarity (0.0-1.0)
     graph_weight: 0.3   # Weight for graph/text match
+    semantic_recall_weight: 0.4
+    semantic_rerank_weight: 0.4
+    semantic_graph_weight: 0.2
+    reranker_veto_threshold: 0.2
+    graph_propagation_decay: 0.85
 
     vector_fields:
       content: 1.0
@@ -79,16 +86,18 @@ search:
       lexical: 0.25
 
     reranker:
-      enabled: false
-      provider: "jina-ai"
-      model: "jina-reranker-v3"
-      top_n: 20
+      enabled: true
+      provider: "bge-reranker-service"  # options: bge-reranker-service, jina-ai, noop
+      model: "BAAI/bge-reranker-v2-m3"
+      top_n: 20            # how many candidates to send to the reranker
+      max_pairs: 50        # hard cap to protect latency
+      max_tokens_per_pair: 1024  # truncate long docs before rerank
 
     top_k: 20  # Number of candidates to retrieve
 
     # BM25/keyword retrieval settings
     bm25:
-      enabled: true  # Phase 7E: Enable BM25 full-text search
+      enabled: false  # Disabled in bge_reranker mode (still available for legacy)
       top_k: 50  # Retrieve more candidates for fusion
 
     # Bounded adjacency expansion (Phase 7E)

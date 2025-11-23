@@ -252,6 +252,21 @@ class ProviderFactory:
             api_key = kwargs.get("api_key") or os.getenv("JINA_API_KEY")
             return JinaRerankProvider(model=model, api_key=api_key, **kwargs)
 
+        elif provider in {"bge-reranker-service", "bge-reranker"}:
+            from src.providers.rerank.local_bge_service import (
+                BGERerankerServiceProvider,
+            )
+
+            base_url = kwargs.get("base_url") or os.getenv(
+                "RERANKER_BASE_URL", "http://127.0.0.1:9001"
+            )
+            timeout = kwargs.get("timeout") or float(
+                os.getenv("RERANKER_TIMEOUT_SECONDS", "60")
+            )
+            return BGERerankerServiceProvider(
+                model=model, base_url=base_url, timeout=timeout
+            )
+
         elif provider == "noop" or provider == "none":
             from src.providers.rerank.noop import NoopReranker
 
@@ -387,3 +402,5 @@ ProviderFactory._EMBEDDING_PROVIDER_CREATORS = {
     "sentence-transformers": ProviderFactory._create_sentence_transformers_provider,
     "bge-m3-service": ProviderFactory._create_bge_m3_service_provider,
 }
+
+# Mapping is appended later for rerank providers.

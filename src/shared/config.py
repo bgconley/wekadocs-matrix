@@ -242,15 +242,26 @@ class RerankerConfig(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     top_n: int = 100
+    max_pairs: int = 50
+    max_tokens_per_pair: int = 1024
 
 
 class HybridSearchConfig(BaseModel):
     enabled: bool = True
+    mode: str = (
+        "legacy"  # legacy (BM25+RRF) or bge_reranker (vector-only + cross-encoder)
+    )
     method: str = "rrf"  # Phase 7E: rrf or weighted
     rrf_k: int = 60  # Phase 7E: RRF constant
     fusion_alpha: float = 0.6  # Phase 7E: Vector weight for weighted fusion
     vector_weight: float = 0.7  # Legacy
     graph_weight: float = 0.3  # Legacy
+    # Architecture 2 semantic blend weights (recall vs rerank vs graph)
+    semantic_recall_weight: float = 0.4
+    semantic_rerank_weight: float = 0.4
+    semantic_graph_weight: float = 0.2
+    reranker_veto_threshold: float = 0.2
+    graph_propagation_decay: float = 0.85
     top_k: int = 20
     vector_fields: Dict[str, float] = Field(
         default_factory=lambda: {"content": 1.0, "title": 0.35, "entity": 0.2}

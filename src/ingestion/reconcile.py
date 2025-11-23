@@ -334,7 +334,8 @@ class Reconciler:
             MATCH (d:Document)-[:HAS_SECTION]->(s:Section {id: sid})
             RETURN
                 s.id AS id,
-                coalesce(s.text, s.content, s.title, '') AS text,
+                coalesce(s.text, s.content, '') AS text,
+                s.title AS title,
                 coalesce(s.document_id, d.id) AS document_id,
                 d.source_uri AS source_uri,
                 d.doc_tag AS doc_tag,
@@ -345,6 +346,7 @@ class Reconciler:
                 for rec in res:
                     text_map[rec["id"]] = {
                         "text": rec["text"] or "",
+                        "title": rec["title"] or "",
                         "document_id": rec.get("document_id"),
                         "source_uri": rec.get("source_uri"),
                         "doc_tag": rec.get("doc_tag"),
@@ -353,14 +355,60 @@ class Reconciler:
             upserts = []
             for sid in missing:
                 meta = text_map.get(
-                    sid, {"text": "", "document_id": None, "source_uri": None}
+                    sid,
+                    {"text": "", "title": "", "document_id": None, "source_uri": None},
                 )
+
+                # Embed Content
                 if embedding_fn is None:
-                    bundle = bundle_fn(meta["text"])
+                    content_bundle = bundle_fn(meta["text"])
                 else:
                     vec = emb_fn(meta["text"])
-                    bundle = DocumentEmbeddingBundle(dense=list(vec))
-                named_vecs = self._build_vectors_from_bundle(bundle)
+                    content_bundle = DocumentEmbeddingBundle(dense=list(vec))
+
+                # Embed Title (if present)
+                title_vec = None
+                title_text = meta.get("title")
+                if title_text:
+                    if embedding_fn is None:
+                        # We only need dense for title currently
+                        title_bundle = bundle_fn(title_text)
+                        title_vec = list(title_bundle.dense)
+                    else:
+                        title_vec = list(emb_fn(title_text))
+
+                # Construct Named Vectors
+                named_vecs: Dict[str, object] = {}
+
+                # 1. Content Vector
+                named_vecs["content"] = list(content_bundle.dense)
+
+                # 2. Title Vector
+                if title_vec:
+                    named_vecs["title"] = title_vec
+                elif "title" in self._schema_plan.vectors_config:
+                    # Fallback: use content vector if title is missing but schema requires it
+                    named_vecs["title"] = list(content_bundle.dense)
+
+                # 3. Sparse Vector (from Content)
+                if (
+                    content_bundle.sparse
+                    and "text-sparse" in self._schema_plan.sparse_vectors_config
+                ):
+                    named_vecs["text-sparse"] = SparseVector(
+                        indices=list(content_bundle.sparse.indices),
+                        values=list(content_bundle.sparse.values),
+                    )
+
+                # 4. ColBERT (from Content)
+                if (
+                    content_bundle.multivector
+                    and "late-interaction" in self._schema_plan.vectors_config
+                ):
+                    named_vecs["late-interaction"] = [
+                        list(vec) for vec in content_bundle.multivector.vectors
+                    ]
+
                 source_uri = meta.get("source_uri") or ""
                 document_uri = Path(source_uri).name if source_uri else source_uri
                 payload = {
@@ -372,6 +420,7 @@ class Reconciler:
                     "doc_tag": meta.get("doc_tag"),
                     "snapshot_scope": meta.get("snapshot_scope"),
                     "embedding_version": self.version,
+                    "heading": meta.get("title"),  # Ensure heading payload is synced
                 }
                 upserts.append((sid, named_vecs, payload))
 

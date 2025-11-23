@@ -180,7 +180,9 @@ class BGEM3ServiceProvider(EmbeddingProvider):
     def embed_query(self, text: str) -> List[float]:
         if not text:
             raise ValueError("Query text must be non-empty.")
-        return self.embed_documents([text])[0]
+        # BGE-M3 instruction for retrieval queries
+        instruction = "Represent this sentence for searching relevant passages: "
+        return self.embed_documents([instruction + text])[0]
 
     def embed_sparse(self, texts: List[str]) -> List[dict]:
         """Return sparse representations using the sparse endpoint."""
@@ -221,9 +223,25 @@ class BGEM3ServiceProvider(EmbeddingProvider):
         """Return dense + sparse + multivector bundle for a query."""
         if not text:
             raise ValueError("Query text must be non-empty.")
-        dense = self.embed_query(text)
-        sparse_entry = self.embed_sparse([text])[0] if self.supports_sparse else None
-        colbert_entry = self.embed_colbert([text])[0] if self.supports_colbert else None
+
+        # BGE-M3 instruction for retrieval queries
+        instruction = "Represent this sentence for searching relevant passages: "
+        query_text = instruction + text
+
+        dense = self.embed_query(
+            text
+        )  # embed_query now adds instruction internally? No, wait.
+        # Recursive call danger if I used self.embed_query(text).
+        # Actually, embed_query above DOES add it. But I need consistent usage.
+        # Let's use embed_documents directly to control it perfectly here.
+
+        dense = self.embed_documents([query_text])[0]
+        sparse_entry = (
+            self.embed_sparse([query_text])[0] if self.supports_sparse else None
+        )
+        colbert_entry = (
+            self.embed_colbert([query_text])[0] if self.supports_colbert else None
+        )
         return QueryEmbeddingBundle(
             dense=list(dense),
             sparse=_to_sparse_embedding(sparse_entry),

@@ -328,6 +328,7 @@ class QueryService:
                 "graph_path": chunk.graph_path,
                 "connection_count": chunk.connection_count,
                 "mention_count": chunk.mention_count,
+                "inherited_score": chunk.inherited_score,
                 "rerank_score": chunk.rerank_score,
                 "rerank_rank": chunk.rerank_rank,
                 "reranker": chunk.reranker,

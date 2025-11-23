@@ -12,6 +12,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
+from qdrant_client.models import FieldCondition, Filter, MatchValue, NamedVector
+
 from src.providers.rerank.base import RerankProvider
 from src.providers.settings import EmbeddingSettings
 from src.shared.config import get_config
@@ -136,7 +138,6 @@ class QdrantVectorStore(VectorStore):
         filters: Optional[Dict] = None,
     ) -> List[Dict[str, Any]]:
         """Search Qdrant for top-k vectors."""
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         # Build filter if provided
         qdrant_filter = None
@@ -165,9 +166,23 @@ class QdrantVectorStore(VectorStore):
             # Search
             query_vector_payload: Any
             if isinstance(vector, dict):
-                query_vector_payload = vector
+                if self.use_named_vectors:
+                    items = list(vector.items())
+                    if len(items) == 1:
+                        name, vec = items[0]
+                        query_vector_payload = NamedVector(name=name, vector=vec)
+                    else:
+                        query_vector_payload = [
+                            NamedVector(name=name, vector=vec) for name, vec in items
+                        ]
+                else:
+                    # fall back to first entry if unnamed
+                    _, vec = next(iter(vector.items()))
+                    query_vector_payload = vec
             elif self.use_named_vectors:
-                query_vector_payload = {self.query_vector_name: vector}
+                query_vector_payload = NamedVector(
+                    name=self.query_vector_name, vector=vector
+                )
             else:
                 query_vector_payload = vector
 

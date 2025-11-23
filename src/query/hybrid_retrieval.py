@@ -10,7 +10,9 @@ Reference: Phase 7E Canonical Spec L1421-1444, L3781-3788
 
 import json
 import logging
+import math
 import os
+import re
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
@@ -121,6 +123,7 @@ class ChunkResult:
     rerank_rank: Optional[int] = None
     rerank_original_rank: Optional[int] = None
     reranker: Optional[str] = None
+    inherited_score: Optional[float] = None  # propagated semantic score from seed
 
     # Retrieval context metadata
     embedding_version: Optional[str] = None
@@ -716,7 +719,7 @@ class QdrantMultiVectorRetriever:
                 pid,
                 payload,
                 fused_score=float(fused_score),
-                vector_score=vec_score_by_id.get((pid, self.primary_vector_name), 0.0),
+                vector_score=float(fused_score),
                 title_vec_score=vec_score_by_id.get((pid, "title"), 0.0),
                 entity_vec_score=vec_score_by_id.get((pid, "entity"), 0.0),
                 lexical_vec_score=(
@@ -725,6 +728,8 @@ class QdrantMultiVectorRetriever:
                     else None
                 ),
             )
+            chunk.fusion_method = "weighted"
+            chunk.vector_score_kind = "weighted_fusion"
             results.append(chunk)
 
         elapsed_ms = (time.time() - start_time) * 1000
@@ -963,9 +968,10 @@ class QdrantMultiVectorRetriever:
         prefetch_entries = self._build_prefetch_entries(bundle, qdrant_filter, top_k)
         prefetch_arg = None
         if prefetch_entries:
+            fusion_mode = getattr(Fusion, "DBSF", Fusion.RRF)
             prefetch_arg = Prefetch(
                 prefetch=prefetch_entries,
-                query=FusionQuery(fusion=Fusion.RRF),
+                query=FusionQuery(fusion=fusion_mode),
                 limit=max(top_k, self.query_api_candidate_limit),
                 filter=qdrant_filter,
             )
@@ -993,7 +999,8 @@ class QdrantMultiVectorRetriever:
                 vector_score=float(point.score or 0.0),
             )
             chunk.vector_rank = idx
-            chunk.vector_score_kind = using_name
+            chunk.vector_score_kind = "similarity"
+            chunk.fusion_method = "weighted"
             results.append(chunk)
 
         elapsed_ms = (time.time() - start_time) * 1000
@@ -1071,10 +1078,25 @@ class QdrantMultiVectorRetriever:
         self, rankings: Dict[str, List[Tuple[str, float]]]
     ) -> Dict[str, float]:
         fused: Dict[str, float] = defaultdict(float)
+        max_by_field: Dict[str, float] = {}
+        for vector_name, items in rankings.items():
+            if not items:
+                continue
+            scores = [score for _, score in items if score is not None]
+            if not scores:
+                continue
+            max_by_field[vector_name] = max(scores) or 0.0
+
         for vector_name, items in rankings.items():
             weight = self.field_weights.get(vector_name, 1.0)
-            for rank, (pid, _score) in enumerate(items, start=1):
-                fused[pid] += weight * 1.0 / (self.rrf_k + rank)
+            if weight <= 0:
+                continue
+            max_score = max_by_field.get(vector_name) or 0.0
+            for pid, raw_score in items:
+                if raw_score is None:
+                    continue
+                normalized = (raw_score / max_score) if max_score > 0 else 0.0
+                fused[pid] += weight * normalized
         return fused
 
 
@@ -1147,6 +1169,7 @@ class HybridRetriever:
         hybrid_config = getattr(config.search, "hybrid", None)
         qdrant_vector_cfg = getattr(config.search.vector, "qdrant", None)
         bm25_config = getattr(config.search, "bm25", None)
+        self.hybrid_mode = getattr(hybrid_config, "mode", "legacy")
         # Timeouts and index migration toggle (set early for downstream use)
         timeout_ms = getattr(hybrid_config, "bm25_timeout_ms", None)
         self.bm25_timeout_seconds = (
@@ -1164,12 +1187,15 @@ class HybridRetriever:
 
         self.neo4j_driver = neo4j_driver
         bm25_index_name = getattr(bm25_config, "index_name", None)
-        self.bm25_retriever = BM25Retriever(
-            neo4j_driver,
-            index_name=bm25_index_name,
-            timeout_seconds=self.bm25_timeout_seconds,
-            allow_index_migration=self.allow_index_migration,
-        )
+        bm25_enabled = getattr(bm25_config, "enabled", False)
+        self.bm25_retriever = None
+        if self.hybrid_mode != "bge_reranker" and bm25_enabled:
+            self.bm25_retriever = BM25Retriever(
+                neo4j_driver,
+                index_name=bm25_index_name,
+                timeout_seconds=self.bm25_timeout_seconds,
+                allow_index_migration=self.allow_index_migration,
+            )
         search_config = config.search
         qdrant_collection = getattr(
             getattr(search_config.vector, "qdrant", None), "collection_name", None
@@ -1178,11 +1204,13 @@ class HybridRetriever:
         namespace_suffix = get_expected_namespace_suffix(
             self.embedding_settings, namespace_mode
         )
-        bm25_namespaced = bool(
-            namespace_suffix
-            and self.bm25_retriever.index_name
-            and str(self.bm25_retriever.index_name).endswith(namespace_suffix)
-        )
+        bm25_namespaced = False
+        if self.bm25_retriever is not None:
+            bm25_namespaced = bool(
+                namespace_suffix
+                and self.bm25_retriever.index_name
+                and str(self.bm25_retriever.index_name).endswith(namespace_suffix)
+            )
         qdrant_namespaced = bool(
             namespace_suffix
             and qdrant_collection
@@ -1193,7 +1221,11 @@ class HybridRetriever:
             "dev",
             "test",
         )
-        if qdrant_namespaced and not bm25_namespaced:
+        if (
+            self.bm25_retriever is not None
+            and qdrant_namespaced
+            and not bm25_namespaced
+        ):
             message = (
                 "BM25 index appears global while Qdrant collection is namespaced. "
                 "Set search.bm25.index_name to the namespaced value or allow override."
@@ -1217,6 +1249,11 @@ class HybridRetriever:
         self.qdrant_collection_name = qdrant_collection
         global HYBRID_INIT_LOGGED
         if not HYBRID_INIT_LOGGED:
+            bm25_name = (
+                getattr(self.bm25_retriever, "index_name", None)
+                if self.bm25_retriever is not None
+                else None
+            )
             logger.info(
                 "HybridRetriever initialized",
                 extra={
@@ -1233,7 +1270,7 @@ class HybridRetriever:
                         self.embedding_settings, "version", None
                     ),
                     "embedding_namespace_mode": namespace_mode,
-                    "bm25_index_name": self.bm25_retriever.index_name,
+                    "bm25_index_name": bm25_name,
                     "qdrant_collection_name": qdrant_collection,
                 },
             )
@@ -1368,6 +1405,9 @@ class HybridRetriever:
         self.fusion_method = FusionMethod(getattr(hybrid_config, "method", "rrf"))
         self.rrf_k = getattr(hybrid_config, "rrf_k", 60)
         self.fusion_alpha = getattr(hybrid_config, "fusion_alpha", 0.6)
+        self.graph_propagation_decay = getattr(
+            hybrid_config, "graph_propagation_decay", 0.85
+        )
 
         # Expansion configuration
         expansion_config = getattr(hybrid_config, "expansion", {})
@@ -1568,15 +1608,23 @@ class HybridRetriever:
         # Retrieve more candidates for fusion (3x top_k)
         candidate_k = min(top_k * 3, 100)
 
-        # BM25 search
-        bm25_start = time.time()
-        bm25_results = self.bm25_retriever.search(
-            query, candidate_k, normalized_filters
-        )
-        metrics["bm25_time_ms"] = (time.time() - bm25_start) * 1000
-        metrics["bm25_count"] = len(bm25_results)
+        # Branch: vector-only (bge_reranker) vs legacy (BM25 + fusion)
+        bm25_results: List[ChunkResult] = []
+        vec_results: List[ChunkResult] = []
 
-        # Vector search
+        if self.hybrid_mode != "bge_reranker" and self.bm25_retriever:
+            # BM25 search
+            bm25_start = time.time()
+            bm25_results = self.bm25_retriever.search(
+                query, candidate_k, normalized_filters
+            )
+            metrics["bm25_time_ms"] = (time.time() - bm25_start) * 1000
+            metrics["bm25_count"] = len(bm25_results)
+        else:
+            metrics["bm25_time_ms"] = 0.0
+            metrics["bm25_count"] = 0
+
+        # Vector search (always)
         vec_start = time.time()
         vec_results = self.vector_retriever.search(
             query, candidate_k, normalized_filters
@@ -1595,12 +1643,21 @@ class HybridRetriever:
 
         # Step 2: Fuse rankings
         fusion_start = time.time()
-        if self.fusion_method == FusionMethod.RRF:
-            fused_results = self._rrf_fusion(bm25_results, vec_results)
+        if self.hybrid_mode == "bge_reranker":
+            # Vector-only path: use vector scores directly
+            fused_results = vec_results
+            for r in fused_results:
+                if r.fused_score is None:
+                    r.fused_score = r.vector_score
+                r.fusion_method = "weighted"
+            metrics["fusion_method"] = "vector-only"
         else:
-            fused_results = self._weighted_fusion(bm25_results, vec_results)
+            if self.fusion_method == FusionMethod.RRF:
+                fused_results = self._rrf_fusion(bm25_results, vec_results)
+            else:
+                fused_results = self._weighted_fusion(bm25_results, vec_results)
+            metrics["fusion_method"] = self.fusion_method.value
         metrics["fusion_time_ms"] = (time.time() - fusion_start) * 1000
-        metrics["fusion_method"] = self.fusion_method.value
 
         fused_results = [r for r in fused_results if not r.is_microdoc_stub]
 
@@ -2267,15 +2324,34 @@ class HybridRetriever:
             metrics["reranker_reason"] = "not_available"
             return seeds
 
+        def _clean_text(text: str) -> str:
+            # Remove simple HTML tags and known markup artifacts, collapse whitespace.
+            text = re.sub(r"<[^>]+>", " ", text)
+            text = text.replace("[CODE]", " ").replace("[/CODE]", " ")
+            text = text.replace("</details>", " ").replace("<details>", " ")
+            text = re.sub(
+                r"\b[A-Z]{1,4}\]\s*", " ", text
+            )  # drop stray tokens like 'DE]'
+            text = text.replace("####", " ")
+            text = text.replace("DE]", " ")
+            text = re.sub(r"^[^A-Za-z0-9]+", "", text)
+            text = re.sub(r"\s+", " ", text)
+            return text.strip()
+
         candidates: List[Dict[str, Any]] = []
         for chunk in seeds:
-            text = (chunk.text or "").strip()
+            text_body = (chunk.text or "").strip()
+            heading = (chunk.heading or "").strip()
+            if heading and text_body:
+                text = f"{heading}\n\n{text_body}"
+            else:
+                text = text_body or heading
+
+            text = _clean_text(text)
             if not text:
-                heading = (chunk.heading or "").strip()
                 has_tokens = (chunk.token_count or 0) > 0
                 if not heading or not has_tokens:
                     continue
-                text = heading
 
             candidates.append(
                 {
@@ -2328,6 +2404,20 @@ class HybridRetriever:
             chunk.reranker = payload.get("reranker") or reranker.model_id
             chunk.fusion_method = "rerank"
             reranked_chunks.append(chunk)
+
+        try:
+            sample_logs = reranked_payload[: min(3, len(reranked_payload))]
+            logger.debug(
+                "Reranker payload samples",
+                extra={
+                    "sample_count": len(sample_logs),
+                    "query_snippet": query[:200],
+                    "doc_snippets": [(p.get("text") or "")[:200] for p in sample_logs],
+                    "scores": [p.get("rerank_score") for p in sample_logs],
+                },
+            )
+        except Exception:
+            pass
 
         if not reranked_chunks:
             metrics["reranker_applied"] = False
@@ -2715,9 +2805,24 @@ class HybridRetriever:
                         or source_chunk.bm25_score
                         or 0.0
                     )
+                    if source_chunk.rerank_score is not None:
+                        try:
+                            rerank_sem = 1.0 / (
+                                1.0 + math.exp(-float(source_chunk.rerank_score))
+                            )
+                        except OverflowError:
+                            rerank_sem = 0.0 if source_chunk.rerank_score < 0 else 1.0
+                        source_score = max(source_score, rerank_sem)
+
+                    propagated = source_score * self.graph_propagation_decay
+                    chunk.inherited_score = propagated
                     chunk.fused_score = max(
                         chunk.fused_score or 0.0,
-                        (source_score * 0.5) + (self.graph_weight * chunk.graph_score),
+                        propagated,
+                    )
+                    chunk.vector_score = chunk.fused_score
+                    chunk.vector_score_kind = (
+                        chunk.vector_score_kind or "graph_propagated"
                     )
 
                     existing = best_by_id.get(chunk.chunk_id)
