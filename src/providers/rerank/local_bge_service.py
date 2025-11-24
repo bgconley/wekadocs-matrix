@@ -42,89 +42,98 @@ class BGERerankerServiceProvider(RerankProvider):
         if not candidates:
             raise ValueError("Cannot rerank empty candidate list")
 
-        # Prepare payload for service
-        docs: List[str] = []
+        max_tokens_total = 1024  # approximate max tokens per request (query + doc)
+        max_tokens_per_doc = 800  # keep doc under this to allow query tokens
+
+        def _truncate(text: str) -> str:
+            tokens = text.split()
+            if len(tokens) > max_tokens_per_doc:
+                return " ".join(tokens[:max_tokens_per_doc])
+            return text
+
+        all_results: List[Dict[str, Any]] = []
         for i, cand in enumerate(candidates):
             if "text" not in cand:
                 raise ValueError(f"Candidate {i} missing required 'text' field")
-            docs.append(cand["text"])
+            text = _truncate(cand["text"])
+            tcount = max(1, len(text.split()))
+            qcount = max(1, len(query.split()))
+            if qcount + tcount > max_tokens_total:
+                # Skip if even truncated doc exceeds budget with query
+                continue
 
-        payload: Dict[str, Any] = {
-            "query": query,
-            "documents": docs,
-            "model": self._model_id,
-        }
-
-        response = self._client.post("/v1/rerank", json=payload)
-        if response.status_code != 200:
-            try:
-                body = response.text
-            except Exception:
-                body = "<unavailable>"
-            raise RuntimeError(f"Reranker service HTTP {response.status_code}: {body}")
-
-        data = response.json()
-        results = data.get("results", [])
-        log_docs = [d[:200] for d in docs[:2]]
-        logger.debug(
-            "Reranker response",
-            extra={
-                "provider": self._provider_name,
+            payload: Dict[str, Any] = {
+                "query": query,
+                "documents": [text],
                 "model": self._model_id,
-                "doc_count": len(docs),
-                "top_k": top_k,
-                "results_count": len(results),
-                "scores": [r.get("score") for r in results[: min(5, len(results))]],
-                "query_snippet": query[:200],
-                "doc_snippets": log_docs,
-            },
-        )
+            }
+            response = self._client.post("/v1/rerank", json=payload)
+            if response.status_code != 200:
+                try:
+                    body = response.text
+                except Exception:
+                    body = "<unavailable>"
+                raise RuntimeError(
+                    f"Reranker service HTTP {response.status_code}: {body}"
+                )
 
-        # Emit a higher-visibility log so we can inspect payload text and scores during smoke tests.
-        logger.warning(
-            "Reranker payload debug",
-            extra={
-                "provider": self._provider_name,
-                "model": self._model_id,
-                "doc_count": len(docs),
-                "top_k": top_k,
-                "scores": [r.get("score") for r in results[: min(5, len(results))]],
-                "query_snippet": query[:200],
-                "doc_snippets": log_docs,
-            },
-        )
-        # Print a concise payload snapshot to stdout for quick inspection in smoke tests.
-        try:
-            print(
-                "RERANKER_PAYLOAD_DEBUG",
-                {
-                    "query": repr(query[:200]),
-                    "docs": [repr(d) for d in log_docs],
+            data = response.json()
+            results = data.get("results", [])
+            log_docs = [text[:200]]
+            logger.debug(
+                "Reranker response",
+                extra={
+                    "provider": self._provider_name,
+                    "model": self._model_id,
+                    "doc_count": 1,
+                    "top_k": top_k,
+                    "results_count": len(results),
                     "scores": [r.get("score") for r in results[: min(5, len(results))]],
+                    "query_snippet": query[:200],
+                    "doc_snippets": log_docs,
                 },
             )
-        except Exception:
-            pass
+            logger.warning(
+                "Reranker payload debug",
+                extra={
+                    "provider": self._provider_name,
+                    "model": self._model_id,
+                    "doc_count": 1,
+                    "top_k": top_k,
+                    "scores": [r.get("score") for r in results[: min(5, len(results))]],
+                    "query_snippet": query[:200],
+                    "doc_snippets": log_docs,
+                },
+            )
+            try:
+                print(
+                    "RERANKER_PAYLOAD_DEBUG",
+                    {
+                        "query": repr(query[:200]),
+                        "docs": [repr(d) for d in log_docs],
+                        "scores": [
+                            r.get("score") for r in results[: min(5, len(results))]
+                        ],
+                    },
+                )
+            except Exception:
+                pass
 
-        # Map scores back to candidates, preserving original order
-        reranked: List[Dict[str, Any]] = []
-        for idx, entry in enumerate(results):
-            score = entry.get("score")
-            # Preserve original candidate info
-            original = candidates[idx] if idx < len(candidates) else {}
-            reranked.append(
+            if not results:
+                continue
+            score = results[0].get("score")
+            all_results.append(
                 {
-                    **original,
+                    **cand,
                     "rerank_score": score,
-                    "original_rank": idx,
+                    "original_rank": i,
                     "reranker": self._provider_name,
                 }
             )
 
-        # Sort by rerank_score desc and truncate to top_k
-        reranked = sorted(
-            reranked,
+        all_results = sorted(
+            all_results,
             key=lambda c: (c.get("rerank_score") or float("-inf")),
             reverse=True,
         )
-        return reranked[:top_k]
+        return all_results[:top_k]

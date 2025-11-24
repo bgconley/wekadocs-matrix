@@ -97,15 +97,15 @@ search:
 
     # BM25/keyword retrieval settings
     bm25:
-      enabled: false  # Disabled in bge_reranker mode (still available for legacy)
+      enabled: true  # re-enable lexical recall
       top_k: 50  # Retrieve more candidates for fusion
 
     # Bounded adjacency expansion (Phase 7E)
     expansion:
-      enabled: false  # Disable neighbor expansion (reverted to pre-reranker default)
+      enabled: true  # Enable bounded neighbor expansion
       max_neighbors: 1
-      query_min_tokens: 12
-      score_delta_max: 0.02
+      query_min_tokens: 8
+      score_delta_max: 0.05
 
   # Graph search settings
   graph:

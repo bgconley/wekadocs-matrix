@@ -2371,17 +2371,56 @@ class HybridRetriever:
             top_n = len(candidates)
         top_k = min(top_n, len(candidates))
 
+        # Batch candidates to respect reranker service limits
+        service_max_batch = 32
+        service_max_batch_tokens = 1024  # user-requested cap
+
+        def _approx_tokens(text: str) -> int:
+            # Simple word-count approximation
+            return max(1, len(text.split()))
+
+        batches: List[List[Dict[str, Any]]] = []
+        current_batch: List[Dict[str, Any]] = []
+        current_tokens = 0
+
+        for idx, cand in enumerate(candidates):
+            tcount = _approx_tokens(cand.get("text", ""))
+            if current_batch and (
+                len(current_batch) + 1 > service_max_batch
+                or current_tokens + tcount > service_max_batch_tokens
+            ):
+                batches.append(current_batch)
+                current_batch = []
+                current_tokens = 0
+            cand["orig_index"] = idx
+            current_batch.append(cand)
+            current_tokens += tcount
+
+        if current_batch:
+            batches.append(current_batch)
+
         start_time = time.time()
+        reranked_payload: List[Dict[str, Any]] = []
         try:
-            reranked_payload = reranker.rerank(
-                query=query, candidates=candidates, top_k=top_k
-            )
+            for batch in batches:
+                batch_top_k = min(top_k, len(batch))
+                reranked_batch = reranker.rerank(
+                    query=query, candidates=batch, top_k=batch_top_k
+                )
+                reranked_payload.extend(reranked_batch)
             latency_ms = (time.time() - start_time) * 1000
         except Exception as exc:  # pragma: no cover - provider failure logging
             logger.warning("Reranker call failed; returning fused ordering: %s", exc)
             metrics["reranker_applied"] = False
             metrics["reranker_reason"] = "provider_error"
             return seeds
+
+        reranked_payload = sorted(
+            reranked_payload,
+            key=lambda c: (c.get("rerank_score") or float("-inf")),
+            reverse=True,
+        )
+        reranked_payload = reranked_payload[:top_k]
 
         reranked_chunks: List[ChunkResult] = []
         for payload in reranked_payload:
