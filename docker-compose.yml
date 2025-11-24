@@ -144,8 +144,9 @@ services:
       - EMBEDDINGS_DIM=
       - EMBEDDINGS_TASK=
       - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
-      - RERANK_PROVIDER=${RERANK_PROVIDER:-jina-ai}
-      - RERANK_MODEL=${RERANK_MODEL:-jina-reranker-v2-base-multilingual}
+      - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
+      - RERANK_MODEL=${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
+      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://host.docker.internal:9001}
       - JINA_API_KEY=${JINA_API_KEY}
       - ANSWER_MODEL=${ANSWER_MODEL:-search-result-formatting}
       # Phase 7C Hotfix: Tokenizer Service Configuration
@@ -230,8 +231,9 @@ services:
       - EMBEDDINGS_DIM=
       - EMBEDDINGS_TASK=
       - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
-      - RERANK_PROVIDER=${RERANK_PROVIDER:-jina-ai}
-      - RERANK_MODEL=${RERANK_MODEL:-jina-reranker-v2-base-multilingual}
+      - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
+      - RERANK_MODEL=${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
+      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://host.docker.internal:9001}
       - JINA_API_KEY=${JINA_API_KEY}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
@@ -322,8 +324,9 @@ services:
       - EMBEDDINGS_MODEL=
       - EMBEDDINGS_DIM=
       - EMBEDDINGS_TASK=
-      - RERANK_PROVIDER=${RERANK_PROVIDER:-jina-ai}
-      - RERANK_MODEL=${RERANK_MODEL:-jina-reranker-v2-base-multilingual}
+      - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
+      - RERANK_MODEL=${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
+      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://host.docker.internal:9001}
       - JINA_API_KEY=${JINA_API_KEY}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf

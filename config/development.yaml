@@ -79,11 +79,12 @@ search:
     reranker_veto_threshold: 0.2
     graph_propagation_decay: 0.85
 
+    # Vector field weights (dense + sparse) for Qdrant multi-vector fusion
     vector_fields:
-      content: 1.0
-      title: 0.35
-      entity: 0.2
-      lexical: 0.25
+      content: 0.5
+      title: 0.1
+      entity: 0.1
+      text-sparse: 0.3
 
     reranker:
       enabled: true
@@ -99,6 +100,7 @@ search:
     bm25:
       enabled: true  # re-enable lexical recall
       top_k: 50  # Retrieve more candidates for fusion
+      weight: 0.15  # Lower weight while sparse is primary lexical channel
 
     # Bounded adjacency expansion (Phase 7E)
     expansion:
@@ -106,8 +108,17 @@ search:
       max_neighbors: 1
       query_min_tokens: 8
       score_delta_max: 0.05
+      sparse_score_threshold: 0.15  # Gating threshold for sparse lexical scores on expanded neighbors
+      rescoring:
+        enabled: true
+        mode: "weighted"
+        normalize_method: "min_max"  # min_max | sigmoid
+        weights:
+          lexical: 0.4
+          structural: 0.5
+          proximity: 0.1
 
-  # Graph search settings
+# Graph search settings
   graph:
     max_depth: 3
     max_related_per_seed: 20

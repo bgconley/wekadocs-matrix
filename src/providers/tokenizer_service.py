@@ -211,7 +211,16 @@ class JinaSegmenterBackend(TokenizerBackend):
             "JINA_SEGMENTER_BASE_URL", "https://api.jina.ai/v1/segment"
         )
         self.api_key = os.getenv("JINA_API_KEY")
-        self.tokenizer_name = os.getenv("SEGMENTER_TOKENIZER_NAME", "xlm-roberta-base")
+
+        # Determine tokenizer name from profile/env (no remapping here)
+        embedding_settings = get_embedding_settings()
+        default_model_id = (
+            embedding_settings.tokenizer_model_id or embedding_settings.model_id
+        )
+        self.tokenizer_name = os.getenv(
+            "SEGMENTER_TOKENIZER_NAME", default_model_id or "xlm-roberta-base"
+        )
+
         timeout_ms = int(os.getenv("SEGMENTER_TIMEOUT_MS", "5000"))
 
         headers = {"Content-Type": "application/json"}
@@ -333,15 +342,24 @@ class TokenizerService:
             ValueError: If backend is invalid
             RuntimeError: If backend initialization fails
         """
+        embedding_settings = get_embedding_settings()
+        embedding_profile = (getattr(embedding_settings, "profile", "") or "").lower()
+
         backend_name = os.getenv("TOKENIZER_BACKEND")
         backend_source = "env" if backend_name else None
+
         if not backend_name:
-            embedding_settings = get_embedding_settings()
-            backend_name = embedding_settings.tokenizer_backend
+            # Profile-driven routing
+            if embedding_profile in {"bge_m3", "bge-m3", "bge-m3-unpad"}:
+                backend_name = "hf"
+            elif "jina" in embedding_profile:
+                backend_name = "segmenter"
+            else:
+                backend_name = embedding_settings.tokenizer_backend
             backend_source = "profile"
+
         if not backend_name:
             backend_source = "config"
-            backend_name = None
             try:
                 config = get_config()
                 tokenizer_config = getattr(config, "tokenizer", None)
@@ -349,16 +367,22 @@ class TokenizerService:
                     backend_name = getattr(tokenizer_config, "backend", None)
             except Exception:
                 backend_name = None
+
         if not backend_name:
             backend_source = "default"
             backend_name = "hf"
+
         backend_name = backend_name.lower()
 
-        # Fallback allowance: default to disallow segmenter fallback for BGE-M3 unless explicitly enabled
-        embedding_profile = getattr(get_embedding_settings(), "profile", "") or ""
+        # Fallback allowance: disallow segmenter fallback for BGE profiles unless explicitly enabled
         allow_segmenter_fallback = (
             os.getenv("TOKENIZER_ALLOW_SEGMENTER_FALLBACK", "").lower() == "true"
-        ) or embedding_profile.lower() not in {"bge_m3", "bge-m3", "bge-m3-service"}
+        ) or embedding_profile not in {
+            "bge_m3",
+            "bge-m3",
+            "bge-m3-service",
+            "bge-m3-unpad",
+        }
 
         if backend_name == "hf":
             try:

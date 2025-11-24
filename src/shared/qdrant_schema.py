@@ -81,6 +81,8 @@ def build_qdrant_schema(
 
     payload_indexes: List[Tuple[str, PayloadSchemaType]] = [
         ("id", PayloadSchemaType.KEYWORD),
+        ("node_id", PayloadSchemaType.KEYWORD),
+        ("kg_id", PayloadSchemaType.KEYWORD),
         ("document_id", PayloadSchemaType.KEYWORD),
         ("doc_id", PayloadSchemaType.KEYWORD),
         ("parent_section_id", PayloadSchemaType.KEYWORD),

@@ -8,6 +8,7 @@ for the BAAI/bge-reranker-v2-m3 model (or compatible).
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, List
 
 import httpx
@@ -37,6 +38,14 @@ class BGERerankerServiceProvider(RerankProvider):
     @property
     def provider_name(self) -> str:
         return self._provider_name
+
+    def health_check(self) -> bool:
+        try:
+            resp = self._client.get("/health")
+            # Some deployments may not expose /health; treat any response as available.
+            return resp.status_code >= 200 and resp.status_code < 500
+        except Exception:
+            return True
 
     def rerank(self, query: str, candidates: List[Dict], top_k: int = 10) -> List[Dict]:
         if not candidates:
@@ -93,31 +102,35 @@ class BGERerankerServiceProvider(RerankProvider):
                     "doc_snippets": log_docs,
                 },
             )
-            logger.warning(
-                "Reranker payload debug",
-                extra={
-                    "provider": self._provider_name,
-                    "model": self._model_id,
-                    "doc_count": 1,
-                    "top_k": top_k,
-                    "scores": [r.get("score") for r in results[: min(5, len(results))]],
-                    "query_snippet": query[:200],
-                    "doc_snippets": log_docs,
-                },
-            )
-            try:
-                print(
-                    "RERANKER_PAYLOAD_DEBUG",
-                    {
-                        "query": repr(query[:200]),
-                        "docs": [repr(d) for d in log_docs],
+            # Optional noisy payload debug (off by default)
+            if os.getenv("RERANKER_PAYLOAD_DEBUG", "").lower() in {"1", "true", "yes"}:
+                logger.warning(
+                    "Reranker payload debug",
+                    extra={
+                        "provider": self._provider_name,
+                        "model": self._model_id,
+                        "doc_count": 1,
+                        "top_k": top_k,
                         "scores": [
                             r.get("score") for r in results[: min(5, len(results))]
                         ],
+                        "query_snippet": query[:200],
+                        "doc_snippets": log_docs,
                     },
                 )
-            except Exception:
-                pass
+                try:
+                    print(
+                        "RERANKER_PAYLOAD_DEBUG",
+                        {
+                            "query": repr(query[:200]),
+                            "docs": [repr(d) for d in log_docs],
+                            "scores": [
+                                r.get("score") for r in results[: min(5, len(results))]
+                            ],
+                        },
+                    )
+                except Exception:
+                    pass
 
             if not results:
                 continue

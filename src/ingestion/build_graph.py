@@ -1944,6 +1944,7 @@ class GraphBuilder:
         payload = {
             # Core identifiers
             "node_id": node_id,  # Chunk ID for matching
+            "kg_id": node_id,  # Explicit graph id for cross-store joins
             "node_label": label,
             "document_id": document_id,
             "doc_id": doc_alias,

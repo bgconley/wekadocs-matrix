@@ -1393,6 +1393,7 @@ class HybridRetriever:
         self._reranker_enabled = bool(getattr(self.reranker_config, "enabled", False))
         self.rerank_top_n = int(getattr(self.reranker_config, "top_n", 0) or 0)
         self._reranker: Optional[RerankProvider] = None
+        self._reranker_available: bool = True
         if self._reranker_enabled:
             logger.info("HybridRetriever reranker enabled via configuration")
         self.context_group_cap = getattr(
@@ -1405,6 +1406,18 @@ class HybridRetriever:
         self.fusion_method = FusionMethod(getattr(hybrid_config, "method", "rrf"))
         self.rrf_k = getattr(hybrid_config, "rrf_k", 60)
         self.fusion_alpha = getattr(hybrid_config, "fusion_alpha", 0.6)
+        bm25_cfg = getattr(hybrid_config, "bm25", None)
+        bm25_weight = getattr(bm25_cfg, "weight", None) if bm25_cfg else None
+        vector_weight = getattr(hybrid_config, "vector_weight", None)
+        if bm25_weight is not None and vector_weight is not None:
+            try:
+                total = float(bm25_weight) + float(vector_weight)
+                if total > 0:
+                    self.fusion_alpha = float(vector_weight) / total
+            except Exception:
+                logger.debug(
+                    "Could not derive fusion_alpha from bm25/vector weights; using default"
+                )
         self.graph_propagation_decay = getattr(
             hybrid_config, "graph_propagation_decay", 0.85
         )
@@ -1420,12 +1433,30 @@ class HybridRetriever:
             self.expansion_score_delta_max = getattr(
                 expansion_config, "score_delta_max", 0.02
             )
+            self.expansion_sparse_threshold = float(
+                getattr(expansion_config, "sparse_score_threshold", 0.0) or 0.0
+            )
         else:
             # Default expansion settings if not configured
             self.expansion_enabled = True
             self.expansion_max_neighbors = 1
             self.expansion_query_min_tokens = 12
             self.expansion_score_delta_max = 0.02
+            self.expansion_sparse_threshold = 0.0
+
+        rescoring_cfg = getattr(expansion_config, "rescoring", None)
+        self.expansion_rescoring_enabled = bool(
+            getattr(rescoring_cfg, "enabled", False)
+        )
+        self.expansion_rescoring_mode = getattr(rescoring_cfg, "mode", "threshold_only")
+        self.expansion_rescoring_weights = getattr(
+            rescoring_cfg,
+            "weights",
+            {"lexical": 0.4, "structural": 0.5, "proximity": 0.1},
+        )
+        self.expansion_rescoring_normalize = getattr(
+            rescoring_cfg, "normalize_method", "min_max"
+        )
 
         # Graph enrichment configuration (Phase 2.3 parity)
         graph_config = getattr(search_config, "graph", None)
@@ -2319,7 +2350,7 @@ class HybridRetriever:
             return seeds
 
         reranker = self._get_reranker()
-        if reranker is None:
+        if reranker is None or not self._reranker_available:
             metrics["reranker_applied"] = False
             metrics["reranker_reason"] = "not_available"
             return seeds
@@ -2493,14 +2524,32 @@ class HybridRetriever:
                 provider=cfg_provider,
                 model=cfg_model,
             )
+            healthy = True
+            if hasattr(self._reranker, "health_check"):
+                try:
+                    healthy = bool(self._reranker.health_check())
+                except Exception:
+                    healthy = False
+            if not healthy:
+                logger.warning(
+                    "Reranker failed health check; disabling reranker",
+                    provider=cfg_provider,
+                    model=cfg_model,
+                )
+                self._reranker_available = False
+                self._reranker = None
+                return None
+
             logger.info(
                 "HybridRetriever reranker initialized: provider=%s, model=%s",
                 self._reranker.provider_name,
                 self._reranker.model_id,
             )
+            self._reranker_available = True
         except Exception as exc:  # pragma: no cover - provider init logging
             logger.warning("Unable to initialize reranker provider: %s", exc)
             self._reranker = None
+            self._reranker_available = False
 
         return self._reranker
 
@@ -2704,7 +2753,159 @@ class HybridRetriever:
             logger.error(f"Adjacency expansion failed: {e}")
             # Don't fail the whole search if expansion fails
 
+        if (
+            expanded
+            and self.vector_retriever.supports_sparse
+            and self.expansion_sparse_threshold > 0
+        ):
+            expanded = self._gate_expansion_with_sparse(
+                query, expanded, self.expansion_sparse_threshold
+            )
+
         return expanded
+
+    def _gate_expansion_with_sparse(
+        self,
+        query: str,
+        neighbors: List[ChunkResult],
+        threshold: float,
+    ) -> List[ChunkResult]:
+        """Filter or rescore expanded neighbors using BGE sparse lexical scores in Qdrant."""
+        sparse_vector = self.vector_retriever._build_sparse_query(query)
+        if not sparse_vector:
+            return neighbors
+
+        indices = (
+            sparse_vector.get("indices") if isinstance(sparse_vector, dict) else None
+        )
+        values = (
+            sparse_vector.get("values") if isinstance(sparse_vector, dict) else None
+        )
+        if not indices or not values:
+            return neighbors
+
+        try:
+            score_map = self._rescore_expansion_with_sparse(
+                indices, values, neighbors, threshold
+            )
+            if score_map is None:
+                return neighbors
+
+            if (
+                not self.expansion_rescoring_enabled
+                or self.expansion_rescoring_mode == "threshold_only"
+            ):
+                allowed = {
+                    pid
+                    for pid, s in score_map.items()
+                    if threshold == 0 or s >= threshold
+                }
+                return [n for n in neighbors if str(n.chunk_id) in allowed] or neighbors
+
+            rescored = self._fuse_expansion_scores(neighbors, score_map)
+            return rescored or neighbors
+        except Exception as exc:
+            logger.debug(
+                "Sparse gating for expansion failed; keeping original neighbors",
+                error=str(exc),
+            )
+            return neighbors
+
+    def _normalize_sparse_scores(self, scores: Dict[str, float]) -> Dict[str, float]:
+        if not scores:
+            return {}
+        vals = list(scores.values())
+        min_s, max_s = min(vals), max(vals)
+        percentile_map: Dict[float, float] = {}
+        if self.expansion_rescoring_normalize == "percentile":
+            sorted_vals = sorted(vals)
+            denom = max(len(sorted_vals) - 1, 1)
+            percentile_map = {v: idx / denom for idx, v in enumerate(sorted_vals)}
+
+        def _norm(val: float) -> float:
+            method = self.expansion_rescoring_normalize
+            if method == "sigmoid":
+                return 1.0 / (1.0 + math.exp(-val))
+            if method == "percentile":
+                return percentile_map.get(val, 0.0)
+            if max_s > min_s:
+                return (val - min_s) / (max_s - min_s)
+            return 0.0
+
+        return {pid: _norm(v) for pid, v in scores.items()}
+
+    def _fuse_expansion_scores(
+        self, neighbors: List[ChunkResult], score_map: Dict[str, float]
+    ) -> List[ChunkResult]:
+        w = self.expansion_rescoring_weights or {}
+        w_lex = float(w.get("lexical", 0.4))
+        w_struct = float(w.get("structural", 0.5))
+        w_prox = float(w.get("proximity", 0.1))
+
+        rescored: List[Tuple[float, ChunkResult]] = []
+        for n in neighbors:
+            pid = str(n.chunk_id)
+            lex_norm = score_map.get(pid)
+            if lex_norm is None:
+                continue
+            struct = float(n.graph_score or 0.0)
+            prox = 1.0 / float((n.graph_distance or 0) + 1)
+            final = (w_lex * lex_norm) + (w_struct * struct) + (w_prox * prox)
+            n.lexical_vec_score = lex_norm
+            n.fused_score = final
+            rescored.append((final, n))
+
+        rescored.sort(key=lambda t: t[0], reverse=True)
+        return [n for _, n in rescored]
+
+    def _rescore_expansion_with_sparse(
+        self,
+        indices: List[int],
+        values: List[float],
+        neighbors: List[ChunkResult],
+        threshold: float,
+    ) -> Optional[Dict[str, float]]:
+        named_sparse = NamedSparseVector(
+            name=self.vector_retriever.sparse_query_name,
+            vector=QdrantSparseVector(indices=indices, values=values),
+        )
+        neighbor_ids = [str(n.chunk_id) for n in neighbors if n.chunk_id]
+        if not neighbor_ids:
+            return None
+
+        q_filter = QdrantFilter(
+            must=[
+                FieldCondition(
+                    key="kg_id",
+                    match=MatchAny(any=neighbor_ids),
+                )
+            ],
+        )
+        hits = self.vector_retriever.client.search(
+            collection_name=self.vector_retriever.collection,
+            query_vector=named_sparse,
+            query_filter=q_filter,
+            limit=len(neighbor_ids),
+            with_payload=False,
+            with_vectors=False,
+            score_threshold=threshold or None,
+        )
+        if not hits:
+            return None
+
+        raw_scores = {
+            str(hit.id): float(hit.score) for hit in hits if hit.score is not None
+        }
+        if not raw_scores:
+            return None
+
+        if (
+            not self.expansion_rescoring_enabled
+            or self.expansion_rescoring_mode == "threshold_only"
+        ):
+            return raw_scores
+
+        return self._normalize_sparse_scores(raw_scores)
 
     def _apply_graph_enrichment(
         self,

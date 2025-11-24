@@ -21,3 +21,11 @@
 - query: "How do I export Weka cluster metrics to Prometheus?"
   expected_doc_ids:
     - monitor-the-weka-cluster_the-wekaio-support-cloud_export-cluster-metrics-to-prometheus
+
+- query: "How do I manage audit forwarding using the CLI?"
+  expected_doc_ids:
+    - operation-guide_audit-and-forwarding-management_manage-audit-and-forwarding-using-the-cli
+
+- query: "How do I manage background tasks using the CLI?"
+  expected_doc_ids:
+    - operation-guide_background-tasks_manage-background-tasks-using-the-cli

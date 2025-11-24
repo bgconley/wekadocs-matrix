@@ -92,3 +92,7 @@ class NoopReranker:
         )
 
         return result
+
+    def health_check(self) -> bool:
+        """Always healthy (no external dependency)."""
+        return True

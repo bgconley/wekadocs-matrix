@@ -61,3 +61,10 @@ class RerankProvider(Protocol):
             RuntimeError: If reranking fails
         """
         ...
+
+    def health_check(self) -> bool:
+        """
+        Lightweight readiness probe. Should return True if the provider is reachable.
+        Implementations may choose to always return True when no remote call is needed.
+        """
+        ...

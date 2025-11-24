@@ -173,6 +173,23 @@ class JinaRerankProvider:
             logger.error(f"Failed to rerank with Jina: {e}")
             raise RuntimeError(f"Jina reranking failed: {e}")
 
+    def health_check(self) -> bool:
+        try:
+            resp = self._client.post(
+                self.API_URL,
+                json={
+                    "model": self._model_id,
+                    "query": "healthcheck",
+                    "documents": ["ok"],
+                    "top_n": 1,
+                    "return_documents": False,
+                },
+                timeout=5,
+            )
+            return resp.status_code == 200
+        except Exception:
+            return False
+
     def _call_api(self, query: str, candidates: List[Dict], top_k: int) -> List[Dict]:
         """
         Call Jina rerank API with rate limiting and exponential backoff.
