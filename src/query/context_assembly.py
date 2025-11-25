@@ -136,6 +136,12 @@ class ContextAssembler:
 
         logger.info(f"ContextAssembler initialized: max_tokens={self.max_tokens}")
 
+        try:
+            newline_cost = self.tokenizer.count_tokens("\n")
+        except Exception:
+            newline_cost = 1
+        self._newline_token_cost = newline_cost if newline_cost > 0 else 1
+
     def assemble(
         self, chunks: List[ChunkResult], query: Optional[str] = None
     ) -> AssembledContext:
@@ -207,7 +213,8 @@ class ContextAssembler:
                     if partial_text:
                         context_parts.append(partial_text)
                         included_chunks.extend(partial_chunks)
-                        total_tokens = self.max_tokens
+                        partial_tokens = self.tokenizer.count_tokens(partial_text)
+                        total_tokens += partial_tokens
                         truncated = True
                         break
                 else:
@@ -312,14 +319,30 @@ class ContextAssembler:
 
         parts = []
         first_chunk = chunks[0]
+        parts.extend(
+            self._build_group_prefix_parts(
+                first_chunk, current_document, current_parent
+            )
+        )
 
-        # Add document separator if switching documents
+        for idx, chunk in enumerate(chunks):
+            parts.extend(
+                self._build_chunk_parts(chunk, is_last=(idx == len(chunks) - 1))
+            )
+
+        return "\n".join(parts)
+
+    def _build_group_prefix_parts(
+        self,
+        first_chunk: ChunkResult,
+        current_document: Optional[str],
+        current_parent: Optional[str],
+    ) -> List[str]:
+        parts: List[str] = []
         if current_document and first_chunk.document_id != current_document:
             parts.append("\n---\n")
 
         is_microdoc_extra = getattr(first_chunk, "is_microdoc_extra", False)
-
-        # Add section heading if available and different from current
         if first_chunk.heading and first_chunk.parent_section_id != current_parent:
             if is_microdoc_extra:
                 display_heading = first_chunk.heading or "Related Document"
@@ -334,25 +357,21 @@ class ContextAssembler:
                 else:
                     parts.append(f"\n{header_line}\n")
             else:
-                heading_prefix = "#" * min(first_chunk.level + 1, 4)  # Cap at ####
+                heading_prefix = "#" * min(first_chunk.level + 1, 4)
                 if current_parent is None:
                     parts.append(f"{heading_prefix} {first_chunk.heading}\n")
                 else:
                     parts.append(f"\n{heading_prefix} {first_chunk.heading}\n")
+        return parts
 
-        # Add chunk texts
-        for chunk in chunks:
-            parts.append(chunk.text)
-
-            # Add expansion indicator if configured
-            if self.include_citations and chunk.is_expanded:
-                parts.append(f" [↪ expanded from {chunk.expansion_source}]")
-
-            # Add chunk boundary indicator for split chunks
-            if chunk.is_split and chunk != chunks[-1]:
-                parts.append(" [...] ")
-
-        return "\n".join(parts)
+    def _build_chunk_parts(self, chunk: ChunkResult, *, is_last: bool) -> List[str]:
+        parts = [chunk.text or ""]
+        if self.include_citations and getattr(chunk, "is_expanded", False):
+            source = getattr(chunk, "expansion_source", "seed")
+            parts.append(f" [↪ expanded from {source}]")
+        if chunk.is_split and not is_last:
+            parts.append(" [...] ")
+        return [part for part in parts if part]
 
     def _fit_partial_group(
         self,
@@ -373,28 +392,76 @@ class ContextAssembler:
         Returns:
             Tuple of (formatted text, included chunks)
         """
-        included = []
-        parts = []
+        if not chunks:
+            return "", []
 
-        # Try to include chunks one by one
-        for i, chunk in enumerate(chunks):
-            # Format just this chunk
-            chunk_group = chunks[: i + 1]
-            text = self._format_group(chunk_group, current_document, current_parent)
-            tokens = self.tokenizer.count_tokens(text)
+        included: List[ChunkResult] = []
+        rendered_blocks: List[str] = []
+        tokens_used = 0
 
-            if tokens <= budget:
-                # Can fit this chunk
-                included = chunk_group
-                parts = [text]
-            else:
-                # Can't fit any more
+        prefix_parts = self._build_group_prefix_parts(
+            chunks[0], current_document, current_parent
+        )
+        prefix_text = self._join_parts(prefix_parts)
+        if prefix_text:
+            prefix_tokens = self.tokenizer.count_tokens(prefix_text)
+            if prefix_tokens > budget:
+                return "", []
+            tokens_used += prefix_tokens
+            rendered_blocks.append(prefix_text)
+
+        for idx, chunk in enumerate(chunks):
+            chunk_parts = self._build_chunk_parts(
+                chunk, is_last=(idx == len(chunks) - 1)
+            )
+            chunk_text = self._join_parts(chunk_parts)
+            if not chunk_text:
+                continue
+
+            chunk_tokens = self._estimate_chunk_tokens(
+                chunk, chunk_parts, has_existing_blocks=bool(rendered_blocks)
+            )
+            if tokens_used + chunk_tokens > budget:
                 break
 
-        if included:
-            return "\n".join(parts), included
-        else:
+            tokens_used += chunk_tokens
+            rendered_blocks.append(chunk_text)
+            included.append(chunk)
+
+        if not included:
             return "", []
+
+        return "\n".join(rendered_blocks), included
+
+    @staticmethod
+    def _join_parts(parts: List[str]) -> str:
+        cleaned = [part for part in parts if part]
+        return "\n".join(cleaned) if cleaned else ""
+
+    def _estimate_chunk_tokens(
+        self,
+        chunk: ChunkResult,
+        parts: List[str],
+        *,
+        has_existing_blocks: bool,
+    ) -> int:
+        """Estimate tokens for a chunk using cached metadata."""
+        tokens = 0
+        has_segments = has_existing_blocks
+        for idx, part in enumerate(parts):
+            if not part:
+                continue
+            if has_segments:
+                tokens += self._newline_token_cost
+            if idx == 0:
+                chunk_tokens = int(chunk.token_count or 0)
+                if chunk_tokens <= 0:
+                    chunk_tokens = self.tokenizer.count_tokens(part)
+                tokens += chunk_tokens
+            else:
+                tokens += self.tokenizer.count_tokens(part)
+            has_segments = True
+        return tokens
 
     def format_with_citations(self, context: AssembledContext) -> str:
         """

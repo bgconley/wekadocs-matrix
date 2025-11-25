@@ -1,0 +1,31 @@
+- query: "How do I create S3 users and configure authentication in Weka?"
+  expected_doc_ids:
+    - additional-protocols_s3_s3-users-and-authentication
+
+- query: "How do I configure AWS CLI to work with Weka S3 storage?"
+  expected_doc_ids:
+    - additional-protocols_s3_configure-and-use-aws-cli-with-weka-s3-storage
+
+- query: "What are the S3 bucket lifecycle management options?"
+  expected_doc_ids:
+    - additional-protocols_s3_s3-information-lifecycle-management
+
+- query: "How do I manage SMB using the CLI?"
+  expected_doc_ids:
+    - additional-protocols_smb-support_smb-management-using-the-cli
+
+- query: "Where can I find the list of alerts and corrective actions?"
+  expected_doc_ids:
+    - operation-guide_alerts_list-of-alerts-and-corrective-actions
+
+- query: "How do I export Weka cluster metrics to Prometheus?"
+  expected_doc_ids:
+    - monitor-the-weka-cluster_the-wekaio-support-cloud_export-cluster-metrics-to-prometheus
+
+- query: "How do I manage audit forwarding using the CLI?"
+  expected_doc_ids:
+    - operation-guide_audit-and-forwarding-management_manage-audit-and-forwarding-using-the-cli
+
+- query: "How do I manage background tasks using the CLI?"
+  expected_doc_ids:
+    - operation-guide_background-tasks_manage-background-tasks-using-the-cli

@@ -3,6 +3,7 @@ Phase 5, Task 5.1 - Webhook endpoints for external connectors.
 Handles incoming webhooks from GitHub, Notion, Confluence, etc.
 """
 
+import json
 import logging
 from typing import Dict, Optional
 
@@ -47,23 +48,35 @@ async def github_webhook(
                 status_code=404, detail="GitHub connector not configured"
             )
 
-        # Read raw body for signature verification
+        # Read raw body once for signature verification and payload parsing
         body = await request.body()
 
-        # Verify signature
-        if x_hub_signature_256:
-            is_valid = await github_connector.verify_webhook_signature(
-                body, x_hub_signature_256
-            )
-            if not is_valid:
-                logger.warning("Invalid GitHub webhook signature")
-                raise HTTPException(status_code=401, detail="Invalid signature")
+        # Signature is required whenever a webhook secret is configured
+        if github_connector.config.webhook_secret and not x_hub_signature_256:
+            logger.warning("Missing GitHub webhook signature header")
+            raise HTTPException(status_code=401, detail="Missing signature header")
 
-        # Parse JSON payload
-        payload = await request.json()
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except ValueError as exc:
+            logger.warning("Invalid GitHub webhook payload: %s", exc)
+            raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
 
         # Process webhook
-        result = await github_connector.process_webhook(payload, x_hub_signature_256)
+        result = await github_connector.process_webhook(
+            payload, signature=x_hub_signature_256, raw_body=body
+        )
+
+        if result.get("status") == "error":
+            error_code = result.get("error") or "webhook_error"
+            if error_code in {"missing_signature", "invalid_signature"}:
+                raise HTTPException(status_code=401, detail="Invalid signature")
+            if error_code == "raw_body_required":
+                raise HTTPException(
+                    status_code=500,
+                    detail="Webhook handler misconfigured: raw body missing",
+                )
+            raise HTTPException(status_code=500, detail=error_code)
 
         logger.info(
             f"GitHub webhook processed: {result.get('status')}",

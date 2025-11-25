@@ -4,7 +4,7 @@
 
 -- Version 1: Basic section search
 MATCH (s:Section)
-WHERE s.id IN $section_ids
+WHERE $section_ids IS NULL OR size($section_ids) = 0 OR s.id IN $section_ids
 OPTIONAL MATCH (s)-[r:MENTIONS]->(e)
 WHERE r.confidence >= 0.5
 RETURN s, collect(DISTINCT {entity: e, confidence: r.confidence}) AS entities
@@ -13,7 +13,7 @@ LIMIT $limit;
 
 -- Version 2: Search with document context
 MATCH (d:Document)-[:HAS_SECTION]->(s:Section)
-WHERE s.id IN $section_ids
+WHERE $section_ids IS NULL OR size($section_ids) = 0 OR s.id IN $section_ids
 OPTIONAL MATCH (s)-[r:MENTIONS]->(e)
 WHERE r.confidence >= 0.5
 RETURN d, s, collect(DISTINCT {
@@ -26,7 +26,7 @@ LIMIT $limit;
 
 -- Version 3: Search with controlled expansion
 MATCH (s:Section)
-WHERE s.id IN $section_ids
+WHERE $section_ids IS NULL OR size($section_ids) = 0 OR s.id IN $section_ids
 OPTIONAL MATCH path=(s)-[:MENTIONS|:CONTAINS_STEP|:HAS_PARAMETER*1..$max_hops]->(n)
 WHERE ALL(r IN relationships(path) WHERE type(r) IN ['MENTIONS', 'CONTAINS_STEP', 'HAS_PARAMETER', 'REQUIRES', 'AFFECTS'])
 WITH s, n, min(length(path)) AS dist

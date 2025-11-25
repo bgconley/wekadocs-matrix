@@ -3,6 +3,7 @@ Redis-based ingestion queue for connector events.
 Supports priority queuing, backpressure monitoring, and graceful degradation.
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -55,7 +56,7 @@ class IngestionQueue:
         """
         try:
             # Check queue size
-            current_size = self.redis.llen(self.queue_name)
+            current_size = await asyncio.to_thread(self.redis.llen, self.queue_name)
             if current_size >= self.max_queue_size:
                 logger.warning(
                     f"Queue full ({current_size}/{self.max_queue_size}), "
@@ -75,9 +76,9 @@ class IngestionQueue:
 
             # Add to queue (priority determines end)
             if priority:
-                self.redis.lpush(self.queue_name, payload_str)
+                await asyncio.to_thread(self.redis.lpush, self.queue_name, payload_str)
             else:
-                self.redis.rpush(self.queue_name, payload_str)
+                await asyncio.to_thread(self.redis.rpush, self.queue_name, payload_str)
 
             logger.debug(f"Queued event: {event.source_uri}")
             return True
@@ -94,7 +95,9 @@ class IngestionQueue:
         """
         try:
             # BLPOP blocks until item available or timeout
-            result = self.redis.blpop(self.queue_name, timeout=timeout_seconds)
+            result = await asyncio.to_thread(
+                self.redis.blpop, self.queue_name, timeout_seconds
+            )
             if not result:
                 return None
 
@@ -115,19 +118,19 @@ class IngestionQueue:
             logger.error(f"Error dequeuing event: {e}", exc_info=True)
             return None
 
-    def get_size(self) -> int:
+    async def get_size(self) -> int:
         """Get current queue size."""
-        return self.redis.llen(self.queue_name)
+        return await asyncio.to_thread(self.redis.llen, self.queue_name)
 
-    def is_backpressure(self) -> bool:
+    async def is_backpressure(self) -> bool:
         """Check if queue is experiencing backpressure."""
-        size = self.get_size()
+        size = await self.get_size()
         usage = size / self.max_queue_size
         return usage >= self.backpressure_threshold
 
-    def get_stats(self) -> dict:
+    async def get_stats(self) -> dict:
         """Get queue statistics."""
-        size = self.get_size()
+        size = await self.get_size()
         usage = size / self.max_queue_size if self.max_queue_size > 0 else 0.0
 
         return {
@@ -138,6 +141,6 @@ class IngestionQueue:
             "backpressure": usage >= self.backpressure_threshold,
         }
 
-    def clear(self) -> int:
+    async def clear(self) -> int:
         """Clear all events from queue (for testing). Returns count cleared."""
-        return self.redis.delete(self.queue_name)
+        return await asyncio.to_thread(self.redis.delete, self.queue_name)

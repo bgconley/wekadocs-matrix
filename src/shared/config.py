@@ -4,16 +4,28 @@
 # Enhanced for Pre-Phase 7: Added validation for embedding configuration
 
 import logging
+import os
+import re
+from enum import Enum
+from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import yaml
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, ValidationError, validator
 from pydantic_settings import BaseSettings
+
+from src.providers.settings import (
+    EmbeddingCapabilities as ProviderEmbeddingCapabilities,
+)
+from src.providers.settings import EmbeddingSettings as ProviderEmbeddingSettings
 
 from .models import WekaBaseModel
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_EMBEDDING_PROFILE = "bge_m3"
+DEFAULT_PROFILE_FILENAME = "embedding_profiles.yaml"
 
 
 class EmbeddingConfig(BaseModel):
@@ -22,16 +34,17 @@ class EmbeddingConfig(BaseModel):
     This is the single source of truth for all embedding parameters.
     """
 
+    profile: Optional[str] = Field(default=None)
     # Model configuration
-    embedding_model: str = Field(
-        alias="model_name"
+    embedding_model: Optional[str] = Field(
+        default=None, alias="model_name"
     )  # Support both names for backwards compat
-    dims: int = Field(..., gt=0)  # Must be positive
+    dims: Optional[int] = Field(default=None)  # Filled via profile/defaults
     similarity: str = Field(default="cosine")
-    version: str = Field(...)  # Required for provenance tracking
+    version: Optional[str] = Field(default=None)  # Filled via profile/defaults
 
     # Provider configuration (Pre-Phase 7)
-    provider: str = Field(default="sentence-transformers")
+    provider: Optional[str] = Field(default=None)
     task: str = Field(default="retrieval.passage")
 
     # Performance settings
@@ -40,6 +53,18 @@ class EmbeddingConfig(BaseModel):
 
     # Legacy fields for compatibility
     multilingual: bool = False
+    tokenizer_backend: str = Field(default="hf")
+    tokenizer_model_id: Optional[str] = None
+    supports_dense: bool = True
+    supports_sparse: bool = False
+    supports_colbert: bool = False
+    supports_long_sequences: bool = True
+    normalized_output: bool = False
+
+    @property
+    def model_name(self) -> Optional[str]:
+        """Backward-compatible accessor for embedding_model."""
+        return self.embedding_model
 
     @validator("similarity")
     def validate_similarity(cls, v):
@@ -52,6 +77,8 @@ class EmbeddingConfig(BaseModel):
     @validator("dims")
     def validate_dims(cls, v):
         """Validate dimensions are reasonable"""
+        if v is None:
+            return v
         if v <= 0:
             raise ValueError(f"dims must be positive, got {v}")
         if v > 4096:  # Sanity check
@@ -61,6 +88,8 @@ class EmbeddingConfig(BaseModel):
     @validator("version")
     def validate_version(cls, v):
         """Ensure version is not empty"""
+        if v is None:
+            return v
         if not v or v.strip() == "":
             raise ValueError("version cannot be empty - required for provenance")
         return v
@@ -69,10 +98,115 @@ class EmbeddingConfig(BaseModel):
         populate_by_name = True  # Allow both embedding_model and model_name
 
 
+class EmbeddingProfileTokenizer(BaseModel):
+    backend: str = Field(default="hf")
+    model_id: str
+
+    @validator("backend")
+    def _backend_not_empty(cls, value: str):
+        if not value or not value.strip():
+            raise ValueError(
+                "tokenizer backend must be provided for embedding profiles"
+            )
+        return value.strip()
+
+    @validator("model_id")
+    def _tokenizer_model_not_empty(cls, value: str):
+        if not value or not value.strip():
+            raise ValueError(
+                "tokenizer model_id must be provided for embedding profiles"
+            )
+        return value.strip()
+
+
+class EmbeddingProfileCapabilities(BaseModel):
+    supports_dense: bool = True
+    supports_sparse: bool = False
+    supports_colbert: bool = False
+    supports_long_sequences: bool = True
+    normalized_output: bool = True
+    multilingual: bool = True
+
+
+class EmbeddingProfileDefinition(BaseModel):
+    description: Optional[str] = None
+    provider: str
+    model_id: str
+    version: Optional[str] = None
+    dims: int
+    similarity: str = "cosine"
+    task: str = "retrieval.passage"
+    tokenizer: EmbeddingProfileTokenizer = Field(
+        default_factory=EmbeddingProfileTokenizer
+    )
+    capabilities: EmbeddingProfileCapabilities = Field(
+        default_factory=EmbeddingProfileCapabilities
+    )
+    requirements: List[str] = Field(default_factory=list)
+
+    @validator("provider")
+    def _provider_required(cls, value: str):
+        if not value or not value.strip():
+            raise ValueError(
+                "provider must be provided for embedding profile definitions"
+            )
+        return value.strip()
+
+    @validator("model_id")
+    def _model_required(cls, value: str):
+        if not value or not value.strip():
+            raise ValueError(
+                "model_id must be provided for embedding profile definitions"
+            )
+        return value.strip()
+
+    @validator("task")
+    def _task_required(cls, value: str):
+        if not value or not value.strip():
+            raise ValueError("task must be provided for embedding profile definitions")
+        return value.strip()
+
+    @validator("dims")
+    def _positive_dims(cls, value: int):
+        if value <= 0:
+            raise ValueError("dims must be greater than zero")
+        return value
+
+    @validator("similarity")
+    def _valid_similarity(cls, value: str):
+        allowed = {"cosine", "dot", "euclidean"}
+        if value not in allowed:
+            raise ValueError(f"similarity must be one of {sorted(allowed)}")
+        return value
+
+    @validator("requirements", each_item=True)
+    def _requirements_not_blank(cls, value: str):
+        if not value or not value.strip():
+            raise ValueError(
+                "requirements entries must be non-empty environment variable names"
+            )
+        return value.strip()
+
+
+class QdrantQueryStrategy(str, Enum):
+    CONTENT_ONLY = "content_only"
+    WEIGHTED = "weighted"
+    MAX_FIELD = "max_field"
+
+
 class QdrantVectorConfig(BaseModel):
     collection_name: str = "weka_sections"
     use_grpc: bool = False
     timeout: int = 30
+    allow_recreate: bool = False
+    query_vector_name: str = "content"
+    query_strategy: QdrantQueryStrategy = QdrantQueryStrategy.CONTENT_ONLY
+    enable_sparse: bool = False
+    enable_colbert: bool = False
+    use_query_api: bool = False
+    query_api_dense_limit: int = 200
+    query_api_sparse_limit: int = 200
+    query_api_candidate_limit: int = 200
 
 
 class Neo4jVectorConfig(BaseModel):
@@ -91,6 +225,7 @@ class BM25Config(BaseModel):
 
     enabled: bool = True
     top_k: int = 50
+    index_name: str = "chunk_text_index_v3"
 
 
 class ExpansionConfig(BaseModel):
@@ -107,15 +242,26 @@ class RerankerConfig(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     top_n: int = 100
+    max_pairs: int = 50
+    max_tokens_per_pair: int = 1024
 
 
 class HybridSearchConfig(BaseModel):
     enabled: bool = True
+    mode: str = (
+        "legacy"  # legacy (BM25+RRF) or bge_reranker (vector-only + cross-encoder)
+    )
     method: str = "rrf"  # Phase 7E: rrf or weighted
     rrf_k: int = 60  # Phase 7E: RRF constant
     fusion_alpha: float = 0.6  # Phase 7E: Vector weight for weighted fusion
     vector_weight: float = 0.7  # Legacy
     graph_weight: float = 0.3  # Legacy
+    # Architecture 2 semantic blend weights (recall vs rerank vs graph)
+    semantic_recall_weight: float = 0.4
+    semantic_rerank_weight: float = 0.4
+    semantic_graph_weight: float = 0.2
+    reranker_veto_threshold: float = 0.2
+    graph_propagation_decay: float = 0.85
     top_k: int = 20
     vector_fields: Dict[str, float] = Field(
         default_factory=lambda: {"content": 1.0, "title": 0.35, "entity": 0.2}
@@ -123,6 +269,8 @@ class HybridSearchConfig(BaseModel):
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
     bm25: BM25Config = Field(default_factory=BM25Config)  # Phase 7E
     expansion: ExpansionConfig = Field(default_factory=ExpansionConfig)  # Phase 7E
+    bm25_timeout_ms: int = 2000
+    expansion_timeout_ms: int = 2000
 
 
 class ResponseConfig(BaseModel):
@@ -143,6 +291,7 @@ class GraphSearchConfig(BaseModel):
 
 class SearchConfig(BaseModel):
     vector: VectorSearchConfig
+    bm25: BM25Config = Field(default_factory=BM25Config)
     hybrid: HybridSearchConfig
     graph: GraphSearchConfig = Field(default_factory=GraphSearchConfig)
     response: ResponseConfig = Field(default_factory=ResponseConfig)  # Phase 7E-2
@@ -216,6 +365,12 @@ class ChunkStructureConfig(BaseModel):
     break_keywords: str = (
         "faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting"
     )
+
+
+class TokenizerConfig(BaseModel):
+    """Tokenizer configuration with backend selection."""
+
+    backend: str = "hf"
 
 
 class ChunkSplitConfig(BaseModel):
@@ -373,12 +528,40 @@ class FeatureFlagsConfig(BaseModel):
     )
 
 
+class GitHubConnectorSettings(BaseModel):
+    enabled: bool = False
+    poll_interval_seconds: int = 300
+    batch_size: int = 50
+    max_retries: int = 3
+    backoff_base_seconds: float = 2.0
+    circuit_breaker_enabled: bool = True
+    circuit_breaker_failure_threshold: int = 5
+    circuit_breaker_timeout_seconds: int = 60
+    owner: Optional[str] = None
+    repo: Optional[str] = None
+    docs_path: str = "docs"
+    webhook_secret: Optional[str] = None
+
+    @validator("owner", "repo")
+    def _strip_owner_repo(cls, value):
+        if value is None:
+            return value
+        stripped = value.strip()
+        return stripped or None
+
+
+class ConnectorsConfig(BaseModel):
+    queue_max_size: int = 10000
+    github: Optional[GitHubConnectorSettings] = None
+
+
 class Config(WekaBaseModel):
     """Main configuration model"""
 
     app: AppConfig
     embedding: EmbeddingConfig
     search: SearchConfig
+    tokenizer: TokenizerConfig = Field(default_factory=TokenizerConfig)
     rate_limit: RateLimitConfig
     auth: AuthConfig
     audit: AuditConfig
@@ -393,6 +576,7 @@ class Config(WekaBaseModel):
         default_factory=FeatureFlagsConfig
     )  # Phase 7C
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)  # Phase 7E-4
+    connectors: Optional[ConnectorsConfig] = None
 
     class Config:
         populate_by_name = True  # Allow both graph_schema and schema
@@ -404,6 +588,22 @@ class Settings(BaseSettings):
     # Environment
     env: str = Field(default="development", alias="ENV")
     config_path: Optional[str] = Field(default=None, alias="CONFIG_PATH")
+
+    # Embedding profiles
+    embedding_profile: Optional[str] = Field(default=None, alias="EMBEDDINGS_PROFILE")
+    embedding_profiles_path: Optional[str] = Field(
+        default=None, alias="EMBEDDING_PROFILES_PATH"
+    )
+    embedding_strict_mode: bool = Field(default=True, alias="EMBEDDING_STRICT_MODE")
+    embedding_namespace_mode: str = Field(
+        default="none", alias="EMBEDDING_NAMESPACE_MODE"
+    )
+    embedding_profile_swappable: bool = Field(
+        default=False, alias="EMBEDDING_PROFILE_SWAPPABLE"
+    )
+    embedding_profile_experiment: Optional[str] = Field(
+        default=None, alias="EMBEDDING_PROFILE_EXPERIMENT"
+    )
 
     # Neo4j
     neo4j_uri: str = Field(default="bolt://localhost:7687", alias="NEO4J_URI")
@@ -443,6 +643,231 @@ class Settings(BaseSettings):
         extra = "ignore"  # Ignore extra environment variables
 
 
+def _resolve_profiles_path(config_path: Path, settings: Settings) -> Path:
+    if settings.embedding_profiles_path:
+        return Path(settings.embedding_profiles_path).expanduser().resolve()
+    return (config_path.parent / DEFAULT_PROFILE_FILENAME).resolve()
+
+
+@lru_cache(maxsize=4)
+def _load_embedding_profiles(
+    manifest_path: str,
+) -> Dict[str, EmbeddingProfileDefinition]:
+    path = Path(manifest_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Embedding profile manifest not found: {path}")
+    with path.open("r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh) or {}
+    profiles_data = data.get("profiles", {})
+    profiles: Dict[str, EmbeddingProfileDefinition] = {}
+    for name, payload in profiles_data.items():
+        try:
+            profiles[name] = EmbeddingProfileDefinition(**payload)
+        except (
+            ValidationError
+        ) as exc:  # pragma: no cover - exercised via dedicated tests
+            raise ValueError(
+                f"Embedding profile '{name}' in {path} is invalid: {exc}"
+            ) from exc
+    return profiles
+
+
+def _ensure_embedding_resolved(embedding: EmbeddingConfig) -> None:
+    missing = []
+    if not embedding.embedding_model:
+        missing.append("embedding_model")
+    if not embedding.dims:
+        missing.append("dims")
+    if not embedding.version:
+        missing.append("version")
+    if not embedding.provider:
+        missing.append("provider")
+    if missing:
+        raise ValueError(
+            f"Embedding configuration is incomplete after profile resolution: {missing}"
+        )
+
+
+def apply_embedding_profile(config: Config, settings: Settings, config_path: Path):
+    profiles_path = _resolve_profiles_path(config_path, settings)
+    profiles = _load_embedding_profiles(str(profiles_path))
+
+    configured_profile = config.embedding.profile
+    runtime_profile = settings.embedding_profile
+
+    # Compute the baseline profile from config or manifest defaults
+    if not configured_profile:
+        if DEFAULT_EMBEDDING_PROFILE in profiles:
+            configured_profile = DEFAULT_EMBEDDING_PROFILE
+            logger.info(
+                "No embedding profile specified in config. Defaulting to %s",
+                DEFAULT_EMBEDDING_PROFILE,
+            )
+        elif profiles:
+            configured_profile = next(iter(profiles.keys()))
+            logger.info(
+                "No embedding profile specified in config. Defaulting to first entry: %s",
+                configured_profile,
+            )
+
+    profile_name = runtime_profile or configured_profile
+
+    if profile_name and profile_name not in profiles:
+        raise ValueError(
+            f"Embedding profile '{profile_name}' not defined in {profiles_path}"
+        )
+
+    if not profile_name:
+        logger.warning(
+            "Embedding profile not provided and manifest empty. Proceeding with legacy config values."
+        )
+        _ensure_embedding_resolved(config.embedding)
+        return
+
+    # Phase 6: rollout & safety guard for non-dev/test environments
+    env = (settings.env or "").lower()
+    is_strict_env = env not in ("development", "dev", "test")
+    if (
+        is_strict_env
+        and runtime_profile
+        and configured_profile
+        and runtime_profile != configured_profile
+    ):
+        allowed = False
+
+        if settings.embedding_profile_swappable:
+            allowed = True
+            logger.warning(
+                "Embedding profile override from '%s' to '%s' permitted via "
+                "EMBEDDING_PROFILE_SWAPPABLE in '%s' environment.",
+                configured_profile,
+                runtime_profile,
+                settings.env,
+            )
+        elif (
+            settings.embedding_profile_experiment
+            and settings.embedding_profile_experiment == runtime_profile
+        ):
+            allowed = True
+            logger.warning(
+                "Embedding profile override from '%s' to experimental profile '%s' "
+                "permitted via EMBEDDING_PROFILE_EXPERIMENT in '%s' environment.",
+                configured_profile,
+                runtime_profile,
+                settings.env,
+            )
+
+        if not allowed:
+            raise ValueError(
+                "Refusing to apply embedding profile override from "
+                f"{configured_profile!r} to {runtime_profile!r} in environment "
+                f"{settings.env!r} without EMBEDDING_PROFILE_SWAPPABLE=true or "
+                f"EMBEDDING_PROFILE_EXPERIMENT={runtime_profile!r}."
+            )
+
+    profile = profiles[profile_name]
+    strict_env = env not in ("development", "dev", "test")
+    overrides = {
+        "profile": profile_name,
+        "embedding_model": profile.model_id,
+        "dims": profile.dims,
+        "similarity": profile.similarity,
+        "version": profile.version or profile.model_id,
+        "provider": profile.provider,
+        "task": profile.task,
+        "tokenizer_backend": profile.tokenizer.backend,
+        "tokenizer_model_id": profile.tokenizer.model_id,
+        "supports_dense": profile.capabilities.supports_dense,
+        "supports_sparse": profile.capabilities.supports_sparse,
+        "supports_colbert": profile.capabilities.supports_colbert,
+        "supports_long_sequences": profile.capabilities.supports_long_sequences,
+        "normalized_output": profile.capabilities.normalized_output,
+        "multilingual": profile.capabilities.multilingual,
+    }
+    config.embedding = config.embedding.copy(update=overrides)
+
+    suffix_source = _resolve_namespace_suffix(
+        profile_name, profile, settings.embedding_namespace_mode
+    )
+    qdrant_cfg = getattr(config.search.vector, "qdrant", None)
+    neo4j_cfg = getattr(config.search.vector, "neo4j", None)
+    bm25_cfg = getattr(config.search, "bm25", None)
+    if suffix_source:
+        if qdrant_cfg and hasattr(qdrant_cfg, "collection_name"):
+            qdrant_cfg.collection_name = namespace_identifier(
+                qdrant_cfg.collection_name, suffix_source
+            )
+        if neo4j_cfg and hasattr(neo4j_cfg, "index_name"):
+            neo4j_cfg.index_name = namespace_identifier(
+                neo4j_cfg.index_name, suffix_source
+            )
+        if bm25_cfg and hasattr(bm25_cfg, "index_name"):
+            bm25_cfg.index_name = namespace_identifier(
+                bm25_cfg.index_name, suffix_source
+            )
+
+    if qdrant_cfg:
+        if getattr(qdrant_cfg, "enable_sparse", False) and not getattr(
+            profile.capabilities, "supports_sparse", False
+        ):
+            message = (
+                f"Profile '{profile_name}' does not support sparse embeddings but "
+                "enable_sparse is True."
+            )
+            if strict_env:
+                raise ValueError(message)
+            logger.warning("%s Disabling sparse for this run.", message)
+            qdrant_cfg.enable_sparse = False
+        if getattr(qdrant_cfg, "enable_colbert", False) and not getattr(
+            profile.capabilities, "supports_colbert", False
+        ):
+            message = (
+                f"Profile '{profile_name}' does not support ColBERT but "
+                "enable_colbert is True."
+            )
+            if strict_env:
+                raise ValueError(message)
+            logger.warning("%s Disabling ColBERT for this run.", message)
+            qdrant_cfg.enable_colbert = False
+        if getattr(qdrant_cfg, "enable_colbert", False) and not getattr(
+            qdrant_cfg, "use_query_api", False
+        ):
+            message = (
+                "ColBERT requires search.vector.qdrant.use_query_api=True; it is "
+                "currently False."
+            )
+            if strict_env:
+                raise ValueError(message)
+            logger.warning("%s Auto-enabling Query API for this run.", message)
+            qdrant_cfg.use_query_api = True
+        # Ensure namespaced names reflect profile slug (not version) to stay consistent with runtime validation
+        if suffix_source and hasattr(qdrant_cfg, "collection_name"):
+            qdrant_cfg.collection_name = namespace_identifier(
+                qdrant_cfg.collection_name, suffix_source
+            )
+
+    missing_req = [req for req in profile.requirements if not os.getenv(req)]
+    if missing_req:
+        logger.warning(
+            "Embedding profile '%s' requires environment variables %s which are not set.",
+            profile_name,
+            missing_req,
+        )
+
+    logger.info(
+        "Embedding profile applied",
+        extra={
+            "embedding_profile": profile_name,
+            "embedding_namespace_mode": settings.embedding_namespace_mode,
+            "bm25_index_name": getattr(bm25_cfg, "index_name", None),
+            "qdrant_collection_name": getattr(qdrant_cfg, "collection_name", None),
+            "neo4j_vector_index_name": getattr(neo4j_cfg, "index_name", None),
+        },
+    )
+
+    _ensure_embedding_resolved(config.embedding)
+
+
 def load_config() -> tuple[Config, Settings]:
     """
     Load configuration from YAML file and environment variables.
@@ -476,11 +901,112 @@ def load_config() -> tuple[Config, Settings]:
         config_dict = yaml.safe_load(f)
 
     config = Config(**config_dict)
+    apply_embedding_profile(config, settings, config_path)
 
     # Pre-Phase 7: Perform startup validation
     validate_config_at_startup(config, settings)
 
     return config, settings
+
+
+def _legacy_env_override(
+    env_name: str,
+    current_value,
+    env_parser=lambda v: v,
+    env_overrides: Dict[str, str] | None = None,
+):
+    raw_value = os.getenv(env_name)
+    if raw_value is None or raw_value.strip() == "":
+        return current_value
+    try:
+        parsed_value = env_parser(raw_value)
+    except Exception:
+        logger.warning(
+            "Failed to parse legacy env override %s=%s; keeping value %s",
+            env_name,
+            raw_value,
+            current_value,
+        )
+        return current_value
+    logger.warning(
+        "Legacy env %s overriding embedding profile value %s -> %s",
+        env_name,
+        current_value,
+        parsed_value,
+    )
+    if env_overrides is not None:
+        env_overrides[env_name] = raw_value
+    return parsed_value
+
+
+def get_embedding_settings(
+    config_override: Optional[Config] = None,
+) -> ProviderEmbeddingSettings:
+    """
+    Build EmbeddingSettings from resolved config + legacy env overrides.
+    """
+    config = config_override or get_config()
+    env_overrides: Dict[str, str] = {}
+
+    embedding = config.embedding
+    dims_default = embedding.dims or 0
+
+    provider = _legacy_env_override(
+        "EMBEDDINGS_PROVIDER", embedding.provider, env_overrides=env_overrides
+    )
+    model = _legacy_env_override(
+        "EMBEDDINGS_MODEL",
+        embedding.embedding_model,
+        env_overrides=env_overrides,
+    )
+    dims = _legacy_env_override(
+        "EMBEDDINGS_DIM",
+        dims_default,
+        env_parser=lambda v: int(v),
+        env_overrides=env_overrides,
+    )
+    task = _legacy_env_override(
+        "EMBEDDINGS_TASK", embedding.task, env_overrides=env_overrides
+    )
+
+    service_url = None
+    if provider == "bge-m3-service":
+        service_url = os.getenv("BGE_M3_API_URL")
+        if not service_url:
+            logger.warning(
+                "BGE_M3_API_URL is not set but provider bge-m3-service is active."
+            )
+
+    capabilities = ProviderEmbeddingCapabilities(
+        supports_dense=embedding.supports_dense,
+        supports_sparse=embedding.supports_sparse,
+        supports_colbert=embedding.supports_colbert,
+        supports_long_sequences=embedding.supports_long_sequences,
+        normalized_output=embedding.normalized_output,
+        multilingual=embedding.multilingual,
+    )
+
+    if env_overrides:
+        overrides = ", ".join(f"{k}={v}" for k, v in env_overrides.items())
+        logger.warning(
+            "Legacy embedding env overrides detected (%s). Prefer EMBEDDINGS_PROFILE to keep settings consistent.",
+            overrides,
+        )
+
+    return ProviderEmbeddingSettings(
+        profile=embedding.profile,
+        provider=provider,
+        model_id=model,
+        version=embedding.version or model,
+        dims=dims,
+        similarity=embedding.similarity,
+        task=task,
+        tokenizer_backend=embedding.tokenizer_backend,
+        tokenizer_model_id=embedding.tokenizer_model_id,
+        service_url=service_url,
+        capabilities=capabilities,
+        extra=env_overrides,
+    )
 
 
 def validate_config_at_startup(config: Config, settings: Settings) -> None:
@@ -497,15 +1023,18 @@ def validate_config_at_startup(config: Config, settings: Settings) -> None:
     """
     # Log embedding configuration (Pre-Phase 7 requirement)
     logger.info(
-        f"Embedding configuration loaded: "
-        f"model={config.embedding.embedding_model}, "
-        f"dims={config.embedding.dims}, "
-        f"version={config.embedding.version}, "
-        f"provider={config.embedding.provider}"
+        "Embedding configuration loaded: profile=%s model=%s dims=%s "
+        "version=%s provider=%s tokenizer=%s",
+        config.embedding.profile or "legacy",
+        config.embedding.embedding_model,
+        config.embedding.dims,
+        config.embedding.version,
+        config.embedding.provider,
+        config.embedding.tokenizer_model_id or config.embedding.tokenizer_backend,
     )
 
     # Validate embedding dimensions are positive
-    if config.embedding.dims <= 0:
+    if not config.embedding.dims or config.embedding.dims <= 0:
         raise ValueError(
             f"embedding.dims must be positive, got {config.embedding.dims}"
         )
@@ -513,6 +1042,9 @@ def validate_config_at_startup(config: Config, settings: Settings) -> None:
     # Validate embedding version is set
     if not config.embedding.version:
         raise ValueError("embedding.version is required for provenance tracking")
+
+    if not config.embedding.provider:
+        raise ValueError("embedding.provider must be defined after profile resolution")
 
     # Validate similarity metric
     valid_similarities = {"cosine", "dot", "euclidean"}
@@ -564,3 +1096,76 @@ def init_config() -> tuple[Config, Settings]:
     global _config, _settings
     _config, _settings = load_config()
     return _config, _settings
+
+
+def reload_config() -> tuple[Config, Settings]:
+    """Force reload of config/settings from disk and environment."""
+    global _config, _settings
+    _config, _settings = load_config()
+    return _config, _settings
+
+
+def _slugify_identifier(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+
+
+def get_expected_namespace_suffix(
+    settings: ProviderEmbeddingSettings, mode: str
+) -> str:
+    """
+    Deterministic namespace suffix (single source of truth).
+
+    Priority:
+    1) Explicit mode selection (profile/version/model)
+    2) Fallback: profile, else version, else model_id
+    3) If namespacing is disabled/empty, return ""
+    """
+
+    normalized = (mode or "").lower()
+    if normalized in {"", "none", "disabled"}:
+        return ""
+
+    if normalized == "profile" and getattr(settings, "profile", None):
+        return _slugify_identifier(settings.profile)
+    if normalized == "version" and getattr(settings, "version", None):
+        return _slugify_identifier(settings.version)
+    if normalized == "model" and getattr(settings, "model_id", None):
+        return _slugify_identifier(settings.model_id)
+
+    # Fallback safety: prefer profile, then version, then model_id
+    if getattr(settings, "profile", None):
+        return _slugify_identifier(settings.profile)
+    if getattr(settings, "version", None):
+        return _slugify_identifier(settings.version)
+    if getattr(settings, "model_id", None):
+        return _slugify_identifier(settings.model_id)
+    return ""
+
+
+def namespace_identifier(base: str, suffix: Optional[str]) -> str:
+    """Append a slugified suffix to the base identifier if provided."""
+    if not suffix:
+        return base
+    slug = _slugify_identifier(suffix)
+    if not slug:
+        return base
+    if base.endswith(f"_{slug}"):
+        return base
+    return f"{base}_{slug}"
+
+
+def _resolve_namespace_suffix(
+    profile_name: Optional[str],
+    profile: Optional[EmbeddingProfileDefinition],
+    mode: str,
+) -> Optional[str]:
+    normalized = (mode or "profile").lower()
+    if normalized in {"", "none", "disabled"}:
+        return None
+    if normalized == "profile":
+        return profile_name
+    if normalized == "version" and profile:
+        return profile.version or profile.model_id
+    if normalized == "model" and profile:
+        return profile.model_id
+    return None

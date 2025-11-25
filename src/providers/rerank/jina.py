@@ -1,6 +1,6 @@
 """
 Jina AI rerank provider implementation.
-Phase 7C: Remote API provider for jina-reranker-v2-base-multilingual.
+Phase 7C: Remote API provider for jina-reranker models (v2/v3).
 
 Features:
 - Cross-attention based reranking for high precision
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 class JinaRerankProvider:
     """
-    Jina AI rerank provider using jina-reranker-v2-base-multilingual.
+    Jina AI rerank provider (supports jina-reranker-v2/v3 models).
 
     Applies cross-attention scoring to refine candidate ordering
     after initial ANN retrieval.
@@ -32,7 +32,6 @@ class JinaRerankProvider:
     - Rate limiting: 500 RPM, 1M TPM (Jina API limits - standard tier)
     - Exponential backoff on errors
     - Circuit breaker for resilience
-    - Shared rate limiter across all rerank calls
     """
 
     API_URL = "https://api.jina.ai/v1/rerank"
@@ -43,7 +42,7 @@ class JinaRerankProvider:
 
     def __init__(
         self,
-        model: str = "jina-reranker-v2-base-multilingual",
+        model: str = "jina-reranker-v3",
         api_key: Optional[str] = None,
         timeout: int = 30,
     ):
@@ -170,8 +169,26 @@ class JinaRerankProvider:
             rerank_error_total.labels(
                 model_id=self._model_id, error_type=type(e).__name__
             ).inc()
+            rerank_request_total.labels(model_id=self._model_id, status="error").inc()
             logger.error(f"Failed to rerank with Jina: {e}")
             raise RuntimeError(f"Jina reranking failed: {e}")
+
+    def health_check(self) -> bool:
+        try:
+            resp = self._client.post(
+                self.API_URL,
+                json={
+                    "model": self._model_id,
+                    "query": "healthcheck",
+                    "documents": ["ok"],
+                    "top_n": 1,
+                    "return_documents": False,
+                },
+                timeout=5,
+            )
+            return resp.status_code == 200
+        except Exception:
+            return False
 
     def _call_api(self, query: str, candidates: List[Dict], top_k: int) -> List[Dict]:
         """
@@ -235,8 +252,27 @@ class JinaRerankProvider:
                 # Map back to original candidates with scores
                 reranked = []
                 for result in results:
-                    index = result["index"]
-                    score = result["relevance_score"]
+                    index = result.get("index")
+                    if index is None:
+                        index = result.get("document_index")
+                    try:
+                        index = int(index)
+                    except (TypeError, ValueError):
+                        index = None
+                    if index is None or index >= len(candidates):
+                        logger.warning(
+                            "Jina rerank response missing valid index: %s", result
+                        )
+                        continue
+
+                    score = result.get("relevance_score")
+                    if score is None:
+                        score = result.get("score")
+                    if score is None:
+                        logger.warning(
+                            "Jina rerank response missing score field: %s", result
+                        )
+                        continue
 
                     # Get original candidate
                     original = candidates[index].copy()

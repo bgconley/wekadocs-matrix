@@ -88,6 +88,18 @@ class SessionTracker:
                 "active": record["active"],
             }
 
+    def ensure_session(self, session_id: str, user_id: Optional[str] = None) -> Dict:
+        """
+        Ensure a Session exists; create if missing.
+
+        Returns the session metadata (same shape as create_session).
+        """
+        try:
+            return self.create_session(session_id=session_id, user_id=user_id)
+        except Exception as exc:
+            logger.error("Failed to ensure session", exc_info=exc)
+            raise
+
     def create_query(self, session_id: str, query_text: str, turn: int) -> str:
         """
         Create Query node and link to Session.
@@ -147,115 +159,131 @@ class SessionTracker:
         Returns:
             List of entity IDs that were focused on
         """
-        # Normalize query text for matching
-        query_lower = query_text.lower()
+        query_lower = (query_text or "").strip().lower()
 
-        # Extract entity mentions by matching against graph entity names
-        # Query all entity types and find mentions in query text
-        # Use CALL with UNION ALL and WHERE inside each branch for valid Cypher
-        query = """
-        CALL {
-            MATCH (e:Command)
-            WHERE toLower(e.name) CONTAINS $query_lower
-               OR $query_lower CONTAINS toLower(e.name)
-            RETURN e.id as id, e.name as name, 'Command' as type
-            UNION ALL
-            MATCH (e:Configuration)
-            WHERE toLower(e.name) CONTAINS $query_lower
-               OR $query_lower CONTAINS toLower(e.name)
-            RETURN e.id as id, e.name as name, 'Configuration' as type
-            UNION ALL
-            MATCH (e:Procedure)
-            WHERE toLower(e.title) CONTAINS $query_lower
-               OR $query_lower CONTAINS toLower(e.title)
-            RETURN e.id as id, e.title as name, 'Procedure' as type
-            UNION ALL
-            MATCH (e:Error)
-            WHERE toLower(e.message) CONTAINS $query_lower
-               OR $query_lower CONTAINS toLower(e.message)
-            RETURN e.id as id, e.message as name, 'Error' as type
-            UNION ALL
-            MATCH (e:Concept)
-            WHERE toLower(e.term) CONTAINS $query_lower
-               OR $query_lower CONTAINS toLower(e.term)
-            RETURN e.id as id, e.term as name, 'Concept' as type
-            UNION ALL
-            MATCH (e:Example)
-            WHERE toLower(e.title) CONTAINS $query_lower
-               OR $query_lower CONTAINS toLower(e.title)
-            RETURN e.id as id, e.title as name, 'Example' as type
-            UNION ALL
-            MATCH (e:Parameter)
-            WHERE toLower(e.name) CONTAINS $query_lower
-               OR $query_lower CONTAINS toLower(e.name)
-            RETURN e.id as id, e.name as name, 'Parameter' as type
-            UNION ALL
-            MATCH (e:Component)
-            WHERE toLower(e.name) CONTAINS $query_lower
-               OR $query_lower CONTAINS toLower(e.name)
-            RETURN e.id as id, e.name as name, 'Component' as type
-        }
-        RETURN id, name, type
-        LIMIT 20
+        # Skip trivial inputs to avoid unnecessary scans
+        if len(query_lower) < 3:
+            logger.debug("Query too short for entity extraction; skipping")
+            return []
+
+        allowed_labels = [
+            "Command",
+            "Configuration",
+            "Procedure",
+            "Error",
+            "Concept",
+            "Example",
+            "Parameter",
+            "Component",
+            "Step",
+            "Section",
+            "Document",
+        ]
+
+        fulltext_query = """
+        CALL db.index.fulltext.queryNodes(
+            'entity_names_fulltext',
+            $query_lower + '~'
+        ) YIELD node, score
+        WITH node, score
+        WHERE any(lbl IN labels(node) WHERE lbl IN $allowed_labels)
+        RETURN node.id AS entity_id,
+               head([lbl IN labels(node) WHERE lbl IN $allowed_labels]) AS entity_type,
+               score
+        ORDER BY score DESC, entity_id
+        LIMIT $max_results
         """
 
-        focused_entity_ids = []
+        fallback_query = """
+        MATCH (n)
+        WHERE any(lbl IN labels(n) WHERE lbl IN $allowed_labels)
+        WITH n,
+             toLower(coalesce(n.name, n.title, n.term, n.message, n.heading, '')) AS lname
+        WHERE lname <> '' AND (lname CONTAINS $query_lower OR $query_lower CONTAINS lname)
+        WITH n,
+             CASE
+                WHEN lname = $query_lower THEN 1.0
+                WHEN $query_lower CONTAINS lname THEN 0.9
+                ELSE 0.8
+             END AS score
+        RETURN n.id AS entity_id,
+               head([lbl IN labels(n) WHERE lbl IN $allowed_labels]) AS entity_type,
+               score
+        ORDER BY score DESC, entity_id
+        LIMIT $max_results
+        """
+
+        collect_and_merge = """
+        MATCH (q:Query {query_id: $query_id})
+        WITH q, $matches AS matches
+        UNWIND matches AS m
+        MATCH (e {id: m.entity_id})
+        WHERE m.entity_type IN labels(e)
+        MERGE (q)-[f:FOCUSED_ON]->(e)
+        ON CREATE SET f.created_at = datetime()
+        SET f.score = m.score,
+            f.extraction_method = m.extraction_method,
+            f.updated_at = datetime()
+        RETURN collect(DISTINCT m.entity_id) AS focused_ids
+        """
 
         with self.driver.session() as session:
-            result = session.run(query, query_lower=query_lower)
-            matches = list(result)
+            matches: List[Dict] = []
+
+            # Try fulltext index first; if unavailable or empty, fall back
+            try:
+                result = session.run(
+                    fulltext_query,
+                    query_lower=query_lower,
+                    allowed_labels=allowed_labels,
+                    max_results=50,
+                )
+                for record in result:
+                    matches.append(
+                        {
+                            "entity_id": record["entity_id"],
+                            "entity_type": record["entity_type"],
+                            "score": record["score"],
+                            "extraction_method": "fulltext",
+                        }
+                    )
+            except Exception as exc:
+                logger.debug("Fulltext search unavailable; falling back", exc_info=exc)
 
             if not matches:
-                logger.debug(f"No entity matches found for query: {query_text}")
-                return []
-
-            # Create FOCUSED_ON relationships for matched entities
-            for record in matches:
-                entity_id = record["id"]
-                entity_name = record["name"]
-                entity_type = record["type"]
-
-                # Calculate focus score based on match quality
-                # Exact match = 1.0, partial match = 0.7
-                if query_lower == entity_name.lower():
-                    score = 1.0
-                elif entity_name.lower() in query_lower:
-                    score = 0.9
-                elif query_lower in entity_name.lower():
-                    score = 0.8
-                else:
-                    score = 0.7
-
-                # Create FOCUSED_ON relationship
-                focus_query = """
-                MATCH (q:Query {query_id: $query_id})
-                MATCH (e {id: $entity_id})
-                WHERE $entity_type IN labels(e)
-                MERGE (q)-[f:FOCUSED_ON]->(e)
-                ON CREATE SET
-                    f.score = $score,
-                    f.extraction_method = 'keyword',
-                    f.created_at = datetime()
-                RETURN e.id as entity_id
-                """
-
-                focus_result = session.run(
-                    focus_query,
-                    query_id=query_id,
-                    entity_id=entity_id,
-                    entity_type=entity_type,
-                    score=score,
+                result = session.run(
+                    fallback_query,
+                    query_lower=query_lower,
+                    allowed_labels=allowed_labels,
+                    max_results=50,
                 )
-
-                if focus_result.single():
-                    focused_entity_ids.append(entity_id)
-                    logger.debug(
-                        f"Focused on {entity_type} '{entity_name}' "
-                        f"(score={score:.2f})"
+                for record in result:
+                    matches.append(
+                        {
+                            "entity_id": record["entity_id"],
+                            "entity_type": record["entity_type"],
+                            "score": record["score"],
+                            "extraction_method": "keyword",
+                        }
                     )
 
+            if not matches:
+                logger.debug("No entity matches found for query: %s", query_text)
+                return []
+
+            merge_result = session.run(
+                collect_and_merge,
+                query_id=query_id,
+                matches=matches,
+            )
+            record = merge_result.single()
+            focused_entities = record["focused_ids"] if record else []
+
+        focused_entity_ids = [e for e in focused_entities]
         logger.info(
-            f"Extracted {len(focused_entity_ids)} focused entities for query {query_id}"
+            "Extracted %d focused entities for query %s",
+            len(focused_entity_ids),
+            query_id,
         )
         return focused_entity_ids
 

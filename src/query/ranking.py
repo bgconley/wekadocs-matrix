@@ -22,7 +22,6 @@ from src.shared.observability import get_logger
 from src.shared.observability.metrics import (
     ranking_candidates_total,
     ranking_latency_ms,
-    ranking_missing_vector_score_total,
     ranking_semantic_score_distribution,
     ranking_vector_score_distribution,
 )
@@ -35,6 +34,9 @@ class RankingFeatures:
     """Feature values used for ranking a result."""
 
     semantic_score: float = 0.0
+    recall_score: float = 0.0
+    rerank_score: float = 0.0
+    inherited_score: float = 0.0
     graph_distance_score: float = 0.0
     recency_score: float = 0.0
     entity_priority_score: float = 0.0
@@ -85,6 +87,18 @@ class Ranker:
         # Get hybrid search weights from config
         self.vector_weight = self.config.search.hybrid.vector_weight
         self.graph_weight = self.config.search.hybrid.graph_weight
+        self.semantic_recall_weight = getattr(
+            self.config.search.hybrid, "semantic_recall_weight", 0.4
+        )
+        self.semantic_rerank_weight = getattr(
+            self.config.search.hybrid, "semantic_rerank_weight", 0.4
+        )
+        self.semantic_graph_weight = getattr(
+            self.config.search.hybrid, "semantic_graph_weight", 0.2
+        )
+        self.reranker_veto_threshold = getattr(
+            self.config.search.hybrid, "reranker_veto_threshold", 0.0
+        )
 
         # Feature weights (sum to 1.0)
         self.weights = {
@@ -118,10 +132,30 @@ class Ranker:
 
         start_time = time.time()
 
+        # Pre-compute max vector scores per kind (for relative normalization)
+        max_scores_by_kind: Dict[str, float] = {}
+        max_vector_score: float = 0.0
+        for res in results:
+            kind = (res.metadata.get("vector_score_kind") or "").lower()
+            score = res.metadata.get("vector_score")
+            if score is None:
+                score = res.score
+            if kind and score is not None:
+                prev = max_scores_by_kind.get(kind, 0.0)
+                if score > prev:
+                    max_scores_by_kind[kind] = score
+            if score is not None and score > max_vector_score:
+                max_vector_score = score
+
         # Extract all features
         ranked = []
         for result in results:
-            features = self._extract_features(result, query_context)
+            features = self._extract_features(
+                result,
+                query_context,
+                max_scores_by_kind=max_scores_by_kind,
+                max_vector_score=max_vector_score or 1.0,
+            )
             ranked.append(RankedResult(result=result, features=features))
 
         # Sort by final score (descending)
@@ -142,7 +176,11 @@ class Ranker:
         return ranked
 
     def _extract_features(
-        self, result: SearchResult, context: Optional[Dict[str, Any]] = None
+        self,
+        result: SearchResult,
+        context: Optional[Dict[str, Any]] = None,
+        max_scores_by_kind: Optional[Dict[str, float]] = None,
+        max_vector_score: float = 1.0,
     ) -> RankingFeatures:
         """Extract all ranking features for a result."""
         features = RankingFeatures()
@@ -150,34 +188,65 @@ class Ranker:
         fusion_method = result.metadata.get("fusion_method")
         vector_score = result.metadata.get("vector_score")
         vector_score_kind = result.metadata.get("vector_score_kind")
-        bm25_score = result.metadata.get("bm25_score")
+        rerank_score = result.metadata.get("rerank_score")
+        inherited_score = result.metadata.get("inherited_score")
 
         # Observe raw vector similarity distribution when available
         if vector_score is not None:
             ranking_vector_score_distribution.observe(vector_score)
 
-        if fusion_method == "rrf":
-            # Prefer original vector similarity; fall back to BM25 or fused score
-            fallback = "vector"
-            semantic_raw = vector_score
-            score_kind_for_norm = vector_score_kind or "similarity"
-            if semantic_raw is None:
-                if bm25_score is not None:
-                    semantic_raw = bm25_score
-                    fallback = "bm25"
-                    score_kind_for_norm = "similarity"
-                else:
-                    semantic_raw = result.score
-                    fallback = "fused"
-                    score_kind_for_norm = "similarity"
-            if fallback != "vector":
-                ranking_missing_vector_score_total.labels(fallback=fallback).inc()
-            features.semantic_score = self._normalize_score(
-                semantic_raw or 0.0, score_kind_for_norm
+        recall_raw = (
+            vector_score
+            if vector_score is not None
+            else (result.score if result.score is not None else 0.0)
+        )
+        features.recall_score = float(recall_raw or 0.0)
+
+        score_kind = (
+            vector_score_kind
+            or result.metadata.get("score_kind", "similarity")
+            or "similarity"
+        )
+        if score_kind:
+            recall_norm = self._normalize_score(
+                recall_raw,
+                score_kind,
+                max_scores_by_kind=max_scores_by_kind,
             )
         else:
-            score_kind = result.metadata.get("score_kind", "similarity")
-            features.semantic_score = self._normalize_score(result.score, score_kind)
+            recall_norm = (
+                (recall_raw / max_vector_score) if max_vector_score > 0 else 0.0
+            )
+
+        rerank_prob = 0.0
+        if rerank_score is not None:
+            try:
+                rerank_prob = 1.0 / (1.0 + math.exp(-float(rerank_score)))
+            except OverflowError:
+                rerank_prob = 0.0 if rerank_score < 0 else 1.0
+        elif inherited_score is not None:
+            try:
+                rerank_prob = float(inherited_score)
+            except (TypeError, ValueError):
+                rerank_prob = 0.0
+            rerank_prob = max(0.0, min(1.0, rerank_prob))
+
+        features.rerank_score = rerank_prob
+        features.inherited_score = float(inherited_score or 0.0)
+
+        veto_threshold = self.reranker_veto_threshold or 0.0
+        veto_active = (
+            rerank_score is not None and veto_threshold and rerank_prob < veto_threshold
+        )
+
+        features.semantic_score = (
+            0.0
+            if veto_active
+            else (
+                self.semantic_recall_weight * recall_norm
+                + self.semantic_rerank_weight * rerank_prob
+            )
+        )
 
         ranking_semantic_score_distribution.observe(features.semantic_score)
 
@@ -196,24 +265,33 @@ class Ranker:
         # Pre-Phase 7: Entity focus hook (returns 0.0 until Phase 7)
         entity_focus_bonus = self._entity_focus_bonus(result, context)
 
-        base_score = (
-            self.weights["semantic"] * features.semantic_score
-            + self.weights["graph_distance"] * features.graph_distance_score
-            + self.weights["recency"] * features.recency_score
+        semantic_with_graph = (
+            features.semantic_score
+            + self.semantic_graph_weight * features.graph_distance_score
+        )
+        extras = (
+            self.weights["recency"] * features.recency_score
             + self.weights["entity_priority"] * features.entity_priority_score
             + self.weights["coverage"] * features.coverage_score
             + entity_focus_bonus
         )
 
-        if fusion_method == "rrf":
+        if veto_active:
+            features.final_score = 0.0
+        elif fusion_method == "rrf":
             fused_primary = result.score or 0.0
-            features.final_score = fused_primary + 1e-6 * base_score
+            features.final_score = fused_primary + 1e-6 * (semantic_with_graph + extras)
         else:
-            features.final_score = base_score
+            features.final_score = semantic_with_graph + extras
 
         return features
 
-    def _normalize_score(self, score: float, score_kind: str = "similarity") -> float:
+    def _normalize_score(
+        self,
+        score: float,
+        score_kind: str = "similarity",
+        max_scores_by_kind: Optional[Dict[str, float]] = None,
+    ) -> float:
         """
         Pre-Phase 7: Robust normalization to similarity in [0, 1].
         Handles both similarity and distance metrics.
@@ -256,12 +334,25 @@ class Ranker:
                 return 1.0 / (1.0 + math.exp(-score))
             except OverflowError:
                 return 0.0 if score < 0 else 1.0
+        if kind in {"late-interaction", "colbert"}:
+            # ColBERT late-interaction sums per-token max sims; scores are unbounded and query-length dependent.
+            # Normalize relative to the max score for this kind in the current batch to preserve ordering.
+            safe = max(0.0, score)
+            if max_scores_by_kind:
+                max_kind_score = max_scores_by_kind.get(
+                    "late-interaction"
+                ) or max_scores_by_kind.get("colbert")
+                if max_kind_score and max_kind_score > 0:
+                    return min(1.0, safe / max_kind_score)
+            # Fallback: gentle squash to [0,1)
+            return math.tanh(safe / 10.0)
         if kind == "rrf":
             # RRF scores are small positive values; scale linearly with a soft cap
             return max(0.0, min(1.0, score * 50.0))
 
-        # Default similarity handling: clamp to [0,1]
-        return max(0.0, min(1.0, score))
+        # Default similarity handling: treat as cosine-like [-1,1] -> [0,1]
+        clamped = max(-1.0, min(1.0, score))
+        return (clamped + 1.0) / 2.0
 
     def _distance_score(self, distance: int) -> float:
         """

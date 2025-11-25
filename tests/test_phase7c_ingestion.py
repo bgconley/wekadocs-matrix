@@ -48,7 +48,7 @@ class TestPhase7CIngestion:
         # (production collection weka_sections_v2 is 1024-D, tests use 384-D)
         config.search.vector.qdrant.collection_name = "weka_sections_test_384d"
 
-        return GraphBuilder(neo4j_driver, config, qdrant_client)
+        return GraphBuilder(neo4j_driver, config, qdrant_client, strict_mode=False)
 
     @pytest.fixture
     def sample_document(self):
@@ -91,6 +91,20 @@ class TestPhase7CIngestion:
             },
         ]
 
+    @staticmethod
+    def _resolve_chunk_id(session, original_section_id: str) -> str:
+        """Resolve the chunk ID that contains the provided original section ID."""
+        record = session.run(
+            """
+            MATCH (s:Section)
+            WHERE $original_id IN s.original_section_ids
+            RETURN s.id AS chunk_id
+            """,
+            original_id=original_section_id,
+        ).single()
+        assert record is not None, f"No chunk found for section {original_section_id}"
+        return record["chunk_id"]
+
     def test_sections_dual_labeled(
         self, graph_builder, sample_document, sample_sections, neo4j_driver
     ):
@@ -101,23 +115,22 @@ class TestPhase7CIngestion:
         # Verify dual-labeling
         with neo4j_driver.session() as session:
             for section in sample_sections:
+                chunk_id = self._resolve_chunk_id(session, section["id"])
                 result = session.run(
                     """
                     MATCH (s {id: $section_id})
                     RETURN labels(s) as labels
                     """,
-                    section_id=section["id"],
+                    section_id=chunk_id,
                 )
                 record = result.single()
-                assert record is not None, f"Section {section['id']} not found"
+                assert record is not None, f"Chunk {chunk_id} not found"
 
                 labels = record["labels"]
-                assert (
-                    "Section" in labels
-                ), f"Section {section['id']} missing :Section label"
+                assert "Section" in labels, f"Chunk {chunk_id} missing :Section label"
                 assert (
                     "Chunk" in labels
-                ), f"Section {section['id']} missing :Chunk label (v3 compat)"
+                ), f"Chunk {chunk_id} missing :Chunk label (v3 compat)"
 
     def test_required_embedding_fields_present(
         self, graph_builder, sample_document, sample_sections, neo4j_driver
@@ -131,6 +144,7 @@ class TestPhase7CIngestion:
         # Verify all required embedding fields are present
         with neo4j_driver.session() as session:
             for section in sample_sections:
+                chunk_id = self._resolve_chunk_id(session, section["id"])
                 result = session.run(
                     """
                     MATCH (s:Section {id: $section_id})
@@ -141,10 +155,10 @@ class TestPhase7CIngestion:
                            s.embedding_timestamp as timestamp,
                            s.embedding_task as task
                     """,
-                    section_id=section["id"],
+                    section_id=chunk_id,
                 )
                 record = result.single()
-                assert record is not None, f"Section {section['id']} not found"
+                assert record is not None, f"Chunk {chunk_id} not found"
 
                 # REQUIRED fields (schema v2.1)
                 assert (
@@ -187,14 +201,19 @@ class TestPhase7CIngestion:
 
         # Verify embeddings match configuration
         with neo4j_driver.session() as session:
+            chunk_ids = [
+                self._resolve_chunk_id(session, section["id"])
+                for section in sample_sections
+            ]
             result = session.run(
                 """
                 MATCH (s:Section)
-                WHERE s.id STARTS WITH 'test-section-'
+                WHERE s.id IN $chunk_ids
                 RETURN s.id as id,
                        s.embedding_dimensions as dims,
                        size(s.vector_embedding) as vector_dims
-                """
+                """,
+                chunk_ids=chunk_ids,
             )
 
             for record in result:
@@ -229,21 +248,37 @@ class TestPhase7CIngestion:
 
         # Verify collection has correct dimensions
         collection_info = qdrant_client.get_collection(expected_collection)
-        vector_size = collection_info.config.params.vectors.size
-
-        assert vector_size == config.embedding.dims, (
-            f"Qdrant collection has wrong dimensions: "
-            f"expected {config.embedding.dims}, got {vector_size}"
-        )
+        vectors_cfg = collection_info.config.params.vectors
+        if isinstance(vectors_cfg, dict):
+            sizes = {name: params.size for name, params in vectors_cfg.items()}
+            assert all(
+                size == config.embedding.dims for size in sizes.values()
+            ), f"Qdrant collection has mismatched vector dims: {sizes}"
+        else:
+            assert (
+                vectors_cfg.size == config.embedding.dims
+            ), f"Qdrant collection has wrong dimension: {vectors_cfg.size}"
 
     def test_qdrant_points_have_metadata(
-        self, graph_builder, sample_document, sample_sections, qdrant_client
+        self,
+        graph_builder,
+        sample_document,
+        sample_sections,
+        neo4j_driver,
+        qdrant_client,
     ):
         """Test that Qdrant points include correct embedding metadata."""
         config = get_config()
 
         # Ingest document
         graph_builder.upsert_document(sample_document, sample_sections, {}, [])
+
+        # Resolve chunk IDs for the ingested sections
+        with neo4j_driver.session() as session:
+            expected_node_ids = {
+                self._resolve_chunk_id(session, section["id"])
+                for section in sample_sections
+            }
 
         # Retrieve points from Qdrant
         collection_name = config.search.vector.qdrant.collection_name
@@ -258,12 +293,12 @@ class TestPhase7CIngestion:
 
         # Find our test sections
         test_points = [
-            p
-            for p in points
-            if p.payload.get("node_id", "").startswith("test-section-")
+            p for p in points if p.payload.get("node_id") in expected_node_ids
         ]
 
-        assert len(test_points) >= 2, "Expected at least 2 test sections in Qdrant"
+        assert len(test_points) >= len(
+            expected_node_ids
+        ), "Expected all ingested sections to be present in Qdrant payloads"
 
         for point in test_points:
             payload = point.payload
@@ -286,11 +321,16 @@ class TestPhase7CIngestion:
                 f"{payload['embedding_dimensions']}"
             )
 
-            # Verify vector dimensions
-            assert len(point.vector) == config.embedding.dims, (
-                f"Point {payload['node_id']} has wrong vector dimensions: "
-                f"{len(point.vector)}"
-            )
+            # Verify vector dimensions (handle named vectors)
+            if isinstance(point.vector, dict):
+                assert all(
+                    len(vec) == config.embedding.dims for vec in point.vector.values()
+                ), f"Point {payload['node_id']} has mismatched vector dims"
+            else:
+                assert len(point.vector) == config.embedding.dims, (
+                    f"Point {payload['node_id']} has wrong vector dimensions: "
+                    f"{len(point.vector)}"
+                )
 
     def test_embedding_validation_blocks_missing_vector(
         self, graph_builder, sample_document, neo4j_driver
@@ -323,17 +363,19 @@ class TestPhase7CIngestion:
 
         # Query for sections WITHOUT required embedding fields
         with neo4j_driver.session() as session:
+            chunk_id = self._resolve_chunk_id(session, "test-validation-section")
             result = session.run(
                 """
                 MATCH (s:Section)
-                WHERE s.id = 'test-validation-section'
+                WHERE s.id = $chunk_id
                   AND (s.vector_embedding IS NULL
                    OR s.embedding_version IS NULL
                    OR s.embedding_provider IS NULL
                    OR s.embedding_dimensions IS NULL
                    OR s.embedding_timestamp IS NULL)
                 RETURN count(s) as incomplete_count
-                """
+                """,
+                chunk_id=chunk_id,
             )
 
             incomplete_count = result.single()["incomplete_count"]

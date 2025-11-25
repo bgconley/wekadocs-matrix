@@ -24,6 +24,9 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from src.providers.settings import build_embedding_telemetry
+from src.shared.config import get_config, get_embedding_settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -100,20 +103,47 @@ class HuggingFaceTokenizerBackend(TokenizerBackend):
         try:
             from transformers import AutoTokenizer
 
-            model_id = os.getenv("HF_TOKENIZER_ID", "jinaai/jina-embeddings-v3")
+            embedding_settings = get_embedding_settings()
+            default_model_id = (
+                embedding_settings.tokenizer_model_id or embedding_settings.model_id
+            )
+            model_id = os.getenv(
+                "HF_TOKENIZER_ID", default_model_id or "jinaai/jina-embeddings-v3"
+            )
             cache_dir = os.getenv("HF_CACHE", "/opt/hf-cache")
             offline = os.getenv("TRANSFORMERS_OFFLINE", "true").lower() == "true"
 
+            telemetry = build_embedding_telemetry(embedding_settings)
+            log_extra = {
+                **telemetry,
+                "hf_model_id": model_id,
+                "hf_cache": cache_dir,
+                "hf_offline": offline,
+            }
             logger.info(
-                f"Loading HuggingFace tokenizer: {model_id} "
-                f"(cache={cache_dir}, offline={offline})"
+                "Loading HuggingFace tokenizer with profile-aware settings",
+                extra=log_extra,
             )
 
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                model_id,
-                cache_dir=cache_dir,
-                local_files_only=offline,
-            )
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    model_id,
+                    cache_dir=cache_dir,
+                    local_files_only=offline,
+                )
+            except Exception as first_err:
+                if offline:
+                    logger.warning(
+                        "Tokenizer cache miss in offline mode; retrying with network",
+                        extra=log_extra,
+                    )
+                    self.tokenizer = AutoTokenizer.from_pretrained(
+                        model_id,
+                        cache_dir=cache_dir,
+                        local_files_only=False,
+                    )
+                else:
+                    raise first_err
 
             # Test tokenizer works
             test_tokens = self.tokenizer.encode("test", add_special_tokens=False)
@@ -181,7 +211,16 @@ class JinaSegmenterBackend(TokenizerBackend):
             "JINA_SEGMENTER_BASE_URL", "https://api.jina.ai/v1/segment"
         )
         self.api_key = os.getenv("JINA_API_KEY")
-        self.tokenizer_name = os.getenv("SEGMENTER_TOKENIZER_NAME", "xlm-roberta-base")
+
+        # Determine tokenizer name from profile/env (no remapping here)
+        embedding_settings = get_embedding_settings()
+        default_model_id = (
+            embedding_settings.tokenizer_model_id or embedding_settings.model_id
+        )
+        self.tokenizer_name = os.getenv(
+            "SEGMENTER_TOKENIZER_NAME", default_model_id or "xlm-roberta-base"
+        )
+
         timeout_ms = int(os.getenv("SEGMENTER_TIMEOUT_MS", "5000"))
 
         headers = {"Content-Type": "application/json"}
@@ -303,11 +342,65 @@ class TokenizerService:
             ValueError: If backend is invalid
             RuntimeError: If backend initialization fails
         """
-        backend_name = os.getenv("TOKENIZER_BACKEND", "hf").lower()
+        embedding_settings = get_embedding_settings()
+        embedding_profile = (getattr(embedding_settings, "profile", "") or "").lower()
+
+        backend_name = os.getenv("TOKENIZER_BACKEND")
+        backend_source = "env" if backend_name else None
+
+        if not backend_name:
+            # Profile-driven routing
+            if embedding_profile in {"bge_m3", "bge-m3", "bge-m3-unpad"}:
+                backend_name = "hf"
+            elif "jina" in embedding_profile:
+                backend_name = "segmenter"
+            else:
+                backend_name = embedding_settings.tokenizer_backend
+            backend_source = "profile"
+
+        if not backend_name:
+            backend_source = "config"
+            try:
+                config = get_config()
+                tokenizer_config = getattr(config, "tokenizer", None)
+                if tokenizer_config:
+                    backend_name = getattr(tokenizer_config, "backend", None)
+            except Exception:
+                backend_name = None
+
+        if not backend_name:
+            backend_source = "default"
+            backend_name = "hf"
+
+        backend_name = backend_name.lower()
+
+        # Fallback allowance: disallow segmenter fallback for BGE profiles unless explicitly enabled
+        allow_segmenter_fallback = (
+            os.getenv("TOKENIZER_ALLOW_SEGMENTER_FALLBACK", "").lower() == "true"
+        ) or embedding_profile not in {
+            "bge_m3",
+            "bge-m3",
+            "bge-m3-service",
+            "bge-m3-unpad",
+        }
 
         if backend_name == "hf":
-            self.backend = HuggingFaceTokenizerBackend()
-            self.backend_name = "huggingface"
+            try:
+                self.backend = HuggingFaceTokenizerBackend()
+                self.backend_name = "huggingface"
+            except Exception as exc:
+                if allow_segmenter_fallback:
+                    logger.warning(
+                        "HuggingFace tokenizer initialization failed; falling back to Jina Segmenter",
+                        exc_info=exc,
+                    )
+                    self.backend = JinaSegmenterBackend()
+                    self.backend_name = "jina-segmenter"
+                else:
+                    raise RuntimeError(
+                        "HuggingFace tokenizer initialization failed and segmenter fallback is disabled "
+                        f"for profile '{embedding_profile}'"
+                    ) from exc
         elif backend_name == "segmenter":
             self.backend = JinaSegmenterBackend()
             self.backend_name = "jina-segmenter"
@@ -332,9 +425,9 @@ class TokenizerService:
         )
 
         logger.info(
-            f"TokenizerService initialized: backend={self.backend_name}, "
-            f"max_tokens={self.max_tokens}, target={self.target_tokens}, "
-            f"overlap={self.overlap_tokens}"
+            f"TokenizerService initialized: backend={self.backend_name} "
+            f"(source={backend_source}), max_tokens={self.max_tokens}, "
+            f"target={self.target_tokens}, overlap={self.overlap_tokens}"
         )
 
     def count_tokens(self, text: str) -> int:
@@ -351,6 +444,26 @@ class TokenizerService:
             RuntimeError: If token counting fails
         """
         return self.backend.count_tokens(text)
+
+    @property
+    def supports_decode(self) -> bool:
+        return hasattr(self.backend, "decode") and not isinstance(
+            self.backend, JinaSegmenterBackend
+        )
+
+    def encode(self, text: str) -> List[int]:
+        if not hasattr(self.backend, "encode"):
+            raise RuntimeError(
+                f"Tokenizer backend {self.backend_name} does not support encode()."
+            )
+        return self.backend.encode(text)
+
+    def decode_tokens(self, token_ids: List[int]) -> str:
+        if not self.supports_decode:
+            raise NotImplementedError(
+                f"Tokenizer backend {self.backend_name} does not support decode()."
+            )
+        return self.backend.decode(token_ids)
 
     def needs_splitting(self, text: str) -> bool:
         """
@@ -447,7 +560,7 @@ class TokenizerService:
             )
 
         # Encode entire text to tokens
-        tokens = self.backend.encode(text)
+        tokens = self.encode(text)
         total_tokens = len(tokens)
 
         chunks = []
@@ -462,7 +575,7 @@ class TokenizerService:
             chunk_tokens = tokens[start_idx:end_idx]
 
             # Decode chunk tokens back to text
-            chunk_text = self.backend.decode(chunk_tokens)
+            chunk_text = self.decode_tokens(chunk_tokens)
 
             # Create chunk metadata
             chunk = {

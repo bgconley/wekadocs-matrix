@@ -68,6 +68,37 @@ print(f'Provider: {config.embedding.provider}')
 "
 ```
 
+### Switch Embedding Profile
+
+1. Pick a profile listed in `config/embedding_profiles.yaml` (e.g., `jina_v3`, `bge_m3`, `st_minilm`).
+2. Set the profile and any required env vars:
+
+```bash
+export EMBEDDINGS_PROFILE=jina_v3
+# For BGE-M3 profiles also export:
+export BGE_M3_API_URL=http://127.0.0.1:9000
+# (Client is now vendored in src/clients; no BGE_M3_CLIENT_PATH required.)
+```
+
+3. Run the verification helper to confirm requirements and provider wiring:
+
+```bash
+python scripts/verify_providers.py
+```
+
+4. Re-ingest data (or run targeted ingestion jobs) and rerun your retrieval tests/CI suite so the new profile has fresh vectors before serving queries.
+5. See `docs/guides/embedding-profile-matrix.md` for the full manifest, registry, and verification workflow (Phases 1–3).
+
+### Profile Matrix Integration Test
+
+To run the real-provider smoke test (hits Jina/BGE endpoints), ensure the required env vars are set (`JINA_API_KEY`, `BGE_M3_API_URL`) and run:
+
+```bash
+RUN_PROFILE_MATRIX_INTEGRATION=1 pytest tests/integration/test_profile_matrix_integration.py -k profile
+```
+
+This test calls the live providers to embed a sample query for each profile. If the env vars are missing or the local BGE service is down, the test will skip automatically.
+
 ---
 
 ## Database Operations
@@ -628,6 +659,12 @@ docker-compose down -v && docker-compose up -d
 
 # Check configuration
 python -c "from src.shared.config import get_config; c=get_config(); print(f'Model: {c.embedding.embedding_model}, Dims: {c.embedding.dims}')"
+
+# Relationship-builder logging (optional)
+LOG_RELATIONSHIP_COUNTS=true docker compose up ingestion-worker
+#   When enabled, ingestion logs include both Neo4j mutation counters and optional
+#   verification MATCH counts for CHILD_OF / PARENT_OF / NEXT / SAME_HEADING builders.
+#   Disable (default) for normal operation to avoid extra MATCH queries.
 
 # Count everything
 docker exec -it weka-neo4j cypher-shell -u neo4j -p testpassword123 "MATCH (n) RETURN labels(n)[0] as type, count(*) as count ORDER BY count DESC"

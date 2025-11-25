@@ -6,6 +6,7 @@ Tests connectors, circuit breakers, queue, and webhooks against real/simulated s
 import asyncio
 import hashlib
 import hmac
+import json
 import os
 import time
 from datetime import datetime
@@ -39,10 +40,10 @@ def ingestion_queue(redis_client):
         max_queue_size=100,
     )
     # Clear queue before test
-    queue.clear()
+    asyncio.run(queue.clear())
     yield queue
     # Cleanup after test
-    queue.clear()
+    asyncio.run(queue.clear())
 
 
 # === Circuit Breaker Tests (NO MOCKS) ===
@@ -138,13 +139,13 @@ class TestIngestionQueue:
         # Enqueue
         success = await ingestion_queue.enqueue(event)
         assert success is True
-        assert ingestion_queue.get_size() == 1
+        assert await ingestion_queue.get_size() == 1
 
         # Dequeue
         dequeued = await ingestion_queue.dequeue(timeout_seconds=1)
         assert dequeued is not None
         assert dequeued.source_uri == event.source_uri
-        assert ingestion_queue.get_size() == 0
+        assert await ingestion_queue.get_size() == 0
 
     @pytest.mark.asyncio
     async def test_queue_rejects_when_full(self, ingestion_queue):
@@ -213,9 +214,9 @@ class TestIngestionQueue:
             await ingestion_queue.enqueue(event)
 
         # Should detect backpressure
-        assert ingestion_queue.is_backpressure() is True
+        assert await ingestion_queue.is_backpressure() is True
 
-        stats = ingestion_queue.get_stats()
+        stats = await ingestion_queue.get_stats()
         assert stats["backpressure"] is True
         assert stats["usage_pct"] >= 80.0
 
@@ -287,6 +288,47 @@ class TestGitHubConnector:
         )
         assert result is False
 
+    @pytest.mark.asyncio
+    async def test_webhook_to_event_multiple_commits(
+        self, github_connector_config, ingestion_queue
+    ):
+        """Ensure webhook processing handles multiple commits."""
+        github_connector_config.metadata = {
+            "owner": "test-owner",
+            "repo": "test-repo",
+            "docs_path": "docs",
+        }
+        connector = GitHubConnector(github_connector_config, ingestion_queue, None)
+
+        payload = {
+            "commits": [
+                {
+                    "id": "commit1",
+                    "message": "Add docs",
+                    "timestamp": "2025-10-14T00:00:00Z",
+                    "author": {"username": "alice"},
+                    "added": ["docs/intro.md"],
+                    "modified": [],
+                    "removed": [],
+                },
+                {
+                    "id": "commit2",
+                    "message": "Update + remove docs",
+                    "timestamp": "2025-10-14T00:05:00Z",
+                    "author": {"username": "bob"},
+                    "added": [],
+                    "modified": ["docs/intro.md"],
+                    "removed": ["docs/legacy.md"],
+                },
+            ]
+        }
+
+        events = await connector.webhook_to_event(payload)
+        filenames = sorted([event.metadata["filename"] for event in events])
+        assert filenames == ["docs/intro.md", "docs/intro.md", "docs/legacy.md"]
+        event_types = sorted(set(e.event_type for e in events))
+        assert set(event_types) == {"created", "deleted", "updated"}
+
 
 # === Connector Manager Tests (NO MOCKS) ===
 
@@ -346,7 +388,7 @@ class TestConnectorManager:
     def test_queue_stats(self, redis_client):
         """Test getting queue statistics."""
         manager = ConnectorManager(redis_client, {"queue_max_size": 1000})
-        stats = manager.get_queue_stats()
+        stats = asyncio.run(manager.get_queue_stats())
 
         assert "queue_name" in stats
         assert "size" in stats
@@ -400,12 +442,20 @@ async def test_end_to_end_webhook_processing(redis_client, ingestion_queue):
         ]
     }
 
+    payload_bytes = json.dumps(webhook_payload).encode("utf-8")
+    signature = hmac.new(
+        config.webhook_secret.encode(), payload_bytes, hashlib.sha256
+    ).hexdigest()
+    header = f"sha256={signature}"
+
     # Process webhook
-    result = await connector.process_webhook(webhook_payload, None)
+    result = await connector.process_webhook(
+        webhook_payload, signature=header, raw_body=payload_bytes
+    )
     assert result["status"] == "success"
 
     # Should be queued
-    assert ingestion_queue.get_size() == 1
+    assert await ingestion_queue.get_size() == 1
 
     # Dequeue and verify
     event = await ingestion_queue.dequeue(timeout_seconds=1)

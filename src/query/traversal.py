@@ -71,6 +71,25 @@ class TraversalService:
     MAX_DEPTH = 3
     MAX_NODES = 100
 
+    # Payload safety limits
+    MAX_TEXT_CHARS = 1000  # Truncate long text fields
+    MAX_STRING_LEN = 500  # Truncate long string properties
+    MAX_LIST_LEN = 64  # Drop long numeric arrays (e.g., embeddings)
+
+    # Keys that are known to be very large and should be removed
+    BLOCKLIST_KEYS = {
+        "embedding",
+        "embeddings",
+        "embedding_values",
+        "embedding_vector",
+        "vector",
+        "dense",
+        "dense_vector",
+        "sparse_vector",
+        "sparse_indices",
+        "sparse_values",
+    }
+
     def __init__(self, neo4j_driver):
         """
         Initialize TraversalService.
@@ -79,6 +98,53 @@ class TraversalService:
             neo4j_driver: Neo4j driver instance
         """
         self.driver = neo4j_driver
+
+    def _sanitize_properties(
+        self, props: Dict[str, Any], include_text: bool
+    ) -> Dict[str, Any]:
+        """Sanitize node properties for safe MCP payload sizes."""
+        if not props:
+            return {}
+
+        sanitized: Dict[str, Any] = {}
+        for k, v in props.items():
+            # Always drop explicit blocklisted keys
+            if k in self.BLOCKLIST_KEYS or "embed" in k.lower():
+                continue
+
+            # Handle text field separately
+            if k == "text":
+                if include_text and isinstance(v, str):
+                    if len(v) > self.MAX_TEXT_CHARS:
+                        sanitized[k] = v[: self.MAX_TEXT_CHARS] + "..."
+                    else:
+                        sanitized[k] = v
+                # If include_text is False, skip adding text entirely
+                continue
+
+            # Truncate long strings
+            if isinstance(v, str):
+                if len(v) > self.MAX_STRING_LEN:
+                    sanitized[k] = v[: self.MAX_STRING_LEN] + "..."
+                else:
+                    sanitized[k] = v
+                continue
+
+            # Drop long numeric arrays (typical for embeddings)
+            if isinstance(v, list):
+                # If it's a list of numbers and long, drop it
+                if len(v) > self.MAX_LIST_LEN and all(
+                    isinstance(x, (int, float)) for x in v[:10]
+                ):
+                    continue
+                # Otherwise, keep small lists as-is
+                sanitized[k] = v
+                continue
+
+            # Default: keep small scalars/dicts
+            sanitized[k] = v
+
+        return sanitized
 
     def traverse(
         self,
@@ -145,7 +211,16 @@ class TraversalService:
             MATCH (start {{id: start_id}})
             RETURN start.id AS id,
                    labels(start)[0] AS label,
-                   properties(start) AS props,
+                   {{
+                       title: coalesce(start.title, start.name, start.heading, ''),
+                       heading: start.heading,
+                       name: start.name,
+                       doc_tag: start.doc_tag,
+                       level: start.level,
+                       tokens: start.tokens,
+                       anchor: start.anchor,
+                       text: start.text
+                   }} AS props,
                    0 AS dist,
                    [] AS sample_paths
 
@@ -158,7 +233,16 @@ class TraversalService:
             WHERE dist <= {max_depth}
             RETURN target.id AS id,
                    labels(target)[0] AS label,
-                   properties(target) AS props,
+                   {{
+                       title: coalesce(target.title, target.name, target.heading, ''),
+                       heading: target.heading,
+                       name: target.name,
+                       doc_tag: target.doc_tag,
+                       level: target.level,
+                       tokens: target.tokens,
+                       anchor: target.anchor,
+                       text: target.text
+                   }} AS props,
                    dist,
                    sample_paths
 
@@ -174,10 +258,11 @@ class TraversalService:
                 result = session.run(query, start_ids=start_ids)
 
                 for record in result:
-                    # Get properties and filter text if needed
-                    props = dict(record["props"]) if record["props"] else {}
-                    if not include_text and "text" in props:
-                        props = {k: v for k, v in props.items() if k != "text"}
+                    # Get properties and sanitize
+                    raw_props = dict(record["props"]) if record["props"] else {}
+                    props = self._sanitize_properties(
+                        raw_props, include_text=include_text
+                    )
 
                     # Add node
                     nodes.append(

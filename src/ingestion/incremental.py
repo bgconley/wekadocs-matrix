@@ -9,7 +9,10 @@ from typing import Any, Dict, List, Optional
 
 from neo4j import Driver
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct
+from qdrant_client.http.models import PointStruct
+
+from src.shared.config import get_embedding_settings
+from src.shared.qdrant_schema import build_qdrant_schema
 
 
 @dataclass
@@ -42,12 +45,45 @@ class IncrementalUpdater:
         self.qdrant = qdrant_client
         self.collection = collection_name
         self.version = embedding_version
+        self.embedding_settings = get_embedding_settings(config) if config else None
         if config and hasattr(config, "search") and hasattr(config.search, "vector"):
             if hasattr(config.search.vector, "qdrant"):
                 self.collection = config.search.vector.qdrant.collection_name
             self.version = (
-                config.embedding.version if hasattr(config, "embedding") else "v1"
+                get_embedding_settings(config).version
+                if hasattr(config, "embedding")
+                else "v1"
             )
+        self._schema_plan = None
+        self._dense_vector_names: Optional[List[str]] = None
+        if self.embedding_settings and self.config and hasattr(self.config, "search"):
+            search_cfg = self.config.search
+            vector_cfg = getattr(search_cfg, "vector", None)
+            qdrant_cfg = getattr(vector_cfg, "qdrant", None)
+            enable_sparse = (
+                getattr(qdrant_cfg, "enable_sparse", False) if qdrant_cfg else False
+            )
+            enable_colbert = (
+                getattr(qdrant_cfg, "enable_colbert", False) if qdrant_cfg else False
+            )
+            hybrid_cfg = getattr(search_cfg, "hybrid", None)
+            vector_fields = (
+                getattr(hybrid_cfg, "vector_fields", None) if hybrid_cfg else None
+            )
+            include_entity = False
+            if isinstance(vector_fields, dict):
+                include_entity = "entity" in vector_fields
+            self._schema_plan = build_qdrant_schema(
+                self.embedding_settings,
+                include_entity=include_entity,
+                enable_sparse=enable_sparse,
+                enable_colbert=enable_colbert,
+            )
+            self._dense_vector_names = [
+                name
+                for name in self._schema_plan.vectors_config.keys()
+                if name != "late-interaction"
+            ]
 
     def _existing_sections(self, document_id: str) -> Dict[str, Dict]:
         """Get existing sections from the database (synchronous)."""
@@ -112,14 +148,8 @@ class IncrementalUpdater:
         the configured Qdrant collection. Defaults to ["content"] so incremental
         updates remain backwards compatible in minimal environments.
         """
-        if (
-            self.config
-            and hasattr(self.config, "search")
-            and hasattr(self.config.search, "hybrid")
-        ):
-            fields = getattr(self.config.search.hybrid, "vector_fields", None)
-            if isinstance(fields, dict) and fields:
-                return list(fields.keys())
+        if self._dense_vector_names:
+            return self._dense_vector_names
         return ["content"]
 
     def _build_named_vectors(
@@ -134,6 +164,14 @@ class IncrementalUpdater:
         names = field_names or self._vector_field_names()
         for name in names:
             vectors[name] = list(base_vector)
+        return vectors
+
+    def _build_placeholder_vectors(
+        self, base_vector: List[float], field_names: Optional[List[str]] = None
+    ) -> Dict[str, object]:
+        vectors: Dict[str, object] = self._build_named_vectors(base_vector, field_names)
+        if self._schema_plan and "late-interaction" in self._schema_plan.vectors_config:
+            vectors["late-interaction"] = [list(base_vector)]
         return vectors
 
     def apply_incremental_update(
@@ -219,11 +257,10 @@ class IncrementalUpdater:
                 points = []
                 # Pre-Phase 7: Use config-driven dimensions for placeholders
                 embedding_dims = 384  # Default fallback
-                if self.config and hasattr(self.config, "embedding"):
-                    embedding_dims = self.config.embedding.dims
+                if self.config:
+                    embedding_dims = get_embedding_settings(self.config).dims
                 zero_template = [0.0] * embedding_dims
                 vector_field_names = self._vector_field_names()
-                expected_dims = {name: embedding_dims for name in vector_field_names}
 
                 for sec in to_upsert:
                     sec_doc_tag = sec.get("doc_tag", doc_tag_value)
@@ -233,7 +270,7 @@ class IncrementalUpdater:
                     if sec_snapshot_scope:
                         sec["snapshot_scope"] = sec_snapshot_scope
                     point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, sec["id"]))
-                    vectors = self._build_named_vectors(
+                    vectors = self._build_placeholder_vectors(
                         zero_template, vector_field_names
                     )
                     points.append(
@@ -253,6 +290,14 @@ class IncrementalUpdater:
                         )
                     )
                 if points:
+                    expected_dims_map: Dict[str, int] = {}
+                    first_vector = points[0].vector
+                    if isinstance(first_vector, dict):
+                        for name, vec in first_vector.items():
+                            dim = self._vector_expected_dim(vec)
+                            if dim:
+                                expected_dims_map[name] = dim
+                    expected_dims = expected_dims_map or embedding_dims
                     # Pre-Phase 7: Use validated upsert with config-driven dimensions
                     self.qdrant.upsert_validated(
                         collection_name=self.collection,
@@ -266,3 +311,23 @@ class IncrementalUpdater:
             "reembedding_required": upserted_count,
             "total_changes": len(to_upsert) + deleted_count,
         }
+
+    @staticmethod
+    def _vector_expected_dim(vector: object) -> Optional[int]:
+        if vector is None:
+            return None
+        if hasattr(vector, "indices") and hasattr(vector, "values"):
+            return None
+        if isinstance(vector, list):
+            if not vector:
+                return None
+            first = vector[0]
+            if isinstance(first, list):
+                return len(first)
+            return len(vector)
+        if hasattr(vector, "__len__") and not isinstance(vector, (str, bytes)):
+            try:
+                return len(vector)
+            except TypeError:
+                return None
+        return None

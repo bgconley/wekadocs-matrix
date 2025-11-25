@@ -6,12 +6,15 @@ See: /docs/pseudocode-reference.md Phase 2, Task 2.1
 """
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from src.shared.config import get_config
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -30,19 +33,23 @@ class TemplateLibrary:
 
     def __init__(self):
         self.templates: Dict[str, Dict[str, str]] = {}
+        self.default_versions: Dict[str, str] = {}
         self._load_templates()
 
     def _load_templates(self):
         """Load all .cypher template files from templates directory."""
         templates_dir = Path(__file__).parent / "templates"
 
-        for template_file in templates_dir.glob("*.cypher"):
+        for template_file in templates_dir.rglob("*.cypher"):
             intent = template_file.stem  # e.g., "search", "traverse", "troubleshoot"
             content = template_file.read_text()
 
-            # Parse multiple versions from the file
             versions = self._parse_template_versions(content)
+            if not versions:
+                continue
+
             self.templates[intent] = versions
+            self.default_versions[intent] = self._select_default_version(versions)
 
     def _parse_template_versions(self, content: str) -> Dict[str, str]:
         """Parse multiple template versions from a single file."""
@@ -72,28 +79,44 @@ class TemplateLibrary:
 
         return versions
 
+    def _select_default_version(self, versions: Dict[str, str]) -> str:
+        ranked = []
+        for version in versions.keys():
+            try:
+                ranked.append((int(version.lstrip("v")), version))
+            except ValueError:
+                ranked.append((0, version))
+        ranked.sort(reverse=True)
+        return ranked[0][1] if ranked else "v1"
+
+    def default_version(self, intent: str) -> str:
+        return self.default_versions.get(intent, "v1")
+
     def has(self, intent: str) -> bool:
         """Check if template exists for intent."""
         return intent in self.templates
 
-    def get(self, intent: str, version: str = "v1") -> Optional[str]:
+    def get(self, intent: str, version: Optional[str] = None) -> Optional[str]:
         """Get template for intent and version."""
         if intent not in self.templates:
             return None
+        if version is None:
+            version = self.default_version(intent)
         return self.templates[intent].get(version)
 
     def render(
-        self, intent: str, entities: Dict[str, Any], version: str = "v1"
-    ) -> Tuple[str, Dict[str, Any]]:
+        self, intent: str, entities: Dict[str, Any], version: Optional[str] = None
+    ) -> Tuple[str, Dict[str, Any], str]:
         """Render template with entities as parameters."""
-        template = self.get(intent, version)
+        chosen_version = version or self.default_version(intent)
+        template = self.get(intent, chosen_version)
         if not template:
             raise ValueError(
-                f"No template found for intent '{intent}' version '{version}'"
+                f"No template found for intent '{intent}' version '{chosen_version}'"
             )
 
         # Parameters are passed as-is; Cypher uses $param syntax
-        return template, entities
+        return template, entities, chosen_version
 
 
 class IntentClassifier:
@@ -199,18 +222,21 @@ class QueryPlanner:
         # Step 4: Render template if available
         if self.templates.has(intent):
             try:
-                cypher, params = self.templates.render(intent, params)
+                cypher, params, template_version = self.templates.render(intent, params)
                 cypher = self._inject_limits_and_constraints(cypher, params)
                 return QueryPlan(
                     intent=intent,
                     cypher=cypher,
                     params=params,
-                    template_name=f"{intent}_v1",
+                    template_name=f"{intent}_{template_version}",
                     confidence=1.0,
                 )
             except Exception:
-                # Template rendering failed, fall through to LLM
-                pass
+                logger.warning(
+                    "Template rendering failed; falling back to generic plan",
+                    extra={"intent": intent},
+                    exc_info=True,
+                )
 
         # Step 5: LLM fallback (not implemented - would call LLM to generate Cypher)
         # For now, return a basic search template
@@ -265,11 +291,12 @@ class QueryPlanner:
             if max_hops <= max_depth:
                 return match.group(0)
 
-            # Clamp upper bound to $max_hops while keeping author-provided minimum
+            # Clamp upper bound to literal max_depth while keeping author-provided minimum
+            clamped_max = max_depth
             if min_hops <= 1:
-                return "*1..$max_hops"
+                return f"*1..{clamped_max}"
 
-            return f"*{min_hops}..$max_hops"
+            return f"*{min_hops}..{clamped_max}"
 
         cypher = re.sub(r"\*(\d+)\.\.(\d+)", _range_rewrite, cypher)
 

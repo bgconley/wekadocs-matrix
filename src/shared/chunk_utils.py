@@ -12,7 +12,7 @@ Key invariants:
 
 import hashlib
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 def generate_chunk_id(document_id: str, original_section_ids: List[str]) -> str:
@@ -234,3 +234,44 @@ def create_combined_chunk_metadata(
         "shingle_hash": shingle_hash,
         "updated_at": datetime.utcnow(),
     }
+
+
+def canonicalize_parent_ids(chunks: List[Dict]) -> Tuple[int, int]:
+    """
+    Ensure parent references point to canonical chunk IDs.
+
+    Returns:
+        Tuple (remapped_count, missing_parent_count)
+    """
+    if not chunks:
+        return 0, 0
+
+    original_to_chunk: Dict[str, str] = {}
+    for chunk in chunks:
+        originals = chunk.get("original_section_ids") or []
+        if not originals:
+            originals = [chunk.get("id")]
+        for original in originals:
+            if original and original not in original_to_chunk:
+                original_to_chunk[original] = chunk.get("id")
+
+    remapped = 0
+    missing = 0
+    for chunk in chunks:
+        parent_original = chunk.get("parent_section_id")
+        if not parent_original:
+            continue
+
+        chunk["parent_section_original_id"] = parent_original
+        mapped_parent = original_to_chunk.get(parent_original)
+        if mapped_parent:
+            chunk["parent_chunk_id"] = mapped_parent
+            chunk["parent_section_id"] = mapped_parent
+            if mapped_parent != parent_original:
+                remapped += 1
+        else:
+            chunk["parent_chunk_id"] = None
+            chunk["parent_section_id"] = None
+            missing += 1
+
+    return remapped, missing

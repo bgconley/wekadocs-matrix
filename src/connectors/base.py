@@ -5,7 +5,7 @@ Implements polling, webhooks, queue-based ingestion, and circuit breaker integra
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -41,6 +41,7 @@ class ConnectorConfig:
     circuit_breaker_failure_threshold: int
     circuit_breaker_timeout_seconds: int
     webhook_secret: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -160,7 +161,10 @@ class BaseConnector(ABC):
             return {"status": "error", "error": str(e)}
 
     async def process_webhook(
-        self, payload: Dict[str, Any], signature: Optional[str] = None
+        self,
+        payload: Dict[str, Any],
+        signature: Optional[str] = None,
+        raw_body: Optional[bytes] = None,
     ) -> Dict[str, Any]:
         """
         Process incoming webhook event.
@@ -170,23 +174,39 @@ class BaseConnector(ABC):
             return {"status": "disabled"}
 
         # Verify signature if configured
-        if self.config.webhook_secret and signature:
-            if not await self.verify_webhook_signature(
-                str(payload).encode(), signature
-            ):
-                logger.warning(f"Invalid webhook signature for {self.config.name}")
+        if self.config.webhook_secret:
+            if not signature:
+                logger.warning(
+                    "Webhook signature required for %s but header missing",
+                    self.config.name,
+                )
+                return {"status": "error", "error": "missing_signature"}
+            if raw_body is None:
+                logger.error(
+                    "Raw request body required to verify webhook signature for %s",
+                    self.config.name,
+                )
+                return {"status": "error", "error": "raw_body_required"}
+            if not await self.verify_webhook_signature(raw_body, signature):
+                logger.warning("Invalid webhook signature for %s", self.config.name)
                 return {"status": "error", "error": "invalid_signature"}
 
         try:
             # Convert webhook payload to ingestion event
-            event = await self.webhook_to_event(payload)
-            if event:
-                success = await self.queue.enqueue(event)
-                if success:
-                    self.stats["events_queued"] += 1
-                    return {"status": "success", "event": event.source_uri}
-                else:
-                    return {"status": "error", "error": "queue_full"}
+            events = await self.webhook_to_event(payload)
+            if events:
+                queued = 0
+                for event in events:
+                    success = await self.queue.enqueue(event)
+                    if success:
+                        queued += 1
+                    else:
+                        logger.warning(
+                            "Ingestion queue full while processing webhook event",
+                            extra={"source": event.source_uri},
+                        )
+                self.stats["events_queued"] += queued
+                return {"status": "success", "queued": queued}
             else:
                 return {"status": "ignored", "reason": "no_action_needed"}
 
@@ -198,12 +218,10 @@ class BaseConnector(ABC):
             return {"status": "error", "error": str(e)}
 
     @abstractmethod
-    async def webhook_to_event(
-        self, payload: Dict[str, Any]
-    ) -> Optional[IngestionEvent]:
+    async def webhook_to_event(self, payload: Dict[str, Any]) -> List[IngestionEvent]:
         """
         Convert webhook payload to IngestionEvent.
-        Returns None if event should be ignored.
+        Returns [] if event should be ignored.
         Must be implemented by subclasses.
         """
         pass

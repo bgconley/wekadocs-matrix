@@ -3,13 +3,12 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct
+from qdrant_client.http.models import PointStruct, SparseVector
 
-# Optional: use the same embedder as build_graph uses
-try:
-    from sentence_transformers import SentenceTransformer
-except Exception:
-    SentenceTransformer = None
+from src.providers.embeddings.contracts import DocumentEmbeddingBundle
+from src.providers.factory import ProviderFactory
+from src.shared.config import get_embedding_settings, namespace_identifier
+from src.shared.qdrant_schema import build_qdrant_schema
 
 
 @dataclass
@@ -43,7 +42,11 @@ class Reconciler:
             self.qdrant = config_or_qdrant
             self.config = None
             self.collection = collection_name
-            self.version = embedding_version
+            self.embedding_settings = get_embedding_settings()
+            self.collection = namespace_identifier(
+                self.collection, self.embedding_settings.profile
+            )
+            self.version = self.embedding_settings.version
         elif hasattr(config_or_qdrant, "embedding"):
             # New signature: Reconciler(neo4j, config, qdrant)
             self.config = config_or_qdrant
@@ -55,13 +58,50 @@ class Reconciler:
                 self.collection = config_or_qdrant.search.vector.qdrant.collection_name
             else:
                 self.collection = collection_name or "weka_sections"
-            self.version = config_or_qdrant.embedding.version
+            self.embedding_settings = get_embedding_settings(self.config)
+            self.collection = namespace_identifier(
+                self.collection, self.embedding_settings.profile
+            )
+            self.version = self.embedding_settings.version
         else:
             # Test signature: Reconciler(neo4j, config, qdrant)
             self.config = config_or_qdrant
             self.qdrant = qdrant_client or config_or_qdrant
             self.collection = collection_name
-            self.version = embedding_version
+            self.embedding_settings = get_embedding_settings()
+            self.collection = namespace_identifier(
+                self.collection, self.embedding_settings.profile
+            )
+            self.version = self.embedding_settings.version
+        self._embedder = None
+        search_cfg = getattr(self.config, "search", None) if self.config else None
+        vector_cfg = getattr(search_cfg, "vector", None) if search_cfg else None
+        qdrant_cfg = getattr(vector_cfg, "qdrant", None)
+        enable_sparse = (
+            getattr(qdrant_cfg, "enable_sparse", False) if qdrant_cfg else False
+        )
+        enable_colbert = (
+            getattr(qdrant_cfg, "enable_colbert", False) if qdrant_cfg else False
+        )
+        hybrid_cfg = getattr(search_cfg, "hybrid", None) if search_cfg else None
+        vector_fields = (
+            getattr(hybrid_cfg, "vector_fields", None) if hybrid_cfg else None
+        )
+        include_entity = False
+        if isinstance(vector_fields, dict):
+            include_entity = "entity" in vector_fields
+
+        self._schema_plan = build_qdrant_schema(
+            self.embedding_settings,
+            include_entity=include_entity,
+            enable_sparse=enable_sparse,
+            enable_colbert=enable_colbert,
+        )
+        self._dense_vector_names = [
+            name
+            for name in self._schema_plan.vectors_config.keys()
+            if name != "late-interaction"
+        ]
 
     def _vector_field_names(self) -> List[str]:
         """
@@ -69,24 +109,72 @@ class Reconciler:
         Falls back to ["content"] so that legacy single-vector deployments
         remain functional.
         """
-        if (
-            hasattr(self, "config")
-            and self.config
-            and hasattr(self.config, "search")
-            and hasattr(self.config.search, "hybrid")
-        ):
-            vector_fields = getattr(self.config.search.hybrid, "vector_fields", None)
-            if isinstance(vector_fields, dict) and vector_fields:
-                return list(vector_fields.keys())
+        if getattr(self, "_dense_vector_names", None):
+            return self._dense_vector_names
         return ["content"]
 
-    def _wrap_named_vectors(self, base_vector: List[float]) -> Dict[str, List[float]]:
-        """
-        Duplicate a single embedding across all named-vector slots required by
-        the collection so reconciliation can operate without additional model
-        invocations.
-        """
-        return {name: list(base_vector) for name in self._vector_field_names()}
+    def _get_embedding_fn(self) -> Callable[[str], List[float]]:
+        embedder = self._ensure_embedder()
+
+        def embed(text: str) -> List[float]:
+            vectors = embedder.embed_documents([text or ""])
+            if not vectors:
+                raise RuntimeError("Embedding provider returned no vectors")
+            return vectors[0]
+
+        return embed
+
+    def _get_embedding_bundle_fn(self) -> Callable[[str], DocumentEmbeddingBundle]:
+        embedder = self._ensure_embedder()
+        if hasattr(embedder, "embed_documents_all"):
+
+            def embed_bundle(text: str) -> DocumentEmbeddingBundle:
+                bundles = embedder.embed_documents_all([text or ""])
+                if not bundles:
+                    raise RuntimeError("Embedding provider returned no bundles")
+                return bundles[0]
+
+            return embed_bundle
+
+        base_fn = self._get_embedding_fn()
+
+        def embed_bundle(text: str) -> DocumentEmbeddingBundle:
+            dense = base_fn(text)
+            return DocumentEmbeddingBundle(dense=list(dense))
+
+        return embed_bundle
+
+    def _ensure_embedder(self):
+        if self._embedder is None:
+            if not self.config and self.embedding_settings is None:
+                raise RuntimeError(
+                    "Embedding configuration unavailable; provide embedding_fn explicitly."
+                )
+            factory = ProviderFactory()
+            settings = self.embedding_settings or get_embedding_settings(self.config)
+            self._embedder = factory.create_embedding_provider(settings=settings)
+        return self._embedder
+
+    def _build_vectors_from_bundle(
+        self, bundle: DocumentEmbeddingBundle
+    ) -> Dict[str, object]:
+        vectors: Dict[str, object] = {}
+        dense_vector = list(bundle.dense)
+        for name in self._vector_field_names():
+            vectors[name] = dense_vector
+        if (
+            bundle.multivector
+            and "late-interaction" in self._schema_plan.vectors_config
+        ):
+            vectors["late-interaction"] = [
+                list(vec) for vec in bundle.multivector.vectors
+            ]
+        if bundle.sparse and "text-sparse" in self._schema_plan.sparse_vectors_config:
+            vectors["text-sparse"] = SparseVector(
+                indices=list(bundle.sparse.indices),
+                values=list(bundle.sparse.values),
+            )
+        return vectors
 
     def _graph_section_ids(self) -> Set[str]:
         """Get all Section IDs from Neo4j with matching embedding_version (synchronous)."""
@@ -137,38 +225,44 @@ class Reconciler:
     def _delete_points_by_node_ids(self, node_ids: List[str]) -> int:
         if not node_ids:
             return 0
-        # Convert section IDs to UUIDs before deleting
-        for nid in node_ids:
+        batch_size = 256
+        deleted = 0
+        for start in range(0, len(node_ids), batch_size):
+            batch = node_ids[start : start + batch_size]
+            if not batch:
+                continue
+            selector = {
+                "filter": {
+                    "must": [
+                        {"key": "node_id", "match": {"any": batch}},
+                        {
+                            "key": "embedding_version",
+                            "match": {"value": self.version},
+                        },
+                    ]
+                }
+            }
             try:
                 self.qdrant.delete(
                     collection_name=self.collection,
-                    points_selector={
-                        "filter": {
-                            "must": [
-                                {"key": "node_id", "match": {"value": nid}},
-                                {
-                                    "key": "embedding_version",
-                                    "match": {"value": self.version},
-                                },
-                            ]
-                        }
-                    },
+                    points_selector=selector,
                     wait=True,
                 )
             except Exception:
-                # Fall back to best-effort deletion without embedding filter
+                fallback_selector = {
+                    "filter": {
+                        "must": [
+                            {"key": "node_id", "match": {"any": batch}},
+                        ]
+                    }
+                }
                 self.qdrant.delete(
                     collection_name=self.collection,
-                    points_selector={
-                        "filter": {
-                            "must": [
-                                {"key": "node_id", "match": {"value": nid}},
-                            ]
-                        }
-                    },
+                    points_selector=fallback_selector,
                     wait=True,
                 )
-        return len(node_ids)
+            deleted += len(batch)
+        return deleted
 
     def _upsert_points(
         self,
@@ -189,18 +283,18 @@ class Reconciler:
         ]
 
         # Pre-Phase 7: Determine expected dimension from config or first vector
-        expected_dim: int | Dict[str, int] = 384  # Default fallback
-        if self.config and hasattr(self.config, "embedding"):
-            expected_dim = self.config.embedding.dims
+        expected_dim: int | Dict[str, int] = (
+            self.embedding_settings.dims if self.embedding_settings else 384
+        )
 
         if pts:
             first_vector = pts[0].vector
             if isinstance(first_vector, dict):
-                derived = {
-                    name: len(vec)
-                    for name, vec in first_vector.items()
-                    if isinstance(vec, list)
-                }
+                derived: Dict[str, int] = {}
+                for name, vec in first_vector.items():
+                    dim = self._vector_expected_dim(vec)
+                    if dim:
+                        derived[name] = dim
                 if derived:
                     expected_dim = derived
             elif isinstance(first_vector, list):
@@ -229,13 +323,7 @@ class Reconciler:
         # Build embeddings for missing
         if missing:
             if embedding_fn is None:
-                if SentenceTransformer is None:
-                    raise RuntimeError("No embedding function available")
-                model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-
-                def emb_fn(t):
-                    return model.encode(t).tolist()
-
+                bundle_fn = self._get_embedding_bundle_fn()
             else:
                 emb_fn = embedding_fn
 
@@ -246,7 +334,8 @@ class Reconciler:
             MATCH (d:Document)-[:HAS_SECTION]->(s:Section {id: sid})
             RETURN
                 s.id AS id,
-                coalesce(s.text, s.content, s.title, '') AS text,
+                coalesce(s.text, s.content, '') AS text,
+                s.title AS title,
                 coalesce(s.document_id, d.id) AS document_id,
                 d.source_uri AS source_uri,
                 d.doc_tag AS doc_tag,
@@ -257,6 +346,7 @@ class Reconciler:
                 for rec in res:
                     text_map[rec["id"]] = {
                         "text": rec["text"] or "",
+                        "title": rec["title"] or "",
                         "document_id": rec.get("document_id"),
                         "source_uri": rec.get("source_uri"),
                         "doc_tag": rec.get("doc_tag"),
@@ -265,10 +355,60 @@ class Reconciler:
             upserts = []
             for sid in missing:
                 meta = text_map.get(
-                    sid, {"text": "", "document_id": None, "source_uri": None}
+                    sid,
+                    {"text": "", "title": "", "document_id": None, "source_uri": None},
                 )
-                vec = emb_fn(meta["text"])
-                named_vecs = self._wrap_named_vectors(vec)
+
+                # Embed Content
+                if embedding_fn is None:
+                    content_bundle = bundle_fn(meta["text"])
+                else:
+                    vec = emb_fn(meta["text"])
+                    content_bundle = DocumentEmbeddingBundle(dense=list(vec))
+
+                # Embed Title (if present)
+                title_vec = None
+                title_text = meta.get("title")
+                if title_text:
+                    if embedding_fn is None:
+                        # We only need dense for title currently
+                        title_bundle = bundle_fn(title_text)
+                        title_vec = list(title_bundle.dense)
+                    else:
+                        title_vec = list(emb_fn(title_text))
+
+                # Construct Named Vectors
+                named_vecs: Dict[str, object] = {}
+
+                # 1. Content Vector
+                named_vecs["content"] = list(content_bundle.dense)
+
+                # 2. Title Vector
+                if title_vec:
+                    named_vecs["title"] = title_vec
+                elif "title" in self._schema_plan.vectors_config:
+                    # Fallback: use content vector if title is missing but schema requires it
+                    named_vecs["title"] = list(content_bundle.dense)
+
+                # 3. Sparse Vector (from Content)
+                if (
+                    content_bundle.sparse
+                    and "text-sparse" in self._schema_plan.sparse_vectors_config
+                ):
+                    named_vecs["text-sparse"] = SparseVector(
+                        indices=list(content_bundle.sparse.indices),
+                        values=list(content_bundle.sparse.values),
+                    )
+
+                # 4. ColBERT (from Content)
+                if (
+                    content_bundle.multivector
+                    and "late-interaction" in self._schema_plan.vectors_config
+                ):
+                    named_vecs["late-interaction"] = [
+                        list(vec) for vec in content_bundle.multivector.vectors
+                    ]
+
                 source_uri = meta.get("source_uri") or ""
                 document_uri = Path(source_uri).name if source_uri else source_uri
                 payload = {
@@ -280,6 +420,7 @@ class Reconciler:
                     "doc_tag": meta.get("doc_tag"),
                     "snapshot_scope": meta.get("snapshot_scope"),
                     "embedding_version": self.version,
+                    "heading": meta.get("title"),  # Ensure heading payload is synced
                 }
                 upserts.append((sid, named_vecs, payload))
 
@@ -334,3 +475,23 @@ class Reconciler:
             "parity_delta": abs(stats.graph_count - stats.vector_count),
             "parity_achieved": stats.graph_count == stats.vector_count,
         }
+
+    @staticmethod
+    def _vector_expected_dim(vector: object) -> Optional[int]:
+        if vector is None:
+            return None
+        if hasattr(vector, "indices") and hasattr(vector, "values"):
+            return None
+        if isinstance(vector, list):
+            if not vector:
+                return None
+            first = vector[0]
+            if isinstance(first, list):
+                return len(first)
+            return len(vector)
+        if hasattr(vector, "__len__") and not isinstance(vector, (str, bytes)):
+            try:
+                return len(vector)
+            except TypeError:
+                return None
+        return None

@@ -101,7 +101,8 @@
 - Accepts sections into a group until hitting `target_max`, ensuring `max_sections` is not exceeded.
 - Maintains metadata:
   - `original_section_ids`
-  - `parent_section_id`
+  - `parent_section_id` (canonical chunk ID used in Neo4j/Qdrant)
+  - `parent_section_original_id` (source tree identifier kept for provenance)
   - `boundaries_json` for citation reconstruction
   - `document_total_tokens`
 

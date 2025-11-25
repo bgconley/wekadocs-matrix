@@ -1,0 +1,62 @@
+profiles:
+  jina_v3:
+    description: "Jina Embeddings v3 (1024-D, multilingual, normalized)."
+    provider: "jina-ai"
+    model_id: "jina-embeddings-v3"
+    version: "jina-embeddings-v3"
+    dims: 1024
+    similarity: "cosine"
+    task: "retrieval.passage"
+    tokenizer:
+      backend: "hf"
+      model_id: "jinaai/jina-embeddings-v3"
+    capabilities:
+      supports_dense: true
+      supports_sparse: false
+      supports_colbert: false
+      supports_long_sequences: true
+      normalized_output: true
+      multilingual: true
+    requirements:
+      - "JINA_API_KEY"
+
+  bge_m3:
+    description: "BGE-M3 (multi-head: dense + sparse + ColBERT) served via custom BGEM3FlagModel service."
+    provider: "bge-m3-service"
+    model_id: "BAAI/bge-m3"
+    version: "BAAI/bge-m3"
+    dims: 1024
+    similarity: "cosine"
+    task: "symmetric"
+    tokenizer:
+      backend: "hf"
+      model_id: "BAAI/bge-m3"
+    capabilities:
+      supports_dense: true
+      supports_sparse: true
+      supports_colbert: true
+      supports_long_sequences: true
+      normalized_output: true
+      multilingual: true
+    requirements:
+      - "BGE_M3_API_URL"
+
+  st_minilm:
+    description: "SentenceTransformers MiniLM (384-D, fast baseline)."
+    provider: "sentence-transformers"
+    model_id: "all-MiniLM-L6-v2"
+    version: "all-MiniLM-L6-v2"
+    dims: 384
+    similarity: "cosine"
+    task: "retrieval.passage"
+    tokenizer:
+      backend: "hf"
+      model_id: "sentence-transformers/all-MiniLM-L6-v2"
+    capabilities:
+      supports_dense: true
+      supports_sparse: false
+      supports_colbert: false
+      supports_long_sequences: false
+      normalized_output: false
+      multilingual: false
+    requirements: []

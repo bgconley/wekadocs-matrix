@@ -22,7 +22,6 @@ from typing import Dict, List, Optional
 
 import redis
 from neo4j import Driver
-from sentence_transformers import SentenceTransformer
 
 from src.ingestion.build_graph import GraphBuilder
 from src.ingestion.extract import extract_entities
@@ -31,7 +30,12 @@ from src.ingestion.parsers.html import parse_html
 from src.ingestion.parsers.markdown import parse_markdown
 from src.ingestion.parsers.notion import parse_notion
 from src.ingestion.reconcile import Reconciler
-from src.shared.config import Config
+from src.providers.factory import ProviderFactory
+from src.shared.config import (
+    Config,
+    _slugify_identifier,
+    get_embedding_settings,
+)
 from src.shared.embedding_fields import (
     canonicalize_embedding_metadata,
     ensure_no_embedding_model_in_payload,
@@ -134,7 +138,8 @@ class Orchestrator:
         self.qdrant = qdrant_client
 
         # Initialize embedder lazily
-        self.embedder: Optional[SentenceTransformer] = None
+        self.embedding_settings = get_embedding_settings(self.config)
+        self.embedder = None
 
         logger.info("Orchestrator initialized")
 
@@ -376,7 +381,7 @@ class Orchestrator:
             self.config,
             self.qdrant,
             collection_name=self.config.search.vector.qdrant.collection_name,
-            embedding_version=self.config.embedding.version,
+            embedding_version=get_embedding_settings(self.config).version,
         )
 
         # Compute diff to detect changes
@@ -460,9 +465,14 @@ class Orchestrator:
         # Initialize embedder lazily
         if not self.embedder:
             logger.info(
-                "Loading embedding model", model=self.config.embedding.embedding_model
+                "Initializing auto-ingestion embedder",
+                provider=self.embedding_settings.provider,
+                model=self.embedding_settings.model_id,
+                profile=self.embedding_settings.profile,
             )
-            self.embedder = SentenceTransformer(self.config.embedding.embedding_model)
+            self.embedder = ProviderFactory.create_embedding_provider(
+                settings=self.embedding_settings
+            )
 
         # Compute embeddings for sections
         embeddings_computed = 0
@@ -473,7 +483,10 @@ class Orchestrator:
             text_to_embed = f"{title}\n\n{text}" if title else text
 
             # Compute embedding
-            embedding = self.embedder.encode(text_to_embed).tolist()
+            vectors = self.embedder.embed_documents([text_to_embed])
+            if not vectors:
+                raise RuntimeError("Embedding provider returned no vectors")
+            embedding = vectors[0]
 
             # Store in section (not yet persisted to vector store)
             section["vector_embedding"] = embedding
@@ -485,7 +498,7 @@ class Orchestrator:
             section.setdefault("lang", state.document.get("lang"))
             section.setdefault("version", state.document.get("version"))
             section.setdefault("semantic_metadata", {"entities": [], "topics": []})
-            section["embedding_version"] = self.config.embedding.version
+            section["embedding_version"] = self.embedding_settings.version
             embeddings_computed += 1
 
         # Save to state
@@ -531,6 +544,14 @@ class Orchestrator:
         # Determine vector store strategy
         primary = self.config.search.vector.primary
         dual_write = self.config.search.vector.dual_write
+        qdrant_collection = getattr(
+            getattr(self.config.search.vector, "qdrant", None), "collection_name", None
+        )
+        expected_suffix = _slugify_identifier(
+            getattr(self.config.embedding, "version", None)
+            or getattr(self.config.embedding, "profile", None)
+            or ""
+        )
 
         # Purge existing vectors for this document to prevent drift
         self._purge_existing_vectors(state.document_id, state.source_uri)
@@ -550,6 +571,15 @@ class Orchestrator:
 
             # Dual write to Qdrant if enabled
             if dual_write and self.qdrant:
+                if (
+                    expected_suffix
+                    and isinstance(qdrant_collection, str)
+                    and not qdrant_collection.endswith(expected_suffix)
+                ):
+                    raise RuntimeError(
+                        f"Qdrant dual-write collection {qdrant_collection!r} "
+                        f"does not match expected namespace suffix {expected_suffix!r}"
+                    )
                 self._upsert_to_qdrant(
                     state.sections, state.document, state.document_id
                 )
@@ -830,7 +860,7 @@ class Orchestrator:
             {"key": "node_label", "match": {"value": "Section"}},
             {
                 "key": "embedding_version",
-                "match": {"value": self.config.embedding.version},
+                "match": {"value": self.embedding_settings.version},
             },
         ]
 
@@ -886,10 +916,11 @@ class Orchestrator:
 
             text_value = section.get("text", "")
             embedding_metadata = canonicalize_embedding_metadata(
-                embedding_model=self.config.embedding.version,
+                embedding_model=self.embedding_settings.version,
                 dimensions=len(embedding),
-                provider=self.config.embedding.provider,
-                task="retrieval.passage",
+                provider=self.embedding_settings.provider,
+                task=self.embedding_settings.task,
+                profile=self.embedding_settings.profile,
                 timestamp=datetime.utcnow(),
             )
 
@@ -968,7 +999,7 @@ class Orchestrator:
                     query,
                     section_id=section["id"],
                     embedding=embedding,
-                    version=self.config.embedding.version,
+                    version=get_embedding_settings(self.config).version,
                 )
 
         return len([s for s in sections if s.get("vector_embedding")])
@@ -984,7 +1015,7 @@ class Orchestrator:
                 session.run(
                     query,
                     section_id=section["id"],
-                    version=self.config.embedding.version,
+                    version=get_embedding_settings(self.config).version,
                 )
 
     def _build_report(self, state: JobState) -> Dict:

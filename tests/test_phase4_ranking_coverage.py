@@ -104,6 +104,18 @@ def test_ranking_normalization():
     return True
 
 
+def test_colbert_normalization_preserves_order():
+    """ColBERT late-interaction scores should not clamp to 1.0."""
+    from src.query.ranking import Ranker
+
+    ranker = Ranker()
+    s1 = ranker._normalize_score(1.0, "late-interaction")
+    s2 = ranker._normalize_score(5.0, "late-interaction")
+    s3 = ranker._normalize_score(10.0, "late-interaction")
+
+    assert 0.0 < s1 < s2 < s3 < 1.0, (s1, s2, s3)
+
+
 def test_utc_recency_scoring():
     """Test D1: UTC handling in recency scoring"""
     print("Testing UTC handling in recency scoring...")

@@ -14,10 +14,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.mcp_server.query_service import QueryService
 from src.providers.factory import ProviderFactory
 from src.providers.rerank.base import RerankProvider
 from src.providers.rerank.jina import JinaRerankProvider
 from src.providers.rerank.noop import NoopReranker
+from src.query.hybrid_retrieval import ChunkResult
 
 
 class TestRerankProviderFactory:
@@ -56,6 +58,44 @@ class TestRerankProviderFactory:
 
         with pytest.raises(ValueError, match="Unknown rerank provider"):
             factory.create_rerank_provider(provider="invalid-provider")
+
+    def test_jina_reranker_tolerates_malformed_results(self, monkeypatch):
+        """Provider skips malformed entries without crashing."""
+        provider = JinaRerankProvider(model="jina-reranker-v3", api_key="fake-key")
+
+        monkeypatch.setattr(
+            provider._rate_limiter, "wait_if_needed", lambda *_args, **_kwargs: None
+        )
+
+        class FakeResponse:
+            def __init__(self, payload):
+                self.status_code = 200
+                self._payload = payload
+
+            def json(self):
+                return self._payload
+
+            def raise_for_status(self):
+                return None
+
+        payload = {
+            "results": [
+                {"relevance_score": 0.7},  # missing index -> skip
+                {"index": 0},  # missing score -> skip
+                {"index": 1, "relevance_score": 0.95},  # valid
+            ]
+        }
+        provider._client.post = MagicMock(return_value=FakeResponse(payload))
+
+        candidates = [
+            {"id": "1", "text": "alpha"},
+            {"id": "2", "text": "beta"},
+        ]
+
+        results = provider.rerank("demo query", candidates, top_k=2)
+
+        assert len(results) == 1
+        assert results[0]["id"] == "2"
 
 
 class TestHybridSearchEngineReranking:
@@ -223,6 +263,9 @@ class TestQueryServiceReranking:
         config.search.vector.primary = "qdrant"
         config.search.vector.qdrant.collection_name = "test_collection"
         config.search.hybrid.top_k = 20
+        config.search.hybrid.reranker.enabled = True
+        config.search.hybrid.reranker.provider = "jina-ai"
+        config.search.hybrid.reranker.model = "jina-reranker-v3"
         config.validator.max_depth = 2
         return config
 
@@ -265,6 +308,19 @@ class TestQueryServiceReranking:
                 # Should return None (graceful fallback)
                 assert reranker is None
 
+    def test_query_service_skips_reranker_when_disabled(self, mock_config):
+        """Verify provider factory is not invoked when reranking disabled."""
+        from src.mcp_server.query_service import QueryService
+
+        with patch("src.mcp_server.query_service.get_config", return_value=mock_config):
+            mock_config.search.hybrid.reranker.enabled = False
+            with patch.object(ProviderFactory, "create_rerank_provider") as mock_create:
+                service = QueryService()
+                reranker = service._get_reranker()
+
+            assert reranker is None
+            mock_create.assert_not_called()
+
 
 class TestNoopReranker:
     """Test NoopReranker fallback."""
@@ -300,6 +356,37 @@ class TestNoopReranker:
 
         assert reranker.provider_name == "noop"
         assert reranker.model_id == "noop"
+
+
+class TestRerankMetadataPropagation:
+    """Ensure rerank metadata is preserved in QueryService diagnostics."""
+
+    def test_wrap_chunks_includes_rerank_metadata(self):
+        service = QueryService()
+        chunk = ChunkResult(
+            chunk_id="chunk-1",
+            document_id="doc-1",
+            parent_section_id="parent-1",
+            order=1,
+            level=2,
+            heading="Heading",
+            text="Body text",
+            token_count=50,
+        )
+        chunk.fused_score = 0.42
+        chunk.bm25_score = 0.33
+        chunk.vector_score = 0.55
+        chunk.graph_score = 0.05
+        chunk.rerank_score = 0.91
+        chunk.rerank_rank = 1
+        chunk.reranker = "jina-reranker-v3"
+
+        ranked = service._wrap_chunks_as_ranked([chunk])
+        metadata = ranked[0].result.metadata
+
+        assert metadata["rerank_score"] == chunk.rerank_score
+        assert metadata["rerank_rank"] == chunk.rerank_rank
+        assert metadata["reranker"] == chunk.reranker
 
 
 if __name__ == "__main__":

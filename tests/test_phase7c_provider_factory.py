@@ -33,26 +33,6 @@ class TestProviderFactory:
             assert provider.model_id == "jina-embeddings-v4"
             assert provider.dims == 1024
 
-    def test_create_ollama_embedding_provider(self):
-        """Test creating Ollama embedding provider."""
-        # Mock Ollama connection validation
-        with patch("src.providers.embeddings.ollama.httpx.Client") as mock_client:
-            mock_response = MagicMock()
-            mock_response.json.return_value = {"models": [{"name": "bge-m3"}]}
-            mock_client.return_value.get.return_value = mock_response
-
-            provider = ProviderFactory.create_embedding_provider(
-                provider="ollama",
-                model="bge-m3",
-                dims=1024,
-                base_url="http://localhost:11434",
-            )
-
-            assert isinstance(provider, EmbeddingProvider)
-            assert provider.provider_name == "ollama"
-            assert provider.model_id == "bge-m3"
-            assert provider.dims == 1024
-
     def test_create_sentence_transformers_provider(self):
         """Test creating SentenceTransformers provider."""
         with patch(
@@ -67,6 +47,38 @@ class TestProviderFactory:
             assert isinstance(provider, EmbeddingProvider)
             assert provider.provider_name == "sentence-transformers"
             assert provider.dims == 384
+
+    def test_create_bge_m3_service_provider(self):
+        """Test creating the BGE-M3 service-backed provider."""
+        with patch(
+            "src.providers.embeddings.bge_m3_service.BGEM3ServiceProvider"
+        ) as mock_provider_cls:
+            mock_instance = MagicMock(spec=EmbeddingProvider)
+            mock_provider_cls.return_value = mock_instance
+
+            provider = ProviderFactory.create_embedding_provider(
+                provider="bge-m3-service",
+                model="bge-m3",
+                dims=1024,
+                task="symmetric",
+                base_url="http://127.0.0.1:9000",
+            )
+
+            assert provider is mock_instance
+            mock_provider_cls.assert_called_once()
+
+    def test_bge_aliases_normalize_to_service(self):
+        """Test that bge aliases normalize to the service provider."""
+        with patch(
+            "src.providers.embeddings.bge_m3_service.BGEM3ServiceProvider"
+        ) as mock_provider_cls:
+            mock_provider_cls.return_value = MagicMock(spec=EmbeddingProvider)
+            provider = ProviderFactory.create_embedding_provider(
+                provider="bge_m3", model="bge-m3", dims=1024
+            )
+
+            assert provider is mock_provider_cls.return_value
+            mock_provider_cls.assert_called_once()
 
     def test_create_jina_rerank_provider(self):
         """Test creating Jina rerank provider."""

@@ -101,6 +101,12 @@ def test_health_endpoint(client):
     assert data["status"] == "healthy"
     assert "timestamp" in data
     assert "version" in data
+    embedding = data.get("embedding", {})
+    assert embedding.get("profile")
+    assert embedding.get("provider")
+    caps = embedding.get("capabilities")
+    assert isinstance(caps, dict)
+    assert "supports_dense" in caps
 
 
 def test_readiness_endpoint(client, docker_services_running):

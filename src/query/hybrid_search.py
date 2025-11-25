@@ -10,13 +10,71 @@ Phase 7C: Integrated with reranking provider for post-ANN refinement.
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
+
+from qdrant_client.models import FieldCondition, Filter, MatchValue, NamedVector
 
 from src.providers.rerank.base import RerankProvider
+from src.providers.settings import EmbeddingSettings
 from src.shared.config import get_config
 from src.shared.observability import get_logger
 
 logger = get_logger(__name__)
+
+METADATA_TEXT_LIMIT = 1000
+SAFE_METADATA_FIELDS = [
+    "chunk_id",
+    "section_id",
+    "document_id",
+    "parent_section_id",
+    "doc_tag",
+    "doc_status",
+    "snapshot_scope",
+    "source_path",
+    "document_uri",
+    "title",
+    "heading",
+    "name",
+    "description",
+    "anchor",
+    "level",
+    "order",
+    "tokens",
+    "token_count",
+    "document_total_tokens",
+    "chunk_order",
+    "chunk_kind",
+    "is_combined",
+    "is_split",
+    "is_microdoc",
+    "doc_is_microdoc",
+    "is_microdoc_extra",
+    "is_microdoc_stub",
+    "expansion_source",
+    "is_expanded",
+    "citation_labels",
+    "original_section_ids",
+    "boundaries_json",
+    "entity_type",
+    "procedure_type",
+    "command_type",
+    "configuration_type",
+]
+
+
+def build_metadata_projection(alias: str) -> str:
+    """
+    Construct a Cypher map projection that whitelists metadata fields and truncates text.
+    """
+
+    field_expr = ", ".join(f".{field}" for field in SAFE_METADATA_FIELDS)
+    text_expr = (
+        f"text: CASE WHEN {alias}.text IS NULL THEN NULL "
+        f"ELSE substring({alias}.text, 0, $metadata_text_limit) END"
+    )
+    if field_expr:
+        return f"{alias}{{{field_expr}, {text_expr}}}"
+    return f"{alias}{{{text_expr}}}"
 
 
 @dataclass
@@ -48,7 +106,10 @@ class VectorStore:
     """Abstract interface for vector operations."""
 
     def search(
-        self, vector: List[float], k: int, filters: Optional[Dict] = None
+        self,
+        vector: Union[List[float], Dict[str, Any]],
+        k: int,
+        filters: Optional[Dict] = None,
     ) -> List[Dict[str, Any]]:
         """Search for top-k nearest neighbors."""
         raise NotImplementedError
@@ -57,15 +118,26 @@ class VectorStore:
 class QdrantVectorStore(VectorStore):
     """Qdrant vector store implementation."""
 
-    def __init__(self, qdrant_client, collection_name: str):
+    def __init__(
+        self,
+        qdrant_client,
+        collection_name: str,
+        *,
+        query_vector_name: str = "content",
+        use_named_vectors: bool = False,
+    ):
         self.client = qdrant_client
         self.collection_name = collection_name
+        self.query_vector_name = query_vector_name or "content"
+        self.use_named_vectors = use_named_vectors
 
     def search(
-        self, vector: List[float], k: int, filters: Optional[Dict] = None
+        self,
+        vector: Union[List[float], Dict[str, Any]],
+        k: int,
+        filters: Optional[Dict] = None,
     ) -> List[Dict[str, Any]]:
         """Search Qdrant for top-k vectors."""
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         # Build filter if provided
         qdrant_filter = None
@@ -83,6 +155,7 @@ class QdrantVectorStore(VectorStore):
 
         from src.shared.observability.metrics import (
             qdrant_operation_latency_ms,
+            qdrant_schema_mismatch_total,
             qdrant_search_total,
         )
 
@@ -91,9 +164,31 @@ class QdrantVectorStore(VectorStore):
 
         try:
             # Search
+            query_vector_payload: Any
+            if isinstance(vector, dict):
+                if self.use_named_vectors:
+                    items = list(vector.items())
+                    if len(items) == 1:
+                        name, vec = items[0]
+                        query_vector_payload = NamedVector(name=name, vector=vec)
+                    else:
+                        query_vector_payload = [
+                            NamedVector(name=name, vector=vec) for name, vec in items
+                        ]
+                else:
+                    # fall back to first entry if unnamed
+                    _, vec = next(iter(vector.items()))
+                    query_vector_payload = vec
+            elif self.use_named_vectors:
+                query_vector_payload = NamedVector(
+                    name=self.query_vector_name, vector=vector
+                )
+            else:
+                query_vector_payload = vector
+
             results = self.client.search(
                 collection_name=self.collection_name,
-                query_vector=vector,
+                query_vector=query_vector_payload,
                 limit=k,
                 query_filter=qdrant_filter,
                 with_payload=True,
@@ -108,11 +203,23 @@ class QdrantVectorStore(VectorStore):
                 collection_name=self.collection_name, operation="search"
             ).observe(latency_ms)
 
-        except Exception:
+        except Exception as exc:
             status = "error"
             qdrant_search_total.labels(
                 collection_name=self.collection_name, status=status
             ).inc()
+            if self.use_named_vectors:
+                message = str(exc).lower()
+                if "named vector" in message or "vector name" in message:
+                    qdrant_schema_mismatch_total.labels(
+                        collection_name=self.collection_name
+                    ).inc()
+                    logger.error(
+                        "Qdrant schema mismatch detected during search",
+                        collection=self.collection_name,
+                        use_named_vectors=self.use_named_vectors,
+                        error=str(exc),
+                    )
             raise
 
         # Convert to standard format
@@ -132,22 +239,29 @@ class QdrantVectorStore(VectorStore):
 class Neo4jVectorStore(VectorStore):
     """Neo4j vector store implementation."""
 
-    def __init__(self, driver, index_name: str):
+    def __init__(
+        self,
+        driver,
+        index_name: str,
+        *,
+        embedding_version: Optional[str] = None,
+    ):
         self.driver = driver
         self.index_name = index_name
+        self.embedding_version = embedding_version
 
     def search(
         self, vector: List[float], k: int, filters: Optional[Dict] = None
     ) -> List[Dict[str, Any]]:
         """Search Neo4j vector index for top-k vectors."""
-        config = get_config()
+        version = self.embedding_version or get_config().embedding.version
 
         where_clauses = ["node.embedding_version = $embedding_version"]
         params: Dict[str, Any] = {
             "index_name": self.index_name,
             "k": k,
             "vector": vector,
-            "embedding_version": config.embedding.version,
+            "embedding_version": version,
         }
 
         if filters:
@@ -163,16 +277,16 @@ class Neo4jVectorStore(VectorStore):
 
         where_clause = " AND ".join(where_clauses)
 
-        query = """
+        metadata_projection = build_metadata_projection("node")
+        query = f"""
         CALL db.index.vector.queryNodes($index_name, $k, $vector)
         YIELD node, score
         WHERE {where_clause}
         RETURN node.id AS id, score, node.document_id AS document_id,
-               labels(node)[0] AS node_label, properties(node) AS metadata
+               labels(node)[0] AS node_label, {metadata_projection} AS metadata
         LIMIT $k
-        """.format(
-            where_clause=where_clause
-        )
+        """
+        params["metadata_text_limit"] = METADATA_TEXT_LIMIT
 
         with self.driver.session() as session:
             result = session.run(query, **params)
@@ -203,11 +317,13 @@ class HybridSearchEngine:
         neo4j_driver,
         embedder,
         reranker: Optional[RerankProvider] = None,
+        embedding_settings: Optional[EmbeddingSettings] = None,
     ):
         self.vector_store = vector_store
         self.neo4j_driver = neo4j_driver
         self.embedder = embedder
         self.reranker = reranker  # Phase 7C: Optional reranker
+        self.embedding_settings = embedding_settings
         self.config = get_config()
 
         # Get search configuration
@@ -219,11 +335,37 @@ class HybridSearchEngine:
         self.rerank_k = 50  # Get more candidates for reranking
         self.rerank_top_k = 20  # Narrow down to top 20 after reranking
 
+        if (
+            self.embedding_settings
+            and hasattr(embedder, "dims")
+            and embedder.dims != self.embedding_settings.dims
+        ):
+            raise ValueError(
+                f"HybridSearchEngine embedder dims ({getattr(embedder, 'dims', 'unknown')}) "
+                f"do not match embedding profile dims ({self.embedding_settings.dims})."
+            )
+
         # Pre-Phase 7: Log embedder info once at init
-        logger.info(
-            f"HybridSearchEngine initialized with embedder: "
-            f"model_id={embedder.model_id}, dims={embedder.dims}"
-        )
+        if self.embedding_settings:
+            logger.info(
+                "HybridSearchEngine initialized with embedder",
+                profile=self.embedding_settings.profile,
+                provider=self.embedding_settings.provider,
+                model_id=embedder.model_id,
+                dims=embedder.dims,
+                tokenizer_backend=self.embedding_settings.tokenizer_backend,
+                supports_sparse=getattr(
+                    self.embedding_settings.capabilities, "supports_sparse", None
+                ),
+                supports_colbert=getattr(
+                    self.embedding_settings.capabilities, "supports_colbert", None
+                ),
+            )
+        else:
+            logger.info(
+                f"HybridSearchEngine initialized with embedder: "
+                f"model_id={embedder.model_id}, dims={embedder.dims}"
+            )
 
         # Phase 7C: Log reranker info
         if self.reranker:
@@ -233,6 +375,15 @@ class HybridSearchEngine:
             )
         else:
             logger.info("Reranking disabled (no reranker provided)")
+
+        hybrid_cfg = getattr(self.config.search, "hybrid", None)
+        vector_fields_cfg = getattr(hybrid_cfg, "vector_fields", {"content": 1.0})
+        self.vector_field_weights = dict(vector_fields_cfg or {"content": 1.0})
+        qdrant_cfg = getattr(self.config.search.vector, "qdrant", None)
+        self.qdrant_query_strategy = getattr(
+            qdrant_cfg, "query_strategy", "content_only"
+        )
+        self._max_vector_field = self._determine_max_vector_field()
 
     def search(
         self,
@@ -272,9 +423,10 @@ class HybridSearchEngine:
 
         vector_start = time.time()
         # Pre-Phase 7 B5: Use provider's embed_query method for queries
-        query_vector = self.embedder.embed_query(query_text)
+        base_query_vector = self.embedder.embed_query(query_text)
+        query_vector_payload = self._build_query_vector_payload(base_query_vector)
         vector_seeds = self.vector_store.search(
-            query_vector, k=vector_k, filters=filters
+            query_vector_payload, k=vector_k, filters=filters
         )
         vector_time_ms = (time.time() - vector_start) * 1000
 
@@ -358,6 +510,57 @@ class HybridSearchEngine:
             total_time_ms=total_time_ms,
         )
 
+    def _determine_max_vector_field(self) -> str:
+        """Select the dominant named vector for max_field strategy."""
+        fallback = getattr(self.vector_store, "query_vector_name", "content")
+        field_weights = self.vector_field_weights or {}
+        if not field_weights:
+            return fallback
+        field, weight = max(
+            field_weights.items(),
+            key=lambda item: item[1] if item[1] is not None else 0.0,
+        )
+        if weight is None or weight <= 0:
+            return fallback
+        return field
+
+    def _build_query_vector_payload(
+        self, base_vector: List[float]
+    ) -> Union[List[float], Dict[str, List[float]]]:
+        """Build query vector payload according to configured strategy."""
+        if not isinstance(self.vector_store, QdrantVectorStore):
+            return base_vector
+        if not getattr(self.vector_store, "use_named_vectors", False):
+            return base_vector
+
+        strategy_value = getattr(
+            self.qdrant_query_strategy, "value", self.qdrant_query_strategy
+        )
+        base_list = list(base_vector)
+
+        if strategy_value == "weighted":
+            payload: Dict[str, List[float]] = {}
+            for field, weight in self.vector_field_weights.items():
+                if weight is None or weight <= 0:
+                    continue
+                if weight == 1.0:
+                    payload[field] = list(base_list)
+                else:
+                    payload[field] = [val * weight for val in base_list]
+            if payload:
+                return payload
+            target_field = getattr(self.vector_store, "query_vector_name", "content")
+            return {target_field: base_list}
+
+        if strategy_value == "max_field":
+            target_field = self._max_vector_field or getattr(
+                self.vector_store, "query_vector_name", "content"
+            )
+            return {target_field: base_list}
+
+        target_field = getattr(self.vector_store, "query_vector_name", "content")
+        return {target_field: base_list}
+
     def _expand_from_seeds(self, seeds: List[SearchResult]) -> List[SearchResult]:
         """
         Expand from seed nodes via typed relationships (1-2 hops).
@@ -369,6 +572,7 @@ class HybridSearchEngine:
 
         # Controlled expansion query with depth limit
         # Note: max_hops must be a literal in the pattern, not a parameter
+        metadata_projection = build_metadata_projection("target")
         expansion_query = f"""
         UNWIND $seed_ids AS seed_id
         MATCH (seed {{id: seed_id}})
@@ -377,7 +581,7 @@ class HybridSearchEngine:
         WITH DISTINCT target, min(length(path)) AS dist, seed.id AS seed_id
         WHERE dist <= {self.max_hops}
         RETURN target.id AS id, dist, labels(target)[0] AS label,
-               properties(target) AS metadata, seed_id
+               {metadata_projection} AS metadata, seed_id
         ORDER BY dist ASC
         LIMIT 50
         """
@@ -386,7 +590,11 @@ class HybridSearchEngine:
 
         try:
             with self.neo4j_driver.session() as session:
-                result = session.run(expansion_query, seed_ids=seed_ids)
+                result = session.run(
+                    expansion_query,
+                    seed_ids=seed_ids,
+                    metadata_text_limit=METADATA_TEXT_LIMIT,
+                )
 
                 for record in result:
                     expanded_results.append(
@@ -418,7 +626,9 @@ class HybridSearchEngine:
         seed_ids = [s.node_id for s in seeds[:5]]  # Limit to top 5
 
         # Find shortest paths between seeds
-        path_query = """
+        metadata_projection = build_metadata_projection("node")
+        path_query = (
+            """
         UNWIND $ids AS a
         UNWIND $ids AS b
         WITH DISTINCT a, b WHERE a < b
@@ -430,15 +640,22 @@ class HybridSearchEngine:
         WITH DISTINCT node, min(len) AS min_dist
         WHERE node.id NOT IN $ids  // Don't return seeds again
         RETURN node.id AS id, labels(node)[0] AS label,
-               properties(node) AS metadata, min_dist AS dist
+               """
+            + metadata_projection
+            + """ AS metadata, min_dist AS dist
         LIMIT 30
         """
+        )
 
         bridge_results = []
 
         try:
             with self.neo4j_driver.session() as session:
-                result = session.run(path_query, ids=seed_ids)
+                result = session.run(
+                    path_query,
+                    ids=seed_ids,
+                    metadata_text_limit=METADATA_TEXT_LIMIT,
+                )
 
                 for record in result:
                     bridge_results.append(

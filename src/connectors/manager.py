@@ -4,6 +4,7 @@ Handles registration, scheduling, and monitoring of all connectors.
 """
 
 import asyncio
+import contextlib
 import logging
 from typing import Dict, List, Optional
 
@@ -148,7 +149,7 @@ class ConnectorManager:
         while self.running:
             try:
                 # Check for backpressure
-                if self.queue.is_backpressure():
+                if await self.queue.is_backpressure():
                     logger.warning(
                         f"Queue backpressure detected, pausing {name} polling"
                     )
@@ -177,6 +178,15 @@ class ConnectorManager:
             stats.append(connector.get_stats())
         return stats
 
-    def get_queue_stats(self) -> Dict:
+    async def get_queue_stats(self) -> Dict:
         """Get ingestion queue statistics."""
-        return self.queue.get_stats()
+        return await self.queue.get_stats()
+
+    def close(self) -> None:
+        """Close Redis connections held by the manager."""
+        with contextlib.suppress(Exception):
+            if hasattr(self.redis, "close"):
+                self.redis.close()
+        with contextlib.suppress(Exception):
+            if hasattr(self.redis, "connection_pool"):
+                self.redis.connection_pool.disconnect()

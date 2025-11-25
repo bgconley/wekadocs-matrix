@@ -9,7 +9,7 @@ from typing import Dict
 
 from neo4j import Driver
 
-from .config import Config
+from .config import Config, get_embedding_settings
 from .observability import get_logger
 
 logger = get_logger(__name__)
@@ -225,9 +225,9 @@ def create_vector_indexes(session, config: Config) -> Dict[str, any]:
     Returns:
         Dict with creation status
     """
-    embedding_config = config.embedding
-    dims = embedding_config.dims
-    similarity = embedding_config.similarity.upper()
+    settings = get_embedding_settings(config)
+    dims = settings.dims
+    similarity = settings.similarity.upper()
 
     # Map config similarity to Neo4j similarity function
     similarity_map = {

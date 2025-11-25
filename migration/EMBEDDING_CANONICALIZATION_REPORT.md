@@ -92,6 +92,10 @@ Successfully canonicalized embedding field names across the GraphRAG system to e
 - **Config Field:** `embedding_model` (kept for backward compatibility)
 - **Persisted As:** `embedding_version` (canonical name in stores)
 
+### BGE-M3 Service Requirements
+- `BGE_M3_API_URL` must point to the running BGEM3FlagModel HTTP service before enabling the `bge_m3` profile.
+- `BGE_M3_CLIENT_PATH` must resolve to the canonical `/Users/brennanconley/vibecode/bge-m3-custom/src` directory so the embedding client can be imported read-only during migrations.
+
 ## Files Modified
 
 ### Core Files

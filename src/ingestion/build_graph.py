@@ -10,15 +10,15 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import redis
 from neo4j import Driver
-from qdrant_client.http.models import PayloadSchemaType
+from qdrant_client.http.models import PayloadSchemaType, SparseVector
 from qdrant_client.models import (
-    Distance,
     HnswConfigDiff,
     OptimizersConfigDiff,
+    SparseVectorParams,
     VectorParams,
 )
 
@@ -27,11 +27,17 @@ from src.ingestion.chunk_assembler import get_chunk_assembler
 # Phase 7E-4: Monitoring imports
 from src.monitoring.metrics import MetricsCollector
 from src.monitoring.slos import check_slos_and_log
+from src.providers.factory import ProviderFactory
 from src.shared.chunk_utils import (
     create_chunk_metadata,
     validate_chunk_schema,
 )
-from src.shared.config import Config
+from src.shared.config import (
+    Config,
+    get_embedding_settings,
+    get_expected_namespace_suffix,
+    get_settings,
+)
 from src.shared.embedding_fields import (
     canonicalize_embedding_metadata,
     ensure_no_embedding_model_in_payload,
@@ -42,17 +48,26 @@ from src.shared.observability.metrics import (
     chunk_token_distribution,
     chunks_created_total,
     chunks_oversized_total,
+    embedding_profile_guard_events_total,
     ingestion_duration_seconds,
 )
+from src.shared.qdrant_schema import build_qdrant_schema
 from src.shared.schema import ensure_schema_version
 
 logger = get_logger(__name__)
+GRAPH_BUILDER_INIT_LOGGED = False
 
 
 class GraphBuilder:
     """Builds graph from parsed documents, sections, and entities."""
 
-    def __init__(self, driver: Driver, config: Config, qdrant_client=None):
+    def __init__(
+        self,
+        driver: Driver,
+        config: Config,
+        qdrant_client=None,
+        strict_mode: Optional[bool] = None,
+    ):
         self.driver = driver
         self.config = config
 
@@ -73,16 +88,56 @@ class GraphBuilder:
             self.qdrant_client = None
 
         self.embedder = None
-        self.embedding_version = config.embedding.version
+        self.embedding_settings = get_embedding_settings(config)
+        self.embedding_version = self.embedding_settings.version
+        self.embedding_dims = self.embedding_settings.dims or 0
+        runtime_settings = get_settings()
+        self.namespace_mode = getattr(
+            runtime_settings, "embedding_namespace_mode", "none"
+        )
         self.vector_primary = config.search.vector.primary
         self.dual_write = config.search.vector.dual_write
         self.expected_schema_version = (
             getattr(config.graph_schema, "version", None) if config else None
         )
         self._schema_version_verified = False
+        self._profile_alignment_verified = False
         self.include_entity_vector = (
             os.getenv("QDRANT_INCLUDE_ENTITY_VECTOR", "true").lower() == "true"
         )
+        self.manage_qdrant_on_init = (
+            os.getenv("MANAGE_QDRANT_SCHEMA_ON_INIT", "false").lower() == "true"
+        )
+        global GRAPH_BUILDER_INIT_LOGGED
+        if not GRAPH_BUILDER_INIT_LOGGED:
+            search_cfg = getattr(config, "search", None)
+            logger.info(
+                "GraphBuilder initialized",
+                extra={
+                    "embedding_profile": getattr(
+                        self.embedding_settings, "profile", None
+                    ),
+                    "embedding_provider": getattr(
+                        self.embedding_settings, "provider", None
+                    ),
+                    "embedding_model": getattr(
+                        self.embedding_settings, "model_id", None
+                    ),
+                    "embedding_version": getattr(
+                        self.embedding_settings, "version", None
+                    ),
+                    "embedding_namespace_mode": self.namespace_mode,
+                    "bm25_index_name": getattr(
+                        getattr(search_cfg, "bm25", None), "index_name", None
+                    ),
+                    "qdrant_collection_name": getattr(
+                        getattr(getattr(search_cfg, "vector", None), "qdrant", None),
+                        "collection_name",
+                        None,
+                    ),
+                },
+            )
+            GRAPH_BUILDER_INIT_LOGGED = True
 
         # Phase 7C.7: Fresh start with 1024-D (Session 06-08)
         # No dual-write complexity - starting fresh with Jina v4 @ 1024-D
@@ -90,6 +145,14 @@ class GraphBuilder:
         # Ensure Qdrant collections exist if using Qdrant
         if self.qdrant_client and (self.vector_primary == "qdrant" or self.dual_write):
             self._ensure_qdrant_collection()
+
+        # Ensure Neo4j vector index and schema metadata align with active profile
+        self._ensure_neo4j_vector_index()
+        self._reconcile_schema_version_embedding_metadata()
+
+        if strict_mode is None:
+            strict_mode = runtime_settings.embedding_strict_mode
+        self._strict_mode_enabled = bool(strict_mode)
 
     def _validate_schema_version(self, session) -> None:
         """
@@ -106,6 +169,54 @@ class GraphBuilder:
 
         ensure_schema_version(self.driver, self.expected_schema_version)
         self._schema_version_verified = True
+
+    def _enforce_profile_guard(self) -> None:
+        """Detect and optionally block ingestion if legacy embeddings persist."""
+        if self._profile_alignment_verified:
+            return
+        # When namespace isolation is enabled, we don’t enforce cross-profile drift
+        # because each profile is intended to have its own storage “home”.
+        if str(self.namespace_mode).lower() not in {"", "none", "disabled"}:
+            self._profile_alignment_verified = True
+            embedding_profile_guard_events_total.labels(
+                profile=self.embedding_settings.profile or "legacy",
+                outcome="namespaced",
+            ).inc()
+            return
+        mismatched_ids: List[str] = []
+        query = """
+        MATCH (s:Section)
+        WHERE s.embedding_version IS NOT NULL AND s.embedding_version <> $version
+        RETURN s.id AS id
+        LIMIT 5
+        """
+        with self.driver.session() as session:
+            result = session.run(query, version=self.embedding_settings.version)
+            mismatched_ids = [record["id"] for record in result]
+
+        if mismatched_ids:
+            message = (
+                "Embedding metadata drift detected for current profile "
+                f"{self.embedding_settings.profile}: found Sections with older "
+                f"embedding_version values (examples: {', '.join(mismatched_ids)}). "
+                "Re-ingest or reconcile existing data before proceeding."
+            )
+            outcome = "blocked" if self._strict_mode_enabled else "warned"
+            embedding_profile_guard_events_total.labels(
+                profile=self.embedding_settings.profile or "legacy",
+                outcome=outcome,
+            ).inc()
+            if self._strict_mode_enabled:
+                raise RuntimeError(
+                    message + " EMBEDDING_STRICT_MODE blocked ingestion."
+                )
+            logger.warning(message)
+        else:
+            embedding_profile_guard_events_total.labels(
+                profile=self.embedding_settings.profile or "legacy",
+                outcome="clean",
+            ).inc()
+        self._profile_alignment_verified = True
 
     def upsert_document(
         self,
@@ -170,6 +281,7 @@ class GraphBuilder:
         with self.driver.session() as session:
             # Fail fast if schema version drifts from configuration
             self._validate_schema_version(session)
+            self._enforce_profile_guard()
 
             # Step 1: Upsert Document node
             self._upsert_document_node(session, document)
@@ -391,6 +503,7 @@ class GraphBuilder:
                 s.order = chunk.order,
                 s.heading = chunk.heading,
                 s.parent_section_id = chunk.parent_section_id,
+                s.parent_section_original_id = chunk.parent_section_original_id,
                 s.text = chunk.text,
                 s.tokens = chunk.tokens,
                 s.token_count = chunk.token_count,
@@ -649,13 +762,45 @@ class GraphBuilder:
             """,
         }
 
-        results: Dict[str, int] = {}
+        log_rel_counts = (
+            os.getenv(
+                "LOG_RELATIONSHIP_COUNTS", os.getenv("INGEST_LOG_REL_COUNTS", "false")
+            ).lower()
+            == "true"
+        )
+        results: Dict[str, Dict[str, int]] = {}
         for name, query in queries.items():
             try:
-                record = session.run(query, doc_id=document_id).single()
-                results[name] = (
-                    int(record["count"]) if record and "count" in record else 0
+                result = session.run(query, doc_id=document_id)
+                record = None
+                try:
+                    record = result.single()
+                except Exception:
+                    record = None
+                summary = result.consume()
+                counters = summary.counters
+                returned = int(record["count"]) if record and "count" in record else 0
+                created = counters.relationships_created if counters else 0
+                deleted = counters.relationships_deleted if counters else 0
+                verification = None
+                if log_rel_counts:
+                    verification = self._verify_relationship_count(
+                        session, name, document_id
+                    )
+                self._log_relationship_builder(
+                    builder=name,
+                    document_id=document_id,
+                    returned=returned,
+                    created=created,
+                    deleted=deleted,
+                    verification=verification,
                 )
+                results[name] = {
+                    "returned": returned,
+                    "created": created,
+                    "deleted": deleted,
+                    "verification": verification or 0,
+                }
             except Exception as exc:
                 logger.warning(
                     "Typed relationship builder failed",
@@ -663,14 +808,78 @@ class GraphBuilder:
                     builder=name,
                     error=str(exc),
                 )
-                results[name] = 0
+                results[name] = {
+                    "returned": 0,
+                    "created": 0,
+                    "deleted": 0,
+                    "verification": 0,
+                }
 
         logger.debug(
             "Typed relationship builders executed",
             document_id=document_id,
-            counts=results,
+            counts={
+                name: {
+                    "returned": data["returned"],
+                    "created": data["created"],
+                    "deleted": data["deleted"],
+                    "verification": data["verification"],
+                }
+                for name, data in results.items()
+            },
         )
-        return results
+
+    def _log_relationship_builder(
+        self,
+        *,
+        builder: str,
+        document_id: str,
+        returned: int,
+        created: int,
+        deleted: int,
+        verification: Optional[int],
+    ) -> None:
+        logger.debug(
+            "Relationship builder stats",
+            builder=builder,
+            document_id=document_id,
+            returned=returned,
+            created=created,
+            deleted=deleted,
+            verification=verification,
+        )
+
+    def _verify_relationship_count(
+        self, session, builder: str, document_id: str
+    ) -> int:
+        if builder == "child_of":
+            query = """
+            MATCH (c:Chunk)-[:CHILD_OF]->(:Section)
+            WHERE coalesce(c.document_id, c.doc_id) = $doc_id
+            RETURN count(*) AS count
+            """
+        elif builder == "parent_of":
+            query = """
+            MATCH (:Section)-[:PARENT_OF]->(child:Section)
+            WHERE coalesce(child.document_id, child.doc_id) = $doc_id
+            RETURN count(*) AS count
+            """
+        elif builder == "next_prev":
+            query = """
+            MATCH (c:Chunk)-[:NEXT]->(:Chunk)
+            WHERE coalesce(c.document_id, c.doc_id) = $doc_id
+            RETURN count(*) AS count
+            """
+        elif builder == "same_heading":
+            query = """
+            MATCH (c:Chunk)-[:SAME_HEADING]->(:Chunk)
+            WHERE coalesce(c.document_id, c.doc_id) = $doc_id
+            RETURN count(*) AS count
+            """
+        else:
+            return 0
+        record = session.run(query, doc_id=document_id).single()
+        return int(record["count"]) if record and "count" in record else 0
 
     def _repair_incorrect_combined_flags(self, session, document_id: str) -> int:
         """
@@ -985,38 +1194,26 @@ class GraphBuilder:
 
         # Phase 7C.7: Initialize embedding provider from factory
         if not self.embedder:
-            from src.providers.factory import ProviderFactory
-
             logger.info(
                 "Initializing embedding provider",
-                provider=self.config.embedding.provider,
-                model=self.config.embedding.embedding_model,
-                dims=self.config.embedding.dims,
+                provider=self.embedding_settings.provider,
+                model=self.embedding_settings.model_id,
+                dims=self.embedding_settings.dims,
+                profile=self.embedding_settings.profile,
             )
 
-            # Use ProviderFactory to create embedding provider with explicit params
-            # so we honor per-call overrides passed via config and avoid reading
-            # from the global singleton inside the factory.
             self.embedder = ProviderFactory.create_embedding_provider(
-                provider=self.config.embedding.provider,
-                model=self.config.embedding.embedding_model,
-                dims=self.config.embedding.dims,
-                task=self.config.embedding.task,
+                settings=self.embedding_settings
             )
 
-            # Validate dimensions match configuration; if not, align the local
-            # (per-call) config to the provider to avoid hard failures when an
-            # override changes the model/dimensions. This does not mutate the
-            # global config because we pass a deep-copied config per call.
-            if self.embedder.dims != self.config.embedding.dims:
+            if self.embedder.dims != self.embedding_dims:
                 logger.warning(
-                    "Embedding dims mismatch; aligning local config to provider",
-                    configured_dims=self.config.embedding.dims,
+                    "Embedding dims mismatch; aligning local settings to provider",
+                    configured_dims=self.embedding_dims,
                     provider_dims=self.embedder.dims,
                     model=self.embedder.model_id,
                 )
-                # Align local config to provider dims for the remainder of this run
-                self.config.embedding.dims = self.embedder.dims
+                self.embedding_dims = self.embedder.dims
 
             logger.info(
                 "Embedding provider initialized",
@@ -1083,24 +1280,104 @@ class GraphBuilder:
             title_texts.append(self._build_title_text_for_embedding(section))
             sections_to_embed.append(section)
 
-        # Generate embeddings in batch
+        # Generate embeddings with token-budgeted micro-batches (do not split chunks)
         if sections_to_embed:
-            # Generate embeddings using configured provider (Jina v3 @ 1024-D)
-            content_embeddings = self.embedder.embed_documents(content_texts)
-            title_embeddings = self.embedder.embed_documents(title_texts)
+            batch_budget = int(os.getenv("EMBED_BATCH_MAX_TOKENS", "7000") or "7000")
+            if batch_budget <= 0:
+                batch_budget = 7000
+
+            batches: List[List[int]] = []
+            current: List[int] = []
+            current_tokens = 0
+            for idx, section in enumerate(sections_to_embed):
+                tokens = (
+                    section.get("token_count")
+                    or section.get("tokens")
+                    or len(content_texts[idx].split())
+                )
+                if current and current_tokens + tokens > batch_budget:
+                    batches.append(current)
+                    current = [idx]
+                    current_tokens = tokens
+                else:
+                    current.append(idx)
+                    current_tokens += tokens
+            if current:
+                batches.append(current)
+
+            content_embeddings: List[List[float]] = []
+            title_embeddings: List[List[float]] = []
+            sparse_embeddings: Optional[List[dict]] = (
+                []
+                if getattr(
+                    self.embedding_settings.capabilities, "supports_sparse", False
+                )
+                else None
+            )
+            colbert_embeddings: Optional[List[List[List[float]]]] = (
+                []
+                if getattr(
+                    self.embedding_settings.capabilities, "supports_colbert", False
+                )
+                else None
+            )
+
+            for batch in batches:
+                batch_content = [content_texts[i] for i in batch]
+                batch_title = [title_texts[i] for i in batch]
+                content_embeddings.extend(self.embedder.embed_documents(batch_content))
+                title_embeddings.extend(self.embedder.embed_documents(batch_title))
+
+                if sparse_embeddings is not None and hasattr(
+                    self.embedder, "embed_sparse"
+                ):
+                    try:
+                        sparse_embeddings.extend(
+                            self.embedder.embed_sparse(batch_content)
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Sparse embedding generation failed; continuing without sparse vectors",
+                            error=str(exc),
+                        )
+                        sparse_embeddings = None
+
+                if colbert_embeddings is not None and hasattr(
+                    self.embedder, "embed_colbert"
+                ):
+                    try:
+                        colbert_embeddings.extend(
+                            self.embedder.embed_colbert(batch_content)
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "ColBERT embedding generation failed; continuing without ColBERT vectors",
+                            error=str(exc),
+                        )
+                        colbert_embeddings = None
 
             # Process each section with its embeddings
             for idx, section in enumerate(sections_to_embed):
                 embedding = content_embeddings[idx]
                 title_embedding = title_embeddings[idx]
+                sparse_vector = (
+                    sparse_embeddings[idx]
+                    if sparse_embeddings is not None and idx < len(sparse_embeddings)
+                    else None
+                )
+                colbert_vector = (
+                    colbert_embeddings[idx]
+                    if colbert_embeddings is not None and idx < len(colbert_embeddings)
+                    else None
+                )
 
                 # Phase 7E-1: CRITICAL - Comprehensive validation layer
 
                 # Validate 1: Dimension check (1024-D for Jina v3)
-                if len(embedding) != self.config.embedding.dims:
+                if len(embedding) != self.embedding_dims:
                     raise ValueError(
                         f"Embedding dimension mismatch for section {section['id']}: "
-                        f"expected {self.config.embedding.dims}-D, got {len(embedding)}-D. "
+                        f"expected {self.embedding_dims}-D, got {len(embedding)}-D. "
                         "Ingestion blocked - dimension safety enforced."
                     )
 
@@ -1120,14 +1397,20 @@ class GraphBuilder:
 
                 # Validate 4: Embedding metadata completeness
                 test_metadata = canonicalize_embedding_metadata(
-                    embedding_model=self.embedding_version,
+                    embedding_model=self.embedding_settings.version,
                     dimensions=len(embedding),
                     provider=self.embedder.provider_name,
-                    task=getattr(self.embedder, "task", "retrieval.passage"),
+                    task=getattr(self.embedder, "task", self.embedding_settings.task),
+                    profile=self.embedding_settings.profile,
                     timestamp=datetime.utcnow(),
                 )
 
-                if not validate_embedding_metadata(test_metadata):
+                if not validate_embedding_metadata(
+                    test_metadata,
+                    expected_dimensions=self.embedding_dims,
+                    expected_provider=self.embedding_settings.provider,
+                    expected_version=self.embedding_settings.version,
+                ):
                     raise ValueError(
                         f"Section {section['id']} has invalid embedding metadata. "
                         "Ingestion blocked - metadata validation failed."
@@ -1150,17 +1433,26 @@ class GraphBuilder:
                         vectors["entity"] = embedding
 
                     self._upsert_to_qdrant(
-                        section["id"], vectors, section, document, "Section"
+                        section["id"],
+                        vectors,
+                        section,
+                        document,
+                        "Section",
+                        sparse_vector=sparse_vector,
+                        colbert_vectors=colbert_vector,
                     )
                     stats["upserted"] += 1
 
                     # Phase 7C.7: Update Neo4j with required embedding metadata
                     # Use canonicalization helper to ensure consistent field naming
                     embedding_metadata = canonicalize_embedding_metadata(
-                        embedding_model=self.embedding_version,  # Maps to embedding_version
+                        embedding_model=self.embedding_settings.version,
                         dimensions=len(embedding),
                         provider=self.embedder.provider_name,
-                        task=getattr(self.embedder, "task", "retrieval.passage"),
+                        task=getattr(
+                            self.embedder, "task", self.embedding_settings.task
+                        ),
+                        profile=self.embedding_settings.profile,
                         timestamp=datetime.utcnow(),
                     )
                     self._upsert_section_embedding_metadata(
@@ -1182,7 +1474,13 @@ class GraphBuilder:
                         if self.include_entity_vector:
                             vectors["entity"] = embedding
                         self._upsert_to_qdrant(
-                            section["id"], vectors, section, document, "Section"
+                            section["id"],
+                            vectors,
+                            section,
+                            document,
+                            "Section",
+                            sparse_vector=sparse_vector,
+                            colbert_vectors=colbert_vector,
                         )
 
         logger.info("Embeddings processed", stats=stats)
@@ -1207,9 +1505,8 @@ class GraphBuilder:
         return text[:256]
 
     def _compute_text_hash(self, text: str) -> str:
-        if not text:
-            return ""
-        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+        value = text or ""
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
     def _compute_shingle_hash(self, text: str, n: int = 8) -> str:
         if not text:
@@ -1246,83 +1543,46 @@ class GraphBuilder:
         Ensure Qdrant collection exists with multi-vector schema + payload indexes.
         """
         collection = self.config.search.vector.qdrant.collection_name
-        dimensions = self.config.embedding.dims
+        expected_suffix = get_expected_namespace_suffix(
+            self.embedding_settings, self.namespace_mode
+        )
+        if expected_suffix and isinstance(collection, str):
+            if not collection.endswith(expected_suffix):
+                raise RuntimeError(
+                    f"Qdrant collection {collection!r} does not match expected namespace suffix {expected_suffix!r}"
+                )
 
         try:
-            vectors_config = {
-                "content": VectorParams(
-                    size=dimensions,
-                    distance=Distance.COSINE,
+            schema_plan = build_qdrant_schema(
+                self.embedding_settings,
+                include_entity=self.include_entity_vector,
+                enable_sparse=getattr(
+                    self.config.search.vector.qdrant, "enable_sparse", False
                 ),
-                "title": VectorParams(
-                    size=dimensions,
-                    distance=Distance.COSINE,
+                enable_colbert=getattr(
+                    self.config.search.vector.qdrant, "enable_colbert", False
                 ),
-            }
-            if self.include_entity_vector:
-                vectors_config["entity"] = VectorParams(
-                    size=dimensions,
-                    distance=Distance.COSINE,
-                )
+            )
+            vectors_config = schema_plan.vectors_config
+            sparse_vectors_config = schema_plan.sparse_vectors_config
+            payload_fields = schema_plan.payload_indexes
+            if schema_plan.notes:
+                for note in schema_plan.notes:
+                    logger.info("Qdrant schema note", note=note)
 
             collections = {
                 c.name for c in self.qdrant_client.get_collections().collections
             }
             if collection not in collections:
-                self.qdrant_client.create_collection(
-                    collection_name=collection,
-                    vectors_config=vectors_config,
-                    hnsw_config=HnswConfigDiff(
-                        m=48,
-                        ef_construct=256,
-                        full_scan_threshold=10000,
-                        max_indexing_threads=0,
-                        on_disk=False,
-                    ),
-                    optimizer_config=OptimizersConfigDiff(
-                        default_segment_number=2,
-                        indexing_threshold=20000,
-                        deleted_threshold=0.2,
-                        vacuum_min_vector_number=2000,
-                        max_optimization_threads=1,
-                        flush_interval_sec=5,
-                    ),
-                    shard_number=1,
-                    replication_factor=1,
-                    write_consistency_factor=1,
-                    on_disk_payload=True,
+                self._create_qdrant_collection(
+                    collection, vectors_config, sparse_vectors_config
                 )
-                logger.info("Created Qdrant collection", collection=collection)
             else:
-                try:
-                    self.qdrant_client.update_collection(
-                        collection_name=collection,
-                        hnsw_config=HnswConfigDiff(
-                            m=48,
-                            ef_construct=256,
-                            full_scan_threshold=10000,
-                        ),
-                        optimizer_config=OptimizersConfigDiff(
-                            default_segment_number=2,
-                            indexing_threshold=20000,
-                            deleted_threshold=0.2,
-                            vacuum_min_vector_number=2000,
-                            max_optimization_threads=1,
-                            flush_interval_sec=5,
-                        ),
-                    )
-                    logger.info(
-                        "Updated Qdrant collection config (non-destructive)",
-                        collection=collection,
-                    )
-                except Exception as exc:
-                    logger.debug(
-                        "Qdrant update_collection not supported; continuing",
-                        collection=collection,
-                        error=str(exc),
-                    )
+                self._reconcile_qdrant_collection(
+                    collection, vectors_config, sparse_vectors_config
+                )
 
-            self._ensure_qdrant_payload_indexes(collection)
+            self._ensure_qdrant_payload_indexes(collection, payload_fields)
         except Exception as e:
             logger.error(
                 "Failed to ensure Qdrant collection",
@@ -1331,31 +1591,114 @@ class GraphBuilder:
             )
             raise
 
-    def _ensure_qdrant_payload_indexes(self, collection: str) -> None:
-        """Ensure payload indexes exist for canonical hybrid fields."""
-        fields = [
-            ("id", PayloadSchemaType.KEYWORD),
-            ("document_id", PayloadSchemaType.KEYWORD),
-            ("doc_id", PayloadSchemaType.KEYWORD),
-            ("parent_section_id", PayloadSchemaType.KEYWORD),
-            ("order", PayloadSchemaType.INTEGER),
-            ("heading", PayloadSchemaType.TEXT),
-            ("updated_at", PayloadSchemaType.INTEGER),
-            ("doc_tag", PayloadSchemaType.KEYWORD),
-            ("snapshot_scope", PayloadSchemaType.KEYWORD),
-            ("is_microdoc", PayloadSchemaType.BOOL),
-            ("token_count", PayloadSchemaType.INTEGER),
-            ("tenant", PayloadSchemaType.KEYWORD),
-            ("lang", PayloadSchemaType.KEYWORD),
-            ("version", PayloadSchemaType.KEYWORD),
-            ("source_path", PayloadSchemaType.KEYWORD),
-            ("embedding_version", PayloadSchemaType.KEYWORD),
-            ("embedding_provider", PayloadSchemaType.KEYWORD),
-            ("embedding_dimensions", PayloadSchemaType.INTEGER),
-            ("text_hash", PayloadSchemaType.KEYWORD),
-            ("shingle_hash", PayloadSchemaType.KEYWORD),
-        ]
+    def _ensure_neo4j_vector_index(self) -> None:
+        """
+        Auto-provision the namespaced Neo4j vector index for the active profile.
 
+        Drops conflicting vector indexes on Section.vector_embedding to avoid dual index issues.
+        """
+        if not self.driver:
+            return
+
+        index_name = getattr(self.config.search.vector.neo4j, "index_name", None)
+        dims = self.embedding_dims
+        if not index_name or not dims:
+            return
+
+        with self.driver.session() as session:
+            try:
+                # Drop conflicting vector indexes on Section.vector_embedding
+                check_query = """
+                SHOW INDEXES
+                YIELD name, type, entityType, labelsOrTypes, properties
+                WHERE type = 'VECTOR'
+                  AND entityType = 'NODE'
+                  AND 'Section' IN labelsOrTypes
+                  AND 'vector_embedding' IN properties
+                RETURN name
+                """
+                existing = [r["name"] for r in session.run(check_query)]
+                for existing_name in existing:
+                    if existing_name != index_name:
+                        logger.info(
+                            "Dropping conflicting Neo4j vector index",
+                            extra={"index": existing_name},
+                        )
+                        session.run(f"DROP INDEX {existing_name} IF EXISTS")
+
+                create_query = f"""
+                CREATE VECTOR INDEX `{index_name}` IF NOT EXISTS
+                FOR (s:Section) ON (s.vector_embedding)
+                OPTIONS {{
+                  indexConfig: {{
+                    `vector.dimensions`: {dims},
+                    `vector.similarity_function`: 'COSINE',
+                    `vector.hnsw.m`: 16,
+                    `vector.hnsw.ef_construction`: 100,
+                    `vector.quantization.enabled`: true
+                  }}
+                }}
+                """
+                session.run(create_query)
+                logger.info(
+                    "Ensured Neo4j vector index exists",
+                    extra={"index": index_name, "dimensions": dims},
+                )
+            except Exception as exc:  # pragma: no cover - defensive log path
+                logger.warning(
+                    "Failed to auto-create Neo4j vector index",
+                    extra={"index": index_name, "error": str(exc)},
+                )
+
+    def _reconcile_schema_version_embedding_metadata(self) -> None:
+        """
+        Update SchemaVersion node to reflect the active embedding profile.
+        """
+        if not self.driver:
+            return
+
+        settings = self.embedding_settings
+        schema_version = (
+            self.expected_schema_version
+            or getattr(self.config.graph_schema, "version", None)
+            or "v2.2"
+        )
+
+        query = """
+        MERGE (s:SchemaVersion {id: 'singleton'})
+        SET s.embedding_provider = $provider,
+            s.embedding_model    = $model,
+            s.version            = $schema_version,
+            s.vector_dimensions  = $dims,
+            s.updated_at         = datetime()
+        """
+
+        try:
+            with self.driver.session() as session:
+                session.run(
+                    query,
+                    provider=getattr(settings, "provider", None),
+                    model=getattr(settings, "model_id", None),
+                    schema_version=schema_version,
+                    dims=self.embedding_dims,
+                )
+                logger.info(
+                    "Updated SchemaVersion embedding metadata",
+                    extra={
+                        "version": schema_version,
+                        "dimensions": self.embedding_dims,
+                    },
+                )
+        except Exception as exc:  # pragma: no cover - defensive log path
+            logger.warning(
+                "Failed to update SchemaVersion metadata",
+                extra={"error": str(exc)},
+            )
+
+    def _ensure_qdrant_payload_indexes(
+        self, collection: str, fields: Sequence[tuple[str, PayloadSchemaType]]
+    ) -> None:
+        """Ensure payload indexes exist for canonical hybrid fields."""
         for field_name, schema in fields:
             try:
                 self.qdrant_client.create_payload_index(
@@ -1366,6 +1709,166 @@ class GraphBuilder:
             except Exception:
                 continue
 
+    def _create_qdrant_collection(
+        self,
+        collection: str,
+        vectors_config: Dict[str, VectorParams],
+        sparse_vectors_config: Optional[Dict[str, SparseVectorParams]] = None,
+    ) -> None:
+        kwargs = {
+            "collection_name": collection,
+            "vectors_config": vectors_config,
+            "hnsw_config": HnswConfigDiff(
+                m=48,
+                ef_construct=256,
+                full_scan_threshold=10000,
+                max_indexing_threads=0,
+                on_disk=False,
+            ),
+            "optimizer_config": OptimizersConfigDiff(
+                default_segment_number=2,
+                indexing_threshold=20000,
+                deleted_threshold=0.2,
+                vacuum_min_vector_number=2000,
+                max_optimization_threads=1,
+                flush_interval_sec=5,
+            ),
+            "shard_number": 1,
+            "replication_factor": 1,
+            "write_consistency_factor": 1,
+            "on_disk_payload": True,
+        }
+        if sparse_vectors_config:
+            kwargs["sparse_vectors_config"] = sparse_vectors_config
+        try:
+            self.qdrant_client.create_collection(**kwargs)
+        except AssertionError as exc:
+            if "optimizer_config" in str(exc):
+                kwargs.pop("optimizer_config", None)
+                self.qdrant_client.create_collection(**kwargs)
+            else:
+                raise
+        logger.info("Created Qdrant collection", collection=collection)
+
+    def _reconcile_qdrant_collection(
+        self,
+        collection: str,
+        vectors_config: Dict[str, VectorParams],
+        sparse_vectors_config: Optional[Dict[str, SparseVectorParams]] = None,
+    ) -> None:
+        info_payload = self._get_qdrant_collection_payload(collection)
+        vectors_meta = (
+            info_payload.get("config", {}).get("params", {}).get("vectors", {})
+        )
+        existing_names, is_single = self._parse_qdrant_vectors_meta(vectors_meta)
+        desired_names = set(vectors_config.keys())
+        allow_recreate = getattr(
+            self.config.search.vector.qdrant, "allow_recreate", False
+        )
+
+        if is_single:
+            logger.warning(
+                "Qdrant collection %s uses single-vector schema; attempting upgrade",
+                collection,
+            )
+            if not self._update_qdrant_vectors_config(collection, vectors_config):
+                self._maybe_recreate_qdrant_collection(
+                    collection,
+                    vectors_config,
+                    allow_recreate,
+                    sparse_vectors_config=sparse_vectors_config,
+                )
+            return
+
+        missing_names = desired_names - existing_names
+        if not missing_names:
+            return
+
+        missing_config = {name: vectors_config[name] for name in missing_names}
+        logger.info(
+            "Adding missing Qdrant named vectors",
+            collection=collection,
+            missing=sorted(missing_names),
+        )
+        if not self._update_qdrant_vectors_config(collection, missing_config):
+            self._maybe_recreate_qdrant_collection(
+                collection,
+                vectors_config,
+                allow_recreate,
+                sparse_vectors_config=sparse_vectors_config,
+            )
+
+    def _get_qdrant_collection_payload(self, collection: str) -> Dict[str, Any]:
+        try:
+            info = self.qdrant_client.get_collection(collection_name=collection)
+            if hasattr(info, "model_dump"):
+                return info.model_dump()
+            if hasattr(info, "dict"):
+                return info.dict()
+        except Exception as exc:
+            logger.debug(
+                "Unable to fetch Qdrant collection metadata",
+                collection=collection,
+                error=str(exc),
+            )
+        return {}
+
+    @staticmethod
+    def _parse_qdrant_vectors_meta(meta: Any) -> (set, bool):
+        """
+        Returns (vector_names, is_single_vector_schema)
+        """
+        if isinstance(meta, dict):
+            # Single-vector schema encodes fields like {"size": 1024, "distance": "Cosine", ...}
+            if "size" in meta:
+                return set(), True
+            return set(meta.keys()), False
+        return set(), True
+
+    def _update_qdrant_vectors_config(
+        self, collection: str, vectors_config: Dict[str, VectorParams]
+    ) -> bool:
+        try:
+            self.qdrant_client.update_collection(
+                collection_name=collection,
+                vectors_config=vectors_config,
+            )
+            logger.info(
+                "Updated Qdrant collection vectors",
+                collection=collection,
+                vectors=list(vectors_config.keys()),
+            )
+            return True
+        except Exception as exc:
+            logger.warning(
+                "Unable to update Qdrant vectors config",
+                collection=collection,
+                error=str(exc),
+            )
+            return False
+
+    def _maybe_recreate_qdrant_collection(
+        self,
+        collection: str,
+        vectors_config: Dict[str, VectorParams],
+        allow_recreate: bool,
+        sparse_vectors_config: Optional[Dict[str, SparseVectorParams]] = None,
+    ) -> None:
+        if not allow_recreate:
+            raise RuntimeError(
+                "Qdrant collection schema is incompatible with multi-vector layout. "
+                "Set search.vector.qdrant.allow_recreate=true to allow automatic "
+                "recreation or migrate the collection manually."
+            )
+        logger.warning(
+            "Recreating Qdrant collection with multi-vector schema",
+            collection=collection,
+        )
+        self.qdrant_client.delete_collection(collection_name=collection)
+        self._create_qdrant_collection(
+            collection, vectors_config, sparse_vectors_config
+        )
+
     def _upsert_to_qdrant(
         self,
         node_id: str,
@@ -1373,6 +1876,9 @@ class GraphBuilder:
         section: Dict,
         document: Dict,
         label: str,
+        *,
+        sparse_vector: Optional[Dict[str, List[float]]] = None,
+        colbert_vectors: Optional[List[List[float]]] = None,
     ):
         """
         Upsert embedding to Qdrant with deterministic UUID mapping.
@@ -1386,6 +1892,16 @@ class GraphBuilder:
             document: Document data
             label: Node label (Section/Chunk)
         """
+        collection = self.config.search.vector.qdrant.collection_name
+        expected_suffix = get_expected_namespace_suffix(
+            self.embedding_settings, self.namespace_mode
+        )
+        if expected_suffix and isinstance(collection, str):
+            if not collection.endswith(expected_suffix):
+                raise RuntimeError(
+                    f"Qdrant collection {collection!r} does not match expected namespace suffix {expected_suffix!r}"
+                )
+
         if not self.qdrant_client:
             logger.warning("Qdrant client not available")
             return
@@ -1393,8 +1909,6 @@ class GraphBuilder:
         import uuid
 
         from qdrant_client.models import PointStruct
-
-        collection = self.config.search.vector.qdrant.collection_name
 
         source_uri = document.get("source_uri", "")
         source_path = str(Path(source_uri).parent) if source_uri else ""
@@ -1415,17 +1929,22 @@ class GraphBuilder:
             raise ValueError("Content vector missing for Qdrant upsert.")
 
         embedding_metadata = canonicalize_embedding_metadata(
-            embedding_model=self.embedding_version,
+            embedding_model=self.embedding_settings.version,
             dimensions=len(content_vector),
             provider=self.embedder.provider_name,
-            task=getattr(self.embedder, "task", "retrieval.passage"),
+            task=getattr(self.embedder, "task", self.embedding_settings.task),
+            profile=self.embedding_settings.profile,
             timestamp=datetime.utcnow(),
+            namespace_mode=self.namespace_mode,
+            namespace_suffix=expected_suffix,
+            collection_name=collection,
         )
 
         # Phase 7E-1: Build payload with canonical chunk fields
         payload = {
             # Core identifiers
             "node_id": node_id,  # Chunk ID for matching
+            "kg_id": node_id,  # Explicit graph id for cross-store joins
             "node_label": label,
             "document_id": document_id,
             "doc_id": doc_alias,
@@ -1441,6 +1960,8 @@ class GraphBuilder:
             # Chunk-specific fields (Phase 7E-1)
             "id": node_id,
             "parent_section_id": section.get("parent_section_id"),
+            "parent_section_original_id": section.get("parent_section_original_id"),
+            "parent_chunk_id": section.get("parent_chunk_id"),
             "level": section.get("level", 3),
             "order": section.get("order", 0),
             "heading": section.get("title") or section.get("heading", ""),
@@ -1465,24 +1986,72 @@ class GraphBuilder:
             **embedding_metadata,
         }
 
+        vectors_payload = dict(vectors)
+
+        if sparse_vector:
+            indices = (
+                sparse_vector.get("indices")
+                if isinstance(sparse_vector, dict)
+                else None
+            )
+            values = (
+                sparse_vector.get("values") if isinstance(sparse_vector, dict) else None
+            )
+            if indices and values:
+                vectors_payload["text-sparse"] = SparseVector(
+                    indices=list(indices), values=list(values)
+                )
+        if colbert_vectors:
+            vectors_payload["late-interaction"] = [
+                list(vector) for vector in colbert_vectors
+            ]
+            payload["colbert_vector_count"] = len(colbert_vectors)
+
         # Ensure no legacy embedding_model field in payload
         payload = ensure_no_embedding_model_in_payload(payload)
 
         # CRITICAL: Store original node_id in payload for reconciliation
         # Parity checks will use payload.node_id to match with Neo4j
         text_value = payload.get("text", "")
-        payload["text_hash"] = self._compute_text_hash(text_value)
-        payload["shingle_hash"] = self._compute_shingle_hash(text_value)
+        existing_text_hash = section.get("text_hash")
+        payload["text_hash"] = (
+            existing_text_hash
+            if existing_text_hash
+            else self._compute_text_hash(text_value)
+        )
+        existing_shingle_hash = section.get("shingle_hash")
+        payload["shingle_hash"] = (
+            existing_shingle_hash
+            if existing_shingle_hash
+            else self._compute_shingle_hash(text_value)
+        )
         payload["semantic_metadata"] = self._extract_semantic_metadata(section)
 
         # qdrant-client expects the keyword `vector` even when we supply a named
         # vector dictionary. Passing `vectors=` raises a validation error on older
         # client builds, so always map to `vector`.
-        point = PointStruct(id=point_uuid, vector=vectors, payload=payload)
+        point = PointStruct(id=point_uuid, vector=vectors_payload, payload=payload)
 
-        expected_dims = {
-            name: len(vec) for name, vec in vectors.items() if isinstance(vec, list)
-        }
+        # Optional debug: dump the exact payload structure we're sending to Qdrant.
+        # Disabled by default; enable by setting LOG_QDRANT_DEBUG_PAYLOAD=true (not recommended in production).
+        if os.getenv("LOG_QDRANT_DEBUG_PAYLOAD", "false").lower() == "true":
+            try:  # pragma: no cover - debug aid
+                from qdrant_client.models import PointsList
+
+                points_list = PointsList(points=[point])
+                logger.error(
+                    "Qdrant debug upsert payload",
+                    collection=collection,
+                    points_list=points_list.model_dump(),
+                )
+            except Exception as exc:  # pragma: no cover - best-effort logging
+                logger.error("Qdrant debug payload logging failed", error=str(exc))
+
+        expected_dims = {}
+        for name, vec in vectors_payload.items():
+            dim = self._vector_expected_dim(vec)
+            if dim:
+                expected_dims[name] = dim
 
         # Use validated upsert with dimension checking
         self.qdrant_client.upsert_validated(
@@ -1501,6 +2070,18 @@ class GraphBuilder:
             is_combined=payload["is_combined"],
             original_section_count=len(payload["original_section_ids"]),
         )
+
+    @staticmethod
+    def _vector_expected_dim(vector: Any) -> Optional[int]:
+        """Return the expected dimension for validation (if applicable)."""
+        if isinstance(vector, list):
+            if not vector:
+                return None
+            first = vector[0]
+            if isinstance(first, list):
+                return len(first)
+            return len(vector)
+        return None
 
     def _upsert_to_neo4j_vector(self, node_id: str, embedding: List[float], label: str):
         """Upsert embedding to Neo4j vector property."""
@@ -1561,7 +2142,12 @@ class GraphBuilder:
             metadata: Dict with embedding metadata fields (all required)
         """
         # Validate metadata using canonicalization helper
-        if not validate_embedding_metadata(metadata):
+        if not validate_embedding_metadata(
+            metadata,
+            expected_dimensions=self.embedding_dims,
+            expected_provider=self.embedding_settings.provider,
+            expected_version=self.embedding_settings.version,
+        ):
             raise ValueError(
                 f"Section {node_id} has invalid embedding metadata. "
                 "Ingestion blocked - metadata validation failed."

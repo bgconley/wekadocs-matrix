@@ -77,7 +77,7 @@ class DatabaseCleaner:
 
     # Critical metadata node labels that must be preserved
     PRESERVED_LABELS: Set[str] = {
-        "SchemaVersion",  # Required for health checks
+        "SchemaVersion",  # Required for health checks (e.g., v2_2)
         "SystemMetadata",  # System configuration
         "MigrationHistory",  # Schema migration tracking
         "RelationshipTypesMarker",  # Documents available relationship types
@@ -136,24 +136,26 @@ class DatabaseCleaner:
             self._log_error(f"Failed to load config: {e}")
             sys.exit(1)
 
-        # Track the primary / known Qdrant collections (legacy + new multi-vector)
+        # Track allowed Qdrant collections for cleanup (ingestion data only)
         primary_collection = None
         if self.config and hasattr(self.config.search.vector, "qdrant"):
             primary_collection = (
                 self.config.search.vector.qdrant.collection_name or None
             )
 
-        self.qdrant_known_collections = sorted(
-            {
-                coll_name
-                for coll_name in [
-                    primary_collection,
-                    "chunks",  # legacy single-vector
-                    "chunks_multi",  # new multi-vector collection
-                ]
-                if coll_name
-            }
-        )
+        allowed_bases = {"chunks", "chunks_multi"}
+        self.qdrant_allowed_collections = set()
+
+        if primary_collection:
+            self.qdrant_allowed_collections.add(primary_collection)
+            # If the configured collection is namespaced and starts with a known base,
+            # also allow the base (non-namespaced) for legacy cleanup.
+            for base in allowed_bases:
+                if primary_collection.startswith(base):
+                    self.qdrant_allowed_collections.add(base)
+
+        # Always include legacy bases explicitly
+        self.qdrant_allowed_collections.update(allowed_bases)
 
     def _log(self, message: str, level: str = "info"):
         """Log message to console and report."""
@@ -328,12 +330,8 @@ class DatabaseCleaner:
                     elif label in self.DATA_LABELS:
                         deletable_labels[label] = count
                     else:
-                        # Unknown label - check if it looks like data
-                        self._log(
-                            f"Unknown label '{label}' with {count} nodes - will delete",
-                            "warning",
-                        )
-                        deletable_labels[label] = count
+                        # Unknown labels are preserved by default for safety
+                        preserved_labels[label] = count
 
                 # Get total counts
                 total_nodes_result = session.run("MATCH (n) RETURN count(n) as count")
@@ -523,9 +521,10 @@ class DatabaseCleaner:
         self._log("", "header")
         self._log("Qdrant Vector Cleanup", "header")
         self._log("-" * 60, "header")
-        if self.qdrant_known_collections:
+        if self.qdrant_allowed_collections:
             self._log(
-                "Target collections: " + ", ".join(self.qdrant_known_collections),
+                "Target collections: "
+                + ", ".join(sorted(self.qdrant_allowed_collections)),
                 "info",
             )
 
@@ -539,6 +538,10 @@ class DatabaseCleaner:
             qdrant_after = {}
 
             for coll in collections:
+                if coll.name not in self.qdrant_allowed_collections:
+                    # Skip non-ingestion collections to avoid damaging shared/metadata state
+                    self._log(f"Skipping non-target collection: {coll.name}", "info")
+                    continue
                 try:
                     coll_info = qdrant.get_collection(coll.name)
                     before_count = coll_info.points_count
@@ -790,7 +793,7 @@ class DatabaseCleaner:
                     "database": "qdrant",
                     "collections_preserved": len(qdrant_before),
                     "total_vectors_deleted": total_vectors,
-                    "target_collections": self.qdrant_known_collections,
+                    "target_collections": sorted(self.qdrant_allowed_collections),
                 }
             )
 

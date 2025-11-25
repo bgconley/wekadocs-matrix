@@ -49,6 +49,11 @@
 3. **Config validation**
    - Add a regression test that enabling reranking without a provider raises a clear error, preventing silent failure.
 
+## Status (2025-11-23)
+- Reranker wiring remains but `config/search.hybrid.reranker.enabled=false` so the feature is off by default (same as pre-activation).
+- `_apply_reranker` still guards empty chunks and preserves fused scores, but with the flag disabled the hybrid pipeline behaves exactly as before (metrics show `reranker_applied=False`).
+- QueryService continues to surface rerank metadata for future experimentation, yet the default MCP/server flow is the original hybrid-only ordering.
+
 ## Suggested rollout steps
 1. Implement provider injection + `_apply_reranker` logic described above.
 2. Add feature flag / config entry to allow gradual rollout (start with `enabled=false`).
