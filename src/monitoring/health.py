@@ -88,7 +88,7 @@ class HealthChecker:
         embed_dim: int,
         embed_model: str,
         embed_provider: str,
-        qdrant_collection: str = "chunks_multi",
+        qdrant_collection: str = "chunks_multi_bge_m3",
     ):
         """
         Initialize health checker.
@@ -433,13 +433,19 @@ class HealthChecker:
         """Verify Qdrant collection exists."""
         try:
             collection_info = self.qdrant_client.get_collection(self.qdrant_collection)
+            # vectors_count is deprecated in qdrant-client 1.16+, use indexed_vectors_count
+            vectors_count = (
+                collection_info.indexed_vectors_count
+                if collection_info.indexed_vectors_count is not None
+                else collection_info.vectors_count or 0
+            )
             return HealthCheckResult(
                 name="qdrant_collection",
                 status=HealthStatus.HEALTHY,
                 message=f"Collection '{self.qdrant_collection}' exists",
                 details={
-                    "points_count": collection_info.points_count,
-                    "vectors_count": collection_info.vectors_count,
+                    "points_count": collection_info.points_count or 0,
+                    "indexed_vectors_count": vectors_count,
                 },
             )
         except Exception as e:

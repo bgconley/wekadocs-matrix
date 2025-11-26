@@ -32,9 +32,9 @@ services:
     environment:
       - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD}
       - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
-      - NEO4J_server_memory_heap_initial__size=${NEO4J_HEAP_INITIAL:-512m}
-      - NEO4J_server_memory_heap_max__size=${NEO4J_HEAP_MAX:-1G}
-      - NEO4J_server_memory_pagecache_size=${NEO4J_PAGECACHE:-512m}
+      - NEO4J_server_memory_heap_initial__size=${NEO4J_HEAP_INITIAL:-1280m}
+      - NEO4J_server_memory_heap_max__size=${NEO4J_HEAP_MAX:-2560m}
+      - NEO4J_server_memory_pagecache_size=${NEO4J_PAGECACHE:-2G}
       - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
       - NEO4J_dbms_security_procedures_allowlist=apoc.*,gds.*
       - NEO4J_apoc_export_file_enabled=true
@@ -46,10 +46,10 @@ services:
       resources:
         limits:
           cpus: '2'
-          memory: 2G
+          memory: 5G
         reservations:
           cpus: '1'
-          memory: 1G
+          memory: 2560M
     healthcheck:
       test: ["CMD", "cypher-shell", "-u", "${NEO4J_USER:-neo4j}", "-p", "${NEO4J_PASSWORD}", "RETURN 1"]
       interval: 10s
@@ -74,11 +74,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 1G
+          cpus: '2'
+          memory: 3G
         reservations:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '1'
+          memory: 1536M
     healthcheck:
       test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/6333' || exit 1"]
       interval: 10s
@@ -99,17 +99,17 @@ services:
       redis-server
       --appendonly yes
       --appendfsync everysec
-      --maxmemory ${REDIS_MAXMEMORY:-256mb}
+      --maxmemory ${REDIS_MAXMEMORY:-768mb}
       --maxmemory-policy allkeys-lru
       --requirepass ${REDIS_PASSWORD}
     deploy:
       resources:
         limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
           cpus: '0.5'
           memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 256M
     healthcheck:
       test: ["CMD", "redis-cli", "--pass", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
@@ -192,10 +192,10 @@ services:
       resources:
         limits:
           cpus: '2'
-          memory: 2G
+          memory: 4G
         reservations:
           cpus: '1'
-          memory: 1G
+          memory: 2G
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -288,10 +288,10 @@ services:
       resources:
         limits:
           cpus: '2'
-          memory: 2G
+          memory: 3584M
         reservations:
           cpus: '1'
-          memory: 1G
+          memory: 1792M
     restart: unless-stopped
 
   # Phase 6: Auto-Ingestion Service (Task 6.1)

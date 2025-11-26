@@ -8,13 +8,16 @@ pydantic>=2.7,<3
 pydantic-settings>=2.5.2
 
 # Neo4j driver
-neo4j==5.15.0
+neo4j==5.26.0
 
 # Qdrant client
-qdrant-client==1.11.0
+qdrant-client==1.16.1
 
 # Redis client
 redis>=5.0.3
+
+# Numerical computations (ColBERT scoring, metrics)
+numpy>=1.24.0
 
 # File system watcher (Phase 6)
 watchdog>=4.0.0

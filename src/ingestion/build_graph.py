@@ -61,6 +61,12 @@ GRAPH_BUILDER_INIT_LOGGED = False
 class GraphBuilder:
     """Builds graph from parsed documents, sections, and entities."""
 
+    # Class-level caches to track what has been ensured in this process.
+    # This prevents redundant DB calls when GraphBuilder is instantiated per-document.
+    _payload_indexes_ensured: set = set()  # Qdrant collections with payload indexes
+    _neo4j_indexes_ensured: set = set()  # Neo4j index names that have been ensured
+    _schema_metadata_ensured: bool = False  # SchemaVersion metadata reconciled
+
     def __init__(
         self,
         driver: Driver,
@@ -829,6 +835,8 @@ class GraphBuilder:
             },
         )
 
+        return results
+
     def _log_relationship_builder(
         self,
         *,
@@ -1027,7 +1035,7 @@ class GraphBuilder:
                 # Dynamic label in query
                 query = f"""
                 UNWIND $entities as ent
-                MERGE (e:{label} {{id: ent.id}})
+                MERGE (e:Entity:{label} {{id: ent.id}})
                 SET e.name = ent.name,
                     e.description = ent.description,
                     e.category = ent.category,
@@ -1104,6 +1112,12 @@ class GraphBuilder:
                 r.end = m.end,
                 r.source_section_id = m.source_section_id,
                 r.updated_at = datetime()
+            MERGE (e)-[rm:MENTIONED_IN {section_id: m.section_id}]->(s)
+            SET rm.confidence = m.confidence,
+                rm.start = m.start,
+                rm.end = m.end,
+                rm.source_section_id = m.source_section_id,
+                rm.updated_at = datetime()
             RETURN count(r) as count
             """
 
@@ -1144,14 +1158,13 @@ class GraphBuilder:
                 batch = rels[i : i + batch_size]
 
                 # Build dynamic Cypher query with relationship type
-                # Using CALL {} subquery to work around Cypher's limitation
-                # on parameterized relationship types
+                # Using CALL (vars) {} subquery to work around Cypher's limitation
+                # on parameterized relationship types (Neo4j 5.x syntax)
                 query = f"""
                 UNWIND $rels as r
                 MATCH (from {{id: r.from_id}})
                 MATCH (to {{id: r.to_id}})
-                CALL {{
-                    WITH from, to, r
+                CALL (from, to, r) {{
                     MERGE (from)-[rel:{rel_type}]->(to)
                     SET rel.confidence = r.confidence,
                         rel.source_section_id = r.source_section_id,
@@ -1596,6 +1609,7 @@ class GraphBuilder:
         Auto-provision the namespaced Neo4j vector index for the active profile.
 
         Drops conflicting vector indexes on Section.vector_embedding to avoid dual index issues.
+        Uses class-level caching to avoid redundant DB calls per document.
         """
         if not self.driver:
             return
@@ -1603,6 +1617,10 @@ class GraphBuilder:
         index_name = getattr(self.config.search.vector.neo4j, "index_name", None)
         dims = self.embedding_dims
         if not index_name or not dims:
+            return
+
+        # Skip if this index has already been ensured in this process
+        if index_name in GraphBuilder._neo4j_indexes_ensured:
             return
 
         with self.driver.session() as session:
@@ -1644,6 +1662,8 @@ class GraphBuilder:
                     "Ensured Neo4j vector index exists",
                     extra={"index": index_name, "dimensions": dims},
                 )
+                # Mark index as ensured for this process
+                GraphBuilder._neo4j_indexes_ensured.add(index_name)
             except Exception as exc:  # pragma: no cover - defensive log path
                 logger.warning(
                     "Failed to auto-create Neo4j vector index",
@@ -1653,8 +1673,14 @@ class GraphBuilder:
     def _reconcile_schema_version_embedding_metadata(self) -> None:
         """
         Update SchemaVersion node to reflect the active embedding profile.
+
+        Uses class-level caching since embedding settings don't change between documents.
         """
         if not self.driver:
+            return
+
+        # Skip if already reconciled in this process
+        if GraphBuilder._schema_metadata_ensured:
             return
 
         settings = self.embedding_settings
@@ -1689,6 +1715,8 @@ class GraphBuilder:
                         "dimensions": self.embedding_dims,
                     },
                 )
+                # Mark as ensured for this process
+                GraphBuilder._schema_metadata_ensured = True
         except Exception as exc:  # pragma: no cover - defensive log path
             logger.warning(
                 "Failed to update SchemaVersion metadata",
@@ -1698,7 +1726,15 @@ class GraphBuilder:
     def _ensure_qdrant_payload_indexes(
         self, collection: str, fields: Sequence[tuple[str, PayloadSchemaType]]
     ) -> None:
-        """Ensure payload indexes exist for canonical hybrid fields."""
+        """Ensure payload indexes exist for canonical hybrid fields.
+
+        Uses class-level caching to avoid redundant HTTP calls when
+        GraphBuilder is instantiated multiple times (e.g., per document).
+        """
+        # Skip if indexes have already been ensured for this collection in this process
+        if collection in GraphBuilder._payload_indexes_ensured:
+            return
+
         for field_name, schema in fields:
             try:
                 self.qdrant_client.create_payload_index(
@@ -1708,6 +1744,9 @@ class GraphBuilder:
                 )
             except Exception:
                 continue
+
+        # Mark collection as having indexes ensured
+        GraphBuilder._payload_indexes_ensured.add(collection)
 
     def _create_qdrant_collection(
         self,

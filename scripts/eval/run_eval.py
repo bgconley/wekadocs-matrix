@@ -171,12 +171,28 @@ def evaluate_queries(
         summary["mrrs"].append(mrr)
         summary["latencies_ms"].append(duration_ms)
 
+        # Preserve scoring metadata per result for analysis
+        results_with_scores = []
+        for idx, c in enumerate(chunks):
+            results_with_scores.append(
+                {
+                    "chunk_id": c.chunk_id,
+                    "rank": idx + 1,
+                    "vector_score": c.vector_score,
+                    "fused_score": c.fused_score,
+                    "rerank_score": c.rerank_score,
+                    "bm25_score": c.bm25_score,
+                    "vector_score_kind": c.vector_score_kind,
+                }
+            )
+
         results.append(
             {
                 "query": query,
                 "filters": filters,
                 "expected_section_ids": expected_ids,
                 "actual_section_ids": actual_ids,
+                "results": results_with_scores,
                 "recall": recall,
                 "mrr": mrr,
                 "metrics": metrics,
@@ -196,6 +212,7 @@ def evaluate_queries(
     summary["p50_latency_ms"] = (
         statistics.median(summary["latencies_ms"]) if summary["latencies_ms"] else None
     )
+    summary["latencies_ms_all"] = summary["latencies_ms"]
     return results, summary
 
 

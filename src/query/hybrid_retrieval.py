@@ -20,11 +20,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+import numpy as np
 from neo4j import Driver
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import (
-    NamedSparseVector,
-)
 from qdrant_client.http.models import SparseVector as QdrantSparseVector
 from qdrant_client.models import FieldCondition
 from qdrant_client.models import Filter as QdrantFilter
@@ -37,6 +35,7 @@ from src.providers.factory import ProviderFactory
 from src.providers.rerank.base import RerankProvider
 from src.providers.settings import EmbeddingSettings
 from src.providers.tokenizer_service import TokenizerService
+from src.query.entity_extraction import EntityExtractor
 from src.shared.config import (
     get_config,
     get_embedding_settings,
@@ -136,6 +135,7 @@ class ChunkResult:
     graph_distance: int = 0
     graph_score: float = 0.0
     graph_path: Optional[List[str]] = None
+    colbert_vector: Optional[List[List[float]]] = None
     connection_count: int = 0
     mention_count: int = 0
 
@@ -525,7 +525,7 @@ class QdrantMultiVectorRetriever:
         self,
         qdrant_client: QdrantClient,
         embedder,
-        collection_name: str = "chunks_multi",
+        collection_name: str = "chunks_multi_bge_m3",
         field_weights: Optional[Dict[str, float]] = None,
         rrf_k: int = 60,
         payload_keys: Optional[List[str]] = None,
@@ -755,15 +755,16 @@ class QdrantMultiVectorRetriever:
         score_threshold: Optional[float] = None,
     ):
         try:
-            query_vector = {"name": vector_name, "vector": list(vector)}
-            return self.client.search(
+            result = self.client.query_points(
                 collection_name=self.collection,
-                query_vector=query_vector,
+                query=list(vector),
+                using=vector_name,
                 limit=limit,
                 query_filter=query_filter,
                 with_payload=True,
                 score_threshold=score_threshold,
             )
+            return result.points
         except Exception as exc:
             logger.debug(
                 "Named vector search failed", field=vector_name, error=str(exc)
@@ -853,17 +854,17 @@ class QdrantMultiVectorRetriever:
         except Exception:
             search_params = None
 
-        query_vector = {"name": vector_name, "vector": list(vector)}
-
-        return self.client.search(
+        result = self.client.query_points(
             collection_name=self.collection,
-            query_vector=query_vector,
+            query=list(vector),
+            using=vector_name,
             limit=top_k,
             query_filter=query_filter,
             search_params=search_params,
             with_payload=True,
             with_vectors=False,
         )
+        return result.points
 
     def _search_sparse(
         self,
@@ -882,24 +883,23 @@ class QdrantMultiVectorRetriever:
         if not indices or not values:
             return []
         try:
-            named_sparse = NamedSparseVector(
-                name=self.sparse_query_name,
-                vector=QdrantSparseVector(indices=indices, values=values),
-            )
+            sparse_query = QdrantSparseVector(indices=indices, values=values)
         except Exception as exc:
             logger.debug(
-                "Failed to construct NamedSparseVector; skipping sparse search",
+                "Failed to construct SparseVector; skipping sparse search",
                 error=str(exc),
             )
             return []
-        return self.client.search(
+        result = self.client.query_points(
             collection_name=self.collection,
-            query_vector=named_sparse,
+            query=sparse_query,
+            using=self.sparse_query_name,
             limit=top_k,
             query_filter=query_filter,
             with_payload=True,
             with_vectors=False,
         )
+        return result.points
 
     def _chunk_from_payload(
         self,
@@ -1063,12 +1063,6 @@ class QdrantMultiVectorRetriever:
     def _build_query_api_query(
         self, bundle: QueryEmbeddingBundle
     ) -> Tuple[Sequence[Sequence[float]] | Sequence[float], str]:
-        if (
-            self.schema_supports_colbert
-            and bundle.multivector
-            and bundle.multivector.vectors
-        ):
-            return [list(vec) for vec in bundle.multivector.vectors], "late-interaction"
         return list(bundle.dense), self.primary_vector_name
 
     def _query_api_supported(self) -> bool:
@@ -1110,7 +1104,7 @@ class VectorRetriever(QdrantMultiVectorRetriever):
         self,
         qdrant_client: QdrantClient,
         embedder,
-        collection_name: str = "chunks_multi",
+        collection_name: str = "chunks_multi_bge_m3",
         similarity: str = "cosine",  # Kept for signature compatibility
         embedding_settings: Optional[EmbeddingSettings] = None,
     ):
@@ -1361,6 +1355,15 @@ class HybridRetriever:
             schema_supports_sparse=getattr(qdrant_vector_cfg, "enable_sparse", False),
             schema_supports_colbert=getattr(qdrant_vector_cfg, "enable_colbert", False),
         )
+        self.colbert_rerank_enabled = getattr(
+            hybrid_config, "colbert_rerank_enabled", True
+        )
+        self.graph_channel_enabled = getattr(
+            hybrid_config, "graph_channel_enabled", False
+        )
+        self.graph_adaptive_enabled = getattr(
+            hybrid_config, "graph_adaptive_enabled", False
+        )
         dense_active = True
         sparse_active = bool(
             self.vector_retriever.supports_sparse
@@ -1388,6 +1391,8 @@ class HybridRetriever:
                 "has_sparse_field": bool(self.vector_retriever.sparse_field_name),
             },
         )
+        self._entity_extractor = None
+        self._last_query_text: str = ""
         self.tokenizer = tokenizer or TokenizerService()
         self.reranker_config = getattr(hybrid_config, "reranker", None)
         self._reranker_enabled = bool(getattr(self.reranker_config, "enabled", False))
@@ -1574,6 +1579,32 @@ class HybridRetriever:
 
         return normalized
 
+    def _classify_query_type(self, query: str) -> str:
+        """Lightweight rule-based query classifier for adaptive graph behavior."""
+        q = (query or "").lower()
+        if ("how to" in q) or ("steps to" in q) or ("configure" in q):
+            return "procedural"
+        if ("error" in q) or ("failed" in q) or ("not working" in q):
+            return "troubleshooting"
+        if ("what is" in q) or ("definition" in q) or ("meaning" in q):
+            return "reference"
+        return "default"
+
+    def _relationships_for_query(self, query: str) -> Tuple[List[str], int]:
+        """Select relationship set and neighbor cap based on query type."""
+        rels = list(self.graph_relationships)
+        cap = self.graph_max_related
+        if not self.graph_adaptive_enabled:
+            return rels, cap
+        qtype = self._classify_query_type(query)
+        if qtype == "procedural":
+            return ["CONTAINS_STEP", "HAS_PARAMETER", "NEXT_CHUNK"], min(cap, 10)
+        if qtype == "troubleshooting":
+            return ["AFFECTS", "CAUSED_BY", "RESOLVES", "NEXT_CHUNK"], min(cap, 15)
+        if qtype == "reference":
+            return ["NEXT_CHUNK"], min(cap, 5)
+        return rels, cap
+
     def _build_bm25_predicates(
         self, filters: Dict[str, Any]
     ) -> Tuple[List[str], Dict[str, Any]]:
@@ -1612,6 +1643,7 @@ class HybridRetriever:
             Tuple of (results, metrics) where metrics contains timing and diagnostic info
         """
         start_time = time.time()
+        self._last_query_text = query
         metrics: Dict[str, Any] = {
             "namespace_mode": getattr(self, "namespace_mode", None),
             "bm25_index_name": getattr(self.bm25_retriever, "index_name", None),
@@ -1695,6 +1727,42 @@ class HybridRetriever:
         # Step 3: Take fused results as seeds and optionally rerank
         fused_results.sort(key=lambda x: x.fused_score or 0, reverse=True)
         self._log_stage_snapshot("post-fusion", fused_results)
+
+        # Optional graph retrieval channel (entity-anchored, cross-doc allowed)
+        graph_channel_stats: Dict[str, Any] = {}
+        if self.graph_channel_enabled:
+            graph_candidates, graph_channel_stats = self._graph_retrieval_channel(
+                query, doc_tag
+            )
+            if graph_candidates:
+                fused_results.extend(graph_candidates)
+                fused_results = self._dedup_results(fused_results)
+        metrics.update(graph_channel_stats)
+
+        # Optional ColBERT rerank between fusion and cross-encoder
+        if (
+            self.colbert_rerank_enabled
+            and self.vector_retriever.supports_colbert
+            and fused_results
+        ):
+            colbert_start = time.time()
+            query_bundle = None
+            try:
+                query_bundle = self.vector_retriever.embedder.embed_query_all(query)
+            except Exception as exc:
+                logger.warning("ColBERT query embedding failed", error=str(exc))
+            if query_bundle and query_bundle.multivector:
+                hydrated = self._hydrate_colbert_vectors(fused_results)
+                colbert_limit = min(len(fused_results), max(top_k * 6, 120))
+                fused_results = self._colbert_rerank(
+                    fused_results, query_bundle, colbert_limit
+                )
+                metrics["colbert_hydrated"] = len(hydrated)
+                metrics["colbert_rerank_applied"] = True
+                metrics["colbert_candidates"] = len(fused_results)
+                metrics["colbert_rerank_time_ms"] = (time.time() - colbert_start) * 1000
+            else:
+                metrics["colbert_rerank_applied"] = False
 
         reranker_active = False
         seeds: List[ChunkResult]
@@ -2865,10 +2933,7 @@ class HybridRetriever:
         neighbors: List[ChunkResult],
         threshold: float,
     ) -> Optional[Dict[str, float]]:
-        named_sparse = NamedSparseVector(
-            name=self.vector_retriever.sparse_query_name,
-            vector=QdrantSparseVector(indices=indices, values=values),
-        )
+        sparse_query = QdrantSparseVector(indices=indices, values=values)
         neighbor_ids = [str(n.chunk_id) for n in neighbors if n.chunk_id]
         if not neighbor_ids:
             return None
@@ -2881,15 +2946,17 @@ class HybridRetriever:
                 )
             ],
         )
-        hits = self.vector_retriever.client.search(
+        result = self.vector_retriever.client.query_points(
             collection_name=self.vector_retriever.collection,
-            query_vector=named_sparse,
+            query=sparse_query,
+            using=self.vector_retriever.sparse_query_name,
             query_filter=q_filter,
             limit=len(neighbor_ids),
             with_payload=False,
             with_vectors=False,
             score_threshold=threshold or None,
         )
+        hits = result.points
         if not hits:
             return None
 
@@ -2906,6 +2973,79 @@ class HybridRetriever:
             return raw_scores
 
         return self._normalize_sparse_scores(raw_scores)
+
+    def _hydrate_colbert_vectors(
+        self, candidates: List[ChunkResult]
+    ) -> Dict[str, List[List[float]]]:
+        """Fetch ColBERT vectors for candidates that lack them."""
+        if not (
+            self.vector_retriever.supports_colbert
+            and self.vector_retriever.schema_supports_colbert
+        ):
+            return {}
+        missing = [c.chunk_id for c in candidates if not c.colbert_vector]
+        if not missing:
+            return {}
+        q_filter = QdrantFilter(
+            must=[
+                FieldCondition(key="kg_id", match=MatchAny(any=list(missing))),
+            ]
+        )
+        try:
+            scroll_res = self.vector_retriever.client.scroll(
+                collection_name=self.vector_retriever.collection,
+                scroll_filter=q_filter,
+                with_vectors=["late-interaction"],
+                with_payload=False,
+                limit=len(missing),
+            )
+            points = scroll_res[0] if isinstance(scroll_res, tuple) else scroll_res
+        except Exception as exc:
+            logger.warning("ColBERT hydration failed", error=str(exc))
+            return {}
+        hydrated: Dict[str, List[List[float]]] = {}
+        for point in points:
+            vectors = getattr(point, "vector", None) or getattr(point, "vectors", None)
+            if isinstance(vectors, dict):
+                colbert_vec = vectors.get("late-interaction")
+            else:
+                colbert_vec = None
+            if colbert_vec:
+                hydrated[str(point.id)] = colbert_vec
+        for c in candidates:
+            if c.chunk_id in hydrated:
+                c.colbert_vector = hydrated[c.chunk_id]
+        return hydrated
+
+    def _colbert_rerank(
+        self,
+        candidates: List[ChunkResult],
+        query_bundle: QueryEmbeddingBundle,
+        limit: int,
+    ) -> List[ChunkResult]:
+        """Rerank using ColBERT late-interaction MaxSim scores."""
+        if not query_bundle or not query_bundle.multivector:
+            return candidates
+        q_vectors = query_bundle.multivector.vectors or []
+        if not q_vectors:
+            return candidates
+        q_mat = np.array(q_vectors)
+        scored: List[ChunkResult] = []
+        for chunk in candidates:
+            if not chunk.colbert_vector:
+                continue
+            d_mat = np.array(chunk.colbert_vector)
+            if d_mat.size == 0:
+                continue
+            sims = q_mat @ d_mat.T
+            score = float(np.max(sims, axis=1).sum()) if sims.size else 0.0
+            chunk.rerank_score = score
+            chunk.reranker = "colbert"
+            scored.append(chunk)
+        if not scored:
+            return candidates
+        scored.sort(key=lambda c: c.rerank_score or float("-inf"), reverse=True)
+        return scored[:limit]
 
     def _apply_graph_enrichment(
         self,
@@ -2948,6 +3088,105 @@ class HybridRetriever:
         stats["graph_neighbors_added"] = len(added)
         return added, stats
 
+    def _get_entity_extractor(self) -> EntityExtractor:
+        if self._entity_extractor:
+            return self._entity_extractor
+        self._entity_extractor = EntityExtractor(self.neo4j_driver)
+        return self._entity_extractor
+
+    def _graph_retrieval_channel(
+        self, query: str, doc_tag: Optional[str]
+    ) -> Tuple[List[ChunkResult], Dict[str, int]]:
+        """Entity-anchored graph retrieval channel (flagged)."""
+        stats = {
+            "graph_channel_candidates": 0,
+            "graph_channel_entities": 0,
+        }
+        if not (self.graph_channel_enabled and self.graph_enabled):
+            return [], stats
+        extractor = self._get_entity_extractor()
+        entities = extractor.extract_entities(query)
+        stats["graph_channel_entities"] = len(entities)
+        if not entities:
+            return [], stats
+        rels, max_related = self._relationships_for_query(query)
+        rel_pattern = "|".join(rels)
+        limit_per_entity = max(1, min(max_related, 50))
+        cypher = """
+        UNWIND $entities AS name
+        MATCH (e:Entity)
+        WHERE toLower(e.name) CONTAINS toLower(name)
+           OR toLower(name) CONTAINS toLower(e.name)
+        MATCH (e)-[:MENTIONED_IN]->(c:Chunk)
+        WHERE $doc_tag IS NULL OR c.doc_tag = $doc_tag
+        RETURN DISTINCT c {
+            .id,
+            .document_id,
+            .parent_section_id,
+            .order,
+            .level,
+            .heading,
+            .text,
+            token_count: coalesce(c.token_count, c.tokens, 0),
+            .doc_tag,
+            .document_total_tokens,
+            .source_path,
+            .is_microdoc,
+            .doc_is_microdoc,
+            .is_microdoc_stub,
+            .embedding_version,
+            .tenant
+        } AS props, size(collect(e)) AS match_count
+        LIMIT $limit
+        """
+        chunks: List[ChunkResult] = []
+        try:
+            with self.neo4j_driver.session() as session:
+                result = session.run(
+                    cypher,
+                    entities=list(set(entities)),
+                    doc_tag=doc_tag,
+                    limit=limit_per_entity,
+                    rel_pattern=rel_pattern,
+                )
+                for record in result:
+                    props = record["props"] or {}
+                    chunk = self._chunk_from_props(props)
+                    chunk.graph_score = max(1.0, float(record.get("match_count") or 1))
+                    chunk.fused_score = chunk.graph_score
+                    chunk.vector_score = chunk.graph_score
+                    chunk.vector_score_kind = "graph_entity"
+                    chunks.append(chunk)
+        except Exception as exc:
+            logger.warning("Graph retrieval channel failed", error=str(exc))
+            return [], stats
+        stats["graph_channel_candidates"] = len(chunks)
+        if not chunks:
+            return [], stats
+
+        # Sparse gating via kg_id if available
+        sparse_query = self.vector_retriever._build_sparse_query(query)
+        if (
+            sparse_query
+            and isinstance(sparse_query, dict)
+            and sparse_query.get("indices")
+            and sparse_query.get("values")
+        ):
+            gated = self._rescore_expansion_with_sparse(
+                sparse_query["indices"],
+                sparse_query["values"],
+                chunks,
+                self.expansion_sparse_threshold,
+            )
+            if gated:
+                allowed = {
+                    pid
+                    for pid, s in gated.items()
+                    if s >= self.expansion_sparse_threshold
+                }
+                chunks = [c for c in chunks if str(c.chunk_id) in allowed] or chunks
+        return chunks, stats
+
     def _fetch_graph_neighbors(
         self, seeds: List[ChunkResult], doc_tag: Optional[str]
     ) -> List[ChunkResult]:
@@ -2959,13 +3198,15 @@ class HybridRetriever:
         if not seed_lookup:
             return []
 
-        limit_per_seed = max(1, min(self.graph_max_related, 200))
-        rel_pattern = "|".join(self.graph_relationships)
+        relationships, max_related = self._relationships_for_query(
+            self._last_query_text
+        )
+        limit_per_seed = max(1, min(max_related, 200))
+        rel_pattern = "|".join(relationships)
         query = f"""
         UNWIND $seed_ids AS seed_id
         MATCH (seed:Chunk {{id: seed_id}})
-        CALL {{
-            WITH seed
+        CALL (seed) {{
             MATCH path=(seed)-[r:{rel_pattern}*1..{self.graph_max_depth}]-(target:Chunk)
             WHERE seed.id <> target.id
               AND ($doc_tag IS NULL OR target.doc_tag = $doc_tag)

@@ -1,0 +1,61 @@
+import re
+from typing import Dict, List
+
+
+class EntityExtractor:
+    """Lightweight trie-based entity extractor sourced from Neo4j Entity nodes."""
+
+    def __init__(self, neo4j_driver):
+        self.neo4j_driver = neo4j_driver
+        self.trie: Dict = {}
+        self._build_trie()
+
+    def _insert(self, phrase: str, canonical: str) -> None:
+        node = self.trie
+        tokens = phrase.split()
+        for token in tokens:
+            node = node.setdefault(token, {})
+        node["__end__"] = canonical
+
+    def _build_trie(self) -> None:
+        cypher = """
+        MATCH (e:Entity)
+        RETURN e.name AS name, e.aliases AS aliases
+        """
+        with self.neo4j_driver.session() as session:
+            result = session.run(cypher)
+            for record in result:
+                name = (record.get("name") or "").strip()
+                aliases = record.get("aliases") or []
+                if name:
+                    self._insert(name.lower(), name)
+                for alias in aliases:
+                    if alias:
+                        self._insert(str(alias).lower().strip(), name)
+
+    def extract_entities(self, query: str, max_len: int = 5) -> List[str]:
+        tokens = re.split(r"\s+", (query or "").lower().strip())
+        entities: List[str] = []
+        i = 0
+        while i < len(tokens):
+            best = None
+            best_len = 0
+            for length in range(min(max_len, len(tokens) - i), 0, -1):
+                candidate = " ".join(tokens[i : i + length])
+                node = self.trie
+                found = True
+                for t in candidate.split():
+                    if t not in node:
+                        found = False
+                        break
+                    node = node[t]
+                if found and "__end__" in node:
+                    best = node["__end__"]
+                    best_len = length
+                    break
+            if best:
+                entities.append(best)
+                i += best_len
+            else:
+                i += 1
+        return entities

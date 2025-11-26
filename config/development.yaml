@@ -42,7 +42,7 @@ search:
     primary: "qdrant"
     dual_write: false  # Phase 7C: Set to true during migration
     qdrant:
-      collection_name: "chunks_multi"  # Phase 7E+: Multi-vector collection
+      collection_name: "chunks_multi_bge_m3"  # Phase 7E+: Multi-vector collection (BGE-M3)
       use_grpc: false
       timeout: 30
       allow_recreate: false  # Set true to auto-rebuild collections during schema upgrades
@@ -62,6 +62,7 @@ search:
     # Architecture mode: legacy (BM25+RRF) or bge_reranker (vector-only + cross-encoder)
     mode: "bge_reranker"
     enabled: true  # Phase 7E: Enable hybrid retrieval
+    graph_channel_enabled: true  # Enable graph as independent scoring channel in fusion
     method: "weighted"  # Architecture 2: magnitude-preserving fusion
 
     # RRF (Reciprocal Rank Fusion) settings

@@ -5,6 +5,32 @@ __pycache__/
 .env
 .pytest_cache/
 
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Serena IDE state
+.serena/
+
+# Large data directories (not tracked in git)
+data/ingest/
+docs/sample_ingest/
+
+# Reports - cleanup and eval artifacts
+reports/cleanup/
+reports/logs/
+reports/eval_*.json
+
+# Temporary scripts and artifacts
+scripts/neo4j/
+architecture_diagram.svg
+tests/eval/
+
+# CDX session outputs (track only approved plans/evaluations)
+docs/cdx-outputs/*.md
+!docs/cdx-outputs/evaluation-comprehensive-retrieval-plan-2025-11-26.md
+!docs/cdx-outputs/plan-graph-channel-rehabilitation-2025-11-26.md
+
 # Coverage & build
 htmlcov/
 .coverage
@@ -27,3 +53,6 @@ reports/**/*.csv
 # Keep junit.xml and summary.json for phase gates
 !reports/**/junit.xml
 !reports/**/summary.json
+
+# HuggingFace model cache (local test runs)
+hf-cache/

@@ -7,7 +7,7 @@ chunk metadata helpers for GraphRAG v2.1.
 Key invariants:
 - IDs are deterministic: same inputs → same ID
 - Order is preserved: never sort original_section_ids
-- IDs are 24-char SHA256 prefixes for Neo4j compatibility
+- IDs are full SHA256 hex (64-char) to stay consistent across parsing, extraction, and storage
 """
 
 import hashlib
@@ -26,7 +26,7 @@ def generate_chunk_id(document_id: str, original_section_ids: List[str]) -> str:
         original_section_ids: List of section IDs in preservation order
 
     Returns:
-        24-character deterministic chunk ID (SHA256 prefix)
+        64-character deterministic chunk ID (SHA256 hex)
 
     Example:
         >>> generate_chunk_id("doc_123", ["sec_1", "sec_2"])
@@ -42,10 +42,14 @@ def generate_chunk_id(document_id: str, original_section_ids: List[str]) -> str:
     # Format: document_id|section_1|section_2|...
     material = f"{document_id}|{'|'.join(original_section_ids)}"
 
-    # Generate SHA256 hash and take first 24 chars
+    # Preserve original ID for single-section chunks to avoid ID drift
+    if len(original_section_ids) == 1 and original_section_ids[0]:
+        return original_section_ids[0]
+
+    # Generate SHA256 hash (full 64-char hex)
     hash_digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
 
-    return hash_digest[:24]
+    return hash_digest
 
 
 def create_chunk_metadata(
@@ -92,7 +96,7 @@ def create_chunk_metadata(
     # For single-section chunks, original_section_ids contains just this section
     original_section_ids = [section_id]
 
-    # Generate deterministic chunk ID
+    # Generate deterministic chunk ID (aligned with original 64-char section_id)
     chunk_id = generate_chunk_id(document_id, original_section_ids)
 
     return {
