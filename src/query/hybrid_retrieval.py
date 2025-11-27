@@ -24,9 +24,18 @@ import numpy as np
 from neo4j import Driver
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import SparseVector as QdrantSparseVector
-from qdrant_client.models import FieldCondition
+from qdrant_client.models import (
+    FieldCondition,
+)
 from qdrant_client.models import Filter as QdrantFilter
-from qdrant_client.models import Fusion, FusionQuery, MatchAny, MatchValue, Prefetch
+from qdrant_client.models import (
+    Fusion,
+    FusionQuery,
+    HasIdCondition,
+    MatchAny,
+    MatchValue,
+    Prefetch,
+)
 
 # Phase 7E-4: Monitoring imports
 from src.monitoring.metrics import get_metrics_aggregator
@@ -106,6 +115,9 @@ class ChunkResult:
     # Expansion tracking
     is_expanded: bool = False  # Was this chunk added via expansion?
     expansion_source: Optional[str] = None  # Which chunk triggered expansion
+    context_source: Optional[str] = (
+        None  # Type: "sequential", "sibling", "parent_section", "shared_entities"
+    )
 
     # Scoring metadata
     fusion_method: Optional[str] = None  # Method used for fusion
@@ -143,6 +155,79 @@ class ChunkResult:
         """Ensure required fields are populated."""
         if self.original_section_ids is None:
             self.original_section_ids = []
+
+
+def dedup_chunk_results(
+    results: List[ChunkResult],
+    vector_weight: float = 0.7,
+    graph_weight: float = 0.3,
+    id_fn=None,
+) -> List[ChunkResult]:
+    """
+    Standalone dedup function that merges duplicate ChunkResults.
+
+    For each unique chunk, keeps the highest-scoring instance and merges
+    the best signals from all duplicates, then recomputes fused_score
+    using the provided weights.
+
+    Args:
+        results: List of ChunkResults (may contain duplicates)
+        vector_weight: Weight for vector_score in fused calculation
+        graph_weight: Weight for graph_score in fused calculation
+        id_fn: Optional function to compute identity key; defaults to chunk_id
+
+    Returns:
+        Deduplicated list with merged scores
+    """
+    if not results:
+        return []
+
+    if id_fn is None:
+
+        def id_fn(r):
+            return r.chunk_id
+
+    by_id: Dict[Any, List[ChunkResult]] = defaultdict(list)
+    for r in results:
+        by_id[id_fn(r)].append(r)
+
+    deduped: List[ChunkResult] = []
+    for rid, dups in by_id.items():
+        if len(dups) == 1:
+            deduped.append(dups[0])
+            continue
+
+        # Pick winner by highest fused_score (fallback to vector_score)
+        winner = max(
+            dups,
+            key=lambda x: (
+                x.fused_score if x.fused_score is not None else x.vector_score or 0.0
+            ),
+        )
+
+        # Merge best signals from all duplicates
+        vector_scores = [w.vector_score for w in dups if w.vector_score is not None]
+        graph_scores = [w.graph_score for w in dups if w.graph_score is not None]
+        bm25_scores = [w.bm25_score for w in dups if w.bm25_score is not None]
+
+        winner.vector_score = (
+            max(vector_scores) if vector_scores else (winner.vector_score or 0.0)
+        )
+        winner.graph_score = (
+            max(graph_scores) if graph_scores else (winner.graph_score or 0.0)
+        )
+        winner.bm25_score = (
+            max(bm25_scores) if bm25_scores else (winner.bm25_score or 0.0)
+        )
+
+        # Recompute fused_score with provided weights
+        vscore = winner.vector_score or 0.0
+        gscore = winner.graph_score or 0.0
+        winner.fused_score = (vector_weight * vscore) + (graph_weight * gscore)
+
+        deduped.append(winner)
+
+    return deduped
 
 
 class BM25Retriever:
@@ -532,6 +617,7 @@ class QdrantMultiVectorRetriever:
         embedding_settings: Optional[EmbeddingSettings] = None,
         *,
         use_query_api: bool = False,
+        query_api_weighted_fusion: bool = False,
         query_api_dense_limit: int = 200,
         query_api_sparse_limit: int = 200,
         query_api_candidate_limit: int = 200,
@@ -553,6 +639,7 @@ class QdrantMultiVectorRetriever:
             embedding_settings.version if embedding_settings else None
         )
         self.use_query_api = use_query_api
+        self.query_api_weighted_fusion = query_api_weighted_fusion
         self.query_api_dense_limit = query_api_dense_limit
         self.query_api_sparse_limit = query_api_sparse_limit
         self.query_api_candidate_limit = query_api_candidate_limit
@@ -659,6 +746,8 @@ class QdrantMultiVectorRetriever:
         if self.use_query_api and self._query_api_supported():
             try:
                 bundle = self._build_query_bundle(query)
+                if self.query_api_weighted_fusion:
+                    return self._search_via_query_api_weighted(bundle, top_k, filters)
                 return self._search_via_query_api(bundle, top_k, filters)
             except Exception as exc:  # pragma: no cover - fallback path
                 logger.warning(
@@ -1022,6 +1111,157 @@ class QdrantMultiVectorRetriever:
         )
         return results
 
+    def _build_id_filter(
+        self, base_filter: Optional[QdrantFilter], candidate_ids: List[str]
+    ) -> QdrantFilter:
+        """Augment an existing filter with an ID constraint."""
+        id_condition = HasIdCondition(has_id=list(candidate_ids))
+        if base_filter is None:
+            return QdrantFilter(must=[id_condition])
+        must = list(getattr(base_filter, "must", []) or [])
+        must.append(id_condition)
+        return QdrantFilter(
+            must=must,
+            must_not=getattr(base_filter, "must_not", None),
+            should=getattr(base_filter, "should", None),
+        )
+
+    def _search_via_query_api_weighted(
+        self,
+        bundle: QueryEmbeddingBundle,
+        top_k: int,
+        filters: Optional[Dict[str, Any]],
+    ) -> List[ChunkResult]:
+        """
+        Two-stage Query API search with Python-side weighted fusion (Strategy 2).
+        Stage 1: Query API + prefetch for candidate recall.
+        Stage 2: Per-field scoring on candidates, fused via _fuse_rankings.
+        """
+        start_time = time.time()
+        qdrant_filter = self._build_filter(filters)
+        prefetch_entries = self._build_prefetch_entries(bundle, qdrant_filter, top_k)
+        prefetch_arg = None
+        if prefetch_entries:
+            fusion_mode = getattr(Fusion, "DBSF", Fusion.RRF)
+            prefetch_arg = Prefetch(
+                prefetch=prefetch_entries,
+                query=FusionQuery(fusion=fusion_mode),
+                limit=max(top_k, self.query_api_candidate_limit),
+                filter=qdrant_filter,
+            )
+
+        query_payload, using_name = self._build_query_api_query(bundle)
+        response = self.client.query_points(
+            collection_name=self.collection,
+            query=query_payload,
+            using=using_name,
+            prefetch=prefetch_arg,
+            query_filter=qdrant_filter,
+            with_payload=True,
+            with_vectors=False,
+            limit=max(top_k, self.query_api_candidate_limit),
+        )
+        points = getattr(response, "points", response) or []
+        if not points:
+            return []
+
+        candidate_ids = [str(p.id) for p in points]
+        # Limit how many candidates we rescore per-field to bound latency
+        scoring_cap = max(top_k * 3, self.query_api_candidate_limit)
+        scoring_ids = candidate_ids[: min(len(candidate_ids), scoring_cap)]
+        rankings: Dict[str, List[Tuple[str, float]]] = {}
+
+        # Dense fields
+        for field_name in self.dense_vector_names:
+            field_hits = self._search_named_vector_candidates(
+                bundle.dense, field_name, scoring_ids, qdrant_filter
+            )
+            rankings[field_name] = [
+                (str(hit.id), float(hit.score or 0.0)) for hit in field_hits
+            ]
+
+        # Sparse field
+        if (
+            self.supports_sparse
+            and bundle.sparse
+            and bundle.sparse.indices
+            and bundle.sparse.values
+        ):
+            sparse_hits = self._search_sparse_candidates(
+                bundle.sparse.indices,
+                bundle.sparse.values,
+                scoring_ids,
+                qdrant_filter,
+            )
+            rankings[self.sparse_query_name] = [
+                (str(hit.id), float(hit.score or 0.0)) for hit in sparse_hits
+            ]
+        sparse_scored = len(rankings.get(self.sparse_query_name, []))
+
+        fused_scores = self._fuse_rankings(rankings)
+        sparse_ids = {
+            pid
+            for pid, _ in rankings.get(self.sparse_query_name, [])  # type: ignore[arg-type]
+        }
+
+        results: List[ChunkResult] = []
+        for idx, point in enumerate(points, start=1):
+            payload = dict(point.payload or {})
+            if self.payload_keys:
+                payload = {k: payload.get(k) for k in self.payload_keys}
+            pid = str(point.id)
+            fused_score = float(fused_scores.get(pid, point.score or 0.0))
+            chunk = self._chunk_from_payload(
+                pid,
+                payload,
+                fused_score=fused_score,
+                vector_score=fused_score,
+            )
+            chunk.vector_rank = idx
+            chunk.vector_score_kind = "weighted_fusion"
+            chunk.fusion_method = "weighted"
+            results.append(chunk)
+
+        results.sort(key=lambda x: x.fused_score or 0.0, reverse=True)
+        results = results[:top_k]
+
+        # Compute sparse coverage among top-k results (Phase B.4)
+        sparse_in_topk = 0
+        if sparse_ids and results:
+            for r in results:
+                if str(r.chunk_id) in sparse_ids:
+                    sparse_in_topk += 1
+
+        elapsed_ms = (time.time() - start_time) * 1000
+        self.last_stats = {
+            "path": "query_api_weighted",
+            "duration_ms": elapsed_ms,
+            "prefetch_count": len(prefetch_entries),
+            "results": len(results),
+            "candidates": len(points),
+            "scored_candidates": len(scoring_ids),
+            "sparse_scored": sparse_scored,
+            "sparse_scored_ratio": (
+                (sparse_scored / len(scoring_ids)) if scoring_ids else 0.0
+            ),
+            "sparse_in_topk": sparse_in_topk,
+            "sparse_topk_ratio": (sparse_in_topk / len(results)) if results else 0.0,
+            "sparse_prefetch": any(
+                getattr(entry, "using", "") == self.sparse_query_name
+                for entry in (prefetch_entries or [])
+            ),
+        }
+        logger.info(
+            "Multi-vector search completed via Query API (weighted)",
+            extra={
+                "results": len(results),
+                "time_ms": f"{elapsed_ms:.2f}",
+                "candidates": len(points),
+                "scored_candidates": len(scoring_ids),
+            },
+        )
+        return results
+
     def _build_prefetch_entries(
         self,
         bundle: QueryEmbeddingBundle,
@@ -1059,6 +1299,62 @@ class QdrantMultiVectorRetriever:
                 )
             )
         return entries
+
+    def _search_named_vector_candidates(
+        self,
+        vector: Sequence[float],
+        vector_name: str,
+        candidate_ids: List[str],
+        base_filter: Optional[QdrantFilter],
+    ):
+        if not candidate_ids:
+            return []
+        try:
+            id_filter = self._build_id_filter(base_filter, candidate_ids)
+            result = self.client.query_points(
+                collection_name=self.collection,
+                query=list(vector),
+                using=vector_name,
+                limit=len(candidate_ids),
+                query_filter=id_filter,
+                with_payload=False,
+                with_vectors=False,
+            )
+            return getattr(result, "points", result) or []
+        except Exception as exc:
+            logger.debug(
+                "Named vector candidate scoring failed",
+                extra={"field": vector_name, "error": str(exc)},
+            )
+            return []
+
+    def _search_sparse_candidates(
+        self,
+        indices: Sequence[int],
+        values: Sequence[float],
+        candidate_ids: List[str],
+        base_filter: Optional[QdrantFilter],
+    ):
+        if not candidate_ids or not indices or not values:
+            return []
+        try:
+            sparse_query = QdrantSparseVector(
+                indices=list(indices), values=list(values)
+            )
+            id_filter = self._build_id_filter(base_filter, candidate_ids)
+            result = self.client.query_points(
+                collection_name=self.collection,
+                query=sparse_query,
+                using=self.sparse_query_name,
+                limit=len(candidate_ids),
+                query_filter=id_filter,
+                with_payload=False,
+                with_vectors=False,
+            )
+            return getattr(result, "points", result) or []
+        except Exception as exc:
+            logger.debug("Sparse candidate scoring failed", extra={"error": str(exc)})
+            return []
 
     def _build_query_api_query(
         self, bundle: QueryEmbeddingBundle
@@ -1144,6 +1440,7 @@ class HybridRetriever:
         """
         config = get_config()
         settings = get_settings()
+        self.config = config
         self.embedding_settings = embedding_settings or get_embedding_settings()
 
         self.expected_schema_version = getattr(config.graph_schema, "version", None)
@@ -1340,6 +1637,13 @@ class HybridRetriever:
             rrf_k=getattr(hybrid_config, "rrf_k", 60),
             embedding_settings=self.embedding_settings,
             use_query_api=getattr(qdrant_vector_cfg, "use_query_api", False),
+            query_api_weighted_fusion=bool(
+                getattr(
+                    getattr(config, "feature_flags", None),
+                    "query_api_weighted_fusion",
+                    False,
+                )
+            ),
             query_api_dense_limit=getattr(
                 qdrant_vector_cfg, "query_api_dense_limit", 200
             ),
@@ -1580,30 +1884,249 @@ class HybridRetriever:
         return normalized
 
     def _classify_query_type(self, query: str) -> str:
-        """Lightweight rule-based query classifier for adaptive graph behavior."""
+        """Unified query classifier for adaptive retrieval behavior."""
         q = (query or "").lower()
+
+        # CLI indicators (require multiple signals)
+        cli_signals = 0
+        cli_patterns = [
+            r"\bweka\s+\w+",
+            r"--[a-z][\w-]+",
+            r"\s-[a-z]\b",
+            r"\bcli\b",
+            r"\bcommand\b",
+            r"\brun\b.*\bcommand",
+        ]
+        for pat in cli_patterns:
+            if re.search(pat, q):
+                cli_signals += 1
+        if cli_signals >= 2:
+            return "cli"
+
+        # Config indicators
+        config_patterns = [
+            r"\w+\s*=\s*\w+",
+            r"\.ya?ml\b",
+            r"\.json\b",
+            r"\.conf\b",
+            r"\bconfig(ure|uration)?\b",
+            r"\bsetting\b",
+            r"\bparameter\b",
+            r"\benvironment\s+variable",
+        ]
+        if any(re.search(pat, q) for pat in config_patterns):
+            return "config"
+
+        # Procedural
         if ("how to" in q) or ("steps to" in q) or ("configure" in q):
             return "procedural"
+
+        # Troubleshooting
         if ("error" in q) or ("failed" in q) or ("not working" in q):
             return "troubleshooting"
+
+        # Reference
         if ("what is" in q) or ("definition" in q) or ("meaning" in q):
             return "reference"
-        return "default"
+
+        # Default to conceptual
+        return "conceptual"
 
     def _relationships_for_query(self, query: str) -> Tuple[List[str], int]:
         """Select relationship set and neighbor cap based on query type."""
+        qtype = self._classify_query_type(query)
         rels = list(self.graph_relationships)
         cap = self.graph_max_related
         if not self.graph_adaptive_enabled:
             return rels, cap
-        qtype = self._classify_query_type(query)
+
+        # Optional config-driven relationships per query type
+        rels_cfg = getattr(
+            getattr(self.config.search, "hybrid", None), "query_type_relationships", {}
+        )
+        if rels_cfg:
+            rels_override = rels_cfg.get(qtype)
+            if rels_override:
+                return rels_override, cap
+
+        if qtype == "conceptual":
+            return ["MENTIONED_IN", "DEFINES", "IN_SECTION"], cap
+        if qtype == "cli":
+            return ["MENTIONED_IN", "CONTAINS_STEP", "HAS_PARAMETER"], cap
+        if qtype == "config":
+            return ["MENTIONED_IN", "HAS_PARAMETER", "DEFINES"], cap
         if qtype == "procedural":
-            return ["CONTAINS_STEP", "HAS_PARAMETER", "NEXT_CHUNK"], min(cap, 10)
+            return ["MENTIONED_IN", "CONTAINS_STEP", "NEXT_CHUNK", "IN_SECTION"], min(
+                cap, 10
+            )
         if qtype == "troubleshooting":
-            return ["AFFECTS", "CAUSED_BY", "RESOLVES", "NEXT_CHUNK"], min(cap, 15)
+            return [
+                "MENTIONED_IN",
+                "AFFECTS",
+                "CAUSED_BY",
+                "RESOLVES",
+                "NEXT_CHUNK",
+            ], min(cap, 15)
         if qtype == "reference":
-            return ["NEXT_CHUNK"], min(cap, 5)
+            return ["MENTIONED_IN", "NEXT_CHUNK"], min(cap, 5)
         return rels, cap
+
+    def _get_query_type_weights(self, query_type: str) -> Tuple[float, float]:
+        weights_cfg = getattr(
+            getattr(self.config.search, "hybrid", None), "query_type_weights", {}
+        )
+        weights = weights_cfg.get(query_type) or {}
+        return float(weights.get("vector", 0.7)), float(weights.get("graph", 0.3))
+
+    def _compute_graph_signals(
+        self,
+        entity_names: List[str],
+        candidate_chunk_ids: List[str],
+        query_type: str,
+        doc_tag: Optional[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        """Compute graph signals for candidate chunks (reranker mode) using canonical_name matches."""
+        if not entity_names or not candidate_chunk_ids:
+            return {}
+        rels, _ = self._relationships_for_query(query_type)
+        cypher = """
+        UNWIND $entity_names AS ename
+        MATCH (e:Entity)
+        WHERE toLower(coalesce(e.canonical_name, e.name, '')) = toLower(ename)
+        MATCH (e)-[r]->(c:Chunk)
+        WHERE type(r) IN $rel_types
+          AND c.id IN $chunk_ids
+          AND ($doc_tag IS NULL OR c.doc_tag = $doc_tag)
+        RETURN c.id AS chunk_id,
+               count(DISTINCT e) AS entity_count,
+               collect(DISTINCT e.name)[..5] AS entity_names
+        """
+        signals: Dict[str, Dict[str, Any]] = {}
+        try:
+            with self.neo4j_driver.session() as session:
+                result = session.run(
+                    cypher,
+                    entity_names=list(set(entity_names)),
+                    rel_types=rels,
+                    chunk_ids=list(set(candidate_chunk_ids)),
+                    doc_tag=doc_tag,
+                )
+                for record in result:
+                    chunk_id = str(record["chunk_id"])
+                    entity_count = float(record.get("entity_count") or 0.0)
+                    if getattr(
+                        getattr(self.config, "feature_flags", None),
+                        "graph_score_normalized",
+                        False,
+                    ):
+                        score = 1.0 - math.exp(-entity_count / 3.0)
+                    else:
+                        score = max(1.0, entity_count)
+                    signals[chunk_id] = {
+                        "score": score,
+                        "entity_count": int(entity_count),
+                        "entities": record.get("entity_names") or [],
+                    }
+        except Exception as exc:
+            logger.warning("Graph signal computation failed", error=str(exc))
+        return signals
+
+    def _apply_graph_reranker(
+        self,
+        query: str,
+        doc_tag: Optional[str],
+        vector_results: List[ChunkResult],
+        metrics: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Graph-as-reranker: apply graph signals to vector candidates only."""
+        stats: Dict[str, Any] = {
+            "graph_channel_candidates": 0,
+            "graph_channel_entities": 0,
+            "graph_reranker_applied": False,
+            "graph_rerank_avg_delta": 0.0,
+        }
+        if not vector_results:
+            return stats
+        qtype = self._classify_query_type(query)
+        extractor = self._get_entity_extractor()
+        entities = extractor.extract_entities(query)
+        if getattr(
+            getattr(self.config, "feature_flags", None), "graph_garbage_filter", False
+        ):
+            entities = [
+                e
+                for e in entities
+                if isinstance(e, str)
+                and len(e.strip()) >= 4
+                and e.lower()
+                not in {
+                    "at",
+                    "in",
+                    "id",
+                    "to",
+                    "of",
+                    "for",
+                    "the",
+                    "and",
+                    "or",
+                    "is",
+                    "it",
+                }
+            ]
+        stats["graph_channel_entities"] = len(entities)
+        if not entities:
+            return stats
+        # Cap candidates to avoid explosion
+        candidate_ids = [str(r.chunk_id) for r in vector_results if r.chunk_id][:50]
+        # Simple guardrail: if entities*candidates too large, trim candidates
+        if len(entities) * len(candidate_ids) > 500:
+            candidate_ids = candidate_ids[: max(1, 500 // max(len(entities), 1))]
+        graph_signals = self._compute_graph_signals(
+            entity_names=entities,
+            candidate_chunk_ids=candidate_ids,
+            query_type=qtype,
+            doc_tag=doc_tag,
+        )
+        stats["graph_channel_candidates"] = len(graph_signals)
+        if not graph_signals:
+            return stats
+
+        w_vec, w_graph = self._get_query_type_weights(qtype)
+        # Track pre-rerank positions to compute delta
+        pre_ranks = {str(r.chunk_id): idx for idx, r in enumerate(vector_results)}
+        for r in vector_results:
+            sig = graph_signals.get(str(r.chunk_id))
+            r.graph_score = sig.get("score") if sig else 0.0
+            if not sig:
+                r.fused_score = r.vector_score
+                continue
+            r.fused_score = (w_vec * (r.vector_score or 0.0)) + (
+                w_graph * r.graph_score
+            )
+        vector_results.sort(key=lambda x: x.fused_score or 0.0, reverse=True)
+        # Compute simple rerank delta metrics
+        deltas = []
+        for idx, r in enumerate(vector_results):
+            old = pre_ranks.get(str(r.chunk_id))
+            if old is not None:
+                deltas.append(old - idx)
+        if deltas:
+            avg_delta = sum(deltas) / len(deltas)
+        else:
+            avg_delta = 0.0
+        stats["graph_reranker_applied"] = True
+        stats["graph_rerank_avg_delta"] = avg_delta
+        logger.info(
+            "graph_reranker_applied",
+            extra={
+                "query_preview": query[:80],
+                "query_type": qtype,
+                "entities": len(entities),
+                "graph_candidates": len(graph_signals),
+                "avg_rank_delta": avg_delta,
+            },
+        )
+        return stats
 
     def _build_bm25_predicates(
         self, filters: Dict[str, Any]
@@ -1703,6 +2226,11 @@ class HybridRetriever:
             metrics["vector_prefetch_count"] = vector_stats["prefetch_count"]
         if "colbert_used" in vector_stats:
             metrics["vector_colbert_used"] = vector_stats["colbert_used"]
+        # Sparse coverage metrics from vector path (Phase B.4)
+        if "sparse_scored_ratio" in vector_stats:
+            metrics["sparse_scored_ratio"] = vector_stats["sparse_scored_ratio"]
+        if "sparse_topk_ratio" in vector_stats:
+            metrics["sparse_topk_ratio"] = vector_stats["sparse_topk_ratio"]
 
         # Step 2: Fuse rankings
         fusion_start = time.time()
@@ -1731,12 +2259,19 @@ class HybridRetriever:
         # Optional graph retrieval channel (entity-anchored, cross-doc allowed)
         graph_channel_stats: Dict[str, Any] = {}
         if self.graph_channel_enabled:
-            graph_candidates, graph_channel_stats = self._graph_retrieval_channel(
-                query, doc_tag
-            )
-            if graph_candidates:
-                fused_results.extend(graph_candidates)
-                fused_results = self._dedup_results(fused_results)
+            if getattr(
+                getattr(self.config, "feature_flags", None), "graph_as_reranker", False
+            ):
+                graph_channel_stats = self._apply_graph_reranker(
+                    query, doc_tag, fused_results, metrics
+                )
+            else:
+                graph_candidates, graph_channel_stats = self._graph_retrieval_channel(
+                    query, doc_tag
+                )
+                if graph_candidates:
+                    fused_results.extend(graph_candidates)
+                    fused_results = self._dedup_results(fused_results)
         metrics.update(graph_channel_stats)
 
         # Optional ColBERT rerank between fusion and cross-encoder
@@ -1905,6 +2440,32 @@ class HybridRetriever:
             metrics["expanded_source_count"] = 0
             metrics["expansion_cap_hit"] = 0
 
+        # Step 6b: Structure-aware expansion (C.4)
+        # Adds sibling, parent section, and shared-entity chunks
+        structure_start = time.time()
+        structure_expanded = self._expand_with_structure(query, seeds, doc_tag)
+        if structure_expanded:
+            all_results.extend(structure_expanded)
+            metrics["structure_expansion_time_ms"] = (
+                time.time() - structure_start
+            ) * 1000
+            metrics["structure_expansion_count"] = len(structure_expanded)
+            # Count by context_source type
+            metrics["structure_sibling_count"] = sum(
+                1 for r in structure_expanded if r.context_source == "sibling"
+            )
+            metrics["structure_parent_count"] = sum(
+                1 for r in structure_expanded if r.context_source == "parent_section"
+            )
+            metrics["structure_entity_count"] = sum(
+                1 for r in structure_expanded if r.context_source == "shared_entities"
+            )
+        else:
+            metrics["structure_expansion_time_ms"] = (
+                time.time() - structure_start
+            ) * 1000
+            metrics["structure_expansion_count"] = 0
+
         # Include micro-doc extras prior to dedup
         if microdoc_extras:
             all_results.extend(microdoc_extras)
@@ -1995,6 +2556,8 @@ class HybridRetriever:
                 chunks_returned=len(final_results),
                 expanded=metrics.get("expansion_triggered", False),
                 fusion_method=self.fusion_method.value,
+                sparse_scored_ratio=metrics.get("sparse_scored_ratio"),
+                sparse_topk_ratio=metrics.get("sparse_topk_ratio"),
             )
 
             # Emit Prometheus metrics for expansion
@@ -2661,15 +3224,36 @@ class HybridRetriever:
         return ("chunk_id", r.chunk_id)
 
     def _dedup_results(self, results: List[ChunkResult]) -> List[ChunkResult]:
-        """Remove duplicate chunks by identity."""
-        seen = set()
-        deduped = []
-        for r in results:
-            rid = self._result_id(r)
-            if rid not in seen:
-                seen.add(rid)
-                deduped.append(r)
-        return deduped
+        """Remove duplicate chunks by identity, optionally merging best scores."""
+        if not getattr(
+            getattr(self.config, "feature_flags", None), "dedup_best_score", False
+        ):
+            # Simple first-wins dedup when feature flag is off
+            seen = set()
+            deduped = []
+            for r in results:
+                rid = self._result_id(r)
+                if rid not in seen:
+                    seen.add(rid)
+                    deduped.append(r)
+            return deduped
+
+        # Use config weights if available, else default to 0.7/0.3
+        weights = getattr(
+            getattr(self.config.search, "hybrid", None), "query_type_weights", {}
+        )
+        wv, wg = 0.7, 0.3
+        default_weights = weights.get("conceptual") or {}
+        wv = float(default_weights.get("vector", wv))
+        wg = float(default_weights.get("graph", wg))
+
+        # Delegate to standalone function for testability
+        return dedup_chunk_results(
+            results,
+            vector_weight=wv,
+            graph_weight=wg,
+            id_fn=lambda r: self._result_id(r),
+        )
 
     def _bounded_expansion(
         self, query: str, seeds: List[ChunkResult]
@@ -2800,6 +3384,7 @@ class HybridRetriever:
                             tenant=record.get("tenant"),
                             is_expanded=True,
                             expansion_source=source_chunk_id,
+                            context_source="sequential",  # C.4: Track expansion type
                             fused_score=neighbor_fused_score,
                             citation_labels=[],
                             graph_distance=1,
@@ -2831,6 +3416,332 @@ class HybridRetriever:
             )
 
         return expanded
+
+    def _expand_with_structure(
+        self,
+        query: str,
+        seeds: List[ChunkResult],
+        doc_tag: Optional[str] = None,
+    ) -> List[ChunkResult]:
+        """
+        Structure-aware context expansion (Phase C.4).
+
+        Finds additional context chunks via:
+        1. Sibling chunks - same parent_section_id (context_source="sibling")
+        2. Parent section chunks - traverse CHILD_OF to parent (context_source="parent_section")
+        3. Shared-entity chunks - chunks sharing entities with top results (context_source="shared_entities")
+
+        Each expanded chunk gets:
+        - is_expanded=True
+        - expansion_source=seed_chunk_id
+        - context_source=<type>
+
+        Returns combined list of expanded chunks (no duplicates).
+        """
+        if not seeds:
+            return []
+
+        # Check feature flag
+        if not getattr(
+            getattr(self.config, "feature_flags", None),
+            "structure_aware_expansion",
+            False,
+        ):
+            return []
+
+        # Get config limits
+        expansion_cfg = getattr(
+            getattr(self.config.search, "hybrid", None), "expansion", {}
+        )
+        structure_cfg = getattr(expansion_cfg, "structure", None) or {}
+        if isinstance(structure_cfg, dict):
+            sibling_limit = structure_cfg.get("sibling_limit", 3)
+            parent_limit = structure_cfg.get("parent_section_limit", 2)
+            entity_limit = structure_cfg.get("shared_entity_limit", 3)
+            timeout_ms = structure_cfg.get("timeout_ms", 100)
+        else:
+            sibling_limit = getattr(structure_cfg, "sibling_limit", 3)
+            parent_limit = getattr(structure_cfg, "parent_section_limit", 2)
+            entity_limit = getattr(structure_cfg, "shared_entity_limit", 3)
+            timeout_ms = getattr(structure_cfg, "timeout_ms", 100)
+
+        timeout_seconds = timeout_ms / 1000.0
+        seen_ids = {self._result_id(r) for r in seeds}
+        expanded: List[ChunkResult] = []
+
+        # Limit seeds for expansion to control latency
+        max_sources = min(5, len(seeds))
+        eligible = seeds[:max_sources]
+        seed_lookup = {seed.chunk_id: seed for seed in seeds}
+
+        # 1. Sibling expansion - chunks with same parent_section_id
+        sibling_query = """
+        UNWIND $parent_section_ids AS psid
+        MATCH (c:Chunk {parent_section_id: psid})
+        WHERE NOT c.id IN $exclude_ids
+          AND ($doc_tag IS NULL OR c.doc_tag = $doc_tag)
+        WITH psid, c
+        ORDER BY c.order
+        WITH psid, collect(c)[..$limit] AS siblings
+        UNWIND siblings AS sibling
+        RETURN DISTINCT
+            sibling.id AS chunk_id,
+            sibling.document_id AS document_id,
+            sibling.parent_section_id AS parent_section_id,
+            sibling.order AS `order`,
+            sibling.level AS level,
+            sibling.heading AS heading,
+            sibling.text AS text,
+            sibling.token_count AS token_count,
+            sibling.is_combined AS is_combined,
+            sibling.is_split AS is_split,
+            sibling.original_section_ids AS original_section_ids,
+            sibling.boundaries_json AS boundaries_json,
+            sibling.doc_tag AS doc_tag,
+            sibling.document_total_tokens AS document_total_tokens,
+            sibling.source_path AS source_path,
+            sibling.is_microdoc AS is_microdoc,
+            sibling.doc_is_microdoc AS doc_is_microdoc,
+            sibling.is_microdoc_stub AS is_microdoc_stub,
+            sibling.embedding_version AS embedding_version,
+            sibling.tenant AS tenant,
+            psid AS source_parent_section
+        """
+
+        # 2. Parent section expansion - traverse CHILD_OF to find parent's chunks
+        parent_query = """
+        UNWIND $chunk_ids AS cid
+        MATCH (c:Chunk {id: cid})
+        OPTIONAL MATCH (c)-[:CHILD_OF]->(parent:Section)
+        WITH cid, parent
+        WHERE parent IS NOT NULL
+        MATCH (sibling:Chunk)-[:IN_SECTION]->(parent)
+        WHERE sibling.id <> cid
+          AND ($doc_tag IS NULL OR sibling.doc_tag = $doc_tag)
+        WITH cid, sibling
+        ORDER BY sibling.order
+        WITH cid, collect(sibling)[..$limit] AS parent_chunks
+        UNWIND parent_chunks AS pc
+        RETURN DISTINCT
+            pc.id AS chunk_id,
+            pc.document_id AS document_id,
+            pc.parent_section_id AS parent_section_id,
+            pc.order AS `order`,
+            pc.level AS level,
+            pc.heading AS heading,
+            pc.text AS text,
+            pc.token_count AS token_count,
+            pc.is_combined AS is_combined,
+            pc.is_split AS is_split,
+            pc.original_section_ids AS original_section_ids,
+            pc.boundaries_json AS boundaries_json,
+            pc.doc_tag AS doc_tag,
+            pc.document_total_tokens AS document_total_tokens,
+            pc.source_path AS source_path,
+            pc.is_microdoc AS is_microdoc,
+            pc.doc_is_microdoc AS doc_is_microdoc,
+            pc.is_microdoc_stub AS is_microdoc_stub,
+            pc.embedding_version AS embedding_version,
+            pc.tenant AS tenant,
+            cid AS source_chunk
+        """
+
+        # 3. Shared-entity expansion - chunks sharing entities
+        entity_query = """
+        UNWIND $chunk_ids AS cid
+        MATCH (c:Chunk {id: cid})-[:MENTIONS|IN_CHUNK]-(e:Entity)
+        WHERE e.name IS NOT NULL AND size(e.name) >= 4
+        WITH cid, collect(DISTINCT e)[..5] AS entities
+        UNWIND entities AS entity
+        MATCH (entity)-[:MENTIONED_IN|IN_CHUNK]-(other:Chunk)
+        WHERE other.id <> cid
+          AND NOT other.id IN $exclude_ids
+          AND ($doc_tag IS NULL OR other.doc_tag = $doc_tag)
+        WITH cid, other, count(DISTINCT entity) AS shared_count
+        ORDER BY shared_count DESC
+        WITH cid, collect(other)[..$limit] AS entity_chunks
+        UNWIND entity_chunks AS ec
+        RETURN DISTINCT
+            ec.id AS chunk_id,
+            ec.document_id AS document_id,
+            ec.parent_section_id AS parent_section_id,
+            ec.order AS `order`,
+            ec.level AS level,
+            ec.heading AS heading,
+            ec.text AS text,
+            ec.token_count AS token_count,
+            ec.is_combined AS is_combined,
+            ec.is_split AS is_split,
+            ec.original_section_ids AS original_section_ids,
+            ec.boundaries_json AS boundaries_json,
+            ec.doc_tag AS doc_tag,
+            ec.document_total_tokens AS document_total_tokens,
+            ec.source_path AS source_path,
+            ec.is_microdoc AS is_microdoc,
+            ec.doc_is_microdoc AS doc_is_microdoc,
+            ec.is_microdoc_stub AS is_microdoc_stub,
+            ec.embedding_version AS embedding_version,
+            ec.tenant AS tenant,
+            cid AS source_chunk
+        """
+
+        try:
+            with self.neo4j_driver.session() as session:
+                # Collect parent_section_ids and chunk_ids from seeds
+                parent_section_ids = list(
+                    {r.parent_section_id for r in eligible if r.parent_section_id}
+                )
+                chunk_ids = [r.chunk_id for r in eligible if r.chunk_id]
+                exclude_ids = [r.chunk_id for r in seeds if r.chunk_id]
+
+                # Run sibling expansion
+                if sibling_limit > 0 and parent_section_ids:
+                    result = session.run(
+                        sibling_query,
+                        parent_section_ids=parent_section_ids,
+                        exclude_ids=exclude_ids,
+                        doc_tag=doc_tag,
+                        limit=sibling_limit,
+                        timeout=timeout_seconds,
+                    )
+                    for record in result:
+                        chunk_id = record["chunk_id"]
+                        rid = ("chunk_id", chunk_id)
+                        if rid in seen_ids:
+                            continue
+                        seen_ids.add(rid)
+
+                        # Find source seed by parent_section_id
+                        source_psid = record["source_parent_section"]
+                        source_seed = next(
+                            (s for s in seeds if s.parent_section_id == source_psid),
+                            eligible[0],
+                        )
+                        source_score = source_seed.fused_score or 0.0
+
+                        expanded.append(
+                            self._build_expanded_chunk(
+                                record,
+                                source_seed.chunk_id,
+                                context_source="sibling",
+                                source_score=source_score,
+                            )
+                        )
+
+                # Run parent section expansion
+                if parent_limit > 0 and chunk_ids:
+                    result = session.run(
+                        parent_query,
+                        chunk_ids=chunk_ids,
+                        doc_tag=doc_tag,
+                        limit=parent_limit,
+                        timeout=timeout_seconds,
+                    )
+                    for record in result:
+                        chunk_id = record["chunk_id"]
+                        rid = ("chunk_id", chunk_id)
+                        if rid in seen_ids:
+                            continue
+                        seen_ids.add(rid)
+
+                        source_chunk_id = record["source_chunk"]
+                        source_seed = seed_lookup.get(source_chunk_id, eligible[0])
+                        source_score = source_seed.fused_score or 0.0
+
+                        expanded.append(
+                            self._build_expanded_chunk(
+                                record,
+                                source_chunk_id,
+                                context_source="parent_section",
+                                source_score=source_score,
+                            )
+                        )
+
+                # Run shared-entity expansion
+                if entity_limit > 0 and chunk_ids:
+                    result = session.run(
+                        entity_query,
+                        chunk_ids=chunk_ids,
+                        exclude_ids=list(seen_ids),
+                        doc_tag=doc_tag,
+                        limit=entity_limit,
+                        timeout=timeout_seconds,
+                    )
+                    for record in result:
+                        chunk_id = record["chunk_id"]
+                        rid = ("chunk_id", chunk_id)
+                        if rid in seen_ids:
+                            continue
+                        seen_ids.add(rid)
+
+                        source_chunk_id = record["source_chunk"]
+                        source_seed = seed_lookup.get(source_chunk_id, eligible[0])
+                        source_score = source_seed.fused_score or 0.0
+
+                        expanded.append(
+                            self._build_expanded_chunk(
+                                record,
+                                source_chunk_id,
+                                context_source="shared_entities",
+                                source_score=source_score,
+                            )
+                        )
+
+            logger.info(
+                "structure_aware_expansion",
+                extra={
+                    "seeds": len(seeds),
+                    "expanded": len(expanded),
+                    "sibling_limit": sibling_limit,
+                    "parent_limit": parent_limit,
+                    "entity_limit": entity_limit,
+                },
+            )
+
+        except Exception as e:
+            logger.error(f"Structure-aware expansion failed: {e}")
+            # Don't fail the whole search if expansion fails
+
+        return expanded
+
+    def _build_expanded_chunk(
+        self,
+        record: dict,
+        source_chunk_id: str,
+        context_source: str,
+        source_score: float,
+    ) -> ChunkResult:
+        """Build a ChunkResult from a Neo4j record for structure expansion."""
+        neighbor_score = self._neighbor_score(source_score)
+        return ChunkResult(
+            chunk_id=record["chunk_id"],
+            document_id=record["document_id"],
+            parent_section_id=record["parent_section_id"],
+            order=record["order"] or 0,
+            level=record["level"] or 0,
+            heading=record["heading"] or "",
+            text=record["text"] or "",
+            token_count=record["token_count"] or 0,
+            is_combined=record.get("is_combined") or False,
+            is_split=record.get("is_split") or False,
+            original_section_ids=record.get("original_section_ids") or [],
+            boundaries_json=record.get("boundaries_json") or "{}",
+            doc_tag=record.get("doc_tag"),
+            document_total_tokens=record.get("document_total_tokens", 0),
+            source_path=record.get("source_path"),
+            is_microdoc=record.get("is_microdoc", False),
+            doc_is_microdoc=record.get("doc_is_microdoc", False),
+            is_microdoc_stub=record.get("is_microdoc_stub", False),
+            embedding_version=record.get("embedding_version"),
+            tenant=record.get("tenant"),
+            is_expanded=True,
+            expansion_source=source_chunk_id,
+            context_source=context_source,
+            fused_score=neighbor_score,
+            citation_labels=[],
+            graph_distance=1,
+            graph_score=0.5,  # Lower than sequential expansion
+        )
 
     def _gate_expansion_with_sparse(
         self,
@@ -3106,18 +4017,43 @@ class HybridRetriever:
             return [], stats
         extractor = self._get_entity_extractor()
         entities = extractor.extract_entities(query)
+        if getattr(
+            getattr(self.config, "feature_flags", None), "graph_garbage_filter", False
+        ):
+            entities = [
+                e
+                for e in entities
+                if isinstance(e, str)
+                and len(e.strip()) >= 4
+                and e.lower()
+                not in {
+                    "at",
+                    "in",
+                    "id",
+                    "to",
+                    "of",
+                    "for",
+                    "the",
+                    "and",
+                    "or",
+                    "is",
+                    "it",
+                }
+            ]
         stats["graph_channel_entities"] = len(entities)
         if not entities:
             return [], stats
         rels, max_related = self._relationships_for_query(query)
-        rel_pattern = "|".join(rels)
         limit_per_entity = max(1, min(max_related, 50))
         cypher = """
         UNWIND $entities AS name
         MATCH (e:Entity)
         WHERE toLower(e.name) CONTAINS toLower(name)
-           OR toLower(name) CONTAINS toLower(e.name)
-        MATCH (e)-[:MENTIONED_IN]->(c:Chunk)
+        MATCH (e)-[r]->(c:Chunk)
+        WHERE (
+            $use_rel_types = false
+            OR type(r) IN $rel_types
+        )
         WHERE $doc_tag IS NULL OR c.doc_tag = $doc_tag
         RETURN DISTINCT c {
             .id,
@@ -3147,14 +4083,29 @@ class HybridRetriever:
                     entities=list(set(entities)),
                     doc_tag=doc_tag,
                     limit=limit_per_entity,
-                    rel_pattern=rel_pattern,
+                    rel_types=rels,
+                    use_rel_types=bool(
+                        getattr(
+                            getattr(self.config, "feature_flags", None),
+                            "graph_rel_types_wired",
+                            False,
+                        )
+                    ),
                 )
                 for record in result:
                     props = record["props"] or {}
                     chunk = self._chunk_from_props(props)
-                    chunk.graph_score = max(1.0, float(record.get("match_count") or 1))
+                    raw_matches = float(record.get("match_count") or 0.0)
+                    if getattr(
+                        getattr(self.config, "feature_flags", None),
+                        "graph_score_normalized",
+                        False,
+                    ):
+                        chunk.graph_score = 1.0 - math.exp(-raw_matches / 3.0)
+                    else:
+                        chunk.graph_score = max(1.0, raw_matches)
+                    # Do not overwrite vector_score; keep graph score separate
                     chunk.fused_score = chunk.graph_score
-                    chunk.vector_score = chunk.graph_score
                     chunk.vector_score_kind = "graph_entity"
                     chunks.append(chunk)
         except Exception as exc:
@@ -3185,6 +4136,15 @@ class HybridRetriever:
                     if s >= self.expansion_sparse_threshold
                 }
                 chunks = [c for c in chunks if str(c.chunk_id) in allowed] or chunks
+        logger.info(
+            "graph_channel_invoked",
+            extra={
+                "query_preview": query[:80],
+                "entities": stats.get("graph_channel_entities"),
+                "candidates": stats.get("graph_channel_candidates"),
+                "rels": rels,
+            },
+        )
         return chunks, stats
 
     def _fetch_graph_neighbors(

@@ -121,6 +121,17 @@ SLO_DEFINITIONS = {
         max_threshold=0.40,  # Guardrail: too high = performance issue
         description="Adjacency expansion rate should be 10-40% (bounded)",
     ),
+    # Sparse embedding coverage SLO - tracks non-stub content chunks
+    # Reference: Graph Channel Rehabilitation RCA - sparse coverage must be tracked
+    "sparse_content_missing": SLODefinition(
+        name="sparse_content_missing",
+        type=SLOType.ZERO_TOLERANCE,
+        target=0.0,  # ZERO non-stub chunks should lack sparse vectors
+        unit="count",
+        alert_threshold=0.0,  # Alert on ANY missing sparse for content chunks
+        page_threshold=5.0,  # Page if >5 content chunks missing sparse
+        description="ZERO non-stub content chunks should lack sparse vectors",
+    ),
 }
 
 

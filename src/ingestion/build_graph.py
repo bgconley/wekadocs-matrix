@@ -57,6 +57,73 @@ from src.shared.schema import ensure_schema_version
 logger = get_logger(__name__)
 GRAPH_BUILDER_INIT_LOGGED = False
 
+# C.1.1: Generic headings that should NOT become concept entities
+GENERIC_HEADING_BLACKLIST = frozenset(
+    {
+        "overview",
+        "introduction",
+        "summary",
+        "description",
+        "details",
+        "notes",
+        "note",
+        "example",
+        "examples",
+        "usage",
+        "syntax",
+        "parameters",
+        "options",
+        "arguments",
+        "returns",
+        "return value",
+        "see also",
+        "related",
+        "prerequisites",
+        "requirements",
+        "warning",
+        "warnings",
+        "caution",
+        "important",
+        "tip",
+        "tips",
+        "troubleshooting",
+        "faq",
+        "appendix",
+        "reference",
+        "references",
+        "contents",
+        "table of contents",
+        "index",
+        "glossary",
+        "about",
+        "getting started",
+        "quick start",
+        "installation",
+        "setup",
+        "configuration",
+        "conclusion",
+        "next steps",
+    }
+)
+
+# C.1.3: Entity validity criteria - entity_types that qualify for :Entity label
+VALID_ENTITY_TYPES = frozenset(
+    {
+        "heading_concept",
+        "cli_command",
+        "config_param",
+        "concept",
+        "api_endpoint",
+        "parameter",
+        "command",
+        "option",
+        "feature",
+        "component",
+        "service",
+        "module",
+    }
+)
+
 
 class GraphBuilder:
     """Builds graph from parsed documents, sections, and entities."""
@@ -324,6 +391,12 @@ class GraphBuilder:
                     repaired_count=repaired,
                 )
 
+            # Step 2d: C.1.1 - Create heading concept entities from section headings
+            heading_concept_stats = self._create_heading_concept_entities(
+                session, document["id"], sections
+            )
+            stats["heading_concepts"] = heading_concept_stats
+
             # Step 3: Upsert Entities in batches
             stats["entities_upserted"] = self._upsert_entities(session, entities)
 
@@ -396,6 +469,10 @@ class GraphBuilder:
             # Phase 7E-4: Check SLOs if monitoring enabled
             if self.config.monitoring.slo_monitoring_enabled:
                 slo_metrics = collector.compute_slo_metrics(chunk_metrics)
+                # Graph Channel Rehabilitation: Add sparse coverage to SLO metrics
+                slo_metrics["sparse_content_missing"] = embedding_stats.get(
+                    "sparse_content_missing", 0
+                )
                 violations = check_slos_and_log(slo_metrics, logger)
 
                 stats["slo_metrics"] = slo_metrics
@@ -543,6 +620,130 @@ class GraphBuilder:
             )
 
         return total_sections
+
+    def _create_heading_concept_entities(
+        self, session, document_id: str, sections: List[Dict]
+    ) -> Dict[str, int]:
+        """
+        C.1.1: Create concept entities from qualifying section headings.
+
+        For each section heading that meets validity criteria:
+        - Creates an :Entity:Concept node with entity_type="heading_concept"
+        - Creates DEFINES relationship from entity to chunk
+        - Creates MENTIONED_IN relationship from entity to chunk
+
+        Criteria for qualifying headings:
+        - Non-empty and >= 5 characters
+        - Not in GENERIC_HEADING_BLACKLIST
+        - Not purely numeric or bullet markers
+
+        Returns:
+            Dict with counts: entities_created, defines_created, mentions_created
+        """
+        stats = {"entities_created": 0, "defines_created": 0, "mentions_created": 0}
+
+        # Extract qualifying headings from sections
+        heading_entities = []
+        for section in sections:
+            heading = section.get("heading") or section.get("title") or ""
+            heading = heading.strip()
+
+            # Skip empty or too short
+            if not heading or len(heading) < 5:
+                continue
+
+            # Normalize for comparison
+            canonical = re.sub(r"\s+", " ", heading.lower().strip())
+            # Remove leading articles
+            canonical = re.sub(r"^(the|a|an)\s+", "", canonical)
+
+            # Skip generic headings
+            if canonical in GENERIC_HEADING_BLACKLIST:
+                continue
+
+            # Skip purely numeric or bullet markers (e.g., "1.", "1.2.3", "•", "-")
+            if re.match(r"^[\d\.\-\•\*\#]+$", heading.strip()):
+                continue
+
+            # Generate deterministic entity ID
+            entity_id = hashlib.sha256(
+                f"heading_concept:{document_id}:{canonical}".encode()
+            ).hexdigest()[:24]
+
+            heading_entities.append(
+                {
+                    "id": entity_id,
+                    "name": heading,
+                    "canonical_name": canonical,
+                    "entity_type": "heading_concept",
+                    "source_section_id": section.get("id"),
+                    "document_id": document_id,
+                    "doc_tag": section.get("doc_tag"),
+                }
+            )
+
+        if not heading_entities:
+            logger.debug(
+                "No qualifying heading concepts found",
+                document_id=document_id,
+                sections_checked=len(sections),
+            )
+            return stats
+
+        # Batch upsert heading concept entities
+        batch_size = self.config.ingestion.batch_size
+        for i in range(0, len(heading_entities), batch_size):
+            batch = heading_entities[i : i + batch_size]
+
+            # Create :Entity:Concept nodes
+            entity_query = """
+            UNWIND $entities AS ent
+            MERGE (e:Entity:Concept {id: ent.id})
+            SET e.name = ent.name,
+                e.canonical_name = ent.canonical_name,
+                e.entity_type = ent.entity_type,
+                e.source_section_id = ent.source_section_id,
+                e.document_id = ent.document_id,
+                e.doc_tag = ent.doc_tag,
+                e.updated_at = datetime()
+            RETURN count(e) AS count
+            """
+            result = session.run(entity_query, entities=batch)
+            stats["entities_created"] += result.single()["count"]
+
+            # Create DEFINES relationships (Entity -> Chunk)
+            defines_query = """
+            UNWIND $entities AS ent
+            MATCH (e:Entity:Concept {id: ent.id})
+            MATCH (c:Chunk {id: ent.source_section_id})
+            MERGE (e)-[r:DEFINES]->(c)
+            SET r.updated_at = datetime()
+            RETURN count(r) AS count
+            """
+            result = session.run(defines_query, entities=batch)
+            stats["defines_created"] += result.single()["count"]
+
+            # Create MENTIONED_IN relationships (Entity -> Chunk)
+            mentions_query = """
+            UNWIND $entities AS ent
+            MATCH (e:Entity:Concept {id: ent.id})
+            MATCH (c:Chunk {id: ent.source_section_id})
+            MERGE (e)-[r:MENTIONED_IN]->(c)
+            SET r.updated_at = datetime()
+            RETURN count(r) AS count
+            """
+            result = session.run(mentions_query, entities=batch)
+            stats["mentions_created"] += result.single()["count"]
+
+        logger.info(
+            "Created heading concept entities",
+            document_id=document_id,
+            entities=stats["entities_created"],
+            defines=stats["defines_created"],
+            mentions=stats["mentions_created"],
+        )
+
+        return stats
 
     def _upsert_citation_units(
         self, session, document_id: str, chunks: List[Dict]
@@ -1015,14 +1216,55 @@ class GraphBuilder:
         return total_removed
 
     def _upsert_entities(self, session, entities: Dict[str, Dict]) -> int:
-        """Upsert Entity nodes in batches."""
+        """
+        Upsert Entity nodes in batches.
+
+        C.1.3: Entity Label Hygiene
+        - Only adds :Entity label to nodes that meet validity criteria
+        - Filters out entities with NULL/empty names, short names, or invalid types
+        - Logs filtered entities for debugging
+        """
         batch_size = self.config.ingestion.batch_size
         entities_list = list(entities.values())
         total_entities = 0
 
+        # C.1.3: Filter entities based on validity criteria
+        valid_entities = []
+        filtered_count = 0
+        for entity in entities_list:
+            name = entity.get("name") or ""
+            entity_type = entity.get("category") or entity.get("entity_type") or ""
+
+            # Skip entities with NULL or empty names
+            if not name or not name.strip():
+                filtered_count += 1
+                continue
+
+            # Skip entities with names too short (< 4 chars)
+            if len(name.strip()) < 4:
+                filtered_count += 1
+                continue
+
+            # Add canonical_name if not present
+            if "canonical_name" not in entity:
+                entity["canonical_name"] = re.sub(r"\s+", " ", name.lower().strip())
+
+            # Add entity_type for tracking (use category as fallback)
+            if "entity_type" not in entity:
+                entity["entity_type"] = entity_type
+
+            valid_entities.append(entity)
+
+        if filtered_count > 0:
+            logger.info(
+                "Entity label hygiene: filtered invalid entities",
+                filtered_count=filtered_count,
+                valid_count=len(valid_entities),
+            )
+
         # Group by label for efficient batching
         by_label = {}
-        for entity in entities_list:
+        for entity in valid_entities:
             label = entity["label"]
             if label not in by_label:
                 by_label[label] = []
@@ -1033,10 +1275,13 @@ class GraphBuilder:
                 batch = entity_batch[i : i + batch_size]
 
                 # Dynamic label in query
+                # C.1.3: Include canonical_name and entity_type for graph queries
                 query = f"""
                 UNWIND $entities as ent
                 MERGE (e:Entity:{label} {{id: ent.id}})
                 SET e.name = ent.name,
+                    e.canonical_name = ent.canonical_name,
+                    e.entity_type = ent.entity_type,
                     e.description = ent.description,
                     e.category = ent.category,
                     e.introduced_in = ent.introduced_in,
@@ -1203,6 +1448,11 @@ class GraphBuilder:
         stats = {
             "computed": 0,
             "upserted": 0,
+            # Sparse coverage tracking (Graph Channel Rehabilitation)
+            "sparse_eligible": 0,  # Non-stub chunks eligible for sparse
+            "sparse_success": 0,  # Chunks that got sparse vectors
+            "sparse_failures": 0,  # Batches where embed_sparse failed
+            "sparse_content_missing": 0,  # Non-stub chunks without sparse (SLO metric)
         }
 
         # Phase 7C.7: Initialize embedding provider from factory
@@ -1341,6 +1591,10 @@ class GraphBuilder:
                 content_embeddings.extend(self.embedder.embed_documents(batch_content))
                 title_embeddings.extend(self.embedder.embed_documents(batch_title))
 
+                # B.2: Per-batch error isolation for sparse embeddings
+                # On failure, insert None placeholders to maintain index alignment
+                # This prevents one failed batch from disabling sparse for ALL chunks
+                # Graph Channel Rehabilitation: Added strict mode and failure tracking
                 if sparse_embeddings is not None and hasattr(
                     self.embedder, "embed_sparse"
                 ):
@@ -1349,12 +1603,37 @@ class GraphBuilder:
                             self.embedder.embed_sparse(batch_content)
                         )
                     except Exception as exc:
-                        logger.warning(
-                            "Sparse embedding generation failed; continuing without sparse vectors",
-                            error=str(exc),
+                        stats["sparse_failures"] += 1
+                        # Check if strict mode is enabled
+                        sparse_strict = getattr(
+                            self.config.search.vector.qdrant,
+                            "sparse_strict_mode",
+                            False,
                         )
-                        sparse_embeddings = None
+                        if sparse_strict:
+                            logger.error(
+                                "Sparse embedding generation failed (STRICT MODE); "
+                                "failing ingestion as sparse_strict_mode=true",
+                                error=str(exc),
+                                batch_size=len(batch_content),
+                                batch_indices=batch,
+                            )
+                            raise RuntimeError(
+                                f"Sparse embedding failed in strict mode: {exc}"
+                            ) from exc
+                        else:
+                            logger.warning(
+                                "Sparse embedding generation failed for batch; "
+                                "inserting None placeholders for affected chunks",
+                                error=str(exc),
+                                batch_size=len(batch_content),
+                                batch_indices=batch,
+                            )
+                            # Insert None placeholders to maintain index alignment
+                            # Only this batch's chunks lose sparse; others continue normally
+                            sparse_embeddings.extend([None] * len(batch_content))
 
+                # B.2: Per-batch error isolation for ColBERT embeddings
                 if colbert_embeddings is not None and hasattr(
                     self.embedder, "embed_colbert"
                 ):
@@ -1364,10 +1643,14 @@ class GraphBuilder:
                         )
                     except Exception as exc:
                         logger.warning(
-                            "ColBERT embedding generation failed; continuing without ColBERT vectors",
+                            "ColBERT embedding generation failed for batch; "
+                            "inserting None placeholders for affected chunks",
                             error=str(exc),
+                            batch_size=len(batch_content),
+                            batch_indices=batch,
                         )
-                        colbert_embeddings = None
+                        # Insert None placeholders to maintain index alignment
+                        colbert_embeddings.extend([None] * len(batch_content))
 
             # Process each section with its embeddings
             for idx, section in enumerate(sections_to_embed):
@@ -1383,6 +1666,29 @@ class GraphBuilder:
                     if colbert_embeddings is not None and idx < len(colbert_embeddings)
                     else None
                 )
+
+                # Graph Channel Rehabilitation: Track sparse coverage for non-stub chunks
+                # Stubs are structural placeholders with empty text - expected to lack sparse
+                is_stub = section.get("is_microdoc_stub", False)
+                if not is_stub and sparse_embeddings is not None:
+                    stats["sparse_eligible"] += 1
+                    # Check if sparse_vector is valid (has indices)
+                    has_valid_sparse = (
+                        sparse_vector is not None
+                        and isinstance(sparse_vector, dict)
+                        and sparse_vector.get("indices")
+                    )
+                    if has_valid_sparse:
+                        stats["sparse_success"] += 1
+                    else:
+                        # Non-stub content chunk missing sparse - this is the SLO metric
+                        stats["sparse_content_missing"] += 1
+                        logger.warning(
+                            "Non-stub content chunk missing sparse vector",
+                            section_id=section.get("id"),
+                            heading=section.get("heading"),
+                            token_count=section.get("token_count", 0),
+                        )
 
                 # Phase 7E-1: CRITICAL - Comprehensive validation layer
 

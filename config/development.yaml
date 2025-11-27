@@ -48,12 +48,16 @@ search:
       allow_recreate: false  # Set true to auto-rebuild collections during schema upgrades
       enable_sparse: true
       enable_colbert: true
+      # Graph Channel Rehabilitation: Sparse embedding error handling mode
+      # false = graceful degradation (default) - insert None placeholder on failure
+      # true = strict mode - fail ingestion if sparse embedding fails
+      sparse_strict_mode: false
       use_query_api: true
       query_api_dense_limit: 200
       query_api_sparse_limit: 200
       query_api_candidate_limit: 200
       query_vector_name: "content"
-      query_strategy: "content_only"  # Options: content_only, weighted, max_field
+      query_strategy: "weighted"  # Options: content_only, weighted, max_field
     neo4j:
       index_name: "section_embeddings_v2"  # Phase 7C: New 1024-D index
 
@@ -86,6 +90,21 @@ search:
       title: 0.1
       entity: 0.1
       text-sparse: 0.3
+    query_type_weights:
+      conceptual: { vector: 0.7, graph: 0.3 }
+      cli: { vector: 0.5, graph: 0.5 }
+      config: { vector: 0.5, graph: 0.5 }
+      procedural: { vector: 0.6, graph: 0.4 }
+      troubleshooting: { vector: 0.7, graph: 0.3 }
+      reference: { vector: 0.7, graph: 0.3 }
+    # Optional: query-type relationship sets (used if graph_adaptive_enabled)
+    query_type_relationships:
+      conceptual: ["MENTIONED_IN", "DEFINES", "IN_SECTION"]
+      cli: ["MENTIONED_IN", "CONTAINS_STEP", "HAS_PARAMETER"]
+      config: ["MENTIONED_IN", "HAS_PARAMETER", "DEFINES"]
+      procedural: ["MENTIONED_IN", "CONTAINS_STEP", "NEXT_CHUNK", "IN_SECTION"]
+      troubleshooting: ["MENTIONED_IN", "AFFECTS", "CAUSED_BY", "RESOLVES", "NEXT_CHUNK"]
+      reference: ["MENTIONED_IN", "NEXT_CHUNK"]
 
     reranker:
       enabled: true
@@ -118,6 +137,12 @@ search:
           lexical: 0.4
           structural: 0.5
           proximity: 0.1
+      # Structure-aware expansion (Phase C.4)
+      structure:
+        sibling_limit: 3           # Max sibling chunks from same parent_section
+        parent_section_limit: 2    # Max chunks from parent section
+        shared_entity_limit: 3     # Max chunks sharing entities with top results
+        timeout_ms: 100            # Max latency budget for structure expansion
 
 # Graph search settings
   graph:
@@ -295,6 +320,15 @@ feature_flags:
   byte_cap_responses: true       # New in pre-phase7
   schema_v2_1_dev: true         # Dev only for pre-phase7
   dual_write_1024d: false       # Phase 7C.4: Enable dual-write to both 384-D and 1024-D indices
+  # New rollout flags for retrieval rehab
+  query_api_weighted_fusion: false
+  graph_garbage_filter: true       # C.0.1: Filter short/stopword entities
+  graph_rel_types_wired: true      # C.0.2: Use query-adaptive relationship types
+  dedup_best_score: true           # C.0.3: Keep highest score in dedup (enabled 2025-11-26)
+  graph_score_normalized: true     # C.0.4: Saturating exponential normalization
+  graph_as_reranker: false
+  entity_embedding_fallback: false
+  structure_aware_expansion: true  # C.4: Sibling/parent/entity context expansion (enabled 2025-11-26)
 
 # Phase 7E-4: Monitoring and observability configuration
 # Reference: Canonical Spec L4916-4976, L3513-3528

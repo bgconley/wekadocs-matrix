@@ -14,6 +14,7 @@ RELATIONSHIP_TYPES = {
     "CHILD_OF",
     "CONTAINS_STEP",
     "CRITICAL_FOR",
+    "DEFINES",  # C.1.1: heading concept → chunk
     "DEPENDS_ON",
     "EXECUTES",
     "FOCUSED_ON",
@@ -22,6 +23,8 @@ RELATIONSHIP_TYPES = {
     "HAS_QUERY",
     "HAS_SECTION",
     "IN_CHUNK",
+    "IN_SECTION",  # Structure expansion: chunk → section
+    "MENTIONED_IN",  # Entity → chunk (inverse of MENTIONS)
     "MENTIONS",
     "NEXT",
     "NEXT_CHUNK",

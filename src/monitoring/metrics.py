@@ -409,6 +409,8 @@ class MetricsAggregator:
         chunks_returned: int,
         expanded: bool,
         fusion_method: str,
+        sparse_scored_ratio: float | None = None,
+        sparse_topk_ratio: float | None = None,
     ):
         """Record a retrieval event."""
         self.retrieval_history.append(
@@ -418,6 +420,8 @@ class MetricsAggregator:
                 "chunks_returned": chunks_returned,
                 "expanded": expanded,
                 "fusion_method": fusion_method,
+                "sparse_scored_ratio": sparse_scored_ratio,
+                "sparse_topk_ratio": sparse_topk_ratio,
             }
         )
 

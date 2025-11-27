@@ -207,6 +207,10 @@ class QdrantVectorConfig(BaseModel):
     query_api_dense_limit: int = 200
     query_api_sparse_limit: int = 200
     query_api_candidate_limit: int = 200
+    # Sparse embedding error handling mode
+    # If True: fail ingestion when sparse embedding fails (strict)
+    # If False: insert None placeholder, continue gracefully (default, B.2 behavior)
+    sparse_strict_mode: bool = False
 
 
 class Neo4jVectorConfig(BaseModel):
@@ -265,6 +269,16 @@ class HybridSearchConfig(BaseModel):
     top_k: int = 20
     vector_fields: Dict[str, float] = Field(
         default_factory=lambda: {"content": 1.0, "title": 0.35, "entity": 0.2}
+    )
+    query_type_weights: Dict[str, Dict[str, float]] = Field(
+        default_factory=lambda: {
+            "conceptual": {"vector": 0.7, "graph": 0.3},
+            "cli": {"vector": 0.5, "graph": 0.5},
+            "config": {"vector": 0.5, "graph": 0.5},
+            "procedural": {"vector": 0.6, "graph": 0.4},
+            "troubleshooting": {"vector": 0.7, "graph": 0.3},
+            "reference": {"vector": 0.7, "graph": 0.3},
+        }
     )
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
     bm25: BM25Config = Field(default_factory=BM25Config)  # Phase 7E
@@ -525,6 +539,46 @@ class FeatureFlagsConfig(BaseModel):
     # Phase 7C.8: Entity focus bias flag
     entity_focus_bias: bool = Field(
         default=False, description="Enable entity focus bias in retrieval"
+    )
+
+    # Query API weighted fusion rollout (Phase A)
+    query_api_weighted_fusion: bool = Field(
+        default=False,
+        description="Enable weighted per-field fusion on Query API path (Strategy 2)",
+    )
+
+    # Graph harm-reduction flags (Phase C.0)
+    graph_garbage_filter: bool = Field(
+        default=False,
+        description="Filter short/stopword entities before graph matching",
+    )
+    graph_rel_types_wired: bool = Field(
+        default=False,
+        description="Use rel_types instead of hardcoded MENTIONED_IN in graph Cypher",
+    )
+    dedup_best_score: bool = Field(
+        default=False,
+        description="Deduplicate by keeping best fused score and merging signals",
+    )
+    graph_score_normalized: bool = Field(
+        default=False,
+        description="Normalize graph scores to [0,1] using saturating exponential",
+    )
+
+    # Graph reranker / entity embedding rollout (Phase C.2 / C.3)
+    graph_as_reranker: bool = Field(
+        default=False,
+        description="Use graph as reranker over vector candidates instead of channel",
+    )
+    entity_embedding_fallback: bool = Field(
+        default=False,
+        description="Enable entity embedding fallback when trie resolution fails",
+    )
+
+    # Structure-aware context expansion (Phase C.4)
+    structure_aware_expansion: bool = Field(
+        default=False,
+        description="Enable sibling, parent section, and shared-entity context expansion",
     )
 
 

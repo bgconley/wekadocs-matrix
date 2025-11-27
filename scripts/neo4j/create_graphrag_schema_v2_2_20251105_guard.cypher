@@ -78,14 +78,14 @@ FOR (d:Document) ON (d.version);
 CREATE INDEX document_last_edited IF NOT EXISTS
 FOR (d:Document) ON (d.last_edited);
 
-// Section indexes (v2.1)
-CREATE INDEX section_document_id IF NOT EXISTS
+// Section indexes (v2.1) - names match running DB with _idx suffix
+CREATE INDEX section_document_id_idx IF NOT EXISTS
 FOR (s:Section) ON (s.document_id);
 
-CREATE INDEX section_level IF NOT EXISTS
+CREATE INDEX section_level_idx IF NOT EXISTS
 FOR (s:Section) ON (s.level);
 
-CREATE INDEX section_order IF NOT EXISTS
+CREATE INDEX section_order_idx IF NOT EXISTS
 FOR (s:Section) ON (s.order);
 
 CREATE INDEX section_parent_section_id IF NOT EXISTS
@@ -132,6 +132,19 @@ FOR (c:Concept) ON (c.term);
 
 CREATE INDEX component_name IF NOT EXISTS
 FOR (c:Component) ON (c.name);
+
+// Entity indexes (C.1.1 / C.1.3 - heading concepts and entity hygiene)
+CREATE INDEX entity_canonical_name IF NOT EXISTS
+FOR (e:Entity) ON (e.canonical_name);
+
+CREATE INDEX entity_name IF NOT EXISTS
+FOR (e:Entity) ON (e.name);
+
+CREATE INDEX entity_type IF NOT EXISTS
+FOR (e:Entity) ON (e.entity_type);
+
+CREATE INDEX entity_document_id IF NOT EXISTS
+FOR (e:Entity) ON (e.document_id);
 
 // Session indexes (v2.1)
 CREATE INDEX session_started_at IF NOT EXISTS
@@ -223,21 +236,23 @@ FOR (s:Section) ON (s.doc_id);
 // PART 2: FULL-TEXT INDEXES (lexical tier for hybrid retrieval)
 // ---------------------------------------------------------------------------
 
-CREATE FULLTEXT INDEX chunk_text_index_v3 IF NOT EXISTS
+// Legacy single-field fulltext index (kept for backward compatibility)
+CREATE FULLTEXT INDEX chunk_text_fulltext IF NOT EXISTS
+FOR (n:Chunk) ON EACH [n.text];
+
+// Primary fulltext index for hybrid retrieval (text + heading)
+CREATE FULLTEXT INDEX chunk_text_index_v3_bge_m3 IF NOT EXISTS
 FOR (n:Chunk|CitationUnit) ON EACH [n.text, n.heading];
 
 CREATE FULLTEXT INDEX heading_fulltext_v1 IF NOT EXISTS
 FOR (n:Chunk|Section) ON EACH [n.heading];
-
-CREATE FULLTEXT INDEX document_title_fulltext_v1 IF NOT EXISTS
-FOR (d:Document) ON EACH [d.title];
 
 
 // ---------------------------------------------------------------------------
 // PART 3: VECTOR INDEXES
 // ---------------------------------------------------------------------------
 // Keep the original 1024-D content vectors (both labels for compatibility)
-CREATE VECTOR INDEX section_embeddings_v2 IF NOT EXISTS
+CREATE VECTOR INDEX section_embeddings_v2_bge_m3 IF NOT EXISTS
 FOR (s:Section)
 ON s.vector_embedding
 OPTIONS {
@@ -384,4 +399,87 @@ SET sv.version = 'v2.2',
 // SHOW INDEXES YIELD name, type WHERE type = 'FULLTEXT' RETURN name;
 // SHOW INDEXES YIELD name, type, labelsOrTypes WHERE type = 'VECTOR' RETURN name, labelsOrTypes;
 // MATCH (c:Chunk) RETURN exists(c.document_id) AS has_document_id, exists(c.doc_id) AS has_doc_id LIMIT 1;
-// ============================================================================
+
+
+// ===========================================================================
+// PART 10: QDRANT SCHEMA (Reference Only - Apply via Python/REST)
+// ===========================================================================
+// This section documents the Qdrant vector store schema for completeness.
+// It cannot be applied via Cypher - use the Python script or Qdrant REST API.
+//
+// To apply: python scripts/neo4j/schema_ddl_complete_20251125.py --apply-qdrant
+//
+// ---------------------------------------------------------------------------
+// COLLECTIONS
+// ---------------------------------------------------------------------------
+// Primary collection: chunks_multi_bge_m3 (Phase 7E+ BGE-M3 embeddings)
+// Legacy collection:  chunks_multi (kept for backward compatibility)
+//
+// DENSE VECTORS (per collection):
+//   - content:          1024D, Cosine  (main content embedding)
+//   - entity:           1024D, Cosine  (entity-name embedding)
+//   - title:            1024D, Cosine  (title/heading embedding)
+//   - late-interaction: 1024D, Cosine, MaxSim (ColBERT-style multi-vector)
+//
+// SPARSE VECTORS (per collection):
+//   - text-sparse: BM25/BGE-M3 sparse, on-disk index
+//
+// HNSW CONFIG:
+//   - m: 48                    (graph edges per node)
+//   - ef_construct: 256        (construction beam width)
+//   - full_scan_threshold: 10000
+//   - on_disk: false
+//
+// OPTIMIZER CONFIG:
+//   - deleted_threshold: 0.2
+//   - vacuum_min_vector_number: 1000
+//   - indexing_threshold: 10000
+//   - flush_interval_sec: 5
+//
+// WAL CONFIG:
+//   - wal_capacity_mb: 32
+//   - wal_segments_ahead: 0
+//
+// ---------------------------------------------------------------------------
+// PAYLOAD INDEXES (21 fields per collection)
+// ---------------------------------------------------------------------------
+// Identifiers:
+//   - id (keyword)
+//   - document_id (keyword)     -- canonical
+//   - doc_id (keyword)          -- legacy alias
+//   - parent_section_id (keyword)
+//   - parent_section_original_id (keyword)
+//   - node_id (keyword)         -- BGE-M3 collection only
+//   - kg_id (keyword)           -- knowledge graph ID
+//
+// Structure & ordering:
+//   - order (integer)
+//   - heading (text)
+//
+// Metadata filters:
+//   - doc_tag (keyword)
+//   - tenant (keyword)
+//   - lang (keyword)
+//   - version (keyword)
+//   - source_path (keyword)
+//   - snapshot_scope (keyword)
+//
+// Token/size:
+//   - token_count (integer)
+//   - is_microdoc (bool)
+//
+// Embedding audit:
+//   - embedding_version (keyword)
+//   - embedding_provider (keyword)
+//   - embedding_dimensions (integer)
+//
+// Deduplication:
+//   - text_hash (keyword)
+//   - shingle_hash (keyword)
+//
+// Timestamps:
+//   - updated_at (integer)      -- epoch seconds
+//
+// ===========================================================================
+// END OF SCHEMA DEFINITION
+// ===========================================================================
