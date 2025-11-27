@@ -1783,7 +1783,9 @@ class HybridRetriever:
             ]
         else:
             self.graph_relationships = [
-                "MENTIONS",
+                "MENTIONED_IN",  # Entity->Chunk: most common (2962 edges)
+                "DEFINES",  # Entity->Chunk: second most common (2126 edges)
+                "MENTIONS",  # Legacy/alternative naming
                 "CONTAINS_STEP",
                 "HAS_PARAMETER",
                 "REQUIRES",

@@ -232,6 +232,26 @@ class BM25Config(BaseModel):
     index_name: str = "chunk_text_index_v3"
 
 
+class ExpansionRescoringConfig(BaseModel):
+    """Rescoring configuration for expansion neighbors"""
+
+    enabled: bool = False
+    mode: str = "threshold_only"  # threshold_only | weighted
+    normalize_method: str = "min_max"  # min_max | sigmoid | percentile
+    weights: Dict[str, float] = Field(
+        default_factory=lambda: {"lexical": 0.4, "structural": 0.5, "proximity": 0.1}
+    )
+
+
+class ExpansionStructureConfig(BaseModel):
+    """Structure-aware expansion configuration (Phase C.4)"""
+
+    sibling_limit: int = 3  # Max sibling chunks from same parent_section
+    parent_section_limit: int = 2  # Max chunks from parent section
+    shared_entity_limit: int = 3  # Max chunks sharing entities with top results
+    timeout_ms: int = 100  # Max latency budget for structure expansion
+
+
 class ExpansionConfig(BaseModel):
     """Bounded adjacency expansion configuration for Phase 7E"""
 
@@ -239,6 +259,13 @@ class ExpansionConfig(BaseModel):
     max_neighbors: int = 1
     query_min_tokens: int = 12
     score_delta_max: float = 0.02
+    sparse_score_threshold: float = 0.0  # Gating threshold for sparse lexical scores
+    rescoring: ExpansionRescoringConfig = Field(
+        default_factory=ExpansionRescoringConfig
+    )
+    structure: ExpansionStructureConfig = Field(
+        default_factory=ExpansionStructureConfig
+    )
 
 
 class RerankerConfig(BaseModel):
@@ -256,6 +283,10 @@ class HybridSearchConfig(BaseModel):
         "legacy"  # legacy (BM25+RRF) or bge_reranker (vector-only + cross-encoder)
     )
     method: str = "rrf"  # Phase 7E: rrf or weighted
+    # Phase C: Graph channel configuration
+    graph_channel_enabled: bool = False  # Enable graph as independent scoring channel
+    graph_adaptive_enabled: bool = False  # Enable adaptive graph weight selection
+    colbert_rerank_enabled: bool = True  # Enable ColBERT late-interaction reranking
     rrf_k: int = 60  # Phase 7E: RRF constant
     fusion_alpha: float = 0.6  # Phase 7E: Vector weight for weighted fusion
     vector_weight: float = 0.7  # Legacy
@@ -278,6 +309,23 @@ class HybridSearchConfig(BaseModel):
             "procedural": {"vector": 0.6, "graph": 0.4},
             "troubleshooting": {"vector": 0.7, "graph": 0.3},
             "reference": {"vector": 0.7, "graph": 0.3},
+        }
+    )
+    # Query-type adaptive relationship sets (used if graph_adaptive_enabled)
+    query_type_relationships: Dict[str, List[str]] = Field(
+        default_factory=lambda: {
+            "conceptual": ["MENTIONED_IN", "DEFINES", "IN_SECTION"],
+            "cli": ["MENTIONED_IN", "CONTAINS_STEP", "HAS_PARAMETER"],
+            "config": ["MENTIONED_IN", "HAS_PARAMETER", "DEFINES"],
+            "procedural": ["MENTIONED_IN", "CONTAINS_STEP", "NEXT_CHUNK", "IN_SECTION"],
+            "troubleshooting": [
+                "MENTIONED_IN",
+                "AFFECTS",
+                "CAUSED_BY",
+                "RESOLVES",
+                "NEXT_CHUNK",
+            ],
+            "reference": ["MENTIONED_IN", "NEXT_CHUNK"],
         }
     )
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)

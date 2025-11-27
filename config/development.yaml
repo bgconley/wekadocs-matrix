@@ -313,12 +313,9 @@ cache:
   #   - {namespace}:chunk_epoch -> HSET {chunk_id} -> epoch_int
 
 # Feature flags for gradual rollout
+# NOTE: All flags here MUST have corresponding fields in FeatureFlagsConfig (src/shared/config.py)
+# Test: tests/test_config_schema_completeness.py validates this invariant
 feature_flags:
-  use_embedding_provider: true  # New in pre-phase7
-  validate_dimensions: true     # New in pre-phase7
-  coverage_enrichment: true      # New in pre-phase7
-  byte_cap_responses: true       # New in pre-phase7
-  schema_v2_1_dev: true         # Dev only for pre-phase7
   dual_write_1024d: false       # Phase 7C.4: Enable dual-write to both 384-D and 1024-D indices
   # New rollout flags for retrieval rehab
   query_api_weighted_fusion: false
@@ -326,7 +323,7 @@ feature_flags:
   graph_rel_types_wired: true      # C.0.2: Use query-adaptive relationship types
   dedup_best_score: true           # C.0.3: Keep highest score in dedup (enabled 2025-11-26)
   graph_score_normalized: true     # C.0.4: Saturating exponential normalization
-  graph_as_reranker: false
+  graph_as_reranker: true  # C.2: Graph signals influence final ranking (enabled 2025-11-27)
   entity_embedding_fallback: false
   structure_aware_expansion: true  # C.4: Sibling/parent/entity context expansion (enabled 2025-11-26)
 
