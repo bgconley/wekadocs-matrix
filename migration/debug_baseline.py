@@ -28,7 +28,7 @@ try:
     print(f"✓ Got {len(points)} points")
 
     for i, point in enumerate(points[:3]):
-        print(f"  Point {i+1}: {point.id}")
+        print(f"  Point {i + 1}: {point.id}")
         if point.payload:
             print(f"    Has embedding_version: {'embedding_version' in point.payload}")
             print(f"    Has embedding_model: {'embedding_model' in point.payload}")

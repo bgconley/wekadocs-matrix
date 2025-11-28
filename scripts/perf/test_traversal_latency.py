@@ -79,7 +79,7 @@ def measure_traversal_latency(depth: int, section_ids: List[str]) -> List[float]
                 timeout=30,
             )
         except Exception as e:
-            print(f"Warmup request {i+1} failed: {e}")
+            print(f"Warmup request {i + 1} failed: {e}")
 
     print(f"Running {TEST_ITERATIONS} test requests...")
 

@@ -6,6 +6,7 @@ Loads a gold set (YAML list of {query, expected_section_ids, filters})
 and executes each query through HybridRetriever, emitting per-query metrics
 and aggregate recall/latency summaries.
 """
+
 from __future__ import annotations
 
 import argparse

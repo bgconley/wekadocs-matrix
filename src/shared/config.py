@@ -697,6 +697,7 @@ class Settings(BaseSettings):
         default=None, alias="EMBEDDING_PROFILES_PATH"
     )
     embedding_strict_mode: bool = Field(default=True, alias="EMBEDDING_STRICT_MODE")
+    validation_strict_mode: bool = Field(default=False, alias="VALIDATION_STRICT_MODE")
     embedding_namespace_mode: str = Field(
         default="none", alias="EMBEDDING_NAMESPACE_MODE"
     )

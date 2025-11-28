@@ -610,7 +610,7 @@ class QueryService:
                 search_time = time.time() - search_start
 
                 logger.info(
-                    f"Search completed: {search_results.total_found} results in {search_time*1000:.1f}ms"
+                    f"Search completed: {search_results.total_found} results in {search_time * 1000:.1f}ms"
                 )
 
                 embedding_diag = self._embedding_diag()
@@ -635,7 +635,7 @@ class QueryService:
                 rank_time = time.time() - rank_start
 
                 logger.info(
-                    f"Ranking completed: {len(ranked_results)} results in {rank_time*1000:.1f}ms"
+                    f"Ranking completed: {len(ranked_results)} results in {rank_time * 1000:.1f}ms"
                 )
 
                 timing = {
@@ -689,7 +689,7 @@ class QueryService:
 
             logger.info(
                 f"Query completed: verbosity={verb_enum.value}, "
-                f"response_size_kb={response_size/1024:.1f}, "
+                f"response_size_kb={response_size / 1024:.1f}, "
                 f"confidence={response.answer_json.confidence:.2f}, "
                 f"evidence_count={len(response.answer_json.evidence)}, "
                 f"total_time={timing['total_ms']:.1f}ms"

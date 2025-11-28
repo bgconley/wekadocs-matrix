@@ -182,7 +182,7 @@ This is the third section.
         )
         assert (
             delta <= 3
-        ), f"Delta too large: {delta} (section count delta={updated_section_count-initial_section_count}, checksums changed={len(changed_sections)})"
+        ), f"Delta too large: {delta} (section count delta={updated_section_count - initial_section_count}, checksums changed={len(changed_sections)})"
 
         print("\n✓ Incremental update verified:")
         print(f"  Initial sections: {initial_section_count}")

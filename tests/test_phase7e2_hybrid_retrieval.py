@@ -554,7 +554,9 @@ class TestHybridRetrievalIntegration:
         hybrid_retriever.context_max_tokens = 100
 
         results, metrics = hybrid_retriever.retrieve(
-            "system documentation", top_k=10, expand=False  # Request many results
+            "system documentation",
+            top_k=10,
+            expand=False,  # Request many results
         )
 
         # Verify token budget enforced
@@ -679,7 +681,9 @@ class TestHybridRetrievalIntegration:
         query = "complete guide for configuring network interfaces with IP addresses"
 
         results, metrics = hybrid_retriever.retrieve(
-            query, top_k=3, expand=True  # Small top_k to leave room for expansion
+            query,
+            top_k=3,
+            expand=True,  # Small top_k to leave room for expansion
         )
 
         # Assemble context

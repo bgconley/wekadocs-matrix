@@ -3,6 +3,7 @@
 Hybrid retrieval eval harness.
 Loads queries.yaml (id/text/expected_type) and runs HybridRetriever (no gold labels yet).
 """
+
 from __future__ import annotations
 
 import argparse

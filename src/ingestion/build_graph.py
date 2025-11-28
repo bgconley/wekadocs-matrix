@@ -291,6 +291,44 @@ class GraphBuilder:
             ).inc()
         self._profile_alignment_verified = True
 
+    def ensure_embedder(self) -> None:
+        """
+        Initialize the embedding provider if it has not been created.
+
+        This mirrors the initialization logic used in upsert_document and is a
+        no-op when the embedder is already available.
+        """
+        if self.embedder:
+            return
+
+        logger.info(
+            "Initializing embedding provider",
+            provider=self.embedding_settings.provider,
+            model=self.embedding_settings.model_id,
+            dims=self.embedding_settings.dims,
+            profile=self.embedding_settings.profile,
+        )
+
+        self.embedder = ProviderFactory.create_embedding_provider(
+            settings=self.embedding_settings
+        )
+
+        if self.embedder.dims != self.embedding_dims:
+            logger.warning(
+                "Embedding dims mismatch; aligning local settings to provider",
+                configured_dims=self.embedding_dims,
+                provider_dims=self.embedder.dims,
+                model=self.embedder.model_id,
+            )
+            self.embedding_dims = self.embedder.dims
+
+        logger.info(
+            "Embedding provider initialized",
+            provider_name=self.embedder.provider_name,
+            model_id=self.embedder.model_id,
+            actual_dims=self.embedder.dims,
+        )
+
     def upsert_document(
         self,
         document: Dict,
@@ -1456,34 +1494,7 @@ class GraphBuilder:
         }
 
         # Phase 7C.7: Initialize embedding provider from factory
-        if not self.embedder:
-            logger.info(
-                "Initializing embedding provider",
-                provider=self.embedding_settings.provider,
-                model=self.embedding_settings.model_id,
-                dims=self.embedding_settings.dims,
-                profile=self.embedding_settings.profile,
-            )
-
-            self.embedder = ProviderFactory.create_embedding_provider(
-                settings=self.embedding_settings
-            )
-
-            if self.embedder.dims != self.embedding_dims:
-                logger.warning(
-                    "Embedding dims mismatch; aligning local settings to provider",
-                    configured_dims=self.embedding_dims,
-                    provider_dims=self.embedder.dims,
-                    model=self.embedder.model_id,
-                )
-                self.embedding_dims = self.embedder.dims
-
-            logger.info(
-                "Embedding provider initialized",
-                provider_name=self.embedder.provider_name,
-                model_id=self.embedder.model_id,
-                actual_dims=self.embedder.dims,
-            )
+        self.ensure_embedder()
 
         # Phase 7E-1: Replace-by-set GC for Qdrant chunks
         # Delete all chunks for this document BEFORE upserting current set

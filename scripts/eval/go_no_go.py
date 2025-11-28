@@ -134,12 +134,12 @@ class GoNoGoEvaluator:
 
         if hit3_improvement >= self.MIN_HIT3_IMPROVEMENT:
             self.checks_passed.append(
-                f"✅ Hit@3 improvement: {hit3_improvement_pct:+.1f}% (≥{self.MIN_HIT3_IMPROVEMENT*100:.0f}% required)"
+                f"✅ Hit@3 improvement: {hit3_improvement_pct:+.1f}% (≥{self.MIN_HIT3_IMPROVEMENT * 100:.0f}% required)"
             )
             return True
         else:
             self.checks_failed.append(
-                f"❌ Hit@3 improvement: {hit3_improvement_pct:+.1f}% (below {self.MIN_HIT3_IMPROVEMENT*100:.0f}% threshold)"
+                f"❌ Hit@3 improvement: {hit3_improvement_pct:+.1f}% (below {self.MIN_HIT3_IMPROVEMENT * 100:.0f}% threshold)"
             )
             return False
 
@@ -303,7 +303,7 @@ def print_report(
         comp = summary["comparison"]
         print(f"  Latency ratio: {comp['latency_ratio']:.2f}×")
         if "hit_at_3_improvement" in comp:
-            print(f"  Hit@3 improvement: {comp['hit_at_3_improvement']*100:+.1f}%")
+            print(f"  Hit@3 improvement: {comp['hit_at_3_improvement'] * 100:+.1f}%")
 
     print()
 

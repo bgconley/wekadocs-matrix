@@ -172,7 +172,9 @@ If you experience connection timeouts:
         timing = response.answer_json.timing
         assert timing["vector_search_ms"] > 0, "Vector search timing not recorded"
         assert timing["total_ms"] > 0, "Total timing not recorded"
-        assert query_time * 1000 < 5000, f"Query took too long: {query_time*1000:.0f}ms"
+        assert (
+            query_time * 1000 < 5000
+        ), f"Query took too long: {query_time * 1000:.0f}ms"
 
         # Verify evidence contains expected content
         evidence_text = " ".join(
@@ -187,7 +189,7 @@ If you experience connection timeouts:
             0.0 <= response.answer_json.confidence <= 1.0
         ), f"Confidence score out of range: {response.answer_json.confidence}"
 
-        print(f"\n✅ Query executed successfully in {query_time*1000:.0f}ms")
+        print(f"\n✅ Query executed successfully in {query_time * 1000:.0f}ms")
         print(f"   Evidence sections: {len(response.answer_json.evidence)}")
         print(f"   Confidence: {response.answer_json.confidence:.2f}")
         print(f"   Vector search time: {timing['vector_search_ms']:.0f}ms")

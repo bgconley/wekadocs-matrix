@@ -321,9 +321,9 @@ class TestGoldenSetBaseline:
         ), f"Too many failures: {summary['test_run']['failed_queries']} failed"
 
         # Log summary
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("GOLDEN SET BASELINE RESULTS")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"Total queries: {summary['test_run']['total_queries']}")
         print(f"Successful: {summary['test_run']['successful_queries']}")
         print(f"Failed: {summary['test_run']['failed_queries']}")
@@ -338,7 +338,7 @@ class TestGoldenSetBaseline:
         print("\nReports written to:")
         print(f"  - {csv_path}")
         print(f"  - {summary_path}")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
     def _calculate_category_stats(self, results: List[Dict]) -> Dict[str, Dict]:
         """Calculate per-category statistics"""

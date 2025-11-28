@@ -1056,17 +1056,17 @@ class Orchestrator:
         """Render report as Markdown."""
         md = f"""# Ingestion Report
 
-**Job ID:** `{report['job_id']}`
-**Tag:** `{report['tag']}`
-**Source:** `{report['source_uri']}`
+**Job ID:** `{report["job_id"]}`
+**Tag:** `{report["tag"]}`
+**Source:** `{report["source_uri"]}`
 
 ## Summary
 
-- **Sections:** {report['sections']}
-- **Entities:** {report['entities']}
-- **Mentions:** {report['mentions']}
-- **Drift:** {report['drift_pct']:.2%}
-- **Ready for Queries:** {'✅ Yes' if report['ready_for_queries'] else '❌ No'}
+- **Sections:** {report["sections"]}
+- **Entities:** {report["entities"]}
+- **Mentions:** {report["mentions"]}
+- **Drift:** {report["drift_pct"]:.2%}
+- **Ready for Queries:** {"✅ Yes" if report["ready_for_queries"] else "❌ No"}
 
 ## Timings
 

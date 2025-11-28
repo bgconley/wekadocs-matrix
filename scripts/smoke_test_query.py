@@ -45,7 +45,7 @@ async def run_test():
         print("\n--- Top Evidence ---")
         for i, ev in enumerate(response.answer_json.evidence[:3]):
             print(
-                f"{i+1}. title={getattr(ev, 'title', None)} "
+                f"{i + 1}. title={getattr(ev, 'title', None)} "
                 f"confidence={getattr(ev, 'confidence', None)} "
                 f"source={getattr(getattr(ev, 'metadata', {}), 'get', lambda k: None)('source_uri')}"
             )

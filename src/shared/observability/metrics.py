@@ -125,10 +125,16 @@ qdrant_search_total = Counter(
     ["collection_name", "status"],
 )
 
+qdrant_delete_total = Counter(
+    "qdrant_delete_total",
+    "Total Qdrant delete operations (compensation phase)",
+    ["collection_name", "status"],
+)
+
 qdrant_operation_latency_ms = Histogram(
     "qdrant_operation_latency_ms",
     "Qdrant operation latency in milliseconds",
-    ["collection_name", "operation"],  # operation: upsert, search
+    ["collection_name", "operation"],  # operation: upsert, search, delete
     buckets=(1, 5, 10, 25, 50, 100, 250, 500, 1000),
 )
 

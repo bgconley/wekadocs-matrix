@@ -342,7 +342,7 @@ def cmd_ingest(args):
     # Final summary
     if not args.json:
         total_time = time.time() - start_time
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(
             f"Completed {len(completed)} of {len(job_ids)} jobs in {int(total_time)}s"
         )
@@ -808,9 +808,9 @@ def cmd_report(args):
             print(json.dumps(report, indent=2))
         else:
             # Human-readable report
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"Ingestion Report: {args.job_id}")
-            print(f"{'='*60}\n")
+            print(f"{'=' * 60}\n")
 
             print(f"Tag: {report.get('tag', 'N/A')}")
             print(f"Timestamp: {report.get('timestamp_utc', 'N/A')}")
@@ -847,7 +847,7 @@ def cmd_report(args):
                 for err in report["errors"]:
                     print(f"  - {err}")
 
-            print(f"\n{'='*60}\n")
+            print(f"\n{'=' * 60}\n")
 
         return 0
 

@@ -139,10 +139,11 @@ services:
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
       # Legacy vars cleared to avoid override; set blank to prefer profile-driven config
-      - EMBEDDINGS_PROVIDER=
-      - EMBEDDINGS_MODEL=
-      - EMBEDDINGS_DIM=
-      - EMBEDDINGS_TASK=
+      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-bge-m3-service}
+      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
+      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
+      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-symmetric}
+      - HF_TOKENIZER_ID=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
       - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
       - RERANK_MODEL=${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
@@ -226,10 +227,11 @@ services:
       # Phase 7C: Embedding Provider Configuration
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
-      - EMBEDDINGS_PROVIDER=
-      - EMBEDDINGS_MODEL=
-      - EMBEDDINGS_DIM=
-      - EMBEDDINGS_TASK=
+      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-bge-m3-service}
+      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
+      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
+      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-symmetric}
+      - HF_TOKENIZER_ID=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
       - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
       - RERANK_MODEL=${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
@@ -320,10 +322,11 @@ services:
       # Phase 7C: Embedding Provider Configuration
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
-      - EMBEDDINGS_PROVIDER=
-      - EMBEDDINGS_MODEL=
-      - EMBEDDINGS_DIM=
-      - EMBEDDINGS_TASK=
+      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-bge-m3-service}
+      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
+      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
+      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-symmetric}
+      - HF_TOKENIZER_ID=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
       - RERANK_MODEL=${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
       - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://host.docker.internal:9001}

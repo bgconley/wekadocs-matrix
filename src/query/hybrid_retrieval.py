@@ -2260,10 +2260,11 @@ class HybridRetriever:
 
         # Optional graph retrieval channel (entity-anchored, cross-doc allowed)
         graph_channel_stats: Dict[str, Any] = {}
+        graph_as_reranker_flag = getattr(
+            getattr(self.config, "feature_flags", None), "graph_as_reranker", False
+        )
         if self.graph_channel_enabled:
-            if getattr(
-                getattr(self.config, "feature_flags", None), "graph_as_reranker", False
-            ):
+            if graph_as_reranker_flag:
                 graph_channel_stats = self._apply_graph_reranker(
                     query, doc_tag, fused_results, metrics
                 )

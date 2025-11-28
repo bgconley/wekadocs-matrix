@@ -319,7 +319,7 @@ class FusionComparator:
 
         for i, test_case in enumerate(test_cases):
             logger.info(
-                f"Processing query {i+1}/{len(test_cases)}: {test_case.query[:50]}..."
+                f"Processing query {i + 1}/{len(test_cases)}: {test_case.query[:50]}..."
             )
             query_results = self.compare_on_query(test_case)
 

@@ -266,7 +266,6 @@ class DatabaseStatusChecker:
 
         # Data Parity Check
         if neo4j.get("status") == "connected" and qdrant.get("status") == "connected":
-
             # Find Section count in Neo4j
             section_count = 0
             for item in neo4j.get("node_labels", []):

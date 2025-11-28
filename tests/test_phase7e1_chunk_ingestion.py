@@ -443,10 +443,10 @@ class TestChunkIngestionIntegration:
 
                 assert (
                     chunk_ids == chunk_ids_initial
-                ), f"Neo4j state changed on iteration {i+1}: {chunk_ids} != {chunk_ids_initial}"
+                ), f"Neo4j state changed on iteration {i + 1}: {chunk_ids} != {chunk_ids_initial}"
                 assert (
                     point_count == point_count_initial
-                ), f"Qdrant state changed on iteration {i+1}: {point_count} != {point_count_initial}"
+                ), f"Qdrant state changed on iteration {i + 1}: {point_count} != {point_count_initial}"
 
             # Step 3: Final verification - counts stable
             assert len(chunk_ids_initial) == 3

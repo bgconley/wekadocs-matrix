@@ -7,11 +7,11 @@ from urllib.parse import unquote, urlparse
 import redis
 import structlog
 
+# Atomic ingestion pipeline with saga-coordinated Neo4j + Qdrant writes
+# Guarantees: Neo4j commits only if Qdrant succeeds; compensates on failure
+from src.ingestion.atomic import ingest_document_atomic
 from src.ingestion.auto.queue import IngestJob, JobStatus, ack, brpoplpush, fail
 from src.ingestion.auto.reaper import JobReaper
-
-# Optional: wire up your existing ingestion pipeline here
-from src.ingestion.build_graph import ingest_document
 from src.shared.config import load_config
 
 log = structlog.get_logger()
@@ -93,9 +93,10 @@ async def process_job(job: IngestJob):
     else:
         format = "markdown"  # default
 
-    # Call Phase 3 ingestion pipeline (use original job.path as source_uri for tracking)
+    # Call atomic ingestion pipeline (saga-coordinated Neo4j + Qdrant writes)
+    # Uses original job.path as source_uri for provenance tracking
     source_uri = job.path if job.path.startswith("file://") else f"file://{job.path}"
-    stats = ingest_document(source_uri, content, format=format)
+    stats = ingest_document_atomic(source_uri, content, format=format)
 
     log.info("Ingestion completed", job_id=job.job_id, stats=stats)
     return stats

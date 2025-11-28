@@ -18,7 +18,8 @@ import httpx
 
 # Jina API configuration
 JINA_API_KEY = os.getenv(
-    "JINA_API_KEY", "jina_35169a1e714a41aab7b4c37817b58910Z65UGWJRVNStkMbt12lxaWrmIsVi"
+    "JINA_API_KEY",
+    "jina_35169a1e714a41aab7b4c37817b58910Z65UGWJRVNStkMbt12lxaWrmIsVi",  # pragma: allowlist secret
 )
 API_URL = "https://api.jina.ai/v1/embeddings"
 
@@ -94,7 +95,7 @@ def test_large_payload():
     }
 
     payload_size = len(json.dumps(payload))
-    print(f"Payload size: {payload_size:,} bytes (~{payload_size/1024:.1f} KB)")
+    print(f"Payload size: {payload_size:,} bytes (~{payload_size / 1024:.1f} KB)")
     print(f"Number of texts: {len(texts)}")
     print(f"Characters per text: {len(texts[0]):,}")
     print(f"Total characters: {sum(len(t) for t in texts):,}")
@@ -155,7 +156,7 @@ def test_medium_payload():
     }
 
     payload_size = len(json.dumps(payload))
-    print(f"Payload size: {payload_size:,} bytes (~{payload_size/1024:.1f} KB)")
+    print(f"Payload size: {payload_size:,} bytes (~{payload_size / 1024:.1f} KB)")
     print(f"Number of texts: {len(texts)}")
 
     try:
