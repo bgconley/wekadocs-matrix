@@ -23,6 +23,7 @@ reports/eval_*.json
 
 # Temporary scripts and artifacts
 scripts/neo4j/
+!scripts/neo4j/create_graphrag_schema_v2_2_20251105_guard.cypher
 architecture_diagram.svg
 tests/eval/
 

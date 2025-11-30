@@ -586,7 +586,7 @@ class HybridSearchEngine:
         expansion_query = f"""
         UNWIND $seed_ids AS seed_id
         MATCH (seed {{id: seed_id}})
-        OPTIONAL MATCH path=(seed)-[r:MENTIONS|CONTAINS_STEP|HAS_PARAMETER|REQUIRES|AFFECTS*1..{self.max_hops}]->(target)
+        OPTIONAL MATCH path=(seed)-[r:MENTIONS|CONTAINS_STEP|HAS_PARAMETER*1..{self.max_hops}]->(target)
         WHERE target.id <> seed.id
         WITH DISTINCT target, min(length(path)) AS dist, seed.id AS seed_id
         WHERE dist <= {self.max_hops}

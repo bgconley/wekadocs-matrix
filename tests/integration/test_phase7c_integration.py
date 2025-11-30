@@ -199,28 +199,36 @@ If you experience connection timeouts:
         Test that query path uses correct provider configuration.
 
         Validates:
-        - Embedder is Jina v4
-        - Dimensions are 1024
-        - Provider name is jina-ai
+        - Embedder matches configured provider (environment-agnostic)
+        - Dimensions match configured profile
+        - Provider name is properly set
         """
+        from src.shared.config import get_config
+
+        config = get_config()
         query_service = QueryService()
 
         # Trigger embedder initialization
         embedder = query_service._get_embedder()
 
-        # Verify provider configuration
-        assert (
-            embedder.provider_name == "jina-ai"
-        ), f"Wrong provider: {embedder.provider_name}"
-        assert (
-            embedder.model_id == "jina-embeddings-v3"
-        ), f"Wrong model: {embedder.model_id}"
-        assert embedder.dims == 1024, f"Wrong dimensions: {embedder.dims}"
+        # Get expected values from config (provider-agnostic validation)
+        expected_provider = config.embedding.provider
+        expected_dims = config.embedding.dims
 
-        print("\n✅ Query path using correct provider:")
-        print(f"   Provider: {embedder.provider_name}")
+        # Verify provider configuration matches config
+        assert (
+            embedder.provider_name == expected_provider
+        ), f"Provider mismatch: expected {expected_provider}, got {embedder.provider_name}"
+        assert (
+            embedder.dims == expected_dims
+        ), f"Dimension mismatch: expected {expected_dims}, got {embedder.dims}"
+        # Model ID should be non-empty (specific value depends on provider)
+        assert embedder.model_id, "Model ID should be set"
+
+        print("\n✅ Query path using correct provider configuration:")
+        print(f"   Provider: {embedder.provider_name} (expected: {expected_provider})")
         print(f"   Model: {embedder.model_id}")
-        print(f"   Dimensions: {embedder.dims}")
+        print(f"   Dimensions: {embedder.dims} (expected: {expected_dims})")
 
 
 class TestPhase7CSessionTracking:
@@ -780,12 +788,14 @@ class TestPhase7CEntityFocusBias:
         }
 
         # Cleanup
+        # Neo4j 5.x requires WITH clause between DELETE and subsequent MATCH
         with neo4j_driver.session() as session:
             session.run(
                 """
                 MATCH (d:Document {id: $doc_id})
                 OPTIONAL MATCH (d)-[:HAS_SECTION]->(s:Section)
                 DETACH DELETE d, s
+                WITH 1 AS _
                 MATCH (e:Configuration {id: $entity_id})
                 DETACH DELETE e
                 """,

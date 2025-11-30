@@ -262,13 +262,12 @@ class QueryPlanner:
             params["section_ids"] = None
 
         # For traverse intent, ensure rel_types is a list
+        # Phase 2 Cleanup: Removed REQUIRES, AFFECTS (never materialized)
         if "rel_types" not in params:
             params["rel_types"] = [
                 "MENTIONS",
                 "CONTAINS_STEP",
                 "HAS_PARAMETER",
-                "REQUIRES",
-                "AFFECTS",
             ]
 
         return params

@@ -318,13 +318,8 @@ class HybridSearchConfig(BaseModel):
             "cli": ["MENTIONED_IN", "CONTAINS_STEP", "HAS_PARAMETER"],
             "config": ["MENTIONED_IN", "HAS_PARAMETER", "DEFINES"],
             "procedural": ["MENTIONED_IN", "CONTAINS_STEP", "NEXT_CHUNK", "IN_SECTION"],
-            "troubleshooting": [
-                "MENTIONED_IN",
-                "AFFECTS",
-                "CAUSED_BY",
-                "RESOLVES",
-                "NEXT_CHUNK",
-            ],
+            # Phase 2 Cleanup: Removed AFFECTS, CAUSED_BY (never materialized)
+            "troubleshooting": ["MENTIONED_IN", "RESOLVES", "NEXT_CHUNK"],
             "reference": ["MENTIONED_IN", "NEXT_CHUNK"],
         }
     )

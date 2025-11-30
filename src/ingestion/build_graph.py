@@ -953,8 +953,10 @@ class GraphBuilder:
         create_graphrag_schema_v2_2_20251105_guard.cypher, ensuring we build:
             - CHILD_OF (Chunk -> Section)
             - PARENT_OF (Section -> Section)
-            - NEXT/PREV (Chunk adjacency within parent/doc scope)
-            - SAME_HEADING (Chunk siblings sharing headings)
+            - NEXT (Chunk adjacency within parent/doc scope)
+
+        Phase 2 Cleanup: Removed PREV (redundant - use <-[:NEXT]-) and
+        SAME_HEADING (O(n²) fanout with zero query usage).
         """
 
         queries = {
@@ -975,7 +977,10 @@ class GraphBuilder:
             MERGE (parent)-[:PARENT_OF]->(child)
             RETURN count(child) AS count
             """,
-            "next_prev": """
+            # Phase 2 Cleanup: Renamed from "next_prev", removed PREV edge creation
+            # Reverse traversal uses <-[:NEXT]- pattern instead of [:PREV]
+            # Also removed "same_heading" query - O(n²) fanout with zero query usage
+            "next": """
             MATCH (c:Chunk)
             WHERE c.text IS NOT NULL
               AND coalesce(c.document_id, c.doc_id) = $doc_id
@@ -986,23 +991,6 @@ class GraphBuilder:
             UNWIND range(0, size(chunks)-2) AS idx
             WITH chunks[idx] AS a, chunks[idx+1] AS b
             MERGE (a)-[:NEXT]->(b)
-            MERGE (b)-[:PREV]->(a)
-            RETURN count(*) AS count
-            """,
-            "same_heading": """
-            MATCH (c:Chunk)
-            WHERE c.text IS NOT NULL
-              AND c.heading IS NOT NULL
-              AND coalesce(c.document_id, c.doc_id) = $doc_id
-            WITH c.parent_section_id AS parent_id, c.heading AS heading, c
-            ORDER BY c.order, c.id
-            WITH parent_id, heading, collect(c) AS chunks
-            WHERE size(chunks) > 1
-            UNWIND chunks AS a
-            UNWIND chunks AS b
-            WITH a, b
-            WHERE a.id <> b.id AND a.order < b.order AND a.order + 8 >= b.order
-            MERGE (a)-[:SAME_HEADING]->(b)
             RETURN count(*) AS count
             """,
         }
@@ -1111,15 +1099,11 @@ class GraphBuilder:
             WHERE coalesce(child.document_id, child.doc_id) = $doc_id
             RETURN count(*) AS count
             """
-        elif builder == "next_prev":
+        # Phase 2 Cleanup: Renamed from "next_prev", removed PREV verification
+        # Also removed "same_heading" verification (edge type no longer created)
+        elif builder == "next":
             query = """
             MATCH (c:Chunk)-[:NEXT]->(:Chunk)
-            WHERE coalesce(c.document_id, c.doc_id) = $doc_id
-            RETURN count(*) AS count
-            """
-        elif builder == "same_heading":
-            query = """
-            MATCH (c:Chunk)-[:SAME_HEADING]->(:Chunk)
             WHERE coalesce(c.document_id, c.doc_id) = $doc_id
             RETURN count(*) AS count
             """
@@ -1421,7 +1405,7 @@ class GraphBuilder:
     ) -> int:
         """
         Create Entity→Entity typed relationships in batches.
-        Supports dynamic relationship types (e.g., CONTAINS_STEP, REQUIRES, AFFECTS).
+        Supports dynamic relationship types (e.g., CONTAINS_STEP, CONFIGURES, RESOLVES).
         """
         if not relationships:
             return 0

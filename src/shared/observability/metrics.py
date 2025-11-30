@@ -357,6 +357,19 @@ ingestion_duration_seconds = Histogram(
     buckets=(0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0),
 )
 
+# Issue #8: Entity→Entity relationship metrics
+entity_relationships_total = Counter(
+    "entity_relationships_total",
+    "Total Entity→Entity relationships created during ingestion",
+    ["relationship_type", "status"],  # status: created, rejected, missing_entities
+)
+
+entity_relationships_missing_total = Counter(
+    "entity_relationships_missing_total",
+    "Total Entity→Entity relationships skipped due to missing entity nodes",
+    ["relationship_type"],
+)
+
 # ===== Phase 7E-4: Chunk quality metrics =====
 chunk_token_distribution = Histogram(
     "chunk_token_distribution",

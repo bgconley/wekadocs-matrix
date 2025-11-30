@@ -116,8 +116,24 @@ from src.shared.embedding_fields import (  # noqa: E402
     ensure_no_embedding_model_in_payload,
     validate_embedding_metadata,
 )
+from src.shared.observability.metrics import (  # noqa: E402
+    entity_relationships_missing_total,
+    entity_relationships_total,
+)
 
 logger = structlog.get_logger(__name__)
+
+# Allowlist of valid Entity→Entity relationship types for Cypher injection defense
+# Phase 1.2: These are the only relationship types allowed to be interpolated into Cypher
+# Phase 2 Cleanup: Removed DEPENDS_ON and REQUIRES (never materialized by ingestion)
+ALLOWED_ENTITY_RELATIONSHIP_TYPES = frozenset(
+    {
+        "CONTAINS_STEP",  # Procedure→Step ordering
+        "REFERENCES",  # Cross-document references (Phase 3)
+        "CONFIGURES",  # Config→Component
+        "RESOLVES",  # Error→Procedure
+    }
+)
 
 
 @dataclass
@@ -1327,42 +1343,247 @@ class AtomicIngestionCoordinator:
         tx.run(query, sections=section_data, document_id=document_id)
         return len(section_data)
 
+    # Allowlist of valid entity labels to prevent Cypher injection
+    # These map to the canonical plan's Entity subtypes
+    ENTITY_LABEL_ALLOWLIST = frozenset(
+        {
+            "Entity",  # Base/fallback label
+            "Command",  # CLI commands (weka fs snapshot, etc.)
+            "Configuration",  # Config parameters
+            "Procedure",  # Multi-step procedures
+            "Step",  # Individual steps within procedures
+            "Error",  # Error codes/messages
+            "Concept",  # Abstract concepts
+        }
+    )
+
     def _neo4j_upsert_entities(self, tx, entities: Dict[str, Dict]) -> int:
-        """Upsert entity nodes within a transaction."""
+        """Upsert entity nodes within a transaction.
+
+        Phase 1.2 Enhancement: Entities now get proper subtype labels (Procedure, Step,
+        Command, Configuration) in addition to the base Entity label. This enables
+        type-specific queries like MATCH (p:Procedure)-[:CONTAINS_STEP]->(s:Step).
+
+        Labels are validated against ENTITY_LABEL_ALLOWLIST to prevent Cypher injection.
+        """
         if not entities:
             return 0
 
-        query = """
-        UNWIND $entities AS entity
-        MERGE (e:Entity {id: entity.id})
-        SET e += entity
-        """
+        # Group entities by their label for type-specific MERGE queries
+        from collections import defaultdict
 
-        entity_list = []
+        by_label = defaultdict(list)
+
         for eid, edata in entities.items():
             data = dict(edata)  # Copy to avoid mutation
             data["id"] = eid
+
+            # Extract and validate label (default to "Entity" if missing or invalid)
+            label = data.get("label", "Entity")
+            if label not in self.ENTITY_LABEL_ALLOWLIST:
+                logger.warning(
+                    "invalid_entity_label_rejected",
+                    label=label,
+                    entity_id=eid,
+                    allowed=list(self.ENTITY_LABEL_ALLOWLIST),
+                )
+                label = "Entity"
+
             # Sanitize for Neo4j (convert dicts to JSON strings, filter non-primitives)
             sanitized = self._sanitize_for_neo4j(data)
-            entity_list.append(sanitized)
+            by_label[label].append(sanitized)
 
-        tx.run(query, entities=entity_list)
-        return len(entity_list)
+        # Run separate MERGE queries for each label type
+        # This ensures proper Neo4j labels are applied, not just properties
+        total = 0
+        for label, entity_list in by_label.items():
+            # Use f-string for label (safe due to allowlist validation above)
+            query = f"""
+            UNWIND $entities AS entity
+            MERGE (e:Entity:{label} {{id: entity.id}})
+            SET e += entity
+            """
+            tx.run(query, entities=entity_list)
+            total += len(entity_list)
+
+        return total
 
     def _neo4j_create_mentions(self, tx, mentions: List[Dict]):
-        """Create MENTIONS relationships within a transaction."""
+        """Create MENTIONS and Entity→Entity relationships within a transaction.
+
+        Phase 1.2 Fix: This method now routes relationships based on their key structure:
+        - Section→Entity mentions have 'section_id' and 'entity_id' keys
+        - Entity→Entity relationships have 'from_id' and 'to_id' keys
+
+        The Entity→Entity relationships (e.g., CONTAINS_STEP from Procedure to Step)
+        were previously being silently dropped because only the Section→Entity
+        pattern was handled.
+        """
         if not mentions:
             return
 
-        query = """
-        UNWIND $mentions AS mention
-        MATCH (e:Entity {id: mention.entity_id})
-        MATCH (c:Chunk {id: mention.section_id})
-        MERGE (e)-[r:MENTIONED_IN]->(c)
-        SET r.count = coalesce(r.count, 0) + 1
-        """
+        # Phase 1.2: Separate mentions by type based on key structure
+        section_entity_mentions = []
+        entity_entity_relationships = []
 
-        tx.run(query, mentions=mentions)
+        for mention in mentions:
+            if "from_id" in mention and "to_id" in mention:
+                # Entity→Entity relationship (e.g., Procedure→Step via CONTAINS_STEP)
+                entity_entity_relationships.append(mention)
+            elif "section_id" in mention and "entity_id" in mention:
+                # Section→Entity mention (MENTIONED_IN)
+                section_entity_mentions.append(mention)
+            else:
+                # Log unexpected mention structure for debugging
+                logger.warning(
+                    "unroutable_mention_structure",
+                    keys=list(mention.keys()),
+                    mention_type=mention.get("relationship", "unknown"),
+                )
+
+        # Process Section→Entity mentions (existing behavior)
+        if section_entity_mentions:
+            query = """
+            UNWIND $mentions AS mention
+            MATCH (e:Entity {id: mention.entity_id})
+            MATCH (c:Chunk {id: mention.section_id})
+            MERGE (e)-[r:MENTIONED_IN]->(c)
+            SET r.count = coalesce(r.count, 0) + 1
+            """
+            tx.run(query, mentions=section_entity_mentions)
+
+        # Phase 1.2: Process Entity→Entity relationships
+        if entity_entity_relationships:
+            self._neo4j_create_entity_relationships(tx, entity_entity_relationships)
+
+    def _neo4j_create_entity_relationships(self, tx, relationships: List[Dict]):
+        """Create Entity→Entity relationships within a transaction.
+
+        Phase 1.2: Handles relationships like CONTAINS_STEP (Procedure→Step)
+        that were previously being dropped by _neo4j_create_mentions.
+
+        Relationship dict structure:
+        - from_id: Source entity ID
+        - from_label: Source entity label (e.g., "Procedure")
+        - to_id: Target entity ID
+        - to_label: Target entity label (e.g., "Step")
+        - relationship: Relationship type (e.g., "CONTAINS_STEP")
+        - order: Optional ordering field for sequential relationships
+        - confidence: Extraction confidence score
+        - source_section_id: Section where relationship was extracted
+        """
+        if not relationships:
+            return
+
+        # Group relationships by type for efficient batch processing
+        by_type: Dict[str, List[Dict]] = {}
+        for rel in relationships:
+            rel_type = rel.get("relationship")
+            if not rel_type:
+                logger.warning(
+                    "entity_relationship_missing_type",
+                    from_id=rel.get("from_id"),
+                    to_id=rel.get("to_id"),
+                    reason="relationship_type_required",
+                )
+                continue  # Skip relationships without explicit type
+            if rel_type not in by_type:
+                by_type[rel_type] = []
+            by_type[rel_type].append(rel)
+
+        # Process each relationship type with a dedicated query
+        rejected_count = 0
+        for rel_type, rels in by_type.items():
+            # Defense-in-depth: Validate relationship type against allowlist
+            # This prevents Cypher injection via malformed/malicious extractor output
+            if rel_type not in ALLOWED_ENTITY_RELATIONSHIP_TYPES:
+                logger.warning(
+                    "entity_relationship_type_rejected",
+                    relationship_type=rel_type,
+                    count=len(rels),
+                    reason="not_in_allowlist",
+                    allowed_types=list(ALLOWED_ENTITY_RELATIONSHIP_TYPES),
+                )
+                rejected_count += len(rels)
+                continue
+
+            # Since relationship types must be known at query compile time in Cypher,
+            # we use separate queries per type (validated above against allowlist)
+            #
+            # Issue #7 Fix: Use OPTIONAL MATCH and return counts to detect missing entities
+            # Issue #18 Fix: Use datetime({timezone: 'UTC'}) for explicit UTC timezone
+            #
+            # Multi-model validation fix: Aggregate missing counts BEFORE filtering
+            # The collect/unwind pattern preserves missing counts through the WHERE clause
+            query = f"""
+            UNWIND $rels AS rel
+            OPTIONAL MATCH (from:Entity {{id: rel.from_id}})
+            OPTIONAL MATCH (to:Entity {{id: rel.to_id}})
+            WITH rel, from, to,
+                 CASE WHEN from IS NULL THEN 1 ELSE 0 END AS mf,
+                 CASE WHEN to IS NULL THEN 1 ELSE 0 END AS mt
+            WITH collect({{r: rel, f: from, t: to}}) AS pairs,
+                 sum(mf) AS total_missing_from,
+                 sum(mt) AS total_missing_to
+            UNWIND pairs AS p
+            WITH p.r AS rel, p.f AS from, p.t AS to,
+                 total_missing_from, total_missing_to
+            WHERE from IS NOT NULL AND to IS NOT NULL
+            MERGE (from)-[r:{rel_type}]->(to)
+            SET r.order = rel.order,
+                r.confidence = rel.confidence,
+                r.source_section_id = rel.source_section_id,
+                r.created_at = datetime({{timezone: 'UTC'}})
+            // N1 Fix: COALESCE prevents NULL when all rows filtered by WHERE clause
+            RETURN count(r) AS created_count,
+                   COALESCE(max(total_missing_from), 0) AS missing_from_count,
+                   COALESCE(max(total_missing_to), 0) AS missing_to_count
+            """
+            result = tx.run(query, rels=rels)
+            record = result.single()
+
+            # N1 Fix: Defensive None handling (belt-and-suspenders with Cypher COALESCE)
+            created_count = record["created_count"] if record else 0
+            missing_from = (record.get("missing_from_count") or 0) if record else 0
+            missing_to = (record.get("missing_to_count") or 0) if record else 0
+
+            # Issue #7: Log when entities are not found
+            if missing_from > 0 or missing_to > 0:
+                logger.warning(
+                    "entity_relationships_missing_entities",
+                    relationship_type=rel_type,
+                    attempted=len(rels),
+                    created=created_count,
+                    missing_from_entities=missing_from,
+                    missing_to_entities=missing_to,
+                )
+                # Issue #8: Prometheus metric for missing entities
+                entity_relationships_missing_total.labels(
+                    relationship_type=rel_type
+                ).inc(missing_from + missing_to)
+
+            # Issue #8: Prometheus metrics for created relationships
+            if created_count > 0:
+                entity_relationships_total.labels(
+                    relationship_type=rel_type, status="created"
+                ).inc(created_count)
+
+            logger.debug(
+                "entity_relationships_created",
+                relationship_type=rel_type,
+                attempted=len(rels),
+                created=created_count,
+            )
+
+        # Issue #8: Prometheus metric for rejected relationships
+        if rejected_count > 0:
+            entity_relationships_total.labels(
+                relationship_type="rejected", status="rejected"
+            ).inc(rejected_count)
+            logger.info(
+                "entity_relationships_rejected_total",
+                rejected_count=rejected_count,
+            )
 
     def _neo4j_upsert_embedding_metadata(
         self,
@@ -1421,7 +1642,7 @@ class AtomicIngestionCoordinator:
                     "embedding_dimensions": (
                         len(content_embedding)
                         if content_embedding
-                        else builder.embedding_settings.dimensions
+                        else builder.embedding_settings.dims
                     ),
                     "embedding_timestamp": datetime.utcnow().isoformat() + "Z",
                     "embedding_task": builder.embedding_settings.task,
@@ -1539,7 +1760,7 @@ class AtomicIngestionCoordinator:
                 dimensions=(
                     len(content_embedding)
                     if content_embedding
-                    else builder.embedding_settings.dimensions
+                    else builder.embedding_settings.dims
                 ),
                 provider=(
                     getattr(builder.embedder, "provider_name", None)
@@ -1666,12 +1887,12 @@ class AtomicIngestionCoordinator:
             # Phase 4: Build expected dimensions dict for validation
             # Both content and title vectors use the same embedding model
             expected_dim = {
-                "content": builder.embedding_settings.dimensions,
-                "title": builder.embedding_settings.dimensions,
+                "content": builder.embedding_settings.dims,
+                "title": builder.embedding_settings.dims,
             }
             # Phase 5: Include entity dimension if entity vector is enabled
             if self.include_entity_vector:
-                expected_dim["entity"] = builder.embedding_settings.dimensions
+                expected_dim["entity"] = builder.embedding_settings.dims
             # Use retry wrapper with dimension validation for transient network failures
             self._qdrant_upsert_with_retry(collection, points, expected_dim)
 

@@ -73,17 +73,21 @@ def _parse_citations(answer_text: str) -> List[str]:
 def _cleanup_regression_docs():
     # Purge prior prodpack docs by source_uri prefix
     # Requires configured Neo4j connection via the repo's connection manager
+    # Neo4j 5.x requires CALL {} subquery for proper aggregation scoping
     cm = get_connection_manager()
     driver = cm.get_neo4j_driver()
     cypher = """
     MATCH (d:Document)
     WHERE coalesce(d.source_uri,d.uri,d.document_uri,'') STARTS WITH 'tests://prodpack/'
-    WITH d
-    OPTIONAL MATCH (d)-[*..5]->(n)
-    WHERE n.document_id = d.id OR coalesce(n.source_uri,'') STARTS WITH 'tests://prodpack/'
-    WITH collect(DISTINCT n)+[d] AS ns
-    UNWIND ns AS n
-    DETACH DELETE n;
+    CALL {
+        WITH d
+        OPTIONAL MATCH (d)-[*..5]->(n)
+        WHERE n.document_id = d.id OR coalesce(n.source_uri,'') STARTS WITH 'tests://prodpack/'
+        RETURN collect(DISTINCT n) AS related
+    }
+    WITH d, related
+    UNWIND related + [d] AS node
+    DETACH DELETE node
     """
     with driver.session() as sess:
         sess.run(cypher)

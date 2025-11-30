@@ -430,7 +430,7 @@ def main():
         print(f"  Total entities:     {result.total_entities}")
         print(f"  Connected entities: {result.connected_entities}")
         print(
-            f"  Orphan entities:    {result.orphan_entities} ({result.orphan_entities/max(result.total_entities,1)*100:.1f}%)"
+            f"  Orphan entities:    {result.orphan_entities} ({result.orphan_entities / max(result.total_entities, 1) * 100:.1f}%)"
         )
         print("\nChunk Statistics:")
         print(f"  Neo4j chunks:  {result.total_chunks_neo4j}")

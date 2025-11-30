@@ -1782,14 +1782,13 @@ class HybridRetriever:
                 rel.strip() for rel in rels_env.split(",") if rel.strip()
             ]
         else:
+            # Phase 2 Cleanup: Removed REQUIRES, AFFECTS (never materialized)
             self.graph_relationships = [
                 "MENTIONED_IN",  # Entity->Chunk: most common (2962 edges)
                 "DEFINES",  # Entity->Chunk: second most common (2126 edges)
                 "MENTIONS",  # Legacy/alternative naming
                 "CONTAINS_STEP",
                 "HAS_PARAMETER",
-                "REQUIRES",
-                "AFFECTS",
             ]
         self.graph_enabled = self.graph_max_related > 0 and self.graph_max_depth > 0
 
@@ -1961,14 +1960,9 @@ class HybridRetriever:
             return ["MENTIONED_IN", "CONTAINS_STEP", "NEXT_CHUNK", "IN_SECTION"], min(
                 cap, 10
             )
+        # Phase 2 Cleanup: Removed AFFECTS, CAUSED_BY (never materialized)
         if qtype == "troubleshooting":
-            return [
-                "MENTIONED_IN",
-                "AFFECTS",
-                "CAUSED_BY",
-                "RESOLVES",
-                "NEXT_CHUNK",
-            ], min(cap, 15)
+            return ["MENTIONED_IN", "RESOLVES", "NEXT_CHUNK"], min(cap, 15)
         if qtype == "reference":
             return ["MENTIONED_IN", "NEXT_CHUNK"], min(cap, 5)
         return rels, cap

@@ -1,15 +1,16 @@
 -- compare_systems: Compare configurations, commands, or components
 -- Parameters: $item_a, $item_b, $comparison_type, $limit
 -- Returns: comparison between two entities with their properties and relationships
+-- Phase 2 Cleanup: Removed AFFECTS patterns (never materialized)
 
--- Version 1: Compare two configurations
+-- Version 1: Compare two configurations via MENTIONS
 MATCH (a:Configuration {name: $item_a})
 MATCH (b:Configuration {name: $item_b})
-OPTIONAL MATCH (a)-[:AFFECTS]->(affected_a)
-OPTIONAL MATCH (b)-[:AFFECTS]->(affected_b)
+OPTIONAL MATCH (a)<-[:MENTIONS]-(sec_a:Section)
+OPTIONAL MATCH (b)<-[:MENTIONS]-(sec_b:Section)
 RETURN a, b,
-       collect(DISTINCT affected_a) AS affects_a,
-       collect(DISTINCT affected_b) AS affects_b
+       collect(DISTINCT sec_a.id) AS mentioned_in_a,
+       collect(DISTINCT sec_b.id) AS mentioned_in_b
 LIMIT $limit;
 
 -- Version 2: Compare two commands

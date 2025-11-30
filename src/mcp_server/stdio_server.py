@@ -513,7 +513,7 @@ async def traverse_relationships(
 
     Args:
         start_ids: Starting section/entity IDs to traverse from
-        rel_types: Relationship types to follow (default: ["MENTIONS", "CONTAINS_STEP", "REQUIRES", "AFFECTS"])
+        rel_types: Relationship types to follow (default: ["MENTIONS", "CONTAINS_STEP"])
         max_depth: Maximum traversal depth, 1-3 hops (default: 2)
         include_text: Include node text field in results (default: False; when True, truncated to ~1K chars)
         ctx: MCP context for progress reporting

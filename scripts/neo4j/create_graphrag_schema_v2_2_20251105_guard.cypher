@@ -330,9 +330,13 @@ SET s.document_id = s.doc_id;
 // PART 6: RELATIONSHIP TYPE MARKER (documentation)
 // ---------------------------------------------------------------------------
 
+// Phase 2 Cleanup: Removed PREV and SAME_HEADING from marker
+// PREV is redundant (use <-[:NEXT]-), SAME_HEADING had O(n²) fanout with no query usage
 MERGE (m:RelationshipTypesMarker {id: 'chunk_rel_types_v1'})
-  ON CREATE SET m.types = ['NEXT','PREV','SAME_HEADING','CHILD_OF','MENTIONS','PARENT_OF'],
-                m.created_at = datetime();
+  ON CREATE SET m.types = ['NEXT','CHILD_OF','MENTIONS','PARENT_OF'],
+                m.created_at = datetime()
+  ON MATCH SET m.types = ['NEXT','CHILD_OF','MENTIONS','PARENT_OF'],
+               m.updated_at = datetime();
 
 
 // ---------------------------------------------------------------------------
@@ -370,7 +374,8 @@ SET sv.version = 'v2.2',
 // MATCH (parent:Section {id: child.parent_section_id})
 // MERGE (parent)-[:PARENT_OF]->(child);
 
-// -- NEXT/PREV within same document/parent ordered by c.order  [guarded]
+// -- NEXT within same document/parent ordered by c.order  [guarded]
+// Phase 2 Cleanup: Removed PREV (redundant - use <-[:NEXT]-)
 // MATCH (c:Chunk)
 // WHERE exists(c.text)
 // WITH coalesce(c.document_id, c.doc_id) AS d, c.parent_section_id AS p, c
@@ -378,17 +383,10 @@ SET sv.version = 'v2.2',
 // WITH d, p, collect(c) AS chunks
 // UNWIND range(0, size(chunks)-2) AS i
 // WITH chunks[i] AS a, chunks[i+1] AS b
-// MERGE (a)-[:NEXT]->(b)
-// MERGE (b)-[:PREV]->(a);
+// MERGE (a)-[:NEXT]->(b);
 
-// -- SAME_HEADING among siblings (bounded fanout)  [guarded]
-// MATCH (c:Chunk) WHERE exists(c.text) AND c.heading IS NOT NULL
-// WITH coalesce(c.document_id, c.doc_id) AS d, c.parent_section_id AS p, c.heading AS h, collect(c) AS chunks
-// UNWIND chunks AS a
-// UNWIND chunks AS b
-// WITH a, b
-// WHERE a.id <> b.id AND a.order < b.order AND a.order + 8 >= b.order
-// MERGE (a)-[:SAME_HEADING]->(b);
+// Phase 2 Cleanup: Removed SAME_HEADING builder entirely
+// (O(n²) edge fanout with zero query usage)
 
 
 // ---------------------------------------------------------------------------

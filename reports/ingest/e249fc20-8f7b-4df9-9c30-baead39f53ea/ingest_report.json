@@ -1,0 +1,32 @@
+{
+  "job_id": "e249fc20-8f7b-4df9-9c30-baead39f53ea",
+  "tag": "test",
+  "timestamp_utc": "2025-11-29T09:03:57.291564Z",
+  "doc": {
+    "source_uri": "N/A",
+    "checksum": "N/A",
+    "sections": 0,
+    "title": "Untitled"
+  },
+  "graph": {
+    "nodes_total": 119,
+    "rels_total": 0,
+    "sections_total": 0,
+    "documents_total": 0
+  },
+  "vector": {
+    "sot": "qdrant",
+    "sections_indexed": 0,
+    "embedding_version": "BAAI/bge-m3"
+  },
+  "drift_pct": 0.0,
+  "sample_queries": [],
+  "ready_for_queries": true,
+  "timings_ms": {
+    "parse": 0,
+    "extract": 0,
+    "graph": 0,
+    "embed": 5
+  },
+  "errors": []
+}

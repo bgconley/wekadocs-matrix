@@ -24,24 +24,24 @@ RETURN a, b,
   b{.id, .name, .title, .heading, .doc_tag, .level, .anchor} AS props_b
 LIMIT 1;
 
--- Version 2: Configuration comparison with dependencies
+-- Version 2: Configuration comparison via MENTIONS (Phase 2 Cleanup: removed AFFECTS)
 MATCH (a:Configuration {name: $entity_name_a})
 MATCH (b:Configuration {name: $entity_name_b})
-OPTIONAL MATCH (a)-[:AFFECTS]->(affected_a)
-OPTIONAL MATCH (b)-[:AFFECTS]->(affected_b)
+OPTIONAL MATCH (a)<-[:MENTIONS]-(sec_a:Section)
+OPTIONAL MATCH (b)<-[:MENTIONS]-(sec_b:Section)
 OPTIONAL MATCH (a)<-[:HAS_PARAMETER]-(cmd_a:Command)
 OPTIONAL MATCH (b)<-[:HAS_PARAMETER]-(cmd_b:Command)
 WITH a, b,
-  collect(DISTINCT affected_a.id) AS affects_a,
-  collect(DISTINCT affected_b.id) AS affects_b,
+  collect(DISTINCT sec_a.id) AS mentions_a,
+  collect(DISTINCT sec_b.id) AS mentions_b,
   collect(DISTINCT cmd_a.name) AS commands_a,
   collect(DISTINCT cmd_b.name) AS commands_b
 RETURN a, b,
   {
-    only_in_a: [x IN affects_a WHERE NOT x IN affects_b],
-    only_in_b: [x IN affects_b WHERE NOT x IN affects_a],
-    common: [x IN affects_a WHERE x IN affects_b]
-  } AS affected_diff,
+    only_in_a: [x IN mentions_a WHERE NOT x IN mentions_b],
+    only_in_b: [x IN mentions_b WHERE NOT x IN mentions_a],
+    common: [x IN mentions_a WHERE x IN mentions_b]
+  } AS mention_diff,
   {
     only_in_a: [x IN commands_a WHERE NOT x IN commands_b],
     only_in_b: [x IN commands_b WHERE NOT x IN commands_a],
