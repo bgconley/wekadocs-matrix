@@ -400,7 +400,8 @@ class ConnectionManager:
             raw_client = CompatQdrantClient(
                 host=self.settings.qdrant_host,
                 port=self.settings.qdrant_port,
-                timeout=30,
+                timeout=90,
+                prefer_grpc=True,
             )
             self._qdrant_client = raw_client
             logger.info("Qdrant client initialized successfully")

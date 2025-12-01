@@ -30,6 +30,40 @@ import structlog
 
 T = TypeVar("T")
 
+# Phase 7F: Lazy exception loader to handle optional qdrant-client dependency
+# This allows the exception to be used in except clauses without import-time errors
+_RESPONSE_HANDLING_EXCEPTION_CACHE: type = None
+
+
+def _get_response_handling_exception() -> type:
+    """
+    Lazy loader for qdrant_client.http.exceptions.ResponseHandlingException.
+
+    Returns the exception class for use in except clauses. Falls back to a
+    placeholder exception if qdrant-client is not installed or doesn't have
+    the exception class (older versions).
+
+    This is needed because ResponseHandlingException is raised on HTTP timeouts
+    (e.g., when large ColBERT payloads exceed the client timeout).
+    """
+    global _RESPONSE_HANDLING_EXCEPTION_CACHE
+    if _RESPONSE_HANDLING_EXCEPTION_CACHE is not None:
+        return _RESPONSE_HANDLING_EXCEPTION_CACHE
+
+    try:
+        from qdrant_client.http.exceptions import ResponseHandlingException
+
+        _RESPONSE_HANDLING_EXCEPTION_CACHE = ResponseHandlingException
+    except ImportError:
+        # Fallback for older qdrant-client versions or missing dependency
+        # Use a placeholder that will never match
+        class _PlaceholderException(Exception):
+            pass
+
+        _RESPONSE_HANDLING_EXCEPTION_CACHE = _PlaceholderException
+
+    return _RESPONSE_HANDLING_EXCEPTION_CACHE
+
 
 def retry_with_backoff(
     max_retries: int = 3,
@@ -2464,8 +2498,91 @@ class AtomicIngestionCoordinator:
             # Phase 5: Include entity dimension if entity vector is enabled
             if self.include_entity_vector:
                 expected_dim["entity"] = builder.embedding_settings.dims
-            # Use retry wrapper with dimension validation for transient network failures
-            self._qdrant_upsert_with_retry(collection, points, expected_dim)
+
+            # Phase 7F: Batch Qdrant upserts to prevent timeout for large ColBERT payloads
+            # Large documents with many chunks can produce 30MB+ JSON payloads that exceed
+            # the 30-second client timeout. Batching reduces payload size.
+            # See: Debug investigation 2025-12-01 - ResponseHandlingException timeout fix
+            batch_size = int(os.getenv("QDRANT_UPSERT_BATCH_SIZE", "5"))
+            max_bytes_per_batch = int(
+                os.getenv("QDRANT_UPSERT_MAX_BYTES", str(12 * 1024 * 1024))
+            )  # ~12MB default target
+
+            json_overhead_factor = 2.5  # conservative multiplier for JSON vs. binary
+            dense_vector_dims = 2 + (1 if self.include_entity_vector else 0)
+            dense_dim_bytes = int(
+                builder.embedding_settings.dims
+                * dense_vector_dims
+                * 4
+                * json_overhead_factor
+            )
+
+            def estimate_point_bytes(point: PointStruct) -> int:
+                payload = getattr(point, "payload", {}) or {}
+                vectors = getattr(point, "vector", {}) or {}
+
+                token_count = (
+                    payload.get("token_count")
+                    or payload.get("tokens")
+                    or payload.get("document_total_tokens_chunk")
+                    or 0
+                )
+                colbert_vectors = vectors.get("late-interaction")
+                colbert_tokens = len(colbert_vectors) if colbert_vectors else 0
+                estimated_tokens = colbert_tokens or token_count or 0
+
+                colbert_bytes = int(
+                    estimated_tokens
+                    * builder.embedding_settings.dims
+                    * 4
+                    * json_overhead_factor
+                )
+                return colbert_bytes + dense_dim_bytes
+
+            batches: List[Tuple[List[PointStruct], int]] = []
+            current_batch: List[PointStruct] = []
+            current_bytes = 0
+
+            for point in points:
+                point_bytes = estimate_point_bytes(point)
+                if point_bytes > max_bytes_per_batch:
+                    logger.warning(
+                        "qdrant_point_exceeds_max_bytes",
+                        point_id=getattr(point, "id", None),
+                        estimated_mb=round(point_bytes / 1_000_000, 2),
+                        max_mb=round(max_bytes_per_batch / 1_000_000, 2),
+                    )
+
+                should_flush = current_batch and (
+                    len(current_batch) >= batch_size
+                    or current_bytes + point_bytes > max_bytes_per_batch
+                )
+                if should_flush:
+                    batches.append((current_batch, current_bytes))
+                    current_batch = []
+                    current_bytes = 0
+
+                current_batch.append(point)
+                current_bytes += point_bytes
+
+            if current_batch:
+                batches.append((current_batch, current_bytes))
+
+            total_batches = len(batches)
+
+            for batch_num, (batch, batch_bytes) in enumerate(batches, start=1):
+                logger.debug(
+                    "qdrant_upsert_batch",
+                    batch_num=batch_num,
+                    total_batches=total_batches,
+                    batch_size=len(batch),
+                    total_points=len(points),
+                    batch_estimated_mb=round(batch_bytes / 1_000_000, 2),
+                    max_batch_mb=round(max_bytes_per_batch / 1_000_000, 2),
+                )
+
+                # Use retry wrapper with dimension validation for transient network failures
+                self._qdrant_upsert_with_retry(collection, batch, expected_dim)
 
         return len(points)
 
@@ -2508,7 +2625,14 @@ class AtomicIngestionCoordinator:
                     wait=True,
                 )
                 return  # Success
-            except (ConnectionError, TimeoutError, OSError) as e:
+            except (
+                ConnectionError,
+                TimeoutError,
+                OSError,
+                _get_response_handling_exception(),
+            ) as e:
+                # Phase 7F: Extended retry to include ResponseHandlingException
+                # which is raised by qdrant-client on HTTP timeouts (e.g., large ColBERT payloads)
                 last_exception = e
                 if attempt < max_retries:
                     delay = min(base_delay * (2**attempt), 30.0)
@@ -2535,8 +2659,15 @@ class AtomicIngestionCoordinator:
             except ValueError:
                 # Dimension mismatch - non-retriable, fail fast
                 raise
-            except Exception:
-                # Other non-retriable exceptions (schema errors, etc.)
+            except Exception as e:
+                # Phase 7F: Log non-retriable exceptions before re-raising
+                # This preserves error context that was previously lost in silent re-raise
+                logger.error(
+                    "qdrant_upsert_non_retriable_error",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    points_count=len(points),
+                )
                 raise
 
         if last_exception:
