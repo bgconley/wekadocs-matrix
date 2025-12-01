@@ -29,6 +29,7 @@ RELATIONSHIP_TYPES = {
     "NEXT",
     "NEXT_CHUNK",
     "PARENT_OF",
+    "REFERENCES",  # Phase 3: Cross-document connectivity (Chunk → Document)
     "RESOLVES",
     "RETRIEVED",
     "SUPPORTED_BY",

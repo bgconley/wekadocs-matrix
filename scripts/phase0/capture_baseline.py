@@ -89,6 +89,7 @@ class GraphStats:
     mentions_count: int
     mentioned_in_count: int
     contains_step_count: int
+    references_count: int  # M5: Phase 3 REFERENCES edges (Chunk→Document)
 
     # Critical checks
     cross_doc_edge_count: int  # Should be 0 pre-Phase 3
@@ -415,6 +416,7 @@ def collect_graph_stats() -> Optional[GraphStats]:
                     mentions_count=count_rel("MENTIONS"),
                     mentioned_in_count=count_rel("MENTIONED_IN"),
                     contains_step_count=count_rel("CONTAINS_STEP"),
+                    references_count=count_rel("REFERENCES"),  # M5: Phase 3 gate metric
                     cross_doc_edge_count=cross_doc,
                     total_nodes=total_nodes,
                     total_relationships=total_rels,
@@ -634,6 +636,7 @@ def main():
         print(f"  Entities: {report.graph.entity_count}")
         print(f"  Cross-doc edges: {report.graph.cross_doc_edge_count} (expected: 0)")
         print(f"  CONTAINS_STEP: {report.graph.contains_step_count} (expected: 0)")
+        print(f"  REFERENCES: {report.graph.references_count} (Phase 3 gate: >= 10)")
         print()
 
     if report.reranker_latency:

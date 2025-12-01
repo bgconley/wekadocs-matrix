@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import os
 import random
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -274,6 +275,7 @@ class AtomicIngestionCoordinator:
             sections = prepared["sections"]
             entities = prepared["entities"]
             mentions = prepared["mentions"]
+            references = prepared.get("references", [])  # Phase 3: Cross-doc refs
             document_id = document["id"]
 
             # Phase 2: Pre-commit validation
@@ -341,6 +343,7 @@ class AtomicIngestionCoordinator:
                 sections=sections,
                 entities=entities,
                 mentions=mentions,
+                references=references,  # Phase 3: Cross-document REFERENCES
                 embeddings=embeddings,
                 builder=prepared["builder"],
             )
@@ -501,6 +504,77 @@ class AtomicIngestionCoordinator:
         # Extract entities
         entities, mentions = extract_entities(sections)
 
+        # Phase 3: Extract cross-document references
+        # Import here to avoid circular imports
+        from src.ingestion.extract.references import (
+            create_reference_edge,
+            extract_chunk_references,
+            extract_references,
+        )
+
+        # CRITICAL: Extract hyperlink references from RAW markdown content
+        # The markdown parser converts [Title](file.md) to HTML, then BeautifulSoup
+        # extracts only the display text, losing the link URL entirely.
+        # We must extract markdown hyperlinks BEFORE HTML conversion.
+        raw_content_refs = []
+        if format == "markdown" and content:
+            # Use document ID as synthetic chunk ID for document-level references
+            # This associates hyperlink references with the document rather than
+            # a specific section (since we can't map character positions to sections)
+            doc_chunk_id = document["id"]
+
+            # Extract references from raw markdown content
+            raw_refs = extract_references(content, doc_chunk_id)
+
+            # Convert to edge format
+            for ref in raw_refs:
+                # Only include hyperlink references from raw content
+                # (other patterns like see_also/related work fine on plain text)
+                if ref.reference_type == "hyperlink":
+                    edge = create_reference_edge(
+                        source_chunk_id=doc_chunk_id,
+                        target_doc_id=None,  # Will be resolved in Neo4j transaction
+                        target_hint=ref.target_hint,
+                        reference_type=ref.reference_type,
+                        reference_text=ref.reference_text,
+                        confidence=ref.confidence,
+                    )
+                    raw_content_refs.append(edge)
+
+            logger.debug(
+                "hyperlinks_extracted_from_raw_markdown",
+                hyperlink_count=len(raw_content_refs),
+                document_id=document["id"],
+            )
+
+        # Respect feature flag
+        references_cfg = getattr(config, "references", None)
+        if references_cfg and getattr(references_cfg, "enabled", False):
+            # Extract other reference patterns from section text (see_also, related, refer_to)
+            # These patterns work on plain text without needing markdown link syntax
+            reference_edges, ref_resolved, ref_unresolved = extract_chunk_references(
+                sections,
+                known_doc_titles=None,  # Target resolution happens in Neo4j transaction
+            )
+        else:
+            reference_edges, ref_resolved, ref_unresolved = [], 0, 0
+
+        # Merge hyperlinks from raw content with other references from sections
+        # Deduplicate by target_hint to avoid double-counting
+        existing_hints = {e.get("target_hint", "").lower() for e in reference_edges}
+        for edge in raw_content_refs:
+            if edge.get("target_hint", "").lower() not in existing_hints:
+                reference_edges.append(edge)
+                existing_hints.add(edge.get("target_hint", "").lower())
+
+        logger.debug(
+            "references_extracted_from_sections",
+            total_references=len(reference_edges),
+            hyperlinks_from_raw=len(raw_content_refs),
+            local_resolved=ref_resolved,
+            pending_neo4j_resolution=ref_unresolved,
+        )
+
         # Assemble chunks
         assembler = get_chunk_assembler(
             getattr(config.ingestion, "chunk_assembly", None)
@@ -525,6 +599,7 @@ class AtomicIngestionCoordinator:
             "sections": sections,
             "entities": entities,
             "mentions": mentions,
+            "references": reference_edges,  # Phase 3: Cross-document REFERENCES
             "builder": builder,
         }
 
@@ -1045,6 +1120,7 @@ class AtomicIngestionCoordinator:
         sections: List[Dict],
         entities: Dict,
         mentions: List[Dict],
+        references: List[Dict],  # Phase 3: Cross-document REFERENCES
         embeddings: Dict,
         builder,
     ) -> Dict[str, Any]:
@@ -1055,6 +1131,8 @@ class AtomicIngestionCoordinator:
         1. Neo4j writes (in a transaction)
         2. Qdrant writes
         3. Commit Neo4j (only if Qdrant succeeds)
+
+        Phase 3: Added references parameter for cross-document REFERENCES edges.
         """
         document_id = document["id"]
         context = SagaContext(saga_id=saga_id, document_id=document_id)
@@ -1114,6 +1192,10 @@ class AtomicIngestionCoordinator:
 
             self._neo4j_create_mentions(neo4j_tx, mentions)
 
+            # Phase 3: Create cross-document REFERENCES edges (Chunk → Document)
+            references_count = self._neo4j_create_references(neo4j_tx, references)
+            stats["references_created"] = references_count
+
             # Step 2b: Store embedding metadata on Chunk nodes
             # This ensures cross-store consistency between Neo4j and Qdrant
             embedding_meta_count = self._neo4j_upsert_embedding_metadata(
@@ -1126,6 +1208,7 @@ class AtomicIngestionCoordinator:
                 saga_id=saga_id,
                 chunks=chunk_count,
                 entities=entity_count,
+                references=references_count,
                 embedding_metadata=embedding_meta_count,
             )
 
@@ -1310,13 +1393,160 @@ class AtomicIngestionCoordinator:
         return sanitized
 
     def _neo4j_upsert_document(self, tx, document: Dict):
-        """Upsert document node within a transaction."""
+        """Upsert document node within a transaction.
+
+        Phase 3 Enhancement: Also resolves Ghost Documents and PendingReferences
+        that match the newly ingested document's title.
+        """
         query = """
         MERGE (d:Document {id: $id})
         SET d += $props
         """
         props = self._sanitize_for_neo4j(document)
         tx.run(query, id=document["id"], props=props)
+
+        # Phase 3: Resolve Ghost Documents with matching title
+        # When a real document is ingested, redirect REFERENCES edges from any
+        # Ghost Document that was created as a forward reference placeholder
+        title = document.get("title", "")
+        if not title:
+            # Fallback: derive title from document ID (usually contains filename)
+            doc_id = document.get("id", "")
+            if doc_id:
+                from src.ingestion.extract.references import normalize_filename_to_title
+
+                filename = doc_id.split("/")[-1]
+                title = normalize_filename_to_title(filename)
+                document["title"] = title
+                logger.warning(
+                    "empty_title_fallback",
+                    document_id=document.get("id"),
+                    derived_title=title,
+                    reason="document_missing_title",
+                )
+        if title:
+            title_cf = title.casefold()
+            # Fix #3 (Phase 3): Atomic ghost resolution with explicit locking
+            # The lock prevents race conditions when multiple processes try to:
+            # 1. Resolve the same ghost simultaneously
+            # 2. Create new edges to a ghost that's being deleted
+            #
+            # The lock pattern works by:
+            # 1. SET ghost._resolve_lock = $doc_id (atomic claim)
+            # 2. Only proceed if ghost._resolve_lock = $doc_id (verify we won)
+            # 3. Delete ghost atomically with edge cleanup
+            #
+            # If another process wins the lock, we gracefully skip (the ghost
+            # will either be resolved or still exist for our next attempt).
+            resolve_ghost_query = """
+            // Find Ghost Documents with matching title (case-insensitive)
+            // Fix #3: Atomically claim lock before proceeding
+            MATCH (ghost:GhostDocument)
+            WHERE toLower(ghost.title) = toLower($title_cf)
+              AND ghost._resolve_lock IS NULL
+            // Atomic lock acquisition - only claim if currently unlocked
+            SET ghost._resolve_lock = $doc_id
+            WITH ghost
+            // Verify we successfully acquired the lock (another tx may have won)
+            WHERE ghost._resolve_lock = $doc_id
+            // Find all REFERENCES edges pointing to the ghost
+            OPTIONAL MATCH (src)-[old_r:REFERENCES]->(ghost)
+            // Get the real document we just upserted
+            MATCH (real:Document {id: $doc_id})
+            WHERE NOT real:GhostDocument
+            // Use FOREACH to conditionally create edges only if old edges exist
+            // This avoids issues when there are no edges to redirect
+            WITH ghost, real, collect({src: src, old_r: old_r}) AS edges
+            UNWIND CASE WHEN size(edges) > 0 AND edges[0].old_r IS NOT NULL
+                        THEN edges ELSE [] END AS edge
+            WITH ghost, real, edge.src AS src, edge.old_r AS old_r
+            // Create new edge to real document with same properties
+            CREATE (src)-[new_r:REFERENCES]->(real)
+            SET new_r = properties(old_r),
+                new_r.is_ghost_target = null,
+                new_r.resolved_from_ghost = ghost.id,
+                new_r.resolved_at = datetime({timezone: 'UTC'})
+            WITH ghost, old_r, count(new_r) AS redirected
+            // Delete old edge
+            DELETE old_r
+            WITH ghost, sum(redirected) AS total_redirected
+            // Atomically delete ghost - at this point we hold the lock
+            // so no other process can add edges
+            DETACH DELETE ghost
+            RETURN total_redirected AS redirected
+            """
+            result = tx.run(
+                resolve_ghost_query,
+                title=title,
+                title_cf=title_cf,
+                doc_id=document["id"],
+            )
+            record = result.single()
+            if record and record["redirected"] > 0:
+                logger.info(
+                    "ghost_references_resolved",
+                    document_id=document["id"],
+                    title=title,
+                    redirected_count=record["redirected"],
+                )
+
+            # Phase 3: Resolve PendingReferences with matching hint
+            # When a real document is ingested, convert pending references that
+            # match the document's title into real REFERENCES edges
+            # Fix #3: Apply same atomic locking pattern as ghost resolution
+            resolve_pending_query = """
+            // Find PendingReferences where hint matches document title
+            // Fix #3: Atomically claim lock before proceeding
+            MATCH (pending:PendingReference)
+            WHERE (toLower($title_cf) CONTAINS toLower(pending.hint)
+               OR toLower(pending.hint) CONTAINS toLower($title_cf))
+              AND pending._resolve_lock IS NULL
+            // Atomic lock acquisition
+            SET pending._resolve_lock = $doc_id
+            WITH pending
+            // Verify we successfully acquired the lock
+            WHERE pending._resolve_lock = $doc_id
+            // Find all PENDING_REF edges
+            OPTIONAL MATCH (src)-[old_r:PENDING_REF]->(pending)
+            // Get the real document
+            MATCH (real:Document {id: $doc_id})
+            // Collect edges to handle empty case gracefully
+            WITH pending, real, collect({src: src, old_r: old_r}) AS edges
+            UNWIND CASE WHEN size(edges) > 0 AND edges[0].old_r IS NOT NULL
+                        THEN edges ELSE [] END AS edge
+            WITH pending, real, edge.src AS src, edge.old_r AS old_r
+            // Create real REFERENCES edge
+            CREATE (src)-[new_r:REFERENCES]->(real)
+            SET new_r.type = old_r.type,
+                new_r.reference_text = old_r.reference_text,
+                new_r.confidence = old_r.confidence,
+                new_r.source_type = old_r.source_type,
+                new_r.target_hint = pending.hint,
+                new_r.resolved_from_pending = true,
+                new_r.created_at = old_r.created_at,
+                new_r.resolved_at = datetime({timezone: 'UTC'})
+            WITH pending, old_r, count(new_r) AS resolved
+            // Delete old PENDING_REF edge
+            DELETE old_r
+            WITH pending, sum(resolved) AS total_resolved
+            // Atomically delete pending - we hold the lock
+            DELETE pending
+            RETURN total_resolved AS resolved
+            """
+            result = tx.run(
+                resolve_pending_query,
+                title=title,
+                title_cf=title_cf,
+                doc_id=document["id"],
+            )
+            record = result.single()
+            if record and record["resolved"] > 0:
+                logger.info(
+                    "pending_references_resolved",
+                    document_id=document["id"],
+                    title=title,
+                    resolved_count=record["resolved"],
+                )
 
     def _neo4j_upsert_sections(self, tx, document_id: str, sections: List[Dict]) -> int:
         """Upsert section/chunk nodes within a transaction."""
@@ -1455,6 +1685,347 @@ class AtomicIngestionCoordinator:
         # Phase 1.2: Process Entity→Entity relationships
         if entity_entity_relationships:
             self._neo4j_create_entity_relationships(tx, entity_entity_relationships)
+
+    def _neo4j_create_references(self, tx, references: List[Dict]) -> int:
+        """Create cross-document REFERENCES edges within a transaction.
+
+        Phase 3: Implements (Chunk)-[:REFERENCES]->(Document) edge pattern.
+
+        Fix #2 (Phase 3): Batched UNWIND implementation replaces O(N) per-reference
+        queries with 4 batched operations:
+        1. Batch resolve titles for hyperlinks
+        2. Batch resolve fuzzy hints for non-hyperlinks
+        3. Batch create ghost/pending/resolved references
+
+        This method handles the consensus-approved hybrid edge pattern where:
+        - Source is Chunk (preserves WHERE the reference occurred for RAG citations)
+        - Target is Document (reliable resolution without brittle anchor matching)
+
+        Reference dict structure (from extract/references.py):
+        - source_chunk_id: The chunk where the reference was found
+        - target_doc_id: Pre-resolved document ID (may be None)
+        - target_hint: Original hint for Neo4j resolution (filename, title, phrase)
+        - reference_type: Type of reference (hyperlink, see_also, related, refer_to)
+        - reference_text: Display text of the reference
+        - confidence: Extraction confidence score
+
+        Returns:
+            Number of REFERENCES edges created
+        """
+        # Delegate to streaming implementation (bug 11 hardening)
+        return self._neo4j_create_references_streaming(tx, references)
+
+    def _neo4j_create_references_streaming(self, tx, references: List[Dict]) -> int:
+        """Streaming, rollback-safe creation of REFERENCES edges (production-grade fix for bug 11)."""
+
+        if not references:
+            return 0
+
+        from src.ingestion.extract.references import (
+            normalize_filename_to_title,
+            slugify_for_id,
+        )
+
+        refs_cfg = getattr(getattr(self, "config", None), "references", None)
+        res_cfg = getattr(refs_cfg, "resolution", None) if refs_cfg else None
+        batch_size = getattr(res_cfg, "batch_size", 100)
+        min_hint_len = getattr(res_cfg, "min_hint_length", 3)
+        penalty_cfg = getattr(
+            getattr(res_cfg, "__dict__", res_cfg), "fuzzy_penalty", None
+        )
+        FUZZY_RESOLUTION_PENALTY = penalty_cfg if penalty_cfg is not None else 0.25
+
+        created_count = 0
+        unresolved_count = 0
+        created_ghost_ids: List[str] = []
+
+        resolved_buffer: List[Dict] = []
+        ghost_buffer: List[Dict] = []
+        pending_buffer: List[Dict] = []
+
+        def flush_resolved(buf: List[Dict]):
+            nonlocal created_count
+            if not buf:
+                return
+            query = """
+            UNWIND $refs AS ref
+            MATCH (src:Chunk {id: ref.source_chunk_id})
+            MATCH (d:Document {id: ref.target_doc_id})
+            MERGE (src)-[r:REFERENCES]->(d)
+            ON CREATE SET
+                r.type = ref.reference_type,
+                r.reference_text = ref.reference_text,
+                r.confidence = ref.final_confidence,
+                r.target_hint = ref.target_hint,
+                r.source_type = 'chunk',
+                r.created_at = datetime({timezone: 'UTC'})
+            ON MATCH SET
+                r.type = ref.reference_type,
+                r.reference_text = ref.reference_text,
+                r.confidence = ref.final_confidence,
+                r.source_type = 'chunk',
+                r.updated_at = datetime({timezone: 'UTC'})
+            RETURN count(r) AS created
+            """
+            rec = tx.run(query, refs=buf).single()
+            if rec:
+                created_count += rec["created"]
+            buf.clear()
+
+        def flush_ghost(buf: List[Dict]):
+            nonlocal created_count, created_ghost_ids
+            if not buf:
+                return
+            query = """
+            UNWIND $refs AS ref
+            MERGE (ghost:GhostDocument {id: ref.ghost_id})
+            ON CREATE SET
+                ghost.title = ref.expected_title,
+                ghost.stub = true,
+                ghost.source_hint = ref.target_hint,
+                ghost.created_at = datetime({timezone: 'UTC'})
+            WITH ghost, ref
+            MATCH (src:Chunk {id: ref.source_chunk_id})
+            MERGE (src)-[r:REFERENCES]->(ghost)
+            ON CREATE SET
+                r.type = ref.reference_type,
+                r.reference_text = ref.reference_text,
+                r.confidence = ref.confidence,
+                r.target_hint = ref.target_hint,
+                r.source_type = 'chunk',
+                r.is_ghost_target = true,
+                r.created_at = datetime({timezone: 'UTC'})
+            ON MATCH SET
+                r.type = ref.reference_type,
+                r.reference_text = ref.reference_text,
+                r.confidence = ref.confidence,
+                r.source_type = 'chunk',
+                r.updated_at = datetime({timezone: 'UTC'})
+            RETURN collect(DISTINCT ghost.id) AS ghost_ids, count(r) AS created
+            """
+            rec = tx.run(query, refs=buf).single()
+            if rec:
+                created_count += rec["created"]
+                created_ghost_ids.extend(rec.get("ghost_ids", []))
+            buf.clear()
+
+        def flush_pending(buf: List[Dict]):
+            nonlocal unresolved_count
+            if not buf:
+                return
+            query = """
+            UNWIND $refs AS ref
+            MERGE (pending:PendingReference {hint: ref.target_hint})
+            ON CREATE SET
+                pending.created_at = datetime({timezone: 'UTC'}),
+                pending.reference_count = 1
+            ON MATCH SET
+                pending.reference_count = coalesce(pending.reference_count, 0) + 1,
+                pending.updated_at = datetime({timezone: 'UTC'})
+            WITH pending, ref
+            MATCH (src:Chunk {id: ref.source_chunk_id})
+            MERGE (src)-[r:PENDING_REF]->(pending)
+            ON CREATE SET
+                r.type = ref.reference_type,
+                r.reference_text = ref.reference_text,
+                r.confidence = ref.confidence,
+                r.source_type = 'chunk',
+                r.created_at = datetime({timezone: 'UTC'})
+            ON MATCH SET
+                r.type = ref.reference_type,
+                r.reference_text = ref.reference_text,
+                r.confidence = ref.confidence,
+                r.source_type = 'chunk',
+                r.updated_at = datetime({timezone: 'UTC'})
+            RETURN count(r) AS created
+            """
+            rec = tx.run(query, refs=buf).single()
+            if rec:
+                unresolved_count += rec["created"]
+            buf.clear()
+
+        def stage_resolved(ref_obj: Dict):
+            resolved_buffer.append(ref_obj)
+            if len(resolved_buffer) >= batch_size:
+                flush_resolved(resolved_buffer)
+
+        def stage_ghost(ref_obj: Dict):
+            ghost_buffer.append(ref_obj)
+            if len(ghost_buffer) >= batch_size:
+                flush_ghost(ghost_buffer)
+
+        def stage_pending(ref_obj: Dict):
+            pending_buffer.append(ref_obj)
+            if len(pending_buffer) >= batch_size:
+                flush_pending(pending_buffer)
+
+        def process_title_batch(batch: List[Dict]):
+            if not batch:
+                return
+            titles_to_resolve = list({r["possible_title"] for r in batch})
+            title_to_doc = {}
+            if titles_to_resolve:
+                query = """
+                UNWIND $titles AS title
+                OPTIONAL MATCH (d:Document)
+                WHERE toLower(d.title) = toLower(title)
+                RETURN title, d.id AS doc_id
+                """
+                title_to_doc = {
+                    rec["title"]: rec["doc_id"]
+                    for rec in tx.run(query, titles=titles_to_resolve)
+                    if rec["doc_id"]
+                }
+
+            for ref_data in batch:
+                resolved_id = title_to_doc.get(ref_data["possible_title"])
+                if resolved_id:
+                    ref_data["target_doc_id"] = resolved_id
+                    ref_data["final_confidence"] = ref_data["confidence"]
+                    stage_resolved(ref_data)
+                else:
+                    expected_title = normalize_filename_to_title(
+                        ref_data["target_hint"]
+                    )
+                    ref_data["ghost_id"] = f"ghost::{slugify_for_id(expected_title)}"
+                    ref_data["expected_title"] = expected_title
+                    stage_ghost(ref_data)
+            batch.clear()
+
+        def process_fuzzy_batch(batch: List[Dict]):
+            if not batch:
+                return
+            hints = {r["target_hint"] for r in batch if r.get("target_hint")}
+            hint_to_doc = {}
+            if hints:
+                query = """
+                UNWIND $hints AS hint
+                CALL db.index.fulltext.queryNodes('document_title_ft', hint) YIELD node AS d, score
+                WHERE score > 0.5
+                WITH hint, d, score
+                ORDER BY score DESC, size(d.title) ASC
+                WITH hint, collect(d.id)[0] AS doc_id
+                RETURN hint, doc_id
+                """
+                hint_to_doc = {
+                    rec["hint"]: rec["doc_id"]
+                    for rec in tx.run(query, hints=list(hints))
+                    if rec["doc_id"]
+                }
+
+            for ref_data in batch:
+                target_hint = ref_data.get("target_hint", "")
+                if len(target_hint.strip()) < min_hint_len:
+                    stage_pending(ref_data)
+                    continue
+                resolved_id = hint_to_doc.get(target_hint)
+                if resolved_id:
+                    final_conf = ref_data["confidence"]
+                    final_conf = max(0.1, final_conf - FUZZY_RESOLUTION_PENALTY)
+                    ref_data["target_doc_id"] = resolved_id
+                    ref_data["final_confidence"] = final_conf
+                    ref_data["is_fuzzy_match"] = True
+                    stage_resolved(ref_data)
+                else:
+                    stage_pending(ref_data)
+            batch.clear()
+
+        title_batch: List[Dict] = []
+        fuzzy_batch: List[Dict] = []
+
+        try:
+            for ref in references:
+                source_chunk_id = ref.get("source_chunk_id")
+                if not source_chunk_id:
+                    logger.warning(
+                        "reference_missing_source_chunk",
+                        target_hint=ref.get("target_hint", ""),
+                        reference_type=ref.get("reference_type", "unknown"),
+                    )
+                    continue
+
+                ref_data = {
+                    "source_chunk_id": source_chunk_id,
+                    "target_doc_id": ref.get("target_doc_id"),
+                    "target_hint": ref.get("target_hint", ""),
+                    "reference_type": ref.get("reference_type", "unknown"),
+                    "reference_text": ref.get("reference_text", ""),
+                    "confidence": ref.get("confidence", 0.5),
+                    "is_fuzzy_match": False,
+                }
+
+                if ref_data["target_doc_id"]:
+                    ref_data["final_confidence"] = ref_data["confidence"]
+                    stage_resolved(ref_data)
+                    continue
+
+                if ref_data["reference_type"] == "hyperlink" and ref_data[
+                    "target_hint"
+                ].endswith(".md"):
+                    ref_data["possible_title"] = normalize_filename_to_title(
+                        ref_data["target_hint"]
+                    )
+                    title_batch.append(ref_data)
+                    if len(title_batch) >= batch_size * 2:
+                        process_title_batch(title_batch)
+                    continue
+
+                fuzzy_batch.append(ref_data)
+                if len(fuzzy_batch) >= batch_size * 2:
+                    process_fuzzy_batch(fuzzy_batch)
+
+            process_title_batch(title_batch)
+            process_fuzzy_batch(fuzzy_batch)
+            flush_resolved(resolved_buffer)
+            flush_ghost(ghost_buffer)
+            flush_pending(pending_buffer)
+
+        except Exception as exc:
+            if created_ghost_ids:
+                tx.run(
+                    """
+                    UNWIND $ids AS gid
+                    MATCH (g:GhostDocument {id: gid})
+                    DETACH DELETE g
+                    """,
+                    ids=created_ghost_ids,
+                )
+            logger.warning(
+                "references_rollback_ghosts",
+                ghost_ids=created_ghost_ids,
+                error=str(exc),
+            )
+            raise
+
+        if created_count > 0 or unresolved_count > 0:
+
+            def _safe_log_value(value: str, max_length: int = 200) -> str:
+                if not value:
+                    return ""
+                sanitized = re.sub(r"[\\x00-\\x1f\\x7f-\\x9f]", "", value)
+                return (
+                    (sanitized[:max_length] + "...")
+                    if len(sanitized) > max_length
+                    else sanitized
+                )
+
+            logger.info(
+                "references_created",
+                created=created_count,
+                unresolved=unresolved_count,
+                total_attempted=len(references),
+                sample_hint=_safe_log_value(
+                    (resolved_buffer or ghost_buffer or pending_buffer or [{}])[0].get(
+                        "target_hint", ""
+                    )
+                ),
+            )
+
+        return created_count
+
+    # Override earlier definition to delegate to streaming, production-grade path (bug 11)
+    def _neo4j_create_references(self, tx, references: List[Dict]) -> int:
+        return self._neo4j_create_references_streaming(tx, references)
 
     def _neo4j_create_entity_relationships(self, tx, relationships: List[Dict]):
         """Create Entity→Entity relationships within a transaction.

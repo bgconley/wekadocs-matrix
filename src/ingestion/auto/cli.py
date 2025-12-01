@@ -182,7 +182,6 @@ def cmd_ingest(args):
     # Redirect ALL logging to stderr in JSON mode
     if args.json:
         import logging
-        import sys
 
         # Configure root logger to use stderr
         root_logger = logging.getLogger()
@@ -361,7 +360,6 @@ def cmd_status(args):
     # Redirect ALL logging to stderr in JSON mode
     if args.json:
         import logging
-        import sys
 
         # Configure root logger to use stderr
         root_logger = logging.getLogger()
@@ -450,7 +448,6 @@ def cmd_tail(args):
     # Redirect ALL logging to stderr in JSON mode
     if args.json:
         import logging
-        import sys
 
         # Configure root logger to use stderr
         root_logger = logging.getLogger()

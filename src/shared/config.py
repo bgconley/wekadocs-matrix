@@ -652,6 +652,43 @@ class ConnectorsConfig(BaseModel):
     github: Optional[GitHubConnectorSettings] = None
 
 
+class ReferencesExtractionConfig(BaseModel):
+    max_text_length: int = 8192
+    window_overlap: int = 512
+    confidence_scores: Dict[str, float] = Field(
+        default_factory=lambda: {
+            "hyperlink": 0.95,
+            "see_also": 0.85,
+            "related": 0.80,
+            "refer_to": 0.70,
+        }
+    )
+
+
+class ReferencesResolutionConfig(BaseModel):
+    fuzzy_penalty: float = 0.25
+    batch_size: int = 100
+    min_hint_length: int = 3
+    use_fulltext_index: bool = True
+
+
+class ReferencesQueryConfig(BaseModel):
+    enable_cross_doc_signals: bool = True
+    cross_doc_weight_ratio: float = 0.3
+    max_referencing_docs: int = 3
+
+
+class ReferencesConfig(BaseModel):
+    enabled: bool = False  # Disabled by default until verified
+    extraction: ReferencesExtractionConfig = Field(
+        default_factory=ReferencesExtractionConfig
+    )
+    resolution: ReferencesResolutionConfig = Field(
+        default_factory=ReferencesResolutionConfig
+    )
+    query: ReferencesQueryConfig = Field(default_factory=ReferencesQueryConfig)
+
+
 class Config(WekaBaseModel):
     """Main configuration model"""
 
@@ -674,6 +711,7 @@ class Config(WekaBaseModel):
     )  # Phase 7C
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)  # Phase 7E-4
     connectors: Optional[ConnectorsConfig] = None
+    references: ReferencesConfig = Field(default_factory=ReferencesConfig)
 
     class Config:
         populate_by_name = True  # Allow both graph_schema and schema

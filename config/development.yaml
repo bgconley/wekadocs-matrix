@@ -198,22 +198,6 @@ ingestion:
       target_tokens: 500
       hard_tokens: 750
       max_sections: 4
-      respect_major_levels: true
-      stop_at_level: 2
-      break_keywords: "faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting"
-    split:
-      enabled: true
-      max_tokens: 750
-      overlap_tokens: 100
-    microdoc:
-      enabled: true
-      doc_token_threshold: 2000
-      min_split_tokens: 400
-    semantic:
-      enabled: false
-      provider: "stub"
-      model_name: null
-      timeout_seconds: 5
 
   # Queue recovery (Phase 6: job reaper)
   queue_recovery:
@@ -228,6 +212,27 @@ ingestion:
     enabled: true
     schedule: "0 2 * * *"  # 2 AM daily
     drift_threshold: 0.01
+
+# References feature (Phase 3)
+references:
+  enabled: true
+  extraction:
+    max_text_length: 8192
+    window_overlap: 512
+    confidence_scores:
+      hyperlink: 0.95
+      see_also: 0.85
+      related: 0.80
+      refer_to: 0.70
+  resolution:
+    fuzzy_penalty: 0.25
+    batch_size: 100
+    min_hint_length: 3
+    use_fulltext_index: true
+  query:
+    enable_cross_doc_signals: true
+    cross_doc_weight_ratio: 0.3
+    max_referencing_docs: 3
 
 # Ranking configuration
 ranking:

@@ -1950,21 +1950,40 @@ class HybridRetriever:
             if rels_override:
                 return rels_override, cap
 
+        # Phase 3: Added REFERENCES for cross-document traversal where appropriate
+        # Fix #4 (Phase 3): Cross-document REFERENCES traversal is now implemented!
+        # The _compute_cross_doc_signals method handles the traversal pattern:
+        # (seed:Chunk) → [:REFERENCES] → (doc:Document) → [:HAS_CHUNK] → (related:Chunk)
+        #
+        # Cross-doc signals are computed independently of entity extraction and merged
+        # into the graph reranker via a weighted three-way fusion:
+        # fused_score = w_vec * vector_score + w_entity * entity_graph + w_cross_doc * cross_doc_graph
+        #
+        # The weight allocation (70/30 split of graph weight) ensures entity signals
+        # remain primary while cross-doc signals provide structural relevance boost.
         if qtype == "conceptual":
-            return ["MENTIONED_IN", "DEFINES", "IN_SECTION"], cap
+            return ["MENTIONED_IN", "DEFINES", "IN_SECTION", "REFERENCES"], cap
         if qtype == "cli":
+            # L4: CLI queries excluded from REFERENCES - CLI commands are self-contained
+            # and cross-document references provide minimal value for command lookups
             return ["MENTIONED_IN", "CONTAINS_STEP", "HAS_PARAMETER"], cap
         if qtype == "config":
-            return ["MENTIONED_IN", "HAS_PARAMETER", "DEFINES"], cap
+            return ["MENTIONED_IN", "HAS_PARAMETER", "DEFINES", "REFERENCES"], cap
         if qtype == "procedural":
-            return ["MENTIONED_IN", "CONTAINS_STEP", "NEXT_CHUNK", "IN_SECTION"], min(
-                cap, 10
-            )
+            return [
+                "MENTIONED_IN",
+                "CONTAINS_STEP",
+                "NEXT_CHUNK",
+                "IN_SECTION",
+                "REFERENCES",
+            ], min(cap, 10)
         # Phase 2 Cleanup: Removed AFFECTS, CAUSED_BY (never materialized)
         if qtype == "troubleshooting":
-            return ["MENTIONED_IN", "RESOLVES", "NEXT_CHUNK"], min(cap, 15)
+            return ["MENTIONED_IN", "RESOLVES", "NEXT_CHUNK", "REFERENCES"], min(
+                cap, 15
+            )
         if qtype == "reference":
-            return ["MENTIONED_IN", "NEXT_CHUNK"], min(cap, 5)
+            return ["MENTIONED_IN", "NEXT_CHUNK", "REFERENCES"], min(cap, 5)
         return rels, cap
 
     def _get_query_type_weights(self, query_type: str) -> Tuple[float, float]:
@@ -2027,6 +2046,97 @@ class HybridRetriever:
             logger.warning("Graph signal computation failed", error=str(exc))
         return signals
 
+    def _compute_cross_doc_signals(
+        self,
+        candidate_chunk_ids: List[str],
+        query_type: str,
+        doc_tag: Optional[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        """Compute cross-document signals via REFERENCES edge traversal.
+
+        Fix #4 (Phase 3): Implements the missing cross-document traversal that enables
+        REFERENCES edges to boost relevance scores.
+
+        The traversal pattern is:
+        (seed:Chunk) → [:REFERENCES] → (doc:Document) → [:HAS_CHUNK] → (related:Chunk)
+
+        If a candidate chunk's document is referenced by another candidate chunk,
+        the related chunk gets a boost. This captures cross-document relevance
+        signals that the entity-centric _compute_graph_signals cannot.
+
+        Args:
+            candidate_chunk_ids: List of chunk IDs from initial vector search
+            query_type: Query classification (conceptual, procedural, etc.)
+            doc_tag: Optional doc_tag filter
+
+        Returns:
+            Dict mapping chunk_id to {score, ref_count, ref_titles}
+        """
+        if not candidate_chunk_ids:
+            return {}
+
+        refs_cfg = getattr(self.config, "references", None)
+        refs_query_cfg = getattr(refs_cfg, "query", None) if refs_cfg else None
+        if not refs_cfg or not getattr(refs_cfg, "enabled", False):
+            return {}
+        if refs_query_cfg and not getattr(
+            refs_query_cfg, "enable_cross_doc_signals", True
+        ):
+            return {}
+
+        # Check if REFERENCES is enabled for this query type
+        rels, _ = self._relationships_for_query(query_type)
+        if "REFERENCES" not in rels:
+            return {}
+
+        # Cypher traversal: find chunks whose documents are referenced by other candidate chunks
+        # This identifies cross-document relevance signals
+        cypher = """
+        // Start with candidate chunks that have REFERENCES edges
+        UNWIND $chunk_ids AS seed_id
+        MATCH (seed:Chunk {id: seed_id})
+        // Follow REFERENCES directly from the chunk to target document
+        MATCH (seed)-[:REFERENCES]->(ref_doc:Document)
+        WHERE NOT ref_doc:GhostDocument
+        // Get chunks from the referenced document that are also candidates
+        MATCH (ref_doc)-[:HAS_CHUNK]->(related:Chunk)
+        WHERE related.id IN $chunk_ids
+          AND related.id <> seed_id
+          AND ($doc_tag IS NULL OR related.doc_tag = $doc_tag)
+        // Aggregate: count how many candidate chunks reference each related chunk's document
+        RETURN related.id AS chunk_id,
+               count(DISTINCT seed) AS ref_count,
+               collect(DISTINCT ref_doc.title)[..3] AS referencing_docs
+        """
+        signals: Dict[str, Dict[str, Any]] = {}
+        try:
+            with self.neo4j_driver.session() as session:
+                result = session.run(
+                    cypher,
+                    chunk_ids=list(set(candidate_chunk_ids)),
+                    doc_tag=doc_tag,
+                )
+                for record in result:
+                    chunk_id = str(record["chunk_id"])
+                    ref_count = float(record.get("ref_count") or 0.0)
+                    # Score: diminishing returns for multiple references
+                    # 1 ref = 0.5, 2 refs = 0.75, 3+ refs = ~0.875
+                    score = 1.0 - math.exp(-ref_count / 2.0)
+                    signals[chunk_id] = {
+                        "score": score,
+                        "ref_count": int(ref_count),
+                        "referencing_docs": record.get("referencing_docs") or [],
+                    }
+                if signals:
+                    logger.debug(
+                        "cross_doc_signals_computed",
+                        chunk_count=len(signals),
+                        query_type=query_type,
+                    )
+        except Exception as exc:
+            logger.warning("Cross-doc signal computation failed", error=str(exc))
+        return signals
+
     def _apply_graph_reranker(
         self,
         query: str,
@@ -2034,18 +2144,44 @@ class HybridRetriever:
         vector_results: List[ChunkResult],
         metrics: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Graph-as-reranker: apply graph signals to vector candidates only."""
+        """Graph-as-reranker: apply graph signals to vector candidates only.
+
+        Fix #4 (Phase 3): Now includes cross-document REFERENCES traversal signals
+        in addition to entity-based signals. The final graph score is a weighted
+        combination of both signal types.
+        """
         stats: Dict[str, Any] = {
             "graph_channel_candidates": 0,
             "graph_channel_entities": 0,
             "graph_reranker_applied": False,
             "graph_rerank_avg_delta": 0.0,
+            "cross_doc_candidates": 0,  # Fix #4: Track cross-doc signal count
         }
         if not vector_results:
             return stats
         qtype = self._classify_query_type(query)
-        extractor = self._get_entity_extractor()
-        entities = extractor.extract_entities(query)
+
+        # Cap candidates to avoid explosion
+        candidate_ids = [str(r.chunk_id) for r in vector_results if r.chunk_id][:50]
+
+        # Fix #4: Compute cross-document signals (doesn't require entity extraction)
+        # This enables REFERENCES edges to boost relevance even when entity extraction fails
+        cross_doc_signals = self._compute_cross_doc_signals(
+            candidate_chunk_ids=candidate_ids,
+            query_type=qtype,
+            doc_tag=doc_tag,
+        )
+        stats["cross_doc_candidates"] = len(cross_doc_signals)
+
+        # If cross-doc signals are strong enough, skip entity extraction to save time
+        if cross_doc_signals and len(cross_doc_signals) >= max(
+            1, len(candidate_ids) // 2
+        ):
+            entities = []
+        else:
+            # Extract entities for traditional entity-based graph signals
+            extractor = self._get_entity_extractor()
+            entities = extractor.extract_entities(query)
         if getattr(
             getattr(self.config, "feature_flags", None), "graph_garbage_filter", False
         ):
@@ -2070,36 +2206,62 @@ class HybridRetriever:
                 }
             ]
         stats["graph_channel_entities"] = len(entities)
-        if not entities:
-            return stats
-        # Cap candidates to avoid explosion
-        candidate_ids = [str(r.chunk_id) for r in vector_results if r.chunk_id][:50]
-        # Simple guardrail: if entities*candidates too large, trim candidates
-        if len(entities) * len(candidate_ids) > 500:
-            candidate_ids = candidate_ids[: max(1, 500 // max(len(entities), 1))]
-        graph_signals = self._compute_graph_signals(
-            entity_names=entities,
-            candidate_chunk_ids=candidate_ids,
-            query_type=qtype,
-            doc_tag=doc_tag,
-        )
+
+        # Compute entity-based graph signals (existing behavior)
+        graph_signals: Dict[str, Dict[str, Any]] = {}
+        if entities:
+            # Simple guardrail: if entities*candidates too large, trim candidates
+            entity_candidate_ids = candidate_ids
+            if len(entities) * len(candidate_ids) > 500:
+                entity_candidate_ids = candidate_ids[
+                    : max(1, 500 // max(len(entities), 1))
+                ]
+            graph_signals = self._compute_graph_signals(
+                entity_names=entities,
+                candidate_chunk_ids=entity_candidate_ids,
+                query_type=qtype,
+                doc_tag=doc_tag,
+            )
         stats["graph_channel_candidates"] = len(graph_signals)
-        if not graph_signals:
+
+        # Fix #4: If neither entity signals nor cross-doc signals exist, skip reranking
+        if not graph_signals and not cross_doc_signals:
             return stats
 
         w_vec, w_graph = self._get_query_type_weights(qtype)
+
+        # Fix #4: Weight allocation for graph signals
+        # - Entity signals get 70% of graph weight (primary semantic signal)
+        # - Cross-doc signals get 30% of graph weight (structural signal)
+        CROSS_DOC_WEIGHT_RATIO = 0.3
+        w_entity = w_graph * (1.0 - CROSS_DOC_WEIGHT_RATIO)
+        w_cross_doc = w_graph * CROSS_DOC_WEIGHT_RATIO
+
         # Track pre-rerank positions to compute delta
         pre_ranks = {str(r.chunk_id): idx for idx, r in enumerate(vector_results)}
         for r in vector_results:
-            sig = graph_signals.get(str(r.chunk_id))
-            r.graph_score = sig.get("score") if sig else 0.0
-            if not sig:
+            chunk_id = str(r.chunk_id)
+            entity_sig = graph_signals.get(chunk_id)
+            cross_doc_sig = cross_doc_signals.get(chunk_id)
+
+            entity_score = entity_sig.get("score", 0.0) if entity_sig else 0.0
+            cross_doc_score = cross_doc_sig.get("score", 0.0) if cross_doc_sig else 0.0
+
+            # Combined graph score (for metrics/debugging)
+            r.graph_score = entity_score + cross_doc_score
+
+            # Fix #4: Three-way fusion: vector + entity_graph + cross_doc_graph
+            if entity_sig or cross_doc_sig:
+                r.fused_score = (
+                    w_vec * (r.vector_score or 0.0)
+                    + w_entity * entity_score
+                    + w_cross_doc * cross_doc_score
+                )
+            else:
                 r.fused_score = r.vector_score
-                continue
-            r.fused_score = (w_vec * (r.vector_score or 0.0)) + (
-                w_graph * r.graph_score
-            )
+
         vector_results.sort(key=lambda x: x.fused_score or 0.0, reverse=True)
+
         # Compute simple rerank delta metrics
         deltas = []
         for idx, r in enumerate(vector_results):
@@ -2119,6 +2281,7 @@ class HybridRetriever:
                 "query_type": qtype,
                 "entities": len(entities),
                 "graph_candidates": len(graph_signals),
+                "cross_doc_candidates": len(cross_doc_signals),
                 "avg_rank_delta": avg_delta,
             },
         )

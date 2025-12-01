@@ -78,6 +78,14 @@ FOR (d:Document) ON (d.version);
 CREATE INDEX document_last_edited IF NOT EXISTS
 FOR (d:Document) ON (d.last_edited);
 
+// Fulltext index to accelerate fuzzy REFERENCES resolution
+CALL db.index.fulltext.createNodeIndex(
+  'document_title_ft',
+  ['Document'],
+  ['title'],
+  {analyzer: 'standard-folding'}
+) IF NOT EXISTS;
+
 // Section indexes (v2.1) - names match running DB with _idx suffix
 CREATE INDEX section_document_id_idx IF NOT EXISTS
 FOR (s:Section) ON (s.document_id);
@@ -343,8 +351,8 @@ MERGE (sv:SchemaVersion {id: 'singleton'})
 SET sv.version = 'v2.2',
     sv.edition = 'community',
     sv.vector_dimensions = 1024,
-    sv.embedding_provider = 'jina-ai',
-    sv.embedding_model = 'jina-embeddings-v3',
+    sv.embedding_provider = 'bge-m3',
+    sv.embedding_model = 'BAAI/bge-m3',
     sv.updated_at = datetime(),
     sv.description = 'Phase 7E+: Hybrid retrieval enablement (multi-vector, lexical boost, graph expansion) with small-chunk ingestion',
     sv.validation_note = 'Property existence constraints enforced in application layer (Community Edition)',

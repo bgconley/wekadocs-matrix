@@ -63,6 +63,16 @@ FOR (a:Answer) REQUIRE a.answer_id IS UNIQUE;
 CREATE CONSTRAINT schema_version_singleton IF NOT EXISTS
 FOR (sv:SchemaVersion) REQUIRE sv.id IS UNIQUE;
 
+// Phase 3: GhostDocument for forward reference resolution
+// Ghost Documents are placeholders created when a reference target doesn't exist yet
+CREATE CONSTRAINT ghost_document_id_unique IF NOT EXISTS
+FOR (g:GhostDocument) REQUIRE g.id IS UNIQUE;
+
+// Phase 3: PendingReference for fuzzy title forward references
+// Created when a non-hyperlink reference can't be resolved at ingestion time
+CREATE CONSTRAINT pending_reference_hint_unique IF NOT EXISTS
+FOR (p:PendingReference) REQUIRE p.hint IS UNIQUE;
+
 
 // ---------------------------------------------------------------------------
 // PART 1: PROPERTY INDEXES (v2.1 set + v2.2 additions)
@@ -77,6 +87,14 @@ FOR (d:Document) ON (d.version);
 
 CREATE INDEX document_last_edited IF NOT EXISTS
 FOR (d:Document) ON (d.last_edited);
+
+// Fulltext index to accelerate fuzzy REFERENCES resolution
+CALL db.index.fulltext.createNodeIndex(
+  'document_title_ft',
+  ['Document'],
+  ['title'],
+  {analyzer: 'standard-folding'}
+) IF NOT EXISTS;
 
 // Section indexes (v2.1) - names match running DB with _idx suffix
 CREATE INDEX section_document_id_idx IF NOT EXISTS
@@ -247,6 +265,11 @@ FOR (n:Chunk|CitationUnit) ON EACH [n.text, n.heading];
 CREATE FULLTEXT INDEX heading_fulltext_v1 IF NOT EXISTS
 FOR (n:Chunk|Section) ON EACH [n.heading];
 
+// Phase 3: Document title fulltext index for efficient REFERENCES resolution
+// Supports fuzzy CONTAINS queries on Document.title without O(N) scan
+CREATE FULLTEXT INDEX document_title_ft IF NOT EXISTS
+FOR (d:Document) ON EACH [d.title];
+
 
 // ---------------------------------------------------------------------------
 // PART 3: VECTOR INDEXES
@@ -332,10 +355,12 @@ SET s.document_id = s.doc_id;
 
 // Phase 2 Cleanup: Removed PREV and SAME_HEADING from marker
 // PREV is redundant (use <-[:NEXT]-), SAME_HEADING had O(n²) fanout with no query usage
+// Phase 3: Added REFERENCES for cross-document connectivity (Chunk → Document)
+// Phase 3: Added PENDING_REF for forward reference tracking (Chunk → PendingReference)
 MERGE (m:RelationshipTypesMarker {id: 'chunk_rel_types_v1'})
-  ON CREATE SET m.types = ['NEXT','CHILD_OF','MENTIONS','PARENT_OF'],
+  ON CREATE SET m.types = ['NEXT','CHILD_OF','MENTIONS','PARENT_OF','REFERENCES','PENDING_REF'],
                 m.created_at = datetime()
-  ON MATCH SET m.types = ['NEXT','CHILD_OF','MENTIONS','PARENT_OF'],
+  ON MATCH SET m.types = ['NEXT','CHILD_OF','MENTIONS','PARENT_OF','REFERENCES','PENDING_REF'],
                m.updated_at = datetime();
 
 
@@ -347,8 +372,8 @@ MERGE (sv:SchemaVersion {id: 'singleton'})
 SET sv.version = 'v2.2',
     sv.edition = 'community',
     sv.vector_dimensions = 1024,
-    sv.embedding_provider = 'jina-ai',
-    sv.embedding_model = 'jina-embeddings-v3',
+    sv.embedding_provider = 'bge-m3',
+    sv.embedding_model = 'BAAI/bge-m3',
     sv.updated_at = datetime(),
     sv.description = 'Phase 7E+: Hybrid retrieval enablement (multi-vector, lexical boost, graph expansion) with small-chunk ingestion',
     sv.validation_note = 'Property existence constraints enforced in application layer (Community Edition)',
