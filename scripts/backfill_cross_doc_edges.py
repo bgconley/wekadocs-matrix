@@ -3,11 +3,12 @@
 Phase 3.5 Cross-Document Linking via Vector Similarity
 
 Creates RELATED_TO edges between semantically similar documents using
-doc_title vectors (dense and/or sparse) from Qdrant.
+doc_title vectors (dense and/or sparse) from Qdrant, and full-text search.
 
 Phases:
     3.5a: Dense similarity only (doc_title vectors)
     3.5b: Dense + Sparse with RRF fusion (doc_title + doc_title-sparse)
+    3.5c: Full-text title mentions (Neo4j chunk_text_fulltext index)
 
 Architecture (per plan docs/plans/phase-3.5-cross-doc-linking.md):
     Stage 1: Query Qdrant for chunks with similar vectors (limit=100)
@@ -23,6 +24,10 @@ Usage:
     # RRF fusion mode (Phase 3.5b) - combines dense + sparse
     python scripts/backfill_cross_doc_edges.py --dry-run --method rrf
     python scripts/backfill_cross_doc_edges.py --execute --method rrf
+
+    # Full-text title mention mode (Phase 3.5c) - finds explicit title references
+    python scripts/backfill_cross_doc_edges.py --dry-run --method title_ft
+    python scripts/backfill_cross_doc_edges.py --execute --method title_ft
 
     # Custom threshold and limits
     python scripts/backfill_cross_doc_edges.py --execute --method rrf --threshold 0.03
@@ -66,10 +71,15 @@ DEFAULT_MAX_EDGES_PER_DOC = 5  # Limit edges per source document
 # Method-specific thresholds
 # Dense similarity scores range 0-1 (cosine similarity)
 # RRF scores are much smaller (sum of 1/(k+rank) terms)
+# Title FT scores are Lucene BM25-style scores (typically 1.0-5.0 range)
 THRESHOLDS = {
     "dense": 0.70,  # Cosine similarity threshold
     "rrf": 0.025,  # RRF score threshold (appears in 2+ methods or high-ranked in 1)
+    "title_ft": 2.0,  # Lucene full-text score threshold
 }
+
+# Full-text index name for chunk content
+CHUNK_FULLTEXT_INDEX = "chunk_text_fulltext"
 
 # Discovery thresholds (relaxed, we filter after aggregation/fusion)
 DISCOVERY_THRESHOLDS = {
@@ -117,6 +127,16 @@ class BackfillStats:
             "<0.02": 0,
         }
     )
+    title_ft_score_distribution: Dict[str, int] = field(
+        default_factory=lambda: {
+            "4.0+": 0,
+            "3.0-4.0": 0,
+            "2.5-3.0": 0,
+            "2.0-2.5": 0,
+            "<2.0": 0,
+        }
+    )
+    title_ft_candidates: int = 0  # Chunks found via full-text search
     start_time: float = field(default_factory=time.time)
     method: str = "dense"
 
@@ -136,6 +156,18 @@ class BackfillStats:
                 self.rrf_score_distribution["0.02-0.03"] += 1
             else:
                 self.rrf_score_distribution["<0.02"] += 1
+        elif self.method == "title_ft":
+            # Lucene full-text scores
+            if score >= 4.0:
+                self.title_ft_score_distribution["4.0+"] += 1
+            elif score >= 3.0:
+                self.title_ft_score_distribution["3.0-4.0"] += 1
+            elif score >= 2.5:
+                self.title_ft_score_distribution["2.5-3.0"] += 1
+            elif score >= 2.0:
+                self.title_ft_score_distribution["2.0-2.5"] += 1
+            else:
+                self.title_ft_score_distribution["<2.0"] += 1
         else:
             # Dense similarity scores
             if score >= 0.90:
@@ -176,6 +208,16 @@ class BackfillStats:
                 ]
             )
             for bucket, count in self.rrf_score_distribution.items():
+                lines.append(f"  {bucket}: {count}")
+        elif self.method == "title_ft":
+            lines.extend(
+                [
+                    f"  - Full-text candidates:   {self.title_ft_candidates}",
+                    "",
+                    "Lucene Score distribution of created edges:",
+                ]
+            )
+            for bucket, count in self.title_ft_score_distribution.items():
                 lines.append(f"  {bucket}: {count}")
         else:
             lines.extend(
@@ -368,6 +410,79 @@ def search_similar_chunks_sparse(
         )
     except Exception as e:
         print(f"  [ERROR] Sparse search failed for doc {exclude_doc_id[:12]}...: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Neo4j Full-Text Search Operations (Phase 3.5c)
+# ---------------------------------------------------------------------------
+
+
+def escape_lucene_query(text: str) -> str:
+    """
+    Escape special characters for Lucene full-text queries.
+
+    Lucene special characters that need escaping:
+    + - && || ! ( ) { } [ ] ^ " ~ * ? : \ /
+
+    We wrap the query in quotes for phrase matching, so we mainly need
+    to escape quotes and backslashes within the phrase.
+    """
+    # Escape backslashes first (important order)
+    text = text.replace("\\", "\\\\")
+    # Escape quotes
+    text = text.replace('"', '\\"')
+    return text
+
+
+def search_title_mentions(
+    neo4j_driver,
+    source_doc_id: str,
+    source_title: str,
+    min_score: float = 2.0,
+    limit: int = 50,
+) -> List[Tuple[str, float]]:
+    """
+    Search for chunks that explicitly mention this document's title.
+
+    Uses Neo4j full-text index (chunk_text_fulltext) with phrase matching.
+    Aggregates chunk results to document level using max-score strategy.
+
+    Args:
+        neo4j_driver: Neo4j driver instance
+        source_doc_id: ID of source document (to exclude from results)
+        source_title: Title to search for in chunk text
+        min_score: Minimum Lucene score threshold
+        limit: Maximum chunks to retrieve before aggregation
+
+    Returns:
+        List of (document_id, max_score) tuples, sorted by score descending
+    """
+    # Escape and prepare the title for phrase search
+    escaped_title = escape_lucene_query(source_title)
+    # Wrap in quotes for phrase matching
+    search_query = f'"{escaped_title}"'
+
+    try:
+        with neo4j_driver.session() as session:
+            result = session.run(
+                """
+                CALL db.index.fulltext.queryNodes($index_name, $search_query, {limit: $fetch_limit})
+                YIELD node, score
+                WHERE node.document_id <> $source_doc_id AND score > $min_score
+                WITH node.document_id AS target_doc_id, max(score) AS max_score
+                RETURN target_doc_id, max_score
+                ORDER BY max_score DESC
+            """,
+                index_name=CHUNK_FULLTEXT_INDEX,
+                search_query=search_query,
+                source_doc_id=source_doc_id,
+                min_score=min_score,
+                fetch_limit=limit,
+            )
+            return [(r["target_doc_id"], r["max_score"]) for r in result]
+    except Exception as e:
+        print(f"  [ERROR] Full-text search failed for '{source_title[:30]}...': {e}")
         return []
 
 
@@ -656,6 +771,81 @@ def process_document_rrf(
     return edges_created
 
 
+def process_document_title_ft(
+    doc: Dict,
+    neo4j_driver,
+    stats: BackfillStats,
+    threshold: float,
+    max_edges: int,
+    dry_run: bool,
+    verbose: bool,
+) -> int:
+    """
+    Process a document using full-text title mention search (Phase 3.5c).
+
+    Finds documents whose chunks explicitly mention this document's title.
+    This captures explicit references that vector similarity might miss.
+    """
+    source_id = doc["id"]
+    source_title = doc.get("title", "")
+
+    if not source_title:
+        stats.docs_skipped_no_vector += 1
+        if verbose:
+            print(f"  [SKIP] No title: {source_id[:12]}...")
+        return 0
+
+    # Search for chunks mentioning this title
+    doc_candidates = search_title_mentions(
+        neo4j_driver,
+        source_id,
+        source_title,
+        min_score=threshold,
+    )
+
+    stats.title_ft_candidates += len(doc_candidates)
+    stats.total_candidates_found += len(doc_candidates)
+
+    if not doc_candidates:
+        stats.docs_skipped_no_candidates += 1
+        if verbose:
+            print(f"  [SKIP] No mentions found: {source_title[:50]}")
+        return 0
+
+    # Create edges for matching documents
+    edges_created = 0
+    for target_id, score in doc_candidates:
+        if score < threshold:
+            break
+        if edges_created >= max_edges:
+            break
+
+        if create_related_to_edge(
+            neo4j_driver,
+            source_id,
+            target_id,
+            score,
+            method="title_mention",
+            phase="3.5c",
+            dry_run=dry_run,
+        ):
+            edges_created += 1
+            stats.record_edge(score)
+
+            if verbose or dry_run:
+                target_title = get_document_title(neo4j_driver, target_id)
+                target_title = (target_title or "Unknown")[:40]
+                mode = "[DRY-RUN]" if dry_run else "[CREATED]"
+                print(
+                    f"  {mode} {source_title[:30]}... --[FT:{score:.2f}]--> {target_title}..."
+                )
+
+    if edges_created > 0:
+        stats.docs_with_edges += 1
+
+    return edges_created
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Phase 3.5: Create RELATED_TO edges between similar documents",
@@ -675,9 +865,9 @@ def main():
     # Method selection
     parser.add_argument(
         "--method",
-        choices=["dense", "rrf"],
+        choices=["dense", "rrf", "title_ft"],
         default="rrf",
-        help="Similarity method: 'dense' (3.5a) or 'rrf' (3.5b, default)",
+        help="Similarity method: 'dense' (3.5a), 'rrf' (3.5b, default), 'title_ft' (3.5c)",
     )
 
     # Configuration options
@@ -685,7 +875,7 @@ def main():
         "--threshold",
         type=float,
         default=None,
-        help="Minimum score to create edge (default: 0.70 for dense, 0.025 for rrf)",
+        help="Minimum score to create edge (default: 0.70 for dense, 0.025 for rrf, 2.0 for title_ft)",
     )
     parser.add_argument(
         "--max-edges",
@@ -719,23 +909,28 @@ def main():
     # Set threshold based on method if not specified
     threshold = args.threshold if args.threshold is not None else THRESHOLDS[method]
 
-    # Determine phase
-    phase = "3.5a" if method == "dense" else "3.5b"
+    # Determine phase and method description
+    phase_map = {"dense": "3.5a", "rrf": "3.5b", "title_ft": "3.5c"}
+    method_desc = {
+        "dense": "dense vectors only",
+        "rrf": "dense + sparse RRF fusion",
+        "title_ft": "full-text title mentions",
+    }
+    phase = phase_map[method]
 
     # Banner
     print()
     print("=" * 60)
-    print(f"Phase {phase}: Cross-Document Linking via Vector Similarity")
+    print(f"Phase {phase}: Cross-Document Linking")
     print("=" * 60)
     print(
         f"Mode:           {'DRY-RUN (no writes)' if dry_run else 'EXECUTE (creating edges)'}"
     )
-    print(
-        f"Method:         {method} ({'dense only' if method == 'dense' else 'dense + sparse RRF fusion'})"
-    )
+    print(f"Method:         {method} ({method_desc[method]})")
     print(f"Threshold:      {threshold}")
     print(f"Max edges/doc:  {args.max_edges}")
-    print(f"Chunk limit:    {args.chunk_limit}")
+    if method != "title_ft":
+        print(f"Chunk limit:    {args.chunk_limit}")
     if args.limit_docs:
         print(f"Doc limit:      {args.limit_docs}")
     print("=" * 60)
@@ -743,11 +938,16 @@ def main():
 
     # Initialize connections
     print("Connecting to databases...")
+    qdrant = None
     try:
         neo4j_driver = get_neo4j_driver()
-        qdrant = get_qdrant_client()
         print("  Neo4j: Connected")
-        print("  Qdrant: Connected")
+        # Only connect to Qdrant for vector-based methods
+        if method != "title_ft":
+            qdrant = get_qdrant_client()
+            print("  Qdrant: Connected")
+        else:
+            print("  Qdrant: Skipped (not needed for title_ft)")
     except Exception as e:
         print(f"[FATAL] Failed to connect: {e}")
         sys.exit(1)
@@ -768,9 +968,6 @@ def main():
     stats = BackfillStats()
     stats.method = method
 
-    # Select processing function based on method
-    process_fn = process_document_dense if method == "dense" else process_document_rrf
-
     for i, doc in enumerate(documents):
         stats.docs_processed += 1
 
@@ -780,17 +977,41 @@ def main():
                 f"\n[{i + 1}/{len(documents)}] Processing: {doc.get('title', 'Unknown')[:50]}..."
             )
 
-        edges = process_fn(
-            doc=doc,
-            qdrant=qdrant,
-            neo4j_driver=neo4j_driver,
-            stats=stats,
-            threshold=threshold,
-            max_edges=args.max_edges,
-            chunk_limit=args.chunk_limit,
-            dry_run=dry_run,
-            verbose=args.verbose,
-        )
+        # Call appropriate processing function based on method
+        if method == "title_ft":
+            edges = process_document_title_ft(
+                doc=doc,
+                neo4j_driver=neo4j_driver,
+                stats=stats,
+                threshold=threshold,
+                max_edges=args.max_edges,
+                dry_run=dry_run,
+                verbose=args.verbose,
+            )
+        elif method == "dense":
+            edges = process_document_dense(
+                doc=doc,
+                qdrant=qdrant,
+                neo4j_driver=neo4j_driver,
+                stats=stats,
+                threshold=threshold,
+                max_edges=args.max_edges,
+                chunk_limit=args.chunk_limit,
+                dry_run=dry_run,
+                verbose=args.verbose,
+            )
+        else:  # rrf
+            edges = process_document_rrf(
+                doc=doc,
+                qdrant=qdrant,
+                neo4j_driver=neo4j_driver,
+                stats=stats,
+                threshold=threshold,
+                max_edges=args.max_edges,
+                chunk_limit=args.chunk_limit,
+                dry_run=dry_run,
+                verbose=args.verbose,
+            )
 
         if edges > 0 and not args.verbose and not dry_run:
             print(f"  Created {edges} edge(s)")
