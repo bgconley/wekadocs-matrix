@@ -14,20 +14,25 @@ materialized by ingestion or queried at runtime:
 - CAUSED_BY: Never created during ingestion
 - CRITICAL_FOR: Never created during ingestion
 - DEPENDS_ON: Never created during ingestion
-- RELATED_TO: Never created during ingestion
 - REQUIRES: Never created during ingestion
 - SAME_HEADING: Removed due to O(n^2) fanout risk
 - PREV: Use <-[:NEXT]- instead for traversal
 
 External queries using these types will fail ExplainGuard validation.
 This is intentional - these types should not have been used.
+
+Phase 3.5 Addition
+------------------
+- RELATED_TO: Re-added for vector-based cross-document linking (Document → Document).
+  Created by backfill script, not during regular ingestion. Tagged with phase='3.5'.
 """
 
 # Enumerates relationship types materialized by ingestion and referenced by
 # query templates / traversal utilities. Keep sorted for readability.
 # Phase 2 Cleanup: Removed dead types that were never materialized by ingestion
-# or queried at runtime: AFFECTS, CRITICAL_FOR, DEPENDS_ON, RELATED_TO, REQUIRES
+# or queried at runtime: AFFECTS, CRITICAL_FOR, DEPENDS_ON, REQUIRES
 # Also removed redundant edges: PREV (use <-[:NEXT]-), SAME_HEADING (O(n²) fanout)
+# Phase 3.5: Re-added RELATED_TO for vector-based cross-document linking
 RELATIONSHIP_TYPES = {
     "ANSWERED_AS",
     "CHILD_OF",
@@ -47,6 +52,7 @@ RELATIONSHIP_TYPES = {
     "NEXT_CHUNK",
     "PARENT_OF",
     "REFERENCES",  # Phase 3: Cross-document connectivity (Chunk → Document)
+    "RELATED_TO",  # Phase 3.5: Vector-based cross-document linking (Document → Document)
     "RESOLVES",
     "RETRIEVED",
     "SUPPORTED_BY",
