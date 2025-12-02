@@ -51,6 +51,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
+
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -72,14 +74,19 @@ DEFAULT_MAX_EDGES_PER_DOC = 5  # Limit edges per source document
 # Dense similarity scores range 0-1 (cosine similarity)
 # RRF scores are much smaller (sum of 1/(k+rank) terms)
 # Title FT scores are Lucene BM25-style scores (typically 1.0-5.0 range)
+# ColBERT MaxSim scores range 0-1 (token-level cosine similarity)
 THRESHOLDS = {
     "dense": 0.70,  # Cosine similarity threshold
     "rrf": 0.025,  # RRF score threshold (appears in 2+ methods or high-ranked in 1)
     "title_ft": 2.0,  # Lucene full-text score threshold
+    "colbert": 0.40,  # ColBERT MaxSim threshold (filters weak matches)
 }
 
 # Full-text index name for chunk content
 CHUNK_FULLTEXT_INDEX = "chunk_text_fulltext"
+
+# ColBERT vector name
+COLBERT_VECTOR_NAME = "late-interaction"
 
 # Discovery thresholds (relaxed, we filter after aggregation/fusion)
 DISCOVERY_THRESHOLDS = {
@@ -136,7 +143,18 @@ class BackfillStats:
             "<2.0": 0,
         }
     )
+    colbert_score_distribution: Dict[str, int] = field(
+        default_factory=lambda: {
+            "0.70+": 0,
+            "0.60-0.70": 0,
+            "0.50-0.60": 0,
+            "0.40-0.50": 0,
+            "<0.40": 0,
+        }
+    )
     title_ft_candidates: int = 0  # Chunks found via full-text search
+    edges_reranked: int = 0  # Edges processed by ColBERT reranking
+    edges_filtered: int = 0  # Edges removed due to low ColBERT score
     start_time: float = field(default_factory=time.time)
     method: str = "dense"
 
@@ -168,6 +186,18 @@ class BackfillStats:
                 self.title_ft_score_distribution["2.0-2.5"] += 1
             else:
                 self.title_ft_score_distribution["<2.0"] += 1
+        elif self.method == "colbert":
+            # ColBERT MaxSim scores (0-1 range)
+            if score >= 0.70:
+                self.colbert_score_distribution["0.70+"] += 1
+            elif score >= 0.60:
+                self.colbert_score_distribution["0.60-0.70"] += 1
+            elif score >= 0.50:
+                self.colbert_score_distribution["0.50-0.60"] += 1
+            elif score >= 0.40:
+                self.colbert_score_distribution["0.40-0.50"] += 1
+            else:
+                self.colbert_score_distribution["<0.40"] += 1
         else:
             # Dense similarity scores
             if score >= 0.90:
@@ -218,6 +248,18 @@ class BackfillStats:
                 ]
             )
             for bucket, count in self.title_ft_score_distribution.items():
+                lines.append(f"  {bucket}: {count}")
+        elif self.method == "colbert":
+            lines.extend(
+                [
+                    f"  - Edges reranked:         {self.edges_reranked}",
+                    f"  - Edges filtered (<thr):  {self.edges_filtered}",
+                    f"  - Edges kept:             {self.total_edges_created}",
+                    "",
+                    "ColBERT MaxSim Score distribution:",
+                ]
+            )
+            for bucket, count in self.colbert_score_distribution.items():
                 lines.append(f"  {bucket}: {count}")
         else:
             lines.extend(
@@ -484,6 +526,167 @@ def search_title_mentions(
     except Exception as e:
         print(f"  [ERROR] Full-text search failed for '{source_title[:30]}...': {e}")
         return []
+
+
+# ---------------------------------------------------------------------------
+# ColBERT Operations (Phase 3.5d)
+# ---------------------------------------------------------------------------
+
+
+def get_first_chunk_colbert(qdrant: QdrantClient, doc_id: str) -> Optional[np.ndarray]:
+    """
+    Get ColBERT (late-interaction) vectors from the FIRST chunk of a document.
+
+    Why first chunk only?
+    - Usually contains title/overview with document's key concepts
+    - Reduces from ~7000 vectors to ~70 vectors per doc
+    - Makes pairwise comparison ~100x faster
+
+    Returns:
+        numpy array of shape [N, 1024] where N is number of tokens,
+        or None if no vectors found
+    """
+    try:
+        points, _ = qdrant.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="document_id", match=models.MatchValue(value=doc_id)
+                    ),
+                    models.FieldCondition(
+                        key="order", match=models.MatchValue(value=0)
+                    ),
+                ]
+            ),
+            limit=1,
+            with_vectors=[COLBERT_VECTOR_NAME],
+            with_payload=False,
+        )
+
+        if not points or not points[0].vector:
+            return None
+
+        vec = points[0].vector
+        if isinstance(vec, dict):
+            colbert_vec = vec.get(COLBERT_VECTOR_NAME)
+            if colbert_vec:
+                return np.array(colbert_vec)
+        return None
+
+    except Exception as e:
+        print(f"  [ERROR] Failed to get ColBERT vectors for {doc_id[:12]}...: {e}")
+        return None
+
+
+def compute_maxsim(source: np.ndarray, target: np.ndarray) -> float:
+    """
+    Compute ColBERT MaxSim score between two sets of token vectors.
+
+    MaxSim algorithm:
+    1. For each source token, find the maximum cosine similarity to any target token
+    2. Average these maximum similarities
+
+    This captures how well each concept in the source is represented in the target.
+
+    Args:
+        source: [N, 1024] array of source token embeddings
+        target: [M, 1024] array of target token embeddings
+
+    Returns:
+        Float score in range [0, 1]
+    """
+    # Normalize vectors for cosine similarity
+    source_norm = source / (np.linalg.norm(source, axis=1, keepdims=True) + 1e-9)
+    target_norm = target / (np.linalg.norm(target, axis=1, keepdims=True) + 1e-9)
+
+    # Compute all pairwise similarities: [N, M]
+    similarities = source_norm @ target_norm.T
+
+    # MaxSim: max over target tokens for each source token, then average
+    max_sims = similarities.max(axis=1)
+
+    return float(max_sims.mean())
+
+
+def get_existing_edges(neo4j_driver) -> List[Dict]:
+    """
+    Fetch all existing RELATED_TO edges for ColBERT reranking.
+
+    Returns edges from phases 3.5a, 3.5b, and 3.5c.
+    """
+    with neo4j_driver.session() as session:
+        result = session.run(
+            """
+            MATCH (s:Document)-[r:RELATED_TO]->(t:Document)
+            WHERE r.phase IN ['3.5a', '3.5b', '3.5c']
+            RETURN s.id AS source_id, s.title AS source_title,
+                   t.id AS target_id, t.title AS target_title,
+                   r.score AS original_score, r.phase AS phase, r.method AS method
+            ORDER BY s.title, r.score DESC
+        """
+        )
+        return [dict(r) for r in result]
+
+
+def update_edge_colbert_score(
+    neo4j_driver,
+    source_id: str,
+    target_id: str,
+    colbert_score: float,
+    dry_run: bool = False,
+) -> bool:
+    """
+    Update an existing edge with ColBERT score and mark as phase 3.5d.
+    """
+    if dry_run:
+        return True
+
+    try:
+        with neo4j_driver.session() as session:
+            session.run(
+                """
+                MATCH (s:Document {id: $source_id})-[r:RELATED_TO]->(t:Document {id: $target_id})
+                SET r.colbert_score = $colbert_score,
+                    r.phase = '3.5d',
+                    r.reranked_at = datetime()
+            """,
+                source_id=source_id,
+                target_id=target_id,
+                colbert_score=colbert_score,
+            )
+            return True
+    except Exception as e:
+        print(f"  [ERROR] Failed to update edge: {e}")
+        return False
+
+
+def delete_edge(
+    neo4j_driver,
+    source_id: str,
+    target_id: str,
+    dry_run: bool = False,
+) -> bool:
+    """
+    Delete an edge that failed ColBERT threshold.
+    """
+    if dry_run:
+        return True
+
+    try:
+        with neo4j_driver.session() as session:
+            session.run(
+                """
+                MATCH (s:Document {id: $source_id})-[r:RELATED_TO]->(t:Document {id: $target_id})
+                DELETE r
+            """,
+                source_id=source_id,
+                target_id=target_id,
+            )
+            return True
+    except Exception as e:
+        print(f"  [ERROR] Failed to delete edge: {e}")
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -846,6 +1049,95 @@ def process_document_title_ft(
     return edges_created
 
 
+def process_colbert_rerank(
+    qdrant: QdrantClient,
+    neo4j_driver,
+    stats: BackfillStats,
+    threshold: float,
+    dry_run: bool,
+    verbose: bool,
+) -> None:
+    """
+    Rerank all existing RELATED_TO edges using ColBERT MaxSim.
+
+    For each edge:
+    1. Fetch first-chunk ColBERT vectors for source and target
+    2. Compute MaxSim score
+    3. If score >= threshold: update edge with colbert_score
+    4. If score < threshold: delete edge (it's a false positive)
+    """
+    print("\nFetching existing edges from Neo4j...")
+    edges = get_existing_edges(neo4j_driver)
+    print(f"  Found {len(edges)} edges to rerank")
+
+    if not edges:
+        print("  No edges found. Run phases 3.5a/b/c first.")
+        return
+
+    # Cache ColBERT vectors to avoid re-fetching
+    colbert_cache: Dict[str, Optional[np.ndarray]] = {}
+
+    def get_cached_colbert(doc_id: str) -> Optional[np.ndarray]:
+        if doc_id not in colbert_cache:
+            colbert_cache[doc_id] = get_first_chunk_colbert(qdrant, doc_id)
+        return colbert_cache[doc_id]
+
+    print("\nReranking edges with ColBERT MaxSim...")
+    print("-" * 60)
+
+    for i, edge in enumerate(edges):
+        stats.edges_reranked += 1
+
+        source_id = edge["source_id"]
+        target_id = edge["target_id"]
+        source_title = edge.get("source_title", "Unknown")[:30]
+        target_title = edge.get("target_title", "Unknown")[:30]
+
+        # Get ColBERT vectors
+        source_colbert = get_cached_colbert(source_id)
+        target_colbert = get_cached_colbert(target_id)
+
+        if source_colbert is None or target_colbert is None:
+            # Keep edge if we can't compute ColBERT (missing vectors)
+            stats.docs_skipped_no_vector += 1
+            if verbose:
+                print(
+                    f"  [SKIP] Missing ColBERT: {source_title}... → {target_title}..."
+                )
+            continue
+
+        # Compute MaxSim
+        colbert_score = compute_maxsim(source_colbert, target_colbert)
+
+        # Progress indicator
+        if (i + 1) % 50 == 0:
+            print(f"\n[{i + 1}/{len(edges)}] Processed...")
+
+        if colbert_score >= threshold:
+            # Keep and update edge
+            if update_edge_colbert_score(
+                neo4j_driver, source_id, target_id, colbert_score, dry_run
+            ):
+                # record_edge increments total_edges_created
+                stats.record_edge(colbert_score)
+
+                if verbose or dry_run:
+                    mode = "[DRY-RUN]" if dry_run else "[KEPT]"
+                    print(
+                        f"  {mode} {source_title}... --[CB:{colbert_score:.3f}]--> {target_title}..."
+                    )
+        else:
+            # Filter out weak edge
+            if delete_edge(neo4j_driver, source_id, target_id, dry_run):
+                stats.edges_filtered += 1
+
+                if verbose or dry_run:
+                    mode = "[DRY-RUN]" if dry_run else "[FILTERED]"
+                    print(
+                        f"  {mode} {source_title}... --[CB:{colbert_score:.3f} < {threshold}]--> {target_title}..."
+                    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Phase 3.5: Create RELATED_TO edges between similar documents",
@@ -865,9 +1157,9 @@ def main():
     # Method selection
     parser.add_argument(
         "--method",
-        choices=["dense", "rrf", "title_ft"],
+        choices=["dense", "rrf", "title_ft", "colbert"],
         default="rrf",
-        help="Similarity method: 'dense' (3.5a), 'rrf' (3.5b, default), 'title_ft' (3.5c)",
+        help="Method: 'dense' (3.5a), 'rrf' (3.5b), 'title_ft' (3.5c), 'colbert' (3.5d rerank)",
     )
 
     # Configuration options
@@ -875,7 +1167,7 @@ def main():
         "--threshold",
         type=float,
         default=None,
-        help="Minimum score to create edge (default: 0.70 for dense, 0.025 for rrf, 2.0 for title_ft)",
+        help="Minimum score (default: 0.70 dense, 0.025 rrf, 2.0 title_ft, 0.40 colbert)",
     )
     parser.add_argument(
         "--max-edges",
@@ -910,11 +1202,12 @@ def main():
     threshold = args.threshold if args.threshold is not None else THRESHOLDS[method]
 
     # Determine phase and method description
-    phase_map = {"dense": "3.5a", "rrf": "3.5b", "title_ft": "3.5c"}
+    phase_map = {"dense": "3.5a", "rrf": "3.5b", "title_ft": "3.5c", "colbert": "3.5d"}
     method_desc = {
         "dense": "dense vectors only",
         "rrf": "dense + sparse RRF fusion",
         "title_ft": "full-text title mentions",
+        "colbert": "ColBERT MaxSim reranking",
     }
     phase = phase_map[method]
 
@@ -928,10 +1221,10 @@ def main():
     )
     print(f"Method:         {method} ({method_desc[method]})")
     print(f"Threshold:      {threshold}")
-    print(f"Max edges/doc:  {args.max_edges}")
-    if method != "title_ft":
+    if method not in ("title_ft", "colbert"):
+        print(f"Max edges/doc:  {args.max_edges}")
         print(f"Chunk limit:    {args.chunk_limit}")
-    if args.limit_docs:
+    if args.limit_docs and method != "colbert":
         print(f"Doc limit:      {args.limit_docs}")
     print("=" * 60)
     print()
@@ -942,8 +1235,8 @@ def main():
     try:
         neo4j_driver = get_neo4j_driver()
         print("  Neo4j: Connected")
-        # Only connect to Qdrant for vector-based methods
-        if method != "title_ft":
+        # Connect to Qdrant for vector-based methods (not title_ft)
+        if method not in ("title_ft",):
             qdrant = get_qdrant_client()
             print("  Qdrant: Connected")
         else:
@@ -952,69 +1245,79 @@ def main():
         print(f"[FATAL] Failed to connect: {e}")
         sys.exit(1)
 
-    # Get all documents
-    print("\nFetching documents from Neo4j...")
-    documents = get_all_documents(neo4j_driver)
-    print(f"  Found {len(documents)} documents")
-
-    if args.limit_docs:
-        documents = documents[: args.limit_docs]
-        print(f"  Limited to first {args.limit_docs} documents")
-
-    # Process documents
-    print("\nProcessing documents...")
-    print("-" * 60)
-
     stats = BackfillStats()
     stats.method = method
 
-    for i, doc in enumerate(documents):
-        stats.docs_processed += 1
+    # ColBERT reranking processes edges, not documents
+    if method == "colbert":
+        process_colbert_rerank(
+            qdrant=qdrant,
+            neo4j_driver=neo4j_driver,
+            stats=stats,
+            threshold=threshold,
+            dry_run=dry_run,
+            verbose=args.verbose,
+        )
+    else:
+        # Other methods process documents
+        print("\nFetching documents from Neo4j...")
+        documents = get_all_documents(neo4j_driver)
+        print(f"  Found {len(documents)} documents")
 
-        # Progress indicator
-        if (i + 1) % 10 == 0 or args.verbose:
-            print(
-                f"\n[{i + 1}/{len(documents)}] Processing: {doc.get('title', 'Unknown')[:50]}..."
-            )
+        if args.limit_docs:
+            documents = documents[: args.limit_docs]
+            print(f"  Limited to first {args.limit_docs} documents")
 
-        # Call appropriate processing function based on method
-        if method == "title_ft":
-            edges = process_document_title_ft(
-                doc=doc,
-                neo4j_driver=neo4j_driver,
-                stats=stats,
-                threshold=threshold,
-                max_edges=args.max_edges,
-                dry_run=dry_run,
-                verbose=args.verbose,
-            )
-        elif method == "dense":
-            edges = process_document_dense(
-                doc=doc,
-                qdrant=qdrant,
-                neo4j_driver=neo4j_driver,
-                stats=stats,
-                threshold=threshold,
-                max_edges=args.max_edges,
-                chunk_limit=args.chunk_limit,
-                dry_run=dry_run,
-                verbose=args.verbose,
-            )
-        else:  # rrf
-            edges = process_document_rrf(
-                doc=doc,
-                qdrant=qdrant,
-                neo4j_driver=neo4j_driver,
-                stats=stats,
-                threshold=threshold,
-                max_edges=args.max_edges,
-                chunk_limit=args.chunk_limit,
-                dry_run=dry_run,
-                verbose=args.verbose,
-            )
+        print("\nProcessing documents...")
+        print("-" * 60)
 
-        if edges > 0 and not args.verbose and not dry_run:
-            print(f"  Created {edges} edge(s)")
+        for i, doc in enumerate(documents):
+            stats.docs_processed += 1
+
+            # Progress indicator
+            if (i + 1) % 10 == 0 or args.verbose:
+                print(
+                    f"\n[{i + 1}/{len(documents)}] Processing: {doc.get('title', 'Unknown')[:50]}..."
+                )
+
+            # Call appropriate processing function based on method
+            if method == "title_ft":
+                edges = process_document_title_ft(
+                    doc=doc,
+                    neo4j_driver=neo4j_driver,
+                    stats=stats,
+                    threshold=threshold,
+                    max_edges=args.max_edges,
+                    dry_run=dry_run,
+                    verbose=args.verbose,
+                )
+            elif method == "dense":
+                edges = process_document_dense(
+                    doc=doc,
+                    qdrant=qdrant,
+                    neo4j_driver=neo4j_driver,
+                    stats=stats,
+                    threshold=threshold,
+                    max_edges=args.max_edges,
+                    chunk_limit=args.chunk_limit,
+                    dry_run=dry_run,
+                    verbose=args.verbose,
+                )
+            else:  # rrf
+                edges = process_document_rrf(
+                    doc=doc,
+                    qdrant=qdrant,
+                    neo4j_driver=neo4j_driver,
+                    stats=stats,
+                    threshold=threshold,
+                    max_edges=args.max_edges,
+                    chunk_limit=args.chunk_limit,
+                    dry_run=dry_run,
+                    verbose=args.verbose,
+                )
+
+            if edges > 0 and not args.verbose and not dry_run:
+                print(f"  Created {edges} edge(s)")
 
     # Summary
     print(stats.summary(phase))
