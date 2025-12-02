@@ -465,7 +465,11 @@ class AtomicIngestionCoordinator:
         from src.ingestion.parsers.markdown import parse_markdown
         from src.shared.config import get_config, get_settings
 
-        config = get_config()
+        # Deep copy config to avoid mutating the global singleton when applying
+        # per-request embedding overrides. This ensures thread safety and
+        # prevents cross-request interference in concurrent workers.
+        # See: Phase 1 bug fix for config singleton mutation
+        config = get_config().model_copy(deep=True)
         _ = get_settings()  # Validates settings load; value unused
 
         # Apply optional overrides with explicit logging
@@ -732,6 +736,15 @@ class AtomicIngestionCoordinator:
             False,
         )
 
+        # Check if doc_title-sparse vectors should be generated
+        # This flag allows disabling doc_title sparse vectors independently of text-sparse
+        # Default: True for backward compatibility with existing deployments
+        enable_doc_title_sparse = getattr(
+            getattr(self.config.search.vector, "qdrant", None),
+            "enable_doc_title_sparse",
+            True,
+        )
+
         # Prepare batch texts for efficient embedding
         section_data = []
         content_texts = []
@@ -905,8 +918,9 @@ class AtomicIngestionCoordinator:
             [] if supports_sparse else None
         )
         # doc_title-sparse: BM25-style lexical matching for document titles
+        # Only generate if BOTH: embedder supports sparse AND config flag is enabled
         doc_title_sparse_embeddings: Optional[List[Optional[dict]]] = (
-            [] if supports_sparse else None
+            [] if (supports_sparse and enable_doc_title_sparse) else None
         )
         colbert_embeddings: Optional[List[Optional[List[List[float]]]]] = (
             [] if supports_colbert else None

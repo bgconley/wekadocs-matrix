@@ -116,9 +116,9 @@ def backfill_doc_title_vectors(dry_run: bool = True):
     """Main backfill logic."""
     from src.providers.factory import ProviderFactory
 
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"Doc Title Vector Backfill - {'DRY RUN' if dry_run else 'EXECUTE'}")
-    print(f"{'='*70}\n")
+    print(f"{'=' * 70}\n")
 
     # Get embedding provider
     provider = ProviderFactory.create_embedding_provider()
@@ -198,9 +198,9 @@ def backfill_doc_title_vectors(dry_run: bool = True):
             errors += len(point_ids)
 
     # Summary
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print("SUMMARY")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
     print(f"Total points: {total_points}")
     print(f"Updated: {updated}")
     print(f"Skipped (no title): {skipped}")

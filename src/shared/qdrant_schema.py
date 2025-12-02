@@ -36,6 +36,7 @@ def build_qdrant_schema(
     include_entity: bool = False,
     enable_sparse: Optional[bool] = None,
     enable_colbert: Optional[bool] = None,
+    enable_doc_title_sparse: Optional[bool] = None,
 ) -> QdrantSchemaPlan:
     """Return the desired Qdrant schema for the embedding profile."""
 
@@ -65,9 +66,18 @@ def build_qdrant_schema(
         )
         # doc_title-sparse: BM25-style lexical matching for document titles
         # Enables exact term matching for title-based queries (o3 recommendation)
-        sparse_vectors_config["doc_title-sparse"] = SparseVectorParams(
-            index=SparseIndexParams(on_disk=True)
+        # Only add if enable_doc_title_sparse is True (default) or not explicitly disabled
+        use_doc_title_sparse = (
+            enable_doc_title_sparse if enable_doc_title_sparse is not None else True
         )
+        if use_doc_title_sparse:
+            sparse_vectors_config["doc_title-sparse"] = SparseVectorParams(
+                index=SparseIndexParams(on_disk=True)
+            )
+        else:
+            notes.append(
+                "doc_title-sparse vector disabled via enable_doc_title_sparse=False."
+            )
     else:
         notes.append("Sparse vector support disabled for current profile or config.")
 
@@ -128,6 +138,7 @@ def validate_qdrant_schema(
     require_sparse: Optional[bool] = None,
     require_colbert: Optional[bool] = None,
     include_entity: Optional[bool] = None,
+    require_doc_title_sparse: Optional[bool] = None,
     require_payload_fields: Optional[Sequence[str]] = None,
     strict: bool = False,
 ) -> None:
@@ -148,11 +159,16 @@ def validate_qdrant_schema(
     )
     include_entity = bool(include_entity)
     required_payload_fields = list(require_payload_fields or [])
+    # Default require_doc_title_sparse to True when sparse is required (backward compat)
+    effective_require_doc_title_sparse = (
+        require_doc_title_sparse if require_doc_title_sparse is not None else True
+    )
     expected_plan = build_qdrant_schema(
         settings,
         include_entity=include_entity,
         enable_sparse=require_sparse,
         enable_colbert=require_colbert,
+        enable_doc_title_sparse=effective_require_doc_title_sparse,
     )
 
     try:
@@ -203,6 +219,14 @@ def validate_qdrant_schema(
             raise RuntimeError(
                 f"Qdrant collection '{collection_name}' missing required sparse vector 'text-sparse'"
             )
+        # Validate doc_title-sparse presence when explicitly required
+        if effective_require_doc_title_sparse:
+            if not sparse or "doc_title-sparse" not in sparse:
+                raise RuntimeError(
+                    f"Qdrant collection '{collection_name}' missing required sparse vector "
+                    f"'doc_title-sparse'. Set require_doc_title_sparse=False to skip this check "
+                    f"or recreate the collection with doc_title-sparse support."
+                )
 
     if require_colbert:
         if isinstance(vectors, dict):

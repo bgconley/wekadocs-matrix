@@ -74,9 +74,9 @@ def test_sec_001_query():
     query = "Enforce security and compliance in WEKA"
     expected_title = "Enforce security and compliance"
 
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print("doc_title Vector Integration Test")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
     print(f"Query: {query}")
     print(f"Expected doc title: {expected_title}")
     print(f"Field weights: {field_weights}")
@@ -146,9 +146,9 @@ def test_sec_001_query():
                 f"  Target result fused_score: {target_result.fused_score or 0.0:.4f}"
             )
 
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"TEST STATUS: {status}")
-    print(f"{'='*70}\n")
+    print(f"{'=' * 70}\n")
 
     return status == "PASS" or status == "MARGINAL"
 

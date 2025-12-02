@@ -163,9 +163,9 @@ def run_smoke_test(
     by_type = {}
     by_difficulty = {}
 
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"Golden Query Smoke Test - top_k={top_k}")
-    print(f"{'='*70}\n")
+    print(f"{'=' * 70}\n")
 
     for i, query in enumerate(queries, start=1):
         query_id = query.get("id", f"q{i}")
@@ -237,9 +237,9 @@ def run_smoke_test(
     hit_rate = hits / len(queries) if queries else 0
     mrr = mrr_sum / len(queries) if queries else 0
 
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print("SUMMARY")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
     print(f"Hit@{top_k}: {hits}/{len(queries)} ({hit_rate:.1%})")
     print(f"MRR@{top_k}: {mrr:.3f}")
     print()
@@ -264,12 +264,12 @@ def run_smoke_test(
     # Pass/fail threshold
     threshold = 0.7
     passed = hit_rate >= threshold
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     if passed:
         print(f"✅ SMOKE TEST PASSED (hit_rate={hit_rate:.1%} >= {threshold:.0%})")
     else:
         print(f"❌ SMOKE TEST FAILED (hit_rate={hit_rate:.1%} < {threshold:.0%})")
-    print(f"{'='*70}\n")
+    print(f"{'=' * 70}\n")
 
     results["passed"] = passed
     return results

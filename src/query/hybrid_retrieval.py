@@ -1685,6 +1685,9 @@ class HybridRetriever:
                 require_sparse=getattr(qdrant_vector_cfg, "enable_sparse", False),
                 require_colbert=getattr(qdrant_vector_cfg, "enable_colbert", False),
                 include_entity=include_entity_vector,
+                require_doc_title_sparse=getattr(
+                    qdrant_vector_cfg, "enable_doc_title_sparse", True
+                ),
                 require_payload_fields=payload_fields,
                 strict=strict_validation,
             )

@@ -83,6 +83,10 @@ class Reconciler:
         enable_colbert = (
             getattr(qdrant_cfg, "enable_colbert", False) if qdrant_cfg else False
         )
+        # Extract doc_title sparse flag - defaults to True for backward compatibility
+        enable_doc_title_sparse = (
+            getattr(qdrant_cfg, "enable_doc_title_sparse", True) if qdrant_cfg else True
+        )
         hybrid_cfg = getattr(search_cfg, "hybrid", None) if search_cfg else None
         vector_fields = (
             getattr(hybrid_cfg, "vector_fields", None) if hybrid_cfg else None
@@ -96,6 +100,7 @@ class Reconciler:
             include_entity=include_entity,
             enable_sparse=enable_sparse,
             enable_colbert=enable_colbert,
+            enable_doc_title_sparse=enable_doc_title_sparse,
         )
         self._dense_vector_names = [
             name
