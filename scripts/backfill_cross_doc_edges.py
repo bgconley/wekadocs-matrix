@@ -58,6 +58,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from qdrant_client import QdrantClient, models
 
+# Import shared functions from cross_doc_linking module (Phase 4)
+from src.services.cross_doc_linking import (
+    compute_maxsim,
+    get_document_colbert_vectors,
+)
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -80,6 +86,7 @@ THRESHOLDS = {
     "rrf": 0.025,  # RRF score threshold (appears in 2+ methods or high-ranked in 1)
     "title_ft": 2.0,  # Lucene full-text score threshold
     "colbert": 0.40,  # ColBERT MaxSim threshold (filters weak matches)
+    "full": 0.025,  # Placeholder - full pipeline uses individual thresholds per phase
 }
 
 # Full-text index name for chunk content
@@ -531,82 +538,8 @@ def search_title_mentions(
 # ---------------------------------------------------------------------------
 # ColBERT Operations (Phase 3.5d)
 # ---------------------------------------------------------------------------
-
-
-def get_first_chunk_colbert(qdrant: QdrantClient, doc_id: str) -> Optional[np.ndarray]:
-    """
-    Get ColBERT (late-interaction) vectors from the FIRST chunk of a document.
-
-    Why first chunk only?
-    - Usually contains title/overview with document's key concepts
-    - Reduces from ~7000 vectors to ~70 vectors per doc
-    - Makes pairwise comparison ~100x faster
-
-    Returns:
-        numpy array of shape [N, 1024] where N is number of tokens,
-        or None if no vectors found
-    """
-    try:
-        points, _ = qdrant.scroll(
-            collection_name=COLLECTION_NAME,
-            scroll_filter=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="document_id", match=models.MatchValue(value=doc_id)
-                    ),
-                    models.FieldCondition(
-                        key="order", match=models.MatchValue(value=0)
-                    ),
-                ]
-            ),
-            limit=1,
-            with_vectors=[COLBERT_VECTOR_NAME],
-            with_payload=False,
-        )
-
-        if not points or not points[0].vector:
-            return None
-
-        vec = points[0].vector
-        if isinstance(vec, dict):
-            colbert_vec = vec.get(COLBERT_VECTOR_NAME)
-            if colbert_vec:
-                return np.array(colbert_vec)
-        return None
-
-    except Exception as e:
-        print(f"  [ERROR] Failed to get ColBERT vectors for {doc_id[:12]}...: {e}")
-        return None
-
-
-def compute_maxsim(source: np.ndarray, target: np.ndarray) -> float:
-    """
-    Compute ColBERT MaxSim score between two sets of token vectors.
-
-    MaxSim algorithm:
-    1. For each source token, find the maximum cosine similarity to any target token
-    2. Average these maximum similarities
-
-    This captures how well each concept in the source is represented in the target.
-
-    Args:
-        source: [N, 1024] array of source token embeddings
-        target: [M, 1024] array of target token embeddings
-
-    Returns:
-        Float score in range [0, 1]
-    """
-    # Normalize vectors for cosine similarity
-    source_norm = source / (np.linalg.norm(source, axis=1, keepdims=True) + 1e-9)
-    target_norm = target / (np.linalg.norm(target, axis=1, keepdims=True) + 1e-9)
-
-    # Compute all pairwise similarities: [N, M]
-    similarities = source_norm @ target_norm.T
-
-    # MaxSim: max over target tokens for each source token, then average
-    max_sims = similarities.max(axis=1)
-
-    return float(max_sims.mean())
+# Note: compute_maxsim() and get_document_colbert_vectors() are imported from
+# src.services.cross_doc_linking (Phase 4 shared module)
 
 
 def get_existing_edges(neo4j_driver) -> List[Dict]:
@@ -1056,12 +989,17 @@ def process_colbert_rerank(
     threshold: float,
     dry_run: bool,
     verbose: bool,
+    max_chunks: int = 3,
+    max_tokens: int = 200,
 ) -> None:
     """
     Rerank all existing RELATED_TO edges using ColBERT MaxSim.
 
+    Uses the shared get_document_colbert_vectors() function from cross_doc_linking
+    module to fetch ColBERT vectors from multiple chunks (Phase 4 enhancement).
+
     For each edge:
-    1. Fetch first-chunk ColBERT vectors for source and target
+    1. Fetch ColBERT vectors for source and target (first N chunks)
     2. Compute MaxSim score
     3. If score >= threshold: update edge with colbert_score
     4. If score < threshold: delete edge (it's a false positive)
@@ -1079,10 +1017,19 @@ def process_colbert_rerank(
 
     def get_cached_colbert(doc_id: str) -> Optional[np.ndarray]:
         if doc_id not in colbert_cache:
-            colbert_cache[doc_id] = get_first_chunk_colbert(qdrant, doc_id)
+            # Use shared function with configurable chunks/tokens
+            colbert_cache[doc_id] = get_document_colbert_vectors(
+                qdrant,
+                doc_id,
+                COLLECTION_NAME,
+                max_chunks=max_chunks,
+                max_tokens=max_tokens,
+            )
         return colbert_cache[doc_id]
 
-    print("\nReranking edges with ColBERT MaxSim...")
+    print(
+        f"\nReranking edges with ColBERT MaxSim (max_chunks={max_chunks}, max_tokens={max_tokens})..."
+    )
     print("-" * 60)
 
     for i, edge in enumerate(edges):
@@ -1102,11 +1049,11 @@ def process_colbert_rerank(
             stats.docs_skipped_no_vector += 1
             if verbose:
                 print(
-                    f"  [SKIP] Missing ColBERT: {source_title}... → {target_title}..."
+                    f"  [SKIP] Missing ColBERT: {source_title}... -> {target_title}..."
                 )
             continue
 
-        # Compute MaxSim
+        # Compute MaxSim using shared function
         colbert_score = compute_maxsim(source_colbert, target_colbert)
 
         # Progress indicator
@@ -1157,9 +1104,10 @@ def main():
     # Method selection
     parser.add_argument(
         "--method",
-        choices=["dense", "rrf", "title_ft", "colbert"],
+        choices=["dense", "rrf", "title_ft", "colbert", "full"],
         default="rrf",
-        help="Method: 'dense' (3.5a), 'rrf' (3.5b), 'title_ft' (3.5c), 'colbert' (3.5d rerank)",
+        help="Method: 'dense' (3.5a), 'rrf' (3.5b), 'title_ft' (3.5c), "
+        "'colbert' (3.5d rerank), 'full' (rrf + colbert pipeline)",
     )
 
     # Configuration options
@@ -1202,12 +1150,19 @@ def main():
     threshold = args.threshold if args.threshold is not None else THRESHOLDS[method]
 
     # Determine phase and method description
-    phase_map = {"dense": "3.5a", "rrf": "3.5b", "title_ft": "3.5c", "colbert": "3.5d"}
+    phase_map = {
+        "dense": "3.5a",
+        "rrf": "3.5b",
+        "title_ft": "3.5c",
+        "colbert": "3.5d",
+        "full": "full",
+    }
     method_desc = {
         "dense": "dense vectors only",
         "rrf": "dense + sparse RRF fusion",
         "title_ft": "full-text title mentions",
         "colbert": "ColBERT MaxSim reranking",
+        "full": "RRF + ColBERT pipeline (Phase 4)",
     }
     phase = phase_map[method]
 
@@ -1248,8 +1203,66 @@ def main():
     stats = BackfillStats()
     stats.method = method
 
+    # Full pipeline: RRF edge discovery -> ColBERT reranking (Phase 4)
+    if method == "full":
+        print("\n" + "=" * 60)
+        print("FULL PIPELINE: RRF Edge Discovery -> ColBERT Reranking")
+        print("=" * 60)
+
+        # Phase 1: RRF edge discovery
+        print("\n[1/2] Running RRF edge discovery...")
+        stats.method = "rrf"
+        documents = get_all_documents(neo4j_driver)
+        print(f"  Found {len(documents)} documents")
+
+        if args.limit_docs:
+            documents = documents[: args.limit_docs]
+            print(f"  Limited to first {args.limit_docs} documents")
+
+        for i, doc in enumerate(documents):
+            stats.docs_processed += 1
+            if (i + 1) % 10 == 0 or args.verbose:
+                print(
+                    f"\n[{i + 1}/{len(documents)}] Processing: {doc.get('title', 'Unknown')[:50]}..."
+                )
+
+            process_document_rrf(
+                doc=doc,
+                qdrant=qdrant,
+                neo4j_driver=neo4j_driver,
+                stats=stats,
+                threshold=THRESHOLDS["rrf"],
+                max_edges=args.max_edges,
+                chunk_limit=args.chunk_limit,
+                dry_run=dry_run,
+                verbose=args.verbose,
+            )
+
+        rrf_edges = stats.total_edges_created
+        print(f"\n[1/2] RRF complete: {rrf_edges} edges created/updated")
+
+        # Phase 2: ColBERT reranking
+        print("\n[2/2] Running ColBERT reranking...")
+        stats.method = "colbert"
+        process_colbert_rerank(
+            qdrant=qdrant,
+            neo4j_driver=neo4j_driver,
+            stats=stats,
+            threshold=THRESHOLDS["colbert"],
+            dry_run=dry_run,
+            verbose=args.verbose,
+        )
+
+        print(
+            f"\n[2/2] ColBERT complete: {stats.edges_reranked} reranked, {stats.edges_filtered} filtered"
+        )
+
+        # Reset method for summary
+        stats.method = "full"
+        phase = "full"
+
     # ColBERT reranking processes edges, not documents
-    if method == "colbert":
+    elif method == "colbert":
         process_colbert_rerank(
             qdrant=qdrant,
             neo4j_driver=neo4j_driver,

@@ -504,6 +504,24 @@ class CrossDocLinkingConfig(BaseModel):
         description="Qdrant collection name for vector searches",
     )
 
+    # ColBERT Reranking (Phase 4)
+    colbert_rerank: bool = Field(
+        default=True,
+        description="Enable ColBERT MaxSim reranking of new edges",
+    )
+    colbert_threshold: float = Field(
+        default=0.30,
+        description="Minimum ColBERT score to keep edge (prune below)",
+    )
+    colbert_max_chunks: int = Field(
+        default=3,
+        description="Maximum chunks to fetch for ColBERT vectors",
+    )
+    colbert_max_tokens: int = Field(
+        default=200,
+        description="Maximum tokens for ColBERT comparison (truncate beyond)",
+    )
+
 
 class IngestionConfig(BaseModel):
     batch_size: int = 500

@@ -20,6 +20,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import structlog
 from qdrant_client import QdrantClient, models
 
@@ -66,6 +67,7 @@ class LinkingResult:
     source_document_id: str
     edges_created: int = 0
     edges_updated: int = 0
+    edges_pruned: int = 0  # ColBERT-pruned edges (Phase 4)
     candidates_found: int = 0
     method: str = "rrf"
     duration_ms: int = 0
@@ -78,6 +80,7 @@ class LinkingResult:
             "source_document_id": self.source_document_id,
             "edges_created": self.edges_created,
             "edges_updated": self.edges_updated,
+            "edges_pruned": self.edges_pruned,
             "candidates_found": self.candidates_found,
             "method": self.method,
             "duration_ms": self.duration_ms,
@@ -213,6 +216,194 @@ def reciprocal_rank_fusion(
         rrf_scores[doc_id] += 1.0 / (k + rank + 1)
 
     return sorted(rrf_scores.items(), key=lambda x: -x[1])
+
+
+def compute_maxsim(source: np.ndarray, target: np.ndarray) -> float:
+    """
+    Compute ColBERT MaxSim score between two sets of token vectors.
+
+    MaxSim algorithm:
+    1. For each source token, find maximum cosine similarity to any target token
+    2. Average these maximum similarities
+
+    This captures how well each concept in the source is represented in the target,
+    providing fine-grained semantic comparison that dense vectors miss.
+
+    Args:
+        source: [N, 1024] array of source token embeddings
+        target: [M, 1024] array of target token embeddings
+
+    Returns:
+        Float score in range [0, 1]
+
+    Complexity:
+        O(N × M) dot products, ~40k ops for 200×200 tokens (sub-ms on CPU)
+
+    Reference:
+        Khattab & Zaharia, "ColBERT: Efficient and Effective Passage Search
+        via Contextualized Late Interaction over BERT" (SIGIR 2020)
+    """
+    # Handle edge cases
+    if source.size == 0 or target.size == 0:
+        return 0.0
+
+    # Ensure 2D arrays
+    if source.ndim == 1:
+        source = source.reshape(1, -1)
+    if target.ndim == 1:
+        target = target.reshape(1, -1)
+
+    # Normalize vectors for cosine similarity
+    source_norm = source / (np.linalg.norm(source, axis=1, keepdims=True) + 1e-9)
+    target_norm = target / (np.linalg.norm(target, axis=1, keepdims=True) + 1e-9)
+
+    # Compute all pairwise similarities: [N, M]
+    similarities = source_norm @ target_norm.T
+
+    # MaxSim: max over target tokens for each source token, then average
+    max_sims = similarities.max(axis=1)
+
+    return float(max_sims.mean())
+
+
+def get_document_colbert_vectors(
+    qdrant_client: QdrantClient,
+    document_id: str,
+    collection_name: str,
+    max_chunks: int = 3,
+    max_tokens: int = 200,
+) -> Optional[np.ndarray]:
+    """
+    Fetch ColBERT vectors from first N chunks of a document.
+
+    ColBERT stores per-token embeddings that enable fine-grained semantic
+    comparison via MaxSim. This function retrieves and concatenates vectors
+    from the first few chunks to capture the document's key concepts.
+
+    Strategy:
+    1. Query Qdrant for chunks where document_id=X, order < max_chunks
+    2. Sort by order ascending
+    3. Concatenate ColBERT arrays into single [total_tokens, 1024] matrix
+    4. Truncate to max_tokens if total exceeds budget
+
+    Why multiple chunks?
+    - First chunk alone (~70 tokens) may be just a title or TOC
+    - 150-200 tokens captures document's key concepts
+    - Balance between coverage and TOC noise
+
+    Args:
+        qdrant_client: Qdrant client instance
+        document_id: Document ID to fetch vectors for
+        collection_name: Qdrant collection name
+        max_chunks: Maximum chunks to fetch (default: 3)
+        max_tokens: Maximum tokens to return (default: 200)
+
+    Returns:
+        numpy array of shape [N, 1024] where N <= max_tokens,
+        or None if no vectors found
+
+    Edge Cases:
+        - Document has < max_chunks: Use all available chunks
+        - No ColBERT vectors found: Return None
+        - Empty chunk ColBERT array: Skip and continue
+    """
+    try:
+        # Query for first N chunks ordered by position
+        points, _ = qdrant_client.scroll(
+            collection_name=collection_name,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="document_id",
+                        match=models.MatchValue(value=document_id),
+                    ),
+                    models.FieldCondition(
+                        key="order",
+                        range=models.Range(gte=0, lt=max_chunks),
+                    ),
+                ]
+            ),
+            limit=max_chunks,
+            with_vectors=[COLBERT_VECTOR_NAME],
+            with_payload=["order"],
+        )
+
+        if not points:
+            logger.debug(
+                "colbert_no_chunks_found",
+                document_id=document_id[:12] if document_id else "unknown",
+            )
+            return None
+
+        # Sort by order and collect ColBERT vectors
+        points_sorted = sorted(
+            points,
+            key=lambda p: p.payload.get("order", 0) if p.payload else 0,
+        )
+
+        colbert_arrays = []
+        total_tokens = 0
+
+        for point in points_sorted:
+            if not point.vector:
+                continue
+
+            # Handle both dict and direct vector formats
+            if isinstance(point.vector, dict):
+                colbert_vec = point.vector.get(COLBERT_VECTOR_NAME)
+            else:
+                colbert_vec = point.vector
+
+            if colbert_vec is None:
+                continue
+
+            # Convert to numpy array
+            arr = np.array(colbert_vec)
+
+            # Handle both [N, 1024] and flat arrays
+            if arr.ndim == 1:
+                # Single token - reshape to [1, dim]
+                arr = arr.reshape(1, -1)
+
+            # Check token budget
+            if total_tokens + len(arr) <= max_tokens:
+                colbert_arrays.append(arr)
+                total_tokens += len(arr)
+            else:
+                # Truncate to fit remaining budget
+                remaining = max_tokens - total_tokens
+                if remaining > 0:
+                    colbert_arrays.append(arr[:remaining])
+                    total_tokens += remaining
+                break
+
+        if not colbert_arrays:
+            logger.debug(
+                "colbert_no_vectors_in_chunks",
+                document_id=document_id[:12] if document_id else "unknown",
+                chunks_found=len(points),
+            )
+            return None
+
+        # Concatenate all arrays
+        result = np.vstack(colbert_arrays)
+
+        logger.debug(
+            "colbert_vectors_fetched",
+            document_id=document_id[:12] if document_id else "unknown",
+            chunks_used=len(colbert_arrays),
+            total_tokens=len(result),
+        )
+
+        return result
+
+    except Exception as e:
+        logger.warning(
+            "colbert_fetch_failed",
+            document_id=document_id[:12] if document_id else "unknown",
+            error=str(e),
+        )
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -547,6 +738,212 @@ class CrossDocLinker:
             return False, False
 
     # -----------------------------------------------------------------------
+    # ColBERT Reranking Methods (Phase 4)
+    # -----------------------------------------------------------------------
+
+    def _update_edge_colbert_score(
+        self,
+        source_id: str,
+        target_id: str,
+        colbert_score: float,
+    ) -> bool:
+        """
+        Update an existing edge with ColBERT score.
+
+        Sets the colbert_score property and updates the method to indicate
+        ColBERT reranking was applied.
+
+        Args:
+            source_id: Source document ID
+            target_id: Target document ID
+            colbert_score: MaxSim score from ColBERT comparison
+
+        Returns:
+            True if update succeeded, False otherwise
+        """
+        try:
+            with self.neo4j_driver.session() as session:
+                session.run(
+                    """
+                    MATCH (s:Document {id: $source_id})-[r:RELATED_TO]->(t:Document {id: $target_id})
+                    SET r.colbert_score = $colbert_score,
+                        r.method = 'rrf_fusion+colbert',
+                        r.reranked_at = datetime()
+                    """,
+                    source_id=source_id,
+                    target_id=target_id,
+                    colbert_score=colbert_score,
+                )
+            return True
+        except Exception as e:
+            logger.warning(
+                "colbert_update_edge_failed",
+                source_id=source_id[:12] if source_id else "unknown",
+                target_id=target_id[:12] if target_id else "unknown",
+                error=str(e),
+            )
+            return False
+
+    def _prune_edge(self, source_id: str, target_id: str) -> bool:
+        """
+        Delete an edge that failed the ColBERT threshold.
+
+        Called when ColBERT MaxSim score is below the configured threshold,
+        indicating the edge was a false positive from RRF fusion.
+
+        Args:
+            source_id: Source document ID
+            target_id: Target document ID
+
+        Returns:
+            True if deletion succeeded, False otherwise
+        """
+        try:
+            with self.neo4j_driver.session() as session:
+                session.run(
+                    """
+                    MATCH (s:Document {id: $source_id})-[r:RELATED_TO]->(t:Document {id: $target_id})
+                    DELETE r
+                    """,
+                    source_id=source_id,
+                    target_id=target_id,
+                )
+            logger.debug(
+                "colbert_edge_pruned",
+                source_id=source_id[:12] if source_id else "unknown",
+                target_id=target_id[:12] if target_id else "unknown",
+            )
+            return True
+        except Exception as e:
+            logger.warning(
+                "colbert_prune_edge_failed",
+                source_id=source_id[:12] if source_id else "unknown",
+                target_id=target_id[:12] if target_id else "unknown",
+                error=str(e),
+            )
+            return False
+
+    def _rerank_edges_colbert(
+        self,
+        source_document_id: str,
+        edges_created: List[Tuple[str, float]],
+        source_colbert: Optional[np.ndarray] = None,
+    ) -> Tuple[int, int]:
+        """
+        Rerank newly-created edges using ColBERT MaxSim.
+
+        For each edge:
+        1. Fetch target document's ColBERT vectors
+        2. Compute MaxSim score against source vectors
+        3. If score >= threshold: update edge with colbert_score
+        4. If score < threshold: delete edge (prune false positive)
+
+        Args:
+            source_document_id: Source document ID
+            edges_created: List of (target_id, rrf_score) tuples
+            source_colbert: Pre-fetched source ColBERT vectors (optional optimization)
+
+        Returns:
+            Tuple of (edges_kept, edges_pruned)
+        """
+        if not edges_created:
+            return 0, 0
+
+        threshold = self.config.colbert_threshold
+        edges_kept = 0
+        edges_pruned = 0
+
+        # Fetch source ColBERT vectors if not provided
+        if source_colbert is None:
+            source_colbert = get_document_colbert_vectors(
+                self.qdrant_client,
+                source_document_id,
+                self.config.collection_name,
+                self.config.colbert_max_chunks,
+                self.config.colbert_max_tokens,
+            )
+
+        if source_colbert is None:
+            # Can't rerank without source vectors - keep all edges
+            logger.warning(
+                "colbert_rerank_skipped_no_source",
+                document_id=(
+                    source_document_id[:12] if source_document_id else "unknown"
+                ),
+                edges_count=len(edges_created),
+            )
+            return len(edges_created), 0
+
+        for target_id, rrf_score in edges_created:
+            # Fetch target ColBERT vectors
+            target_colbert = get_document_colbert_vectors(
+                self.qdrant_client,
+                target_id,
+                self.config.collection_name,
+                self.config.colbert_max_chunks,
+                self.config.colbert_max_tokens,
+            )
+
+            if target_colbert is None:
+                # Can't compute score - keep edge (don't punish missing data)
+                logger.debug(
+                    "colbert_rerank_no_target_vectors",
+                    source_id=(
+                        source_document_id[:12] if source_document_id else "unknown"
+                    ),
+                    target_id=target_id[:12] if target_id else "unknown",
+                )
+                edges_kept += 1
+                continue
+
+            # Compute ColBERT MaxSim score
+            colbert_score = compute_maxsim(source_colbert, target_colbert)
+
+            if colbert_score >= threshold:
+                # Keep edge and update with ColBERT score
+                if self._update_edge_colbert_score(
+                    source_document_id, target_id, colbert_score
+                ):
+                    edges_kept += 1
+                    logger.debug(
+                        "colbert_edge_kept",
+                        source_id=(
+                            source_document_id[:12] if source_document_id else "unknown"
+                        ),
+                        target_id=target_id[:12] if target_id else "unknown",
+                        rrf_score=round(rrf_score, 4),
+                        colbert_score=round(colbert_score, 4),
+                    )
+                else:
+                    edges_kept += 1  # Update failed but edge still exists
+            else:
+                # Prune edge below threshold
+                if self._prune_edge(source_document_id, target_id):
+                    edges_pruned += 1
+                    logger.debug(
+                        "colbert_edge_filtered",
+                        source_id=(
+                            source_document_id[:12] if source_document_id else "unknown"
+                        ),
+                        target_id=target_id[:12] if target_id else "unknown",
+                        rrf_score=round(rrf_score, 4),
+                        colbert_score=round(colbert_score, 4),
+                        threshold=threshold,
+                    )
+                else:
+                    edges_kept += 1  # Prune failed, edge still exists
+
+        logger.info(
+            "colbert_rerank_complete",
+            document_id=source_document_id[:12] if source_document_id else "unknown",
+            edges_kept=edges_kept,
+            edges_pruned=edges_pruned,
+            threshold=threshold,
+        )
+
+        return edges_kept, edges_pruned
+
+    # -----------------------------------------------------------------------
     # Main linking methods
     # -----------------------------------------------------------------------
 
@@ -562,6 +959,8 @@ class CrossDocLinker:
         Link a single document to semantically similar documents.
 
         This is the main entry point for incremental mode during ingestion.
+        If ColBERT reranking is enabled, edges will be reranked after creation
+        and weak edges will be pruned.
 
         Args:
             doc_id: Document ID
@@ -627,6 +1026,7 @@ class CrossDocLinker:
         # Create edges for candidates above threshold
         edges_created = 0
         edges_updated = 0
+        created_edges: List[Tuple[str, float]] = []  # Track for ColBERT reranking
 
         for target_id, score in candidates:
             if score < threshold:
@@ -645,11 +1045,42 @@ class CrossDocLinker:
 
             if created:
                 edges_created += 1
+                created_edges.append((target_id, score))
             if updated:
                 edges_updated += 1
+                created_edges.append((target_id, score))
 
         result.edges_created = edges_created
         result.edges_updated = edges_updated
+
+        # ColBERT reranking (Phase 4)
+        if self.config.colbert_rerank and created_edges and not dry_run:
+            # Fetch source ColBERT vectors once
+            source_colbert = get_document_colbert_vectors(
+                self.qdrant_client,
+                doc_id,
+                self.config.collection_name,
+                self.config.colbert_max_chunks,
+                self.config.colbert_max_tokens,
+            )
+
+            if source_colbert is not None:
+                edges_kept, edges_pruned = self._rerank_edges_colbert(
+                    doc_id,
+                    created_edges,
+                    source_colbert,
+                )
+                result.edges_created = edges_kept
+                result.edges_pruned = edges_pruned
+                if edges_kept > 0:
+                    result.method = "rrf_fusion+colbert"
+            else:
+                logger.warning(
+                    "colbert_rerank_skipped",
+                    document_id=doc_id[:12] if doc_id else "unknown",
+                    reason="no_source_vectors",
+                )
+
         result.duration_ms = int((time.time() - start_time) * 1000)
 
         return result
@@ -771,10 +1202,15 @@ __all__ = [
     "CrossDocLinker",
     "LinkingResult",
     "BatchLinkingStats",
+    # Pure functions
     "escape_lucene_query",
     "aggregate_chunks_to_documents",
     "reciprocal_rank_fusion",
+    "compute_maxsim",
+    "get_document_colbert_vectors",
+    # Constants
     "DENSE_VECTOR_NAME",
     "SPARSE_VECTOR_NAME",
+    "COLBERT_VECTOR_NAME",
     "DEFAULT_THRESHOLDS",
 ]

@@ -225,6 +225,11 @@ ingestion:
     max_edges_per_doc: 5
     rrf_k: 60
     min_corpus_size: 3
+    # ColBERT Reranking (Phase 4)
+    colbert_rerank: true          # Enable ColBERT MaxSim reranking
+    colbert_threshold: 0.30       # Minimum score to keep edge
+    colbert_max_chunks: 3         # Chunks to fetch per document
+    colbert_max_tokens: 200       # Token budget for comparison
 
 # References feature (Phase 3)
 references:
