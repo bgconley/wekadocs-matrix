@@ -458,6 +458,53 @@ class ChunkAssemblyConfig(BaseModel):
     semantic: SemanticEnrichmentConfig = Field(default_factory=SemanticEnrichmentConfig)
 
 
+class CrossDocLinkingConfig(BaseModel):
+    """
+    Cross-document linking configuration (Phase 3.5).
+
+    Controls semantic similarity edge creation between documents.
+    Used by both incremental (ingestion) and batch (backfill) modes.
+    """
+
+    enabled: bool = Field(default=True, description="Enable cross-document linking")
+    method: str = Field(
+        default="rrf",
+        description="Linking method: 'dense', 'rrf', 'title_ft'",
+    )
+    dense_threshold: float = Field(
+        default=0.70,
+        description="Cosine similarity threshold for dense-only mode",
+    )
+    rrf_threshold: float = Field(
+        default=0.025,
+        description="RRF score threshold for fusion mode",
+    )
+    discovery_threshold: float = Field(
+        default=0.50,
+        description="Initial discovery threshold (relaxed, filtered later)",
+    )
+    chunk_limit: int = Field(
+        default=100,
+        description="Max chunks to fetch per query before aggregation",
+    )
+    max_edges_per_doc: int = Field(
+        default=5,
+        description="Maximum edges to create per source document",
+    )
+    rrf_k: int = Field(
+        default=60,
+        description="RRF constant (standard value from literature)",
+    )
+    min_corpus_size: int = Field(
+        default=3,
+        description="Minimum documents required before linking is attempted",
+    )
+    collection_name: str = Field(
+        default="chunks_multi_bge_m3",
+        description="Qdrant collection name for vector searches",
+    )
+
+
 class IngestionConfig(BaseModel):
     batch_size: int = 500
     max_section_tokens: int = 1000
@@ -466,6 +513,9 @@ class IngestionConfig(BaseModel):
     chunk_assembly: ChunkAssemblyConfig = Field(default_factory=ChunkAssemblyConfig)
     queue_recovery: QueueRecoveryConfig = Field(default_factory=QueueRecoveryConfig)
     reconciliation: ReconciliationConfig
+    cross_doc_linking: CrossDocLinkingConfig = Field(
+        default_factory=CrossDocLinkingConfig
+    )
 
 
 class SchemaConfig(BaseModel):

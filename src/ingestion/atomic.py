@@ -145,6 +145,7 @@ from src.ingestion.saga import (  # noqa: E402
     ValidationResult,
 )
 from src.providers.tokenizer_service import TokenizerService  # noqa: E402
+from src.services.cross_doc_linking import CrossDocLinker  # noqa: E402
 from src.shared.chunk_utils import validate_chunk_schema  # noqa: E402
 from src.shared.embedding_fields import (  # noqa: E402
     canonicalize_embedding_metadata,
@@ -260,6 +261,138 @@ class AtomicIngestionCoordinator:
         )
 
         self.validator = IngestionValidator(neo4j_driver, qdrant_client, config)
+
+    # -------------------------------------------------------------------------
+    # Cross-Document Linking (Phase 3.5)
+    # -------------------------------------------------------------------------
+
+    def _get_document_count(self) -> int:
+        """Get total document count for corpus size check."""
+        try:
+            with self.neo4j_driver.session() as session:
+                result = session.run("MATCH (d:Document) RETURN count(d) as count")
+                record = result.single()
+                return record["count"] if record else 0
+        except Exception as e:
+            logger.warning("cross_doc_get_count_failed", error=str(e))
+            return 0
+
+    def _create_cross_doc_links(
+        self,
+        document_id: str,
+        document: Dict,
+        sections: List[Dict],
+        embeddings: Dict,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Create cross-document links for a newly ingested document.
+
+        This is called AFTER the Neo4j commit to ensure the document exists.
+        Failures here are logged but NEVER fail the ingestion.
+
+        Args:
+            document_id: The document ID
+            document: Document dict with title, etc.
+            sections: List of section dicts
+            embeddings: Dict with section embeddings
+
+        Returns:
+            Dict with linking stats, or None if skipped/failed
+        """
+        # Check if cross_doc_linking is configured and enabled
+        linking_config = getattr(
+            getattr(self.config, "ingestion", None),
+            "cross_doc_linking",
+            None,
+        )
+        if not linking_config:
+            return {"skipped": True, "reason": "not_configured"}
+
+        if not linking_config.enabled:
+            return {"skipped": True, "reason": "disabled"}
+
+        if not self.qdrant_client:
+            return {"skipped": True, "reason": "no_qdrant_client"}
+
+        # Check corpus size (need at least min_corpus_size documents)
+        doc_count = self._get_document_count()
+        if doc_count < linking_config.min_corpus_size:
+            logger.debug(
+                "cross_doc_linking_skipped_corpus_small",
+                document_id=document_id,
+                doc_count=doc_count,
+                min_required=linking_config.min_corpus_size,
+            )
+            return {"skipped": True, "reason": f"corpus_too_small:{doc_count}"}
+
+        # Extract doc_title vectors from embeddings (same for all sections)
+        doc_title_vector = None
+        doc_title_sparse = None
+
+        section_embeddings = embeddings.get("sections", {})
+        if section_embeddings:
+            # Get the first section's vectors (all sections have same doc_title)
+            first_section_id = next(iter(section_embeddings.keys()), None)
+            if first_section_id:
+                section_emb = section_embeddings[first_section_id]
+                doc_title_vector = section_emb.get("doc_title")
+                doc_title_sparse = section_emb.get("doc_title_sparse")
+
+        if not doc_title_vector:
+            logger.debug(
+                "cross_doc_linking_skipped_no_vector",
+                document_id=document_id,
+            )
+            return {"skipped": True, "reason": "no_doc_title_vector"}
+
+        try:
+            start_time = time.time()
+
+            linker = CrossDocLinker(
+                neo4j_driver=self.neo4j_driver,
+                qdrant_client=self.qdrant_client,
+                config=linking_config,
+            )
+
+            result = linker.link_document(
+                doc_id=document_id,
+                doc_title=document.get("title", ""),
+                doc_title_vector=doc_title_vector,
+                doc_title_sparse=doc_title_sparse,
+            )
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.info(
+                "cross_doc_linking_complete",
+                document_id=document_id,
+                edges_created=result.edges_created,
+                edges_updated=result.edges_updated,
+                candidates_found=result.candidates_found,
+                method=result.method,
+                duration_ms=duration_ms,
+                skipped=result.skipped,
+                skip_reason=result.skip_reason,
+            )
+
+            return {
+                "edges_created": result.edges_created,
+                "edges_updated": result.edges_updated,
+                "candidates_found": result.candidates_found,
+                "method": result.method,
+                "duration_ms": duration_ms,
+                "skipped": result.skipped,
+                "skip_reason": result.skip_reason,
+            }
+
+        except Exception as e:
+            # Cross-doc linking failure should NOT fail ingestion
+            logger.warning(
+                "cross_doc_linking_failed",
+                document_id=document_id,
+                error=str(e),
+            )
+            return {"skipped": True, "reason": f"error:{str(e)[:100]}"}
 
     def ingest_document_atomic(
         self,
@@ -1354,6 +1487,18 @@ class AtomicIngestionCoordinator:
                 document_id=document_id,
                 stats=stats,
             )
+
+            # Step 5: Incremental cross-document linking (Phase 3.5)
+            # This runs AFTER commit to ensure the document exists in Neo4j/Qdrant
+            # Errors here should NOT fail the ingestion - they are logged only
+            cross_doc_stats = self._create_cross_doc_links(
+                document_id=document_id,
+                document=document,
+                sections=sections,
+                embeddings=embeddings,
+            )
+            if cross_doc_stats:
+                stats["cross_doc_linking"] = cross_doc_stats
 
             return {
                 "success": True,
