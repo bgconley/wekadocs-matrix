@@ -1,27 +1,34 @@
 #!/usr/bin/env python3
 """
-Phase 3.5a: Dense Similarity Cross-Document Linking (MVP)
+Phase 3.5 Cross-Document Linking via Vector Similarity
 
-Creates RELATED_TO edges between semantically similar documents based on
-doc_title vector similarity in Qdrant.
+Creates RELATED_TO edges between semantically similar documents using
+doc_title vectors (dense and/or sparse) from Qdrant.
+
+Phases:
+    3.5a: Dense similarity only (doc_title vectors)
+    3.5b: Dense + Sparse with RRF fusion (doc_title + doc_title-sparse)
 
 Architecture (per plan docs/plans/phase-3.5-cross-doc-linking.md):
-    Stage 1: Query Qdrant for chunks with similar doc_title vectors (limit=100)
+    Stage 1: Query Qdrant for chunks with similar vectors (limit=100)
     Stage 2: Aggregate chunks to documents (max-score wins)
-    Stage 3: Filter by threshold and create RELATED_TO edges
+    Stage 3: RRF fusion of dense and sparse results (if using rrf method)
+    Stage 4: Filter by threshold and create RELATED_TO edges
 
 Usage:
-    # Preview what edges would be created (no writes)
-    python scripts/backfill_cross_doc_edges.py --dry-run
+    # Dense-only mode (Phase 3.5a)
+    python scripts/backfill_cross_doc_edges.py --dry-run --method dense
+    python scripts/backfill_cross_doc_edges.py --execute --method dense
 
-    # Create edges with default settings (threshold=0.70, max 5 edges per doc)
-    python scripts/backfill_cross_doc_edges.py --execute
+    # RRF fusion mode (Phase 3.5b) - combines dense + sparse
+    python scripts/backfill_cross_doc_edges.py --dry-run --method rrf
+    python scripts/backfill_cross_doc_edges.py --execute --method rrf
 
     # Custom threshold and limits
-    python scripts/backfill_cross_doc_edges.py --execute --threshold 0.75 --max-edges 3
+    python scripts/backfill_cross_doc_edges.py --execute --method rrf --threshold 0.03
 
-    # Test with limited documents first
-    python scripts/backfill_cross_doc_edges.py --dry-run --limit-docs 5
+    # Test with limited documents
+    python scripts/backfill_cross_doc_edges.py --dry-run --limit-docs 5 --verbose
 
 Environment variables:
     NEO4J_URI: Neo4j connection URI (default: bolt://localhost:7687)
@@ -50,12 +57,28 @@ from qdrant_client import QdrantClient, models
 
 COLLECTION_NAME = "chunks_multi_bge_m3"
 DENSE_VECTOR_NAME = "doc_title"
+SPARSE_VECTOR_NAME = "doc_title-sparse"
 
 # Defaults (can be overridden via CLI)
-DEFAULT_SCORE_THRESHOLD = 0.70  # Minimum similarity to create edge
 DEFAULT_CHUNK_LIMIT = 100  # Chunks to fetch per query (before aggregation)
 DEFAULT_MAX_EDGES_PER_DOC = 5  # Limit edges per source document
-DEFAULT_DISCOVERY_THRESHOLD = 0.50  # Relaxed threshold for initial discovery
+
+# Method-specific thresholds
+# Dense similarity scores range 0-1 (cosine similarity)
+# RRF scores are much smaller (sum of 1/(k+rank) terms)
+THRESHOLDS = {
+    "dense": 0.70,  # Cosine similarity threshold
+    "rrf": 0.025,  # RRF score threshold (appears in 2+ methods or high-ranked in 1)
+}
+
+# Discovery thresholds (relaxed, we filter after aggregation/fusion)
+DISCOVERY_THRESHOLDS = {
+    "dense": 0.50,
+    "sparse": 0.0,  # Sparse scores can be low but still meaningful
+}
+
+# RRF constant (standard value from literature)
+RRF_K = 60
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +95,10 @@ class BackfillStats:
     docs_skipped_no_vector: int = 0
     docs_skipped_no_candidates: int = 0
     total_edges_created: int = 0
+    total_edges_updated: int = 0  # Edges that already existed (score updated)
     total_candidates_found: int = 0
+    dense_candidates: int = 0
+    sparse_candidates: int = 0
     score_distribution: Dict[str, int] = field(
         default_factory=lambda: {
             "0.90+": 0,
@@ -82,41 +108,85 @@ class BackfillStats:
             "<0.60": 0,
         }
     )
+    rrf_score_distribution: Dict[str, int] = field(
+        default_factory=lambda: {
+            "0.05+": 0,
+            "0.04-0.05": 0,
+            "0.03-0.04": 0,
+            "0.02-0.03": 0,
+            "<0.02": 0,
+        }
+    )
     start_time: float = field(default_factory=time.time)
+    method: str = "dense"
 
     def record_edge(self, score: float) -> None:
         """Record an edge creation with its score."""
         self.total_edges_created += 1
-        if score >= 0.90:
-            self.score_distribution["0.90+"] += 1
-        elif score >= 0.80:
-            self.score_distribution["0.80-0.90"] += 1
-        elif score >= 0.70:
-            self.score_distribution["0.70-0.80"] += 1
-        elif score >= 0.60:
-            self.score_distribution["0.60-0.70"] += 1
-        else:
-            self.score_distribution["<0.60"] += 1
 
-    def summary(self) -> str:
+        if self.method == "rrf":
+            # RRF scores are smaller
+            if score >= 0.05:
+                self.rrf_score_distribution["0.05+"] += 1
+            elif score >= 0.04:
+                self.rrf_score_distribution["0.04-0.05"] += 1
+            elif score >= 0.03:
+                self.rrf_score_distribution["0.03-0.04"] += 1
+            elif score >= 0.02:
+                self.rrf_score_distribution["0.02-0.03"] += 1
+            else:
+                self.rrf_score_distribution["<0.02"] += 1
+        else:
+            # Dense similarity scores
+            if score >= 0.90:
+                self.score_distribution["0.90+"] += 1
+            elif score >= 0.80:
+                self.score_distribution["0.80-0.90"] += 1
+            elif score >= 0.70:
+                self.score_distribution["0.70-0.80"] += 1
+            elif score >= 0.60:
+                self.score_distribution["0.60-0.70"] += 1
+            else:
+                self.score_distribution["<0.60"] += 1
+
+    def summary(self, phase: str) -> str:
         """Generate a summary report."""
         elapsed = time.time() - self.start_time
         lines = [
             "",
             "=" * 60,
-            "Phase 3.5a Backfill Complete",
+            f"Phase {phase} Backfill Complete",
             "=" * 60,
+            f"Method:                     {self.method}",
             f"Documents processed:        {self.docs_processed}",
             f"Documents with new edges:   {self.docs_with_edges}",
             f"Documents skipped (no vec): {self.docs_skipped_no_vector}",
             f"Documents skipped (no cand):{self.docs_skipped_no_candidates}",
             f"Total edges created:        {self.total_edges_created}",
             f"Total candidates evaluated: {self.total_candidates_found}",
-            "",
-            "Score distribution of created edges:",
         ]
-        for bucket, count in self.score_distribution.items():
-            lines.append(f"  {bucket}: {count}")
+
+        if self.method == "rrf":
+            lines.extend(
+                [
+                    f"  - Dense candidates:       {self.dense_candidates}",
+                    f"  - Sparse candidates:      {self.sparse_candidates}",
+                    "",
+                    "RRF Score distribution of created edges:",
+                ]
+            )
+            for bucket, count in self.rrf_score_distribution.items():
+                lines.append(f"  {bucket}: {count}")
+        else:
+            lines.extend(
+                [
+                    "",
+                    "Score distribution of created edges:",
+                ]
+            )
+            for bucket, count in self.score_distribution.items():
+                lines.append(f"  {bucket}: {count}")
+
         lines.extend(
             [
                 "",
@@ -180,13 +250,23 @@ def get_document_title(neo4j_driver, doc_id: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-def get_doc_title_vector(qdrant: QdrantClient, doc_id: str) -> Optional[List[float]]:
+def get_doc_vectors(
+    qdrant: QdrantClient, doc_id: str, include_sparse: bool = False
+) -> Tuple[Optional[List[float]], Optional[models.SparseVector]]:
     """
-    Get the doc_title vector for a document.
+    Get the doc_title vectors (dense and optionally sparse) for a document.
 
     Since all chunks from the same document have identical doc_title vectors,
-    we only need to fetch one chunk to get the document's vector.
+    we only need to fetch one chunk to get the document's vectors.
+
+    Returns:
+        Tuple of (dense_vector, sparse_vector)
+        sparse_vector is a SparseVector model with 'indices' and 'values' attrs
     """
+    vector_names = [DENSE_VECTOR_NAME]
+    if include_sparse:
+        vector_names.append(SPARSE_VECTOR_NAME)
+
     try:
         points, _ = qdrant.scroll(
             collection_name=COLLECTION_NAME,
@@ -198,35 +278,37 @@ def get_doc_title_vector(qdrant: QdrantClient, doc_id: str) -> Optional[List[flo
                 ]
             ),
             limit=1,
-            with_vectors=[DENSE_VECTOR_NAME],
+            with_vectors=vector_names,
             with_payload=False,
         )
 
-        if points and points[0].vector:
-            vec = points[0].vector
-            # Handle both dict and direct vector formats
-            if isinstance(vec, dict):
-                return vec.get(DENSE_VECTOR_NAME)
-            return vec
-        return None
+        if not points or not points[0].vector:
+            return None, None
+
+        vec = points[0].vector
+        if isinstance(vec, dict):
+            dense = vec.get(DENSE_VECTOR_NAME)
+            sparse = vec.get(SPARSE_VECTOR_NAME) if include_sparse else None
+            return dense, sparse
+
+        # Single vector format (shouldn't happen with named vectors)
+        return vec, None
 
     except Exception as e:
-        print(f"  [ERROR] Failed to get vector for doc {doc_id[:12]}...: {e}")
-        return None
+        print(f"  [ERROR] Failed to get vectors for doc {doc_id[:12]}...: {e}")
+        return None, None
 
 
-def search_similar_chunks(
+def search_similar_chunks_dense(
     qdrant: QdrantClient,
     query_vector: List[float],
     exclude_doc_id: str,
     limit: int = DEFAULT_CHUNK_LIMIT,
-    score_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
 ) -> List[models.ScoredPoint]:
     """
-    Search for chunks with similar doc_title vectors.
+    Search for chunks with similar doc_title dense vectors.
 
     Returns up to `limit` chunks, excluding those from the source document.
-    Uses a relaxed score_threshold since we filter more strictly after aggregation.
     """
     try:
         return qdrant.search(
@@ -242,16 +324,55 @@ def search_similar_chunks(
                 ]
             ),
             limit=limit,
-            score_threshold=score_threshold,
-            with_payload=["document_id"],  # Only need doc ID for aggregation
+            score_threshold=DISCOVERY_THRESHOLDS["dense"],
+            with_payload=["document_id"],
         )
     except Exception as e:
-        print(f"  [ERROR] Search failed for doc {exclude_doc_id[:12]}...: {e}")
+        print(f"  [ERROR] Dense search failed for doc {exclude_doc_id[:12]}...: {e}")
+        return []
+
+
+def search_similar_chunks_sparse(
+    qdrant: QdrantClient,
+    sparse_vector: models.SparseVector,
+    exclude_doc_id: str,
+    limit: int = DEFAULT_CHUNK_LIMIT,
+) -> List[models.ScoredPoint]:
+    """
+    Search for chunks with similar doc_title sparse vectors.
+
+    Sparse vectors enable lexical/keyword matching - documents sharing
+    specific terms in their titles will score higher.
+
+    Args:
+        sparse_vector: SparseVector model with 'indices' and 'values' attributes
+
+    Returns up to `limit` chunks, excluding those from the source document.
+    """
+    try:
+        return qdrant.search(
+            collection_name=COLLECTION_NAME,
+            query_vector=models.NamedSparseVector(
+                name=SPARSE_VECTOR_NAME,
+                vector=sparse_vector,  # Already a SparseVector model
+            ),
+            query_filter=models.Filter(
+                must_not=[
+                    models.FieldCondition(
+                        key="document_id", match=models.MatchValue(value=exclude_doc_id)
+                    )
+                ]
+            ),
+            limit=limit,
+            with_payload=["document_id"],
+        )
+    except Exception as e:
+        print(f"  [ERROR] Sparse search failed for doc {exclude_doc_id[:12]}...: {e}")
         return []
 
 
 # ---------------------------------------------------------------------------
-# Core Algorithm: Chunk-to-Document Aggregation
+# Core Algorithms
 # ---------------------------------------------------------------------------
 
 
@@ -266,15 +387,6 @@ def aggregate_chunks_to_documents(
     - Take the highest chunk score as the document's score
     - This captures the "best match" semantic from any chunk
 
-    Why max-score instead of mean?
-    - A document might have 1 highly relevant chunk and 5 irrelevant ones
-    - Mean would dilute the signal from the relevant chunk
-    - Max preserves the strongest match signal
-
-    Args:
-        chunk_hits: Raw Qdrant search results (chunks)
-        exclude_doc_id: Source document ID to exclude from results
-
     Returns:
         List of (document_id, max_score) tuples, sorted by score descending
     """
@@ -284,10 +396,46 @@ def aggregate_chunks_to_documents(
         doc_id = hit.payload.get("document_id")
         if not doc_id or doc_id == exclude_doc_id:
             continue
-        # Max-score aggregation: best chunk represents document
         doc_scores[doc_id] = max(doc_scores[doc_id], hit.score)
 
     return sorted(doc_scores.items(), key=lambda x: -x[1])
+
+
+def reciprocal_rank_fusion(
+    dense_docs: List[Tuple[str, float]],
+    sparse_docs: List[Tuple[str, float]],
+    k: int = RRF_K,
+) -> List[Tuple[str, float]]:
+    """
+    Combine document rankings using Reciprocal Rank Fusion.
+
+    RRF formula: score(d) = Σ 1/(k + rank_i(d))
+
+    Why RRF works well:
+    - Rank-based, not score-based (handles different score scales)
+    - Documents appearing in BOTH lists get boosted
+    - Robust to outliers in either retrieval method
+    - Standard k=60 from literature works well empirically
+
+    Args:
+        dense_docs: List of (doc_id, score) from dense search, sorted by score desc
+        sparse_docs: List of (doc_id, score) from sparse search, sorted by score desc
+        k: RRF constant (default 60)
+
+    Returns:
+        List of (doc_id, rrf_score) tuples, sorted by RRF score descending
+    """
+    rrf_scores: Dict[str, float] = defaultdict(float)
+
+    # Add dense contributions
+    for rank, (doc_id, _) in enumerate(dense_docs):
+        rrf_scores[doc_id] += 1.0 / (k + rank + 1)
+
+    # Add sparse contributions
+    for rank, (doc_id, _) in enumerate(sparse_docs):
+        rrf_scores[doc_id] += 1.0 / (k + rank + 1)
+
+    return sorted(rrf_scores.items(), key=lambda x: -x[1])
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +444,13 @@ def aggregate_chunks_to_documents(
 
 
 def create_related_to_edge(
-    neo4j_driver, source_id: str, target_id: str, score: float, dry_run: bool = False
+    neo4j_driver,
+    source_id: str,
+    target_id: str,
+    score: float,
+    method: str,
+    phase: str,
+    dry_run: bool = False,
 ) -> bool:
     """
     Create a RELATED_TO edge between two documents.
@@ -305,9 +459,9 @@ def create_related_to_edge(
     rather than creating duplicate edges.
 
     Edge properties:
-    - score: Similarity score from dense vector search
-    - method: 'dense_similarity' (Phase 3.5a)
-    - phase: '3.5a' (for rollback targeting)
+    - score: Similarity score (cosine for dense, RRF score for fusion)
+    - method: 'dense_similarity' or 'rrf_fusion'
+    - phase: '3.5a' or '3.5b' (for rollback targeting)
     - created_at: Timestamp
     """
     if dry_run:
@@ -321,14 +475,16 @@ def create_related_to_edge(
                 MATCH (target:Document {id: $target_id})
                 MERGE (source)-[r:RELATED_TO]->(target)
                 SET r.score = $score,
-                    r.method = 'dense_similarity',
-                    r.phase = '3.5a',
+                    r.method = $method,
+                    r.phase = $phase,
                     r.created_at = datetime()
                 RETURN count(r) AS created
             """,
                 source_id=source_id,
                 target_id=target_id,
                 score=score,
+                method=method,
+                phase=phase,
             )
             return result.single()["created"] > 0
     except Exception as e:
@@ -341,7 +497,7 @@ def create_related_to_edge(
 # ---------------------------------------------------------------------------
 
 
-def process_document(
+def process_document_dense(
     doc: Dict,
     qdrant: QdrantClient,
     neo4j_driver,
@@ -352,25 +508,21 @@ def process_document(
     dry_run: bool,
     verbose: bool,
 ) -> int:
-    """
-    Process a single document: find similar docs and create edges.
-
-    Returns the number of edges created for this document.
-    """
+    """Process a document using dense-only similarity (Phase 3.5a)."""
     source_id = doc["id"]
     source_title = doc.get("title", "Unknown")[:50]
 
-    # Stage 1: Get source document's doc_title vector
-    query_vector = get_doc_title_vector(qdrant, source_id)
-    if not query_vector:
+    # Get dense vector
+    dense_vector, _ = get_doc_vectors(qdrant, source_id, include_sparse=False)
+    if not dense_vector:
         stats.docs_skipped_no_vector += 1
         if verbose:
             print(f"  [SKIP] No vector: {source_title}")
         return 0
 
-    # Stage 2: Search for similar chunks
-    chunk_hits = search_similar_chunks(
-        qdrant, query_vector, source_id, limit=chunk_limit
+    # Search for similar chunks
+    chunk_hits = search_similar_chunks_dense(
+        qdrant, dense_vector, source_id, limit=chunk_limit
     )
 
     if not chunk_hits:
@@ -379,24 +531,31 @@ def process_document(
             print(f"  [SKIP] No candidates: {source_title}")
         return 0
 
-    # Stage 3: Aggregate chunks to documents
+    # Aggregate to documents
     doc_candidates = aggregate_chunks_to_documents(chunk_hits, source_id)
     stats.total_candidates_found += len(doc_candidates)
 
-    # Stage 4: Filter by threshold and create edges
+    # Filter and create edges
     edges_created = 0
     for target_id, score in doc_candidates:
         if score < threshold:
-            break  # Sorted by score, so no more will pass threshold
+            break
         if edges_created >= max_edges:
             break
 
-        if create_related_to_edge(neo4j_driver, source_id, target_id, score, dry_run):
+        if create_related_to_edge(
+            neo4j_driver,
+            source_id,
+            target_id,
+            score,
+            method="dense_similarity",
+            phase="3.5a",
+            dry_run=dry_run,
+        ):
             edges_created += 1
             stats.record_edge(score)
 
             if verbose or dry_run:
-                # Get target title for display
                 target_title = get_document_title(neo4j_driver, target_id)
                 target_title = (target_title or "Unknown")[:40]
                 mode = "[DRY-RUN]" if dry_run else "[CREATED]"
@@ -410,9 +569,96 @@ def process_document(
     return edges_created
 
 
+def process_document_rrf(
+    doc: Dict,
+    qdrant: QdrantClient,
+    neo4j_driver,
+    stats: BackfillStats,
+    threshold: float,
+    max_edges: int,
+    chunk_limit: int,
+    dry_run: bool,
+    verbose: bool,
+) -> int:
+    """Process a document using RRF fusion of dense + sparse (Phase 3.5b)."""
+    source_id = doc["id"]
+    source_title = doc.get("title", "Unknown")[:50]
+
+    # Get both dense and sparse vectors
+    dense_vector, sparse_vector = get_doc_vectors(
+        qdrant, source_id, include_sparse=True
+    )
+
+    if not dense_vector:
+        stats.docs_skipped_no_vector += 1
+        if verbose:
+            print(f"  [SKIP] No dense vector: {source_title}")
+        return 0
+
+    # Search with dense vectors
+    dense_hits = search_similar_chunks_dense(
+        qdrant, dense_vector, source_id, limit=chunk_limit
+    )
+    dense_docs = aggregate_chunks_to_documents(dense_hits, source_id)
+    stats.dense_candidates += len(dense_docs)
+
+    # Search with sparse vectors (if available)
+    sparse_docs = []
+    if sparse_vector and hasattr(sparse_vector, "indices") and sparse_vector.indices:
+        sparse_hits = search_similar_chunks_sparse(
+            qdrant, sparse_vector, source_id, limit=chunk_limit
+        )
+        sparse_docs = aggregate_chunks_to_documents(sparse_hits, source_id)
+        stats.sparse_candidates += len(sparse_docs)
+
+    if not dense_docs and not sparse_docs:
+        stats.docs_skipped_no_candidates += 1
+        if verbose:
+            print(f"  [SKIP] No candidates: {source_title}")
+        return 0
+
+    # RRF Fusion
+    fused_candidates = reciprocal_rank_fusion(dense_docs, sparse_docs)
+    stats.total_candidates_found += len(fused_candidates)
+
+    # Filter and create edges
+    edges_created = 0
+    for target_id, rrf_score in fused_candidates:
+        if rrf_score < threshold:
+            break
+        if edges_created >= max_edges:
+            break
+
+        if create_related_to_edge(
+            neo4j_driver,
+            source_id,
+            target_id,
+            rrf_score,
+            method="rrf_fusion",
+            phase="3.5b",
+            dry_run=dry_run,
+        ):
+            edges_created += 1
+            stats.record_edge(rrf_score)
+
+            if verbose or dry_run:
+                target_title = get_document_title(neo4j_driver, target_id)
+                target_title = (target_title or "Unknown")[:40]
+                mode = "[DRY-RUN]" if dry_run else "[CREATED]"
+                # Show RRF score with more decimals since they're smaller
+                print(
+                    f"  {mode} {source_title[:30]}... --[RRF:{rrf_score:.4f}]--> {target_title}..."
+                )
+
+    if edges_created > 0:
+        stats.docs_with_edges += 1
+
+    return edges_created
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Phase 3.5a: Create RELATED_TO edges between similar documents",
+        description="Phase 3.5: Create RELATED_TO edges between similar documents",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -426,12 +672,20 @@ def main():
         "--execute", action="store_true", help="Actually create the edges"
     )
 
+    # Method selection
+    parser.add_argument(
+        "--method",
+        choices=["dense", "rrf"],
+        default="rrf",
+        help="Similarity method: 'dense' (3.5a) or 'rrf' (3.5b, default)",
+    )
+
     # Configuration options
     parser.add_argument(
         "--threshold",
         type=float,
-        default=DEFAULT_SCORE_THRESHOLD,
-        help=f"Minimum similarity score to create edge (default: {DEFAULT_SCORE_THRESHOLD})",
+        default=None,
+        help="Minimum score to create edge (default: 0.70 for dense, 0.025 for rrf)",
     )
     parser.add_argument(
         "--max-edges",
@@ -460,16 +714,26 @@ def main():
 
     args = parser.parse_args()
     dry_run = args.dry_run
+    method = args.method
+
+    # Set threshold based on method if not specified
+    threshold = args.threshold if args.threshold is not None else THRESHOLDS[method]
+
+    # Determine phase
+    phase = "3.5a" if method == "dense" else "3.5b"
 
     # Banner
     print()
     print("=" * 60)
-    print("Phase 3.5a: Dense Similarity Cross-Document Linking")
+    print(f"Phase {phase}: Cross-Document Linking via Vector Similarity")
     print("=" * 60)
     print(
         f"Mode:           {'DRY-RUN (no writes)' if dry_run else 'EXECUTE (creating edges)'}"
     )
-    print(f"Threshold:      {args.threshold}")
+    print(
+        f"Method:         {method} ({'dense only' if method == 'dense' else 'dense + sparse RRF fusion'})"
+    )
+    print(f"Threshold:      {threshold}")
     print(f"Max edges/doc:  {args.max_edges}")
     print(f"Chunk limit:    {args.chunk_limit}")
     if args.limit_docs:
@@ -502,6 +766,10 @@ def main():
     print("-" * 60)
 
     stats = BackfillStats()
+    stats.method = method
+
+    # Select processing function based on method
+    process_fn = process_document_dense if method == "dense" else process_document_rrf
 
     for i, doc in enumerate(documents):
         stats.docs_processed += 1
@@ -512,12 +780,12 @@ def main():
                 f"\n[{i + 1}/{len(documents)}] Processing: {doc.get('title', 'Unknown')[:50]}..."
             )
 
-        edges = process_document(
+        edges = process_fn(
             doc=doc,
             qdrant=qdrant,
             neo4j_driver=neo4j_driver,
             stats=stats,
-            threshold=args.threshold,
+            threshold=threshold,
             max_edges=args.max_edges,
             chunk_limit=args.chunk_limit,
             dry_run=dry_run,
@@ -528,7 +796,7 @@ def main():
             print(f"  Created {edges} edge(s)")
 
     # Summary
-    print(stats.summary())
+    print(stats.summary(phase))
 
     # Cleanup
     neo4j_driver.close()
@@ -536,7 +804,7 @@ def main():
     # Verification hint
     if not dry_run and stats.total_edges_created > 0:
         print("\nVerification query:")
-        print("  MATCH ()-[r:RELATED_TO {phase: '3.5a'}]->() RETURN count(r)")
+        print(f"  MATCH ()-[r:RELATED_TO {{phase: '{phase}'}}]->() RETURN count(r)")
         print()
 
 
