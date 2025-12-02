@@ -127,6 +127,10 @@ class ChunkResult:
     vector_score: Optional[float] = None  # Vector similarity score
     vector_score_kind: Optional[str] = None  # Similarity metric (cosine, dot, etc.)
     title_vec_score: Optional[float] = None
+    doc_title_vec_score: Optional[float] = None  # Document-level title dense score
+    doc_title_sparse_score: Optional[float] = (
+        None  # Document-level title sparse/BM25 score
+    )
     entity_vec_score: Optional[float] = None
     lexical_vec_score: Optional[float] = None
     fused_score: Optional[float] = None  # Final fused score
@@ -624,6 +628,7 @@ class QdrantMultiVectorRetriever:
         primary_vector_name: str = "content",
         schema_supports_sparse: bool = False,
         schema_supports_colbert: bool = False,
+        schema_supports_doc_title_sparse: bool = False,
     ):
         settings = get_settings()
         env = (
@@ -652,6 +657,10 @@ class QdrantMultiVectorRetriever:
         self.schema_supports_colbert = schema_supports_colbert or bool(
             getattr(caps, "supports_colbert", False)
         )
+        # doc_title-sparse support: only enable if general sparse support is also enabled
+        self.schema_supports_doc_title_sparse = (
+            schema_supports_doc_title_sparse and self.schema_supports_sparse
+        )
         if self.schema_supports_colbert and not self.use_query_api:
             message = (
                 "Configuration error: ColBERT enabled but Query API is disabled. "
@@ -671,6 +680,7 @@ class QdrantMultiVectorRetriever:
                 raise ValueError(message)
             logger.warning("%s Disabling sparse support in non-strict env.", message)
             self.schema_supports_sparse = False
+            self.schema_supports_doc_title_sparse = False
         if self.schema_supports_colbert and not hasattr(
             self.embedder, "embed_query_all"
         ):
@@ -810,6 +820,10 @@ class QdrantMultiVectorRetriever:
                 fused_score=float(fused_score),
                 vector_score=float(fused_score),
                 title_vec_score=vec_score_by_id.get((pid, "title"), 0.0),
+                doc_title_vec_score=vec_score_by_id.get((pid, "doc_title"), 0.0),
+                doc_title_sparse_score=vec_score_by_id.get(
+                    (pid, "doc_title-sparse"), 0.0
+                ),
                 entity_vec_score=vec_score_by_id.get((pid, "entity"), 0.0),
                 lexical_vec_score=(
                     vec_score_by_id.get((pid, self.sparse_field_name), 0.0)
@@ -998,6 +1012,8 @@ class QdrantMultiVectorRetriever:
         fused_score: Optional[float] = None,
         vector_score: Optional[float] = None,
         title_vec_score: Optional[float] = None,
+        doc_title_vec_score: Optional[float] = None,
+        doc_title_sparse_score: Optional[float] = None,
         entity_vec_score: Optional[float] = None,
         lexical_vec_score: Optional[float] = None,
     ) -> ChunkResult:
@@ -1029,6 +1045,8 @@ class QdrantMultiVectorRetriever:
             fused_score=fused_score,
             vector_score=vector_score,
             title_vec_score=title_vec_score,
+            doc_title_vec_score=doc_title_vec_score,
+            doc_title_sparse_score=doc_title_sparse_score,
             entity_vec_score=entity_vec_score,
             lexical_vec_score=lexical_vec_score,
             citation_labels=payload.get("citation_labels") or [],
@@ -1170,6 +1188,7 @@ class QdrantMultiVectorRetriever:
         scoring_cap = max(top_k * 3, self.query_api_candidate_limit)
         scoring_ids = candidate_ids[: min(len(candidate_ids), scoring_cap)]
         rankings: Dict[str, List[Tuple[str, float]]] = {}
+        vec_score_by_id: Dict[Tuple[str, str], float] = {}
 
         # Dense fields
         for field_name in self.dense_vector_names:
@@ -1179,8 +1198,11 @@ class QdrantMultiVectorRetriever:
             rankings[field_name] = [
                 (str(hit.id), float(hit.score or 0.0)) for hit in field_hits
             ]
+            # Track individual vector scores for debugging and analysis
+            for hit in field_hits:
+                vec_score_by_id[(str(hit.id), field_name)] = float(hit.score or 0.0)
 
-        # Sparse field
+        # Sparse field (text-sparse)
         if (
             self.supports_sparse
             and bundle.sparse
@@ -1196,6 +1218,39 @@ class QdrantMultiVectorRetriever:
             rankings[self.sparse_query_name] = [
                 (str(hit.id), float(hit.score or 0.0)) for hit in sparse_hits
             ]
+            for hit in sparse_hits:
+                vec_score_by_id[(str(hit.id), self.sparse_query_name)] = float(
+                    hit.score or 0.0
+                )
+
+        # doc_title-sparse prefetch is handled in _build_prefetch_entries
+        # but we need to score it separately if enabled
+        if (
+            self.schema_supports_doc_title_sparse
+            and bundle.sparse
+            and bundle.sparse.indices
+            and bundle.sparse.values
+        ):
+            try:
+                doc_title_sparse_hits = self._search_sparse_candidates(
+                    bundle.sparse.indices,
+                    bundle.sparse.values,
+                    scoring_ids,
+                    qdrant_filter,
+                    sparse_vector_name="doc_title-sparse",
+                )
+                rankings["doc_title-sparse"] = [
+                    (str(hit.id), float(hit.score or 0.0))
+                    for hit in doc_title_sparse_hits
+                ]
+                for hit in doc_title_sparse_hits:
+                    vec_score_by_id[(str(hit.id), "doc_title-sparse")] = float(
+                        hit.score or 0.0
+                    )
+            except Exception:
+                # doc_title-sparse may not exist in older collections
+                pass
+
         sparse_scored = len(rankings.get(self.sparse_query_name, []))
 
         fused_scores = self._fuse_rankings(rankings)
@@ -1216,6 +1271,17 @@ class QdrantMultiVectorRetriever:
                 payload,
                 fused_score=fused_score,
                 vector_score=fused_score,
+                title_vec_score=vec_score_by_id.get((pid, "title"), 0.0),
+                doc_title_vec_score=vec_score_by_id.get((pid, "doc_title"), 0.0),
+                doc_title_sparse_score=vec_score_by_id.get(
+                    (pid, "doc_title-sparse"), 0.0
+                ),
+                entity_vec_score=vec_score_by_id.get((pid, "entity"), 0.0),
+                lexical_vec_score=(
+                    vec_score_by_id.get((pid, self.sparse_query_name), 0.0)
+                    if self.sparse_query_name
+                    else None
+                ),
             )
             chunk.vector_rank = idx
             chunk.vector_score_kind = "weighted_fusion"
@@ -1290,6 +1356,7 @@ class QdrantMultiVectorRetriever:
             sparse_query = QdrantSparseVector(
                 indices=list(bundle.sparse.indices), values=list(bundle.sparse.values)
             )
+            # text-sparse: BM25 matching against chunk content
             entries.append(
                 Prefetch(
                     query=sparse_query,
@@ -1298,6 +1365,17 @@ class QdrantMultiVectorRetriever:
                     filter=qdrant_filter,
                 )
             )
+            # doc_title-sparse: BM25 matching against document titles
+            # Uses same sparse embedding but searches title text index
+            if self.schema_supports_doc_title_sparse:
+                entries.append(
+                    Prefetch(
+                        query=sparse_query,
+                        using="doc_title-sparse",
+                        limit=50,  # Smaller limit for title term matching (high precision)
+                        filter=qdrant_filter,
+                    )
+                )
         return entries
 
     def _search_named_vector_candidates(
@@ -1334,6 +1412,7 @@ class QdrantMultiVectorRetriever:
         values: Sequence[float],
         candidate_ids: List[str],
         base_filter: Optional[QdrantFilter],
+        sparse_vector_name: Optional[str] = None,
     ):
         if not candidate_ids or not indices or not values:
             return []
@@ -1342,10 +1421,12 @@ class QdrantMultiVectorRetriever:
                 indices=list(indices), values=list(values)
             )
             id_filter = self._build_id_filter(base_filter, candidate_ids)
+            # Use provided name or default to text-sparse
+            using = sparse_vector_name or self.sparse_query_name
             result = self.client.query_points(
                 collection_name=self.collection,
                 query=sparse_query,
-                using=self.sparse_query_name,
+                using=using,
                 limit=len(candidate_ids),
                 query_filter=id_filter,
                 with_payload=False,
@@ -1658,6 +1739,9 @@ class HybridRetriever:
             ),
             schema_supports_sparse=getattr(qdrant_vector_cfg, "enable_sparse", False),
             schema_supports_colbert=getattr(qdrant_vector_cfg, "enable_colbert", False),
+            schema_supports_doc_title_sparse=getattr(
+                qdrant_vector_cfg, "enable_doc_title_sparse", False
+            ),
         )
         self.colbert_rerank_enabled = getattr(
             hybrid_config, "colbert_rerank_enabled", True

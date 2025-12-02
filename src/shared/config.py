@@ -203,6 +203,9 @@ class QdrantVectorConfig(BaseModel):
     query_strategy: QdrantQueryStrategy = QdrantQueryStrategy.CONTENT_ONLY
     enable_sparse: bool = False
     enable_colbert: bool = False
+    enable_doc_title_sparse: bool = (
+        True  # Enable doc_title-sparse prefetch for title term matching
+    )
     use_query_api: bool = False
     query_api_dense_limit: int = 200
     query_api_sparse_limit: int = 200
@@ -299,7 +302,12 @@ class HybridSearchConfig(BaseModel):
     graph_propagation_decay: float = 0.85
     top_k: int = 20
     vector_fields: Dict[str, float] = Field(
-        default_factory=lambda: {"content": 1.0, "title": 0.35, "entity": 0.2}
+        default_factory=lambda: {
+            "content": 1.0,
+            "title": 0.35,
+            "doc_title": 0.2,  # Document-level title signal for title-matching queries
+            "entity": 0.2,
+        }
     )
     query_type_weights: Dict[str, Dict[str, float]] = Field(
         default_factory=lambda: {

@@ -736,6 +736,17 @@ class AtomicIngestionCoordinator:
         section_data = []
         content_texts = []
         title_texts = []
+        doc_title_texts = []
+
+        # Get document title for doc_title vector (same for all sections in this doc)
+        doc_title = document.get("title", "")
+        if not doc_title:
+            # Fallback: derive from doc_id if title is empty
+            doc_id = document.get("doc_id", document.get("id", ""))
+            if "/" in doc_id:
+                doc_title = doc_id.split("/")[-1].replace("-", " ").replace("_", " ")
+            else:
+                doc_title = doc_id
 
         for section in sections:
             section_id = section.get("id")
@@ -811,11 +822,13 @@ class AtomicIngestionCoordinator:
                     "section": section,
                     "content_text": content_text,
                     "title_text": title_text,
+                    "doc_title_text": doc_title,
                     "token_count": content_tokens,
                 }
             )
             content_texts.append(content_text)
             title_texts.append(title_text)
+            doc_title_texts.append(doc_title)
 
         if not section_data:
             return embeddings
@@ -864,6 +877,7 @@ class AtomicIngestionCoordinator:
         # Initialize embedding result lists
         content_embeddings: List[List[float]] = []
         title_embeddings: List[List[float]] = []
+        doc_title_embeddings: List[List[float]] = []
 
         # Guard capability flags with runtime method detection to prevent
         # confusing "count mismatch" errors when config advertises capability
@@ -890,6 +904,10 @@ class AtomicIngestionCoordinator:
         sparse_embeddings: Optional[List[Optional[dict]]] = (
             [] if supports_sparse else None
         )
+        # doc_title-sparse: BM25-style lexical matching for document titles
+        doc_title_sparse_embeddings: Optional[List[Optional[dict]]] = (
+            [] if supports_sparse else None
+        )
         colbert_embeddings: Optional[List[Optional[List[List[float]]]]] = (
             [] if supports_colbert else None
         )
@@ -900,6 +918,7 @@ class AtomicIngestionCoordinator:
         for batch_idx, batch_indices in enumerate(batches):
             batch_content = [content_texts[i] for i in batch_indices]
             batch_title = [title_texts[i] for i in batch_indices]
+            batch_doc_title = [doc_title_texts[i] for i in batch_indices]
             batch_tokens = sum(
                 section_data[i].get("token_count", 0) for i in batch_indices
             )
@@ -917,6 +936,9 @@ class AtomicIngestionCoordinator:
                     builder.embedder.embed_documents(batch_content)
                 )
                 title_embeddings.extend(builder.embedder.embed_documents(batch_title))
+                doc_title_embeddings.extend(
+                    builder.embedder.embed_documents(batch_doc_title)
+                )
             except Exception as e:
                 logger.error(
                     "dense_embedding_batch_failed",
@@ -964,6 +986,24 @@ class AtomicIngestionCoordinator:
                         # Only this batch's chunks lose sparse; others continue normally
                         sparse_embeddings.extend([None] * len(batch_content))
 
+            # doc_title-sparse: BM25-style lexical matching for document titles
+            if doc_title_sparse_embeddings is not None and hasattr(
+                builder.embedder, "embed_sparse"
+            ):
+                try:
+                    doc_title_sparse_embeddings.extend(
+                        builder.embedder.embed_sparse(batch_doc_title)
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "doc_title_sparse_embedding_batch_failed_inserting_placeholders",
+                        error=str(exc),
+                        batch_index=batch_idx,
+                        batch_size=len(batch_doc_title),
+                    )
+                    # Insert None placeholders to maintain index alignment
+                    doc_title_sparse_embeddings.extend([None] * len(batch_doc_title))
+
             # Phase 2: Per-Batch Error Isolation for ColBERT Embeddings
             if colbert_embeddings is not None and hasattr(
                 builder.embedder, "embed_colbert"
@@ -991,11 +1031,21 @@ class AtomicIngestionCoordinator:
             raise RuntimeError(
                 f"Title embedding count mismatch: expected {len(section_data)}, got {len(title_embeddings)}"
             )
+        if len(doc_title_embeddings) != len(section_data):
+            raise RuntimeError(
+                f"Doc title embedding count mismatch: expected {len(section_data)}, got {len(doc_title_embeddings)}"
+            )
         if sparse_embeddings is not None and len(sparse_embeddings) != len(
             section_data
         ):
             raise RuntimeError(
                 f"Sparse embedding count mismatch: expected {len(section_data)}, got {len(sparse_embeddings)}"
+            )
+        if doc_title_sparse_embeddings is not None and len(
+            doc_title_sparse_embeddings
+        ) != len(section_data):
+            raise RuntimeError(
+                f"Doc title sparse embedding count mismatch: expected {len(section_data)}, got {len(doc_title_sparse_embeddings)}"
             )
         if colbert_embeddings is not None and len(colbert_embeddings) != len(
             section_data
@@ -1013,9 +1063,16 @@ class AtomicIngestionCoordinator:
             section = data["section"]
             embedding = content_embeddings[idx]
             title_embedding = title_embeddings[idx]
+            doc_title_embedding = doc_title_embeddings[idx]
             sparse_vector = (
                 sparse_embeddings[idx]
                 if sparse_embeddings is not None and idx < len(sparse_embeddings)
+                else None
+            )
+            doc_title_sparse_vector = (
+                doc_title_sparse_embeddings[idx]
+                if doc_title_sparse_embeddings is not None
+                and idx < len(doc_title_sparse_embeddings)
                 else None
             )
             colbert_vector = (
@@ -1111,11 +1168,16 @@ class AtomicIngestionCoordinator:
             section_embedding = {
                 "content": embedding,
                 "title": title_embedding,
+                "doc_title": doc_title_embedding,
             }
 
             # Add sparse if computed (may be None for failed batches)
             if sparse_embeddings is not None:
                 section_embedding["sparse"] = sparse_vector
+
+            # Add doc_title sparse if computed (may be None for failed batches)
+            if doc_title_sparse_embeddings is not None:
+                section_embedding["doc_title_sparse"] = doc_title_sparse_vector
 
             # Add ColBERT if computed (may be None for failed batches)
             if colbert_embeddings is not None:
@@ -2424,6 +2486,8 @@ class AtomicIngestionCoordinator:
                 "is_microdoc": section.get("is_microdoc"),
                 "doc_is_microdoc": section.get("doc_is_microdoc", False),
                 "is_microdoc_stub": section.get("is_microdoc_stub", False),
+                # === Document title (1 field) ===
+                "doc_title": document.get("title", ""),
                 # === Versioning (2 fields) ===
                 "lang": section.get("lang") or document.get("lang"),
                 "version": section.get("version") or document.get("version"),
@@ -2447,6 +2511,7 @@ class AtomicIngestionCoordinator:
             vectors = {
                 "content": section_embeddings["content"],
                 "title": section_embeddings["title"],
+                "doc_title": section_embeddings["doc_title"],
             }
 
             # Phase 5: Add entity vector if enabled (copy of content embedding)
@@ -2472,6 +2537,24 @@ class AtomicIngestionCoordinator:
                         indices=list(indices), values=list(values)
                     )
 
+            # Add doc_title sparse vector if available (o3 recommendation for literal title matches)
+            doc_title_sparse_vector = section_embeddings.get("doc_title_sparse")
+            if doc_title_sparse_vector:
+                indices = (
+                    doc_title_sparse_vector.get("indices")
+                    if isinstance(doc_title_sparse_vector, dict)
+                    else None
+                )
+                values = (
+                    doc_title_sparse_vector.get("values")
+                    if isinstance(doc_title_sparse_vector, dict)
+                    else None
+                )
+                if indices and values:
+                    vectors["doc_title-sparse"] = SparseVector(
+                        indices=list(indices), values=list(values)
+                    )
+
             # Add ColBERT late-interaction vectors if available
             colbert_vectors = section_embeddings.get("colbert")
             if colbert_vectors:
@@ -2490,10 +2573,11 @@ class AtomicIngestionCoordinator:
 
         if points:
             # Phase 4: Build expected dimensions dict for validation
-            # Both content and title vectors use the same embedding model
+            # All dense vectors use the same embedding model
             expected_dim = {
                 "content": builder.embedding_settings.dims,
                 "title": builder.embedding_settings.dims,
+                "doc_title": builder.embedding_settings.dims,
             }
             # Phase 5: Include entity dimension if entity vector is enabled
             if self.include_entity_vector:

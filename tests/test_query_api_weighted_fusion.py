@@ -195,6 +195,124 @@ def test_dedup_chunk_results_preserves_bm25_score():
 # =============================================================================
 
 
+# =============================================================================
+# Tests for doc_title vector integration
+# =============================================================================
+
+
+def test_config_default_includes_doc_title():
+    """Verify that the default vector_fields config includes doc_title."""
+    from src.shared.config import HybridSearchConfig
+
+    config = HybridSearchConfig()
+    assert "doc_title" in config.vector_fields
+    assert config.vector_fields["doc_title"] == 0.2
+
+
+def test_qdrant_config_has_enable_doc_title_sparse():
+    """Verify QdrantVectorConfig has enable_doc_title_sparse toggle."""
+    from src.shared.config import QdrantVectorConfig
+
+    config = QdrantVectorConfig()
+    assert hasattr(config, "enable_doc_title_sparse")
+    assert config.enable_doc_title_sparse is True  # Default should be True
+
+
+def test_chunk_result_has_doc_title_score_fields():
+    """Verify ChunkResult has doc_title_vec_score and doc_title_sparse_score fields."""
+    chunk = ChunkResult(
+        chunk_id="test",
+        document_id="doc1",
+        parent_section_id="sec1",
+        order=0,
+        level=1,
+        heading="Test",
+        text="Test content",
+        token_count=10,
+        doc_title_vec_score=0.85,
+        doc_title_sparse_score=0.42,
+    )
+    assert chunk.doc_title_vec_score == 0.85
+    assert chunk.doc_title_sparse_score == 0.42
+
+
+def test_doc_title_flows_to_dense_vector_names():
+    """Verify doc_title in field_weights becomes part of dense_vector_names."""
+    retriever = QdrantMultiVectorRetriever(
+        qdrant_client=DummyClient(),
+        embedder=MockEmbedder(),
+        field_weights={
+            "content": 1.0,
+            "title": 0.35,
+            "doc_title": 0.2,
+            "entity": 0.2,
+        },
+        schema_supports_sparse=True,
+    )
+    assert "doc_title" in retriever.dense_vector_names
+    assert "content" in retriever.dense_vector_names
+    assert "title" in retriever.dense_vector_names
+
+
+def test_build_prefetch_includes_doc_title_sparse():
+    """Verify _build_prefetch_entries includes doc_title-sparse when enabled."""
+    retriever = QdrantMultiVectorRetriever(
+        qdrant_client=DummyClient(),
+        embedder=MockEmbedder(),
+        field_weights={"content": 1.0, "doc_title": 0.2},
+        schema_supports_sparse=True,
+        schema_supports_doc_title_sparse=True,
+    )
+
+    class DummyBundleSparseInner:
+        def __init__(self):
+            self.indices = [0, 1, 2]
+            self.values = [0.3, 0.4, 0.3]
+
+    class DummyBundleInner:
+        def __init__(self):
+            self.dense = [0.1] * 1024
+            self.sparse = DummyBundleSparseInner()
+
+    bundle = DummyBundleInner()
+    entries = retriever._build_prefetch_entries(bundle, None, 10)
+
+    # Should have: content (dense), doc_title (dense), text-sparse, doc_title-sparse
+    using_names = [e.using for e in entries]
+    assert "content" in using_names
+    assert "doc_title" in using_names
+    assert "text-sparse" in using_names
+    assert "doc_title-sparse" in using_names
+
+
+def test_build_prefetch_excludes_doc_title_sparse_when_disabled():
+    """Verify _build_prefetch_entries excludes doc_title-sparse when disabled."""
+    retriever = QdrantMultiVectorRetriever(
+        qdrant_client=DummyClient(),
+        embedder=MockEmbedder(),
+        field_weights={"content": 1.0, "doc_title": 0.2},
+        schema_supports_sparse=True,
+        schema_supports_doc_title_sparse=False,  # Disabled
+    )
+
+    class DummyBundleSparseInner:
+        def __init__(self):
+            self.indices = [0, 1, 2]
+            self.values = [0.3, 0.4, 0.3]
+
+    class DummyBundleInner:
+        def __init__(self):
+            self.dense = [0.1] * 1024
+            self.sparse = DummyBundleSparseInner()
+
+    bundle = DummyBundleInner()
+    entries = retriever._build_prefetch_entries(bundle, None, 10)
+
+    using_names = [e.using for e in entries]
+    assert "doc_title-sparse" not in using_names
+    assert "text-sparse" in using_names  # Regular sparse should still be present
+
+
 def test_query_api_weighted_path_sets_weighted_fusion_and_sparse_metrics():
     """End-to-end unit test for _search_via_query_api_weighted using DummyClient."""
 

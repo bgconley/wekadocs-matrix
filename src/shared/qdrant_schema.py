@@ -43,6 +43,7 @@ def build_qdrant_schema(
     vectors_config: Dict[str, VectorParams] = {
         "content": VectorParams(size=dims, distance=Distance.COSINE),
         "title": VectorParams(size=dims, distance=Distance.COSINE),
+        "doc_title": VectorParams(size=dims, distance=Distance.COSINE),
     }
     if include_entity:
         vectors_config["entity"] = VectorParams(size=dims, distance=Distance.COSINE)
@@ -60,6 +61,11 @@ def build_qdrant_schema(
 
     if use_sparse:
         sparse_vectors_config["text-sparse"] = SparseVectorParams(
+            index=SparseIndexParams(on_disk=True)
+        )
+        # doc_title-sparse: BM25-style lexical matching for document titles
+        # Enables exact term matching for title-based queries (o3 recommendation)
+        sparse_vectors_config["doc_title-sparse"] = SparseVectorParams(
             index=SparseIndexParams(on_disk=True)
         )
     else:
@@ -85,6 +91,7 @@ def build_qdrant_schema(
         ("kg_id", PayloadSchemaType.KEYWORD),
         ("document_id", PayloadSchemaType.KEYWORD),
         ("doc_id", PayloadSchemaType.KEYWORD),
+        ("doc_title", PayloadSchemaType.TEXT),
         ("parent_section_id", PayloadSchemaType.KEYWORD),
         ("parent_section_original_id", PayloadSchemaType.KEYWORD),
         ("order", PayloadSchemaType.INTEGER),

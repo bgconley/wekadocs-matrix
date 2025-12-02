@@ -441,11 +441,13 @@ SET sv.version = 'v2.2',
 // DENSE VECTORS (per collection):
 //   - content:          1024D, Cosine  (main content embedding)
 //   - entity:           1024D, Cosine  (entity-name embedding)
-//   - title:            1024D, Cosine  (title/heading embedding)
+//   - title:            1024D, Cosine  (chunk title/heading embedding)
+//   - doc_title:        1024D, Cosine  (parent document title embedding)
 //   - late-interaction: 1024D, Cosine, MaxSim (ColBERT-style multi-vector)
 //
 // SPARSE VECTORS (per collection):
-//   - text-sparse: BM25/BGE-M3 sparse, on-disk index
+//   - text-sparse:      BM25/BGE-M3 sparse, on-disk index (chunk content)
+//   - doc_title-sparse: BM25/BGE-M3 sparse, on-disk index (document title)
 //
 // HNSW CONFIG:
 //   - m: 48                    (graph edges per node)
@@ -464,7 +466,7 @@ SET sv.version = 'v2.2',
 //   - wal_segments_ahead: 0
 //
 // ---------------------------------------------------------------------------
-// PAYLOAD INDEXES (21 fields per collection)
+// PAYLOAD INDEXES (22 fields per collection)
 // ---------------------------------------------------------------------------
 // Identifiers:
 //   - id (keyword)
@@ -478,6 +480,7 @@ SET sv.version = 'v2.2',
 // Structure & ordering:
 //   - order (integer)
 //   - heading (text)
+//   - doc_title (text)          -- parent document title for filtering/display
 //
 // Metadata filters:
 //   - doc_tag (keyword)
