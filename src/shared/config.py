@@ -290,6 +290,10 @@ class HybridSearchConfig(BaseModel):
     graph_channel_enabled: bool = False  # Enable graph as independent scoring channel
     graph_adaptive_enabled: bool = False  # Enable adaptive graph weight selection
     colbert_rerank_enabled: bool = True  # Enable ColBERT late-interaction reranking
+    colbert_candidate_limit: int = (
+        50  # Min candidates for ColBERT reranking (reduces payload)
+    )
+    colbert_candidate_multiplier: int = 3  # top_k multiplier for ColBERT candidates
     rrf_k: int = 60  # Phase 7E: RRF constant
     fusion_alpha: float = 0.6  # Phase 7E: Vector weight for weighted fusion
     vector_weight: float = 0.7  # Legacy

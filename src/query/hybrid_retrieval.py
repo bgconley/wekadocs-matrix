@@ -216,18 +216,22 @@ def dedup_chunk_results(
             deduped.append(dups[0])
             continue
 
-        # Pick winner by highest fused_score (fallback to vector_score)
-        winner = max(
-            dups,
-            key=lambda x: (
+        # Pick winner: prefer reranked chunks, then highest fused_score
+        # This ensures rerank_score is preserved during dedup
+        def _winner_key(x: ChunkResult) -> tuple:
+            has_rerank = 1 if x.rerank_score is not None else 0
+            fused = (
                 x.fused_score if x.fused_score is not None else x.vector_score or 0.0
-            ),
-        )
+            )
+            return (has_rerank, fused)
+
+        winner = max(dups, key=_winner_key)
 
         # Merge best signals from all duplicates
         vector_scores = [w.vector_score for w in dups if w.vector_score is not None]
         graph_scores = [w.graph_score for w in dups if w.graph_score is not None]
         bm25_scores = [w.bm25_score for w in dups if w.bm25_score is not None]
+        rerank_scores = [w.rerank_score for w in dups if w.rerank_score is not None]
 
         winner.vector_score = (
             max(vector_scores) if vector_scores else (winner.vector_score or 0.0)
@@ -238,6 +242,9 @@ def dedup_chunk_results(
         winner.bm25_score = (
             max(bm25_scores) if bm25_scores else (winner.bm25_score or 0.0)
         )
+        # Preserve rerank_score from any duplicate (cross-encoder scores are authoritative)
+        if rerank_scores:
+            winner.rerank_score = max(rerank_scores)
 
         # Recompute fused_score with provided weights
         vscore = winner.vector_score or 0.0
@@ -1764,6 +1771,12 @@ class HybridRetriever:
         self.colbert_rerank_enabled = getattr(
             hybrid_config, "colbert_rerank_enabled", True
         )
+        self.colbert_candidate_limit = getattr(
+            hybrid_config, "colbert_candidate_limit", 50
+        )
+        self.colbert_candidate_multiplier = getattr(
+            hybrid_config, "colbert_candidate_multiplier", 3
+        )
         self.graph_channel_enabled = getattr(
             hybrid_config, "graph_channel_enabled", False
         )
@@ -2637,14 +2650,24 @@ class HybridRetriever:
             except Exception as exc:
                 logger.warning("ColBERT query embedding failed", error=str(exc))
             if query_bundle and query_bundle.multivector:
+                # Calculate limit FIRST to avoid fetching unnecessary vectors
+                # This dramatically reduces payload: 50 candidates ≈ 3.8 MB vs 120 ≈ 9.2 MB
+                colbert_limit = min(
+                    len(fused_results),
+                    max(
+                        top_k * self.colbert_candidate_multiplier,
+                        self.colbert_candidate_limit,
+                    ),
+                )
+                # Only hydrate the top candidates we actually need
+                colbert_candidates = fused_results[:colbert_limit]
                 # Track pre-rerank order for rank change calculation
                 pre_rerank_order = {
-                    r.chunk_id: idx for idx, r in enumerate(fused_results)
+                    r.chunk_id: idx for idx, r in enumerate(colbert_candidates)
                 }
-                hydrated = self._hydrate_colbert_vectors(fused_results)
-                colbert_limit = min(len(fused_results), max(top_k * 6, 120))
+                hydrated = self._hydrate_colbert_vectors(colbert_candidates)
                 fused_results = self._colbert_rerank(
-                    fused_results, query_bundle, colbert_limit
+                    colbert_candidates, query_bundle, colbert_limit
                 )
                 metrics["colbert_hydrated"] = len(hydrated)
                 metrics["colbert_rerank_applied"] = True

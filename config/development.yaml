@@ -64,10 +64,13 @@ search:
   # Hybrid search settings (Phase 7E: RRF + BM25)
   hybrid:
     # Architecture mode: legacy (BM25+RRF) or bge_reranker (vector-only + cross-encoder)
-    mode: "bge_reranker"
+    mode: "legacy"
     enabled: true  # Phase 7E: Enable hybrid retrieval
     graph_channel_enabled: true  # Enable graph as independent scoring channel in fusion
-    method: "weighted"  # Architecture 2: magnitude-preserving fusion
+    colbert_rerank_enabled: true  # Ensure ColBERT late interaction rerank stays on
+    colbert_candidate_limit: 50  # Min candidates for ColBERT reranking (was 120 - reduced for latency)
+    colbert_candidate_multiplier: 3  # top_k multiplier (was 6 - reduced for latency)
+    method: "rrf"  # RRF fusion: rank-based, robust to score scale differences
 
     # RRF (Reciprocal Rank Fusion) settings
     rrf_k: 60  # Phase 7E: RRF constant (default: 60)
@@ -108,11 +111,11 @@ search:
 
     reranker:
       enabled: true
-      provider: "bge-reranker-service"  # options: bge-reranker-service, jina-ai, noop
+      provider: "bge-reranker-service"  # Must match factory: bge-reranker-service or bge-reranker
       model: "BAAI/bge-reranker-v2-m3"
-      top_n: 20            # how many candidates to send to the reranker
-      max_pairs: 50        # hard cap to protect latency
-      max_tokens_per_pair: 1024  # truncate long docs before rerank
+      top_n: 20           # Final results after reranking
+      max_pairs: 50       # Candidates to send to reranker (from RRF fusion)
+      max_tokens_per_pair: 512  # Max tokens per query-doc pair
 
     top_k: 20  # Number of candidates to retrieve
 
