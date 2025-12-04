@@ -20,7 +20,9 @@ from src.query.context_assembly import ContextAssembler
 from src.query.hybrid_retrieval import ChunkResult, HybridRetriever
 from src.query.hybrid_search import HybridSearchEngine, QdrantVectorStore, SearchResult
 from src.query.planner import QueryPlanner
-from src.query.ranking import RankedResult, Ranker, rank_results
+from src.query.ranking import (  # Ranker bypassed - hybrid_retrieval handles ranking
+    RankedResult,
+)
 from src.query.response_builder import (
     Response,
     StructuredResponse,
@@ -283,25 +285,39 @@ class QueryService:
         return self._context_assembler
 
     def _wrap_chunks_as_ranked(self, chunks: List[ChunkResult]) -> List[RankedResult]:
-        """Adapt ChunkResult objects to RankedResult instances for response building."""
+        """
+        Adapt ChunkResult objects to RankedResult instances for response building.
 
-        ranker = Ranker()
+        Note: hybrid_retrieval.py already performs sophisticated ranking (ColBERT,
+        BGE cross-encoder, graph signals). This method simply wraps the pre-ranked
+        chunks into RankedResult format without re-ranking.
+        """
+        from src.query.ranking import RankingFeatures
 
-        search_results: List[SearchResult] = []
+        ranked_results: List[RankedResult] = []
 
-        for chunk in chunks:
-            score = float(
-                chunk.fused_score
-                if chunk.fused_score is not None
+        for idx, chunk in enumerate(chunks):
+            # Use rerank_score if available (from ColBERT/BGE), else fall back to fusion score
+            primary_score = float(
+                chunk.rerank_score
+                if chunk.rerank_score is not None
                 else (
-                    chunk.vector_score
-                    if chunk.vector_score is not None
-                    else chunk.bm25_score if chunk.bm25_score is not None else 0.0
+                    chunk.fused_score
+                    if chunk.fused_score is not None
+                    else (
+                        chunk.vector_score
+                        if chunk.vector_score is not None
+                        else chunk.bm25_score if chunk.bm25_score is not None else 0.0
+                    )
                 )
             )
 
             fusion_method = chunk.fusion_method or None
-            score_kind = "rrf" if fusion_method == "rrf" else "similarity"
+            score_kind = (
+                "reranked"
+                if chunk.rerank_score is not None
+                else ("rrf" if fusion_method == "rrf" else "similarity")
+            )
 
             metadata: Dict[str, Any] = {
                 "chunk_id": chunk.chunk_id,
@@ -336,18 +352,70 @@ class QueryService:
 
             metadata["anchor"] = getattr(chunk, "anchor", None)
 
-            search_results.append(
-                SearchResult(
-                    node_id=chunk.chunk_id,
-                    node_label="Chunk",
-                    score=score,
-                    distance=int(chunk.graph_distance or 0),
-                    metadata=metadata,
-                    path=chunk.graph_path,
+            search_result = SearchResult(
+                node_id=chunk.chunk_id,
+                node_label="Chunk",
+                score=primary_score,
+                distance=int(chunk.graph_distance or 0),
+                metadata=metadata,
+                path=chunk.graph_path,
+            )
+
+            # Create minimal RankingFeatures from chunk's existing scores
+            # (hybrid_retrieval already computed these)
+            features = RankingFeatures(
+                semantic_score=primary_score,
+                recall_score=float(chunk.vector_score or 0.0),
+                rerank_score=float(chunk.rerank_score or 0.0),
+                inherited_score=float(chunk.inherited_score or 0.0),
+                graph_distance_score=float(chunk.graph_score or 0.0),
+                final_score=primary_score,
+            )
+
+            ranked_results.append(
+                RankedResult(
+                    result=search_result,
+                    features=features,
+                    rank=idx + 1,  # Already ranked by hybrid_retrieval
                 )
             )
 
-        return ranker.rank(search_results)
+        return ranked_results
+
+    def _wrap_search_results_as_ranked(
+        self, results: List[SearchResult]
+    ) -> List[RankedResult]:
+        """
+        Wrap SearchResult objects as RankedResult without re-ranking.
+
+        Used by the legacy HybridSearchEngine path. The search engine already
+        orders results, so we just wrap them in the expected format.
+        """
+        from src.query.ranking import RankingFeatures
+
+        ranked_results: List[RankedResult] = []
+
+        for idx, result in enumerate(results):
+            # Create minimal RankingFeatures from result metadata
+            features = RankingFeatures(
+                semantic_score=float(result.score or 0.0),
+                recall_score=float(result.metadata.get("vector_score", 0.0) or 0.0),
+                rerank_score=float(result.metadata.get("rerank_score", 0.0) or 0.0),
+                graph_distance_score=float(
+                    result.metadata.get("graph_score", 0.0) or 0.0
+                ),
+                final_score=float(result.score or 0.0),
+            )
+
+            ranked_results.append(
+                RankedResult(
+                    result=result,
+                    features=features,
+                    rank=idx + 1,
+                )
+            )
+
+        return ranked_results
 
     def _get_planner(self) -> QueryPlanner:
         """Get or initialize the query planner."""
@@ -630,12 +698,16 @@ class QueryService:
                     for idx, result in enumerate(search_results.results)
                 ]
 
+                # Wrap search results as RankedResult without re-ranking
+                # (legacy HybridSearchEngine already orders results)
                 rank_start = time.time()
-                ranked_results = rank_results(search_results.results)
+                ranked_results = self._wrap_search_results_as_ranked(
+                    search_results.results
+                )
                 rank_time = time.time() - rank_start
 
                 logger.info(
-                    f"Ranking completed: {len(ranked_results)} results in {rank_time * 1000:.1f}ms"
+                    f"Results wrapped: {len(ranked_results)} results in {rank_time * 1000:.1f}ms"
                 )
 
                 timing = {

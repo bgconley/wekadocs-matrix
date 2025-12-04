@@ -2,6 +2,7 @@ import asyncio
 import os
 import signal
 import traceback
+from typing import Any, Coroutine
 from urllib.parse import unquote, urlparse
 
 import redis
@@ -18,6 +19,110 @@ log = structlog.get_logger()
 
 # Global flag for graceful shutdown
 shutdown_requested = False
+
+
+# =============================================================================
+# Asyncio Exception Handling - Prevents silent failures in background tasks
+# Reference: https://superfastpython.com/asyncio-event-loop-exception-handler/
+# =============================================================================
+
+
+def global_exception_handler(
+    loop: asyncio.AbstractEventLoop, context: dict[str, Any]
+) -> None:
+    """
+    Global handler for asyncio never-retrieved exceptions.
+
+    Called by the event loop for unhandled exceptions in callbacks and
+    never-retrieved task exceptions during shutdown.
+
+    Context dict may contain:
+    - 'message': Error message
+    - 'exception': Exception object (optional)
+    - 'future': asyncio.Future instance (optional)
+    - 'task': asyncio.Task instance (optional)
+    - 'handle': asyncio.Handle instance (optional)
+    """
+    # Extract exception details
+    exception = context.get("exception")
+    message = context.get("message", "Unhandled exception in asyncio")
+    task = context.get("task")
+    future = context.get("future")
+
+    # Build structured log context
+    log_context: dict[str, Any] = {
+        "error_message": message,
+        "exception_type": type(exception).__name__ if exception else "Unknown",
+        "exception_str": str(exception) if exception else None,
+    }
+
+    # Add task/future info if available
+    if task:
+        log_context["task_name"] = task.get_name()
+        log_context["task_coro"] = str(task.get_coro())
+    elif future:
+        log_context["future"] = str(future)
+
+    # Log with full traceback
+    if exception:
+        log_context["traceback"] = "".join(
+            traceback.format_exception(
+                type(exception), exception, exception.__traceback__
+            )
+        )
+
+    log.error("asyncio_unhandled_exception", **log_context)
+
+
+def log_task_exception_callback(task: asyncio.Task) -> None:
+    """
+    Done callback that logs exceptions immediately when a task completes.
+
+    This provides real-time exception logging, unlike the global handler
+    which only fires at shutdown.
+
+    Reference: https://superfastpython.com/asyncio-log-exceptions-done-callback/
+    """
+    try:
+        # Safely retrieve exception (may raise CancelledError)
+        exception = task.exception()
+        if exception is not None:
+            log.error(
+                "asyncio_task_failed",
+                task_name=task.get_name(),
+                exception_type=type(exception).__name__,
+                exception_str=str(exception),
+                traceback="".join(
+                    traceback.format_exception(
+                        type(exception), exception, exception.__traceback__
+                    )
+                ),
+            )
+    except asyncio.CancelledError:
+        # Task was cancelled, not an error
+        log.debug("asyncio_task_cancelled", task_name=task.get_name())
+    except asyncio.InvalidStateError:
+        # Task is not done yet (should not happen in done callback)
+        pass
+
+
+def create_monitored_task(coro: Coroutine, name: str | None = None) -> asyncio.Task:
+    """
+    Create an asyncio task with automatic exception logging.
+
+    Use this instead of asyncio.create_task() for background tasks
+    that might fail silently.
+
+    Args:
+        coro: Coroutine to wrap in a task
+        name: Optional task name for logging
+
+    Returns:
+        Task with done callback attached
+    """
+    task = asyncio.create_task(coro, name=name)
+    task.add_done_callback(log_task_exception_callback)
+    return task
 
 
 def parse_file_uri(uri: str) -> str:
@@ -116,6 +221,11 @@ async def main():
     signal.signal(signal.SIGTERM, handle_shutdown)
     signal.signal(signal.SIGINT, handle_shutdown)
 
+    # Register global asyncio exception handler for never-retrieved exceptions
+    loop = asyncio.get_running_loop()
+    loop.set_exception_handler(global_exception_handler)
+    log.info("asyncio_exception_handler_registered")
+
     # Load config for reaper settings
     try:
         config, settings = load_config()  # load_config returns (config, settings)
@@ -159,8 +269,8 @@ async def main():
         enabled=reaper_enabled,
     )
 
-    # Start reaper as background task
-    reaper_task = asyncio.create_task(reaper.reap_loop())
+    # Start reaper as background task with exception monitoring
+    reaper_task = create_monitored_task(reaper.reap_loop(), name="job_reaper")
 
     log.info(
         "Ingestion worker starting",

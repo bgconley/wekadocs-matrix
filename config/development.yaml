@@ -341,7 +341,7 @@ cache:
 feature_flags:
   dual_write_1024d: false       # Phase 7C.4: Enable dual-write to both 384-D and 1024-D indices
   # New rollout flags for retrieval rehab
-  query_api_weighted_fusion: false
+  query_api_weighted_fusion: true  # Enables _search_via_query_api_weighted() with per-field score tracking
   graph_garbage_filter: true       # C.0.1: Filter short/stopword entities
   graph_rel_types_wired: true      # C.0.2: Use query-adaptive relationship types
   dedup_best_score: true           # C.0.3: Keep highest score in dedup (enabled 2025-11-26)

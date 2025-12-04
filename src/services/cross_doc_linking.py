@@ -149,6 +149,69 @@ def escape_lucene_query(text: str) -> str:
     return text
 
 
+def prepare_lucene_phrase_query(
+    hint: str,
+    min_length: int = 3,
+    max_length: int = 512,
+) -> str | None:
+    """
+    Prepare a hint string for safe Lucene fulltext phrase query.
+
+    This function implements the "Hybrid" approach recommended for handling
+    user-derived input in Lucene fulltext queries:
+    1. Validate: Filter invalid hints (no alphanumeric content, too short)
+    2. Sanitize: Strip control characters, normalize whitespace
+    3. Escape: Handle backslash and quote (required inside phrase)
+    4. Wrap: Enclose in double quotes for literal phrase matching
+
+    Args:
+        hint: Raw hint string from user input
+        min_length: Minimum length after stripping (default: 3)
+        max_length: Maximum length before truncation (default: 512)
+
+    Returns:
+        Escaped and quoted phrase string ready for Lucene, or None if invalid.
+
+    Example:
+        >>> prepare_lucene_phrase_query('NFS Support')
+        '"NFS Support"'
+        >>> prepare_lucene_phrase_query('C:\\\\Program Files')
+        '"C:\\\\\\\\Program Files"'
+        >>> prepare_lucene_phrase_query('---')  # No alphanumeric
+        None
+    """
+    import re
+
+    if not hint:
+        return None
+
+    # Strip control characters (ASCII 0x00-0x1f, 0x7f-0x9f)
+    cleaned = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", hint)
+
+    # Normalize whitespace and strip
+    cleaned = " ".join(cleaned.split()).strip()
+
+    # Check minimum length
+    if len(cleaned) < min_length:
+        return None
+
+    # Must have at least one alphanumeric character
+    if not any(c.isalnum() for c in cleaned):
+        return None
+
+    # Truncate to avoid Lucene term length limits
+    if len(cleaned) > max_length:
+        cleaned = cleaned[:max_length].rsplit(" ", 1)[0]  # Truncate at word boundary
+
+    # Escape backslashes first (order matters!)
+    escaped = cleaned.replace("\\", "\\\\")
+    # Escape double quotes
+    escaped = escaped.replace('"', '\\"')
+
+    # Wrap in double quotes for phrase matching
+    return f'"{escaped}"'
+
+
 def aggregate_chunks_to_documents(
     chunk_hits: List[models.ScoredPoint],
     exclude_document_id: str,

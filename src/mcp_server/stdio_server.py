@@ -269,6 +269,23 @@ async def lifespan(server: FastMCP) -> AsyncIterator[Deps]:
         deps.query = get_query_service()
         manager = get_connection_manager()
         neo4j_driver = manager.get_neo4j_driver()
+
+        # Validate Neo4j schema at startup (Phase 3 hardening)
+        from src.neo.schema_validator import validate_neo4j_schema
+
+        schema_result = validate_neo4j_schema(neo4j_driver, strict=False)
+        if not schema_result.valid:
+            logger.error(
+                "Neo4j schema validation failed - queries may return empty results",
+                errors=schema_result.errors,
+                node_counts=schema_result.node_counts,
+            )
+        elif schema_result.warnings:
+            logger.warning(
+                "Neo4j schema has warnings",
+                warnings=schema_result.warnings,
+            )
+
         deps.graph = GraphService(neo4j_driver)
         deps.text = TextService(neo4j_driver)
         deps.summarizer = SummarizationService(deps.graph)
@@ -452,9 +469,16 @@ async def search_sections(
     next_cursor = _encode_cursor(offset + len(sliced)) if more else None
     results = []
     for idx, chunk in enumerate(sliced):
-        score = chunk.fused_score or chunk.vector_score or chunk.bm25_score or 0.0
+        # Prefer rerank_score (from ColBERT/BGE cross-encoder) over pre-rerank fusion score
+        score = (
+            chunk.rerank_score
+            if chunk.rerank_score is not None
+            else (chunk.fused_score or chunk.vector_score or chunk.bm25_score or 0.0)
+        )
         source = "hybrid"
-        if chunk.vector_score and not chunk.bm25_score:
+        if chunk.rerank_score is not None:
+            source = "reranked"
+        elif chunk.vector_score and not chunk.bm25_score:
             source = "vector"
         elif chunk.bm25_score and not chunk.vector_score:
             source = "bm25"
@@ -467,6 +491,11 @@ async def search_sections(
                 "score": float(score),
                 "rank": offset + idx + 1,
                 "source": source,
+                "rerank_score": (
+                    float(chunk.rerank_score)
+                    if chunk.rerank_score is not None
+                    else None
+                ),
                 "graph_score": float(getattr(chunk, "graph_score", 0.0) or 0.0),
                 "graph_distance": int(getattr(chunk, "graph_distance", 0) or 0),
                 "connection_count": int(getattr(chunk, "connection_count", 0) or 0),

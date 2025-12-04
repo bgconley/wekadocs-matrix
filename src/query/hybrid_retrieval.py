@@ -2040,7 +2040,7 @@ class HybridRetriever:
         # Phase 3: Added REFERENCES for cross-document traversal where appropriate
         # Fix #4 (Phase 3): Cross-document REFERENCES traversal is now implemented!
         # The _compute_cross_doc_signals method handles the traversal pattern:
-        # (seed:Chunk) → [:REFERENCES] → (doc:Document) → [:HAS_CHUNK] → (related:Chunk)
+        # (seed:Chunk) → [:REFERENCES] → (doc:Document) → [:HAS_SECTION] → (related:Chunk)
         #
         # Cross-doc signals are computed independently of entity extraction and merged
         # into the graph reranker via a weighted three-way fusion:
@@ -2145,7 +2145,7 @@ class HybridRetriever:
         REFERENCES edges to boost relevance scores.
 
         The traversal pattern is:
-        (seed:Chunk) → [:REFERENCES] → (doc:Document) → [:HAS_CHUNK] → (related:Chunk)
+        (seed:Chunk) → [:REFERENCES] → (doc:Document) → [:HAS_SECTION] → (related:Chunk)
 
         If a candidate chunk's document is referenced by another candidate chunk,
         the related chunk gets a boost. This captures cross-document relevance
@@ -2186,7 +2186,7 @@ class HybridRetriever:
         MATCH (seed)-[:REFERENCES]->(ref_doc:Document)
         WHERE NOT ref_doc:GhostDocument
         // Get chunks from the referenced document that are also candidates
-        MATCH (ref_doc)-[:HAS_CHUNK]->(related:Chunk)
+        MATCH (ref_doc)-[:HAS_SECTION]->(related:Chunk)
         WHERE related.id IN $chunk_ids
           AND related.id <> seed_id
           AND ($doc_tag IS NULL OR related.doc_tag = $doc_tag)

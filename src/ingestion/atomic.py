@@ -145,7 +145,10 @@ from src.ingestion.saga import (  # noqa: E402
     ValidationResult,
 )
 from src.providers.tokenizer_service import TokenizerService  # noqa: E402
-from src.services.cross_doc_linking import CrossDocLinker  # noqa: E402
+from src.services.cross_doc_linking import (  # noqa: E402
+    CrossDocLinker,
+    prepare_lucene_phrase_query,
+)
 from src.shared.chunk_utils import validate_chunk_schema  # noqa: E402
 from src.shared.embedding_fields import (  # noqa: E402
     canonicalize_embedding_metadata,
@@ -1807,11 +1810,11 @@ class AtomicIngestionCoordinator:
         """Upsert section/chunk nodes within a transaction."""
         query = """
         UNWIND $sections AS section
-        MERGE (c:Chunk {id: section.id})
+        MERGE (c:Section:Chunk {id: section.id})
         SET c += section
         WITH c, section
         MATCH (d:Document {id: $document_id})
-        MERGE (d)-[:HAS_CHUNK]->(c)
+        MERGE (d)-[:HAS_SECTION]->(c)
         """
 
         # Prepare sections for Cypher - sanitize to avoid Map{} errors
@@ -2150,9 +2153,26 @@ class AtomicIngestionCoordinator:
         def process_fuzzy_batch(batch: List[Dict]):
             if not batch:
                 return
-            hints = {r["target_hint"] for r in batch if r.get("target_hint")}
-            hint_to_doc = {}
-            if hints:
+
+            # Phase 5.1 Fix: Use safe Lucene phrase queries to prevent ParseException
+            # Build mapping: original_hint -> safe_phrase (or None if invalid)
+            # This filters invalid hints BEFORE the query and escapes special chars
+            original_to_safe: Dict[str, str] = {}
+            for r in batch:
+                raw_hint = r.get("target_hint")
+                if raw_hint:
+                    safe_phrase = prepare_lucene_phrase_query(
+                        raw_hint, min_length=min_hint_len
+                    )
+                    if safe_phrase:
+                        original_to_safe[raw_hint] = safe_phrase
+
+            hint_to_doc: Dict[str, str] = {}
+            if original_to_safe:
+                # Build reverse mapping: safe_phrase -> original_hint
+                safe_to_original = {v: k for k, v in original_to_safe.items()}
+                safe_phrases = list(original_to_safe.values())
+
                 query = """
                 UNWIND $hints AS hint
                 CALL db.index.fulltext.queryNodes('document_title_ft', hint) YIELD node AS d, score
@@ -2162,15 +2182,18 @@ class AtomicIngestionCoordinator:
                 WITH hint, collect(d.id)[0] AS doc_id
                 RETURN hint, doc_id
                 """
-                hint_to_doc = {
-                    rec["hint"]: rec["doc_id"]
-                    for rec in tx.run(query, hints=list(hints))
-                    if rec["doc_id"]
-                }
+                # Map safe_phrase -> doc_id, then convert to original_hint -> doc_id
+                for rec in tx.run(query, hints=safe_phrases):
+                    if rec["doc_id"]:
+                        safe_phrase = rec["hint"]
+                        original_hint = safe_to_original.get(safe_phrase)
+                        if original_hint:
+                            hint_to_doc[original_hint] = rec["doc_id"]
 
             for ref_data in batch:
                 target_hint = ref_data.get("target_hint", "")
-                if len(target_hint.strip()) < min_hint_len:
+                # Check if hint was valid (present in our mapping)
+                if target_hint not in original_to_safe:
                     stage_pending(ref_data)
                     continue
                 resolved_id = hint_to_doc.get(target_hint)

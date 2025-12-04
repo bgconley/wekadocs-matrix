@@ -409,6 +409,25 @@ integrity_failures_total = Counter(
     ["check_type", "failure_reason"],
 )
 
+# ===== Schema alignment & defensive query metrics (Phase 3/4 hardening) =====
+schema_validation_failures_total = Counter(
+    "schema_validation_failures_total",
+    "Total schema validation failures at startup",
+    ["store"],  # neo4j, qdrant
+)
+
+empty_query_results_total = Counter(
+    "empty_query_results_total",
+    "Queries that returned 0 results unexpectedly",
+    ["service", "operation"],
+)
+
+partial_query_results_total = Counter(
+    "partial_query_results_total",
+    "Queries that returned fewer results than requested",
+    ["service", "operation"],
+)
+
 # ===== Phase 7E-4: Retrieval expansion metrics =====
 retrieval_expansion_total = Counter(
     "retrieval_expansion_total",
