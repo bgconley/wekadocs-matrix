@@ -26,7 +26,7 @@ from datetime import datetime
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
-import structlog
+from src.shared.observability import get_logger
 
 T = TypeVar("T")
 
@@ -160,7 +160,22 @@ from src.shared.observability.metrics import (  # noqa: E402
     entity_relationships_total,
 )
 
-logger = structlog.get_logger(__name__)
+# LGTM Phase 4: OTEL tracing for ingestion pipeline observability
+try:
+    from opentelemetry import trace
+    from opentelemetry.trace import Status, StatusCode
+
+    OTEL_AVAILABLE = True
+except ImportError:
+    OTEL_AVAILABLE = False
+    trace = None  # type: ignore
+    Status = None  # type: ignore
+    StatusCode = None  # type: ignore
+
+logger = get_logger(__name__)
+
+# LGTM Phase 4: Tracer for ingestion pipeline spans
+_tracer = trace.get_tracer("wekadocs.ingestion") if OTEL_AVAILABLE else None
 
 # Allowlist of valid Entity→Entity relationship types for Cypher injection defense
 # Phase 1.2: These are the only relationship types allowed to be interpolated into Cypher
@@ -366,14 +381,29 @@ class AtomicIngestionCoordinator:
 
             duration_ms = int((time.time() - start_time) * 1000)
 
+            # LGTM Phase 4: Verbose log event 7 - cross_doc_linking_complete
+            # Enhanced with sample_edges per canonical plan
+            sample_edges = []
+            if hasattr(result, "edges") and result.edges:
+                sample_edges = [
+                    {
+                        "target": getattr(e, "target_doc_id", None),
+                        "score": getattr(e, "score", None),
+                        "colbert_score": getattr(e, "colbert_score", None),
+                    }
+                    for e in result.edges[:3]
+                ]
             logger.info(
                 "cross_doc_linking_complete",
-                document_id=document_id,
+                doc_id=document_id,
                 edges_created=result.edges_created,
                 edges_updated=result.edges_updated,
-                candidates_found=result.candidates_found,
+                candidates_evaluated=result.candidates_found,
+                pruned_count=result.candidates_found - result.edges_created,
                 method=result.method,
+                colbert_reranked=getattr(result, "colbert_reranked", False),
                 duration_ms=duration_ms,
+                sample_edges=sample_edges,
                 skipped=result.skipped,
                 skip_reason=result.skip_reason,
             )
@@ -411,6 +441,9 @@ class AtomicIngestionCoordinator:
 
         This is the main entry point that replaces non-atomic ingest_document calls.
 
+        LGTM Phase 4: Enhanced with verbose logging and OTEL spans for full
+        observability of the ingestion pipeline.
+
         Args:
             source_uri: Document source URI
             content: Document content
@@ -424,15 +457,55 @@ class AtomicIngestionCoordinator:
         start_time = time.time()
         saga_id = str(uuid.uuid4())
 
+        # LGTM Phase 4: Extract feature flags for observability
+        feature_flags = {}
+        if self.config:
+            ff = getattr(self.config, "feature_flags", None)
+            cross_doc = getattr(self.config, "cross_doc_linking", None)
+            if ff:
+                feature_flags = {
+                    "graph_as_reranker": getattr(ff, "graph_as_reranker", False),
+                    "structure_aware_expansion": getattr(
+                        ff, "structure_aware_expansion", False
+                    ),
+                    "graph_garbage_filter": getattr(ff, "graph_garbage_filter", False),
+                    "dedup_best_score": getattr(ff, "dedup_best_score", False),
+                }
+            if cross_doc:
+                feature_flags["cross_doc_linking_enabled"] = getattr(
+                    cross_doc, "enabled", False
+                )
+                feature_flags["colbert_rerank"] = getattr(
+                    cross_doc, "colbert_rerank", False
+                )
+
+        # LGTM Phase 4: Verbose log event 1 - ingestion_started
         logger.info(
-            "atomic_ingestion_started",
+            "ingestion_started",
             saga_id=saga_id,
-            source_uri=source_uri,
+            doc_path=source_uri,
             format=format,
+            content_length=len(content),
+            feature_flags=feature_flags,
         )
+
+        # LGTM Phase 4: Create root span for full ingestion trace
+        span_ctx = None
+        if OTEL_AVAILABLE and _tracer:
+            span_ctx = _tracer.start_as_current_span(
+                "ingest_document",
+                attributes={
+                    "document.source_uri": source_uri,
+                    "document.format": format,
+                    "document.content_length": len(content),
+                    "saga.id": saga_id,
+                },
+            )
+            span_ctx.__enter__()
 
         try:
             # Phase 1: Parse and prepare all data
+            parse_start = time.time()
             prepared = self._prepare_ingestion(
                 source_uri,
                 content,
@@ -440,6 +513,7 @@ class AtomicIngestionCoordinator:
                 embedding_model=embedding_model,
                 embedding_version=embedding_version,
             )
+            parse_time_ms = (time.time() - parse_start) * 1000
 
             document = prepared["document"]
             sections = prepared["sections"]
@@ -447,6 +521,43 @@ class AtomicIngestionCoordinator:
             mentions = prepared["mentions"]
             references = prepared.get("references", [])  # Phase 3: Cross-doc refs
             document_id = document["id"]
+
+            # LGTM Phase 4: Verbose log event 2 - document_parsed
+            logger.info(
+                "document_parsed",
+                doc_id=document_id,
+                saga_id=saga_id,
+                sections_count=len(sections),
+                entities_count=len(entities),
+                mentions_count=len(mentions),
+                references_count=len(references),
+                total_chars=sum(len(s.get("content", "")) for s in sections),
+                parse_time_ms=round(parse_time_ms, 2),
+            )
+
+            # LGTM Phase 4: Verbose log event 3 - chunking_complete
+            # (sections are the chunks in our architecture)
+            total_tokens = sum(int(s.get("token_count", 0)) for s in sections)
+            avg_tokens = total_tokens / len(sections) if sections else 0
+            sample_chunk = sections[0] if sections else {}
+            logger.info(
+                "chunking_complete",
+                doc_id=document_id,
+                saga_id=saga_id,
+                chunks_count=len(sections),
+                total_tokens=total_tokens,
+                avg_tokens_per_chunk=round(avg_tokens, 1),
+                max_tokens=max(
+                    (int(s.get("token_count", 0)) for s in sections), default=0
+                ),
+                min_tokens=min(
+                    (int(s.get("token_count", 0)) for s in sections), default=0
+                ),
+                sample_chunk_text=(
+                    sample_chunk.get("content", "")[:200] if sample_chunk else None
+                ),
+                sample_chunk_title=sample_chunk.get("title"),
+            )
 
             # Phase 2: Pre-commit validation
             if self.validate_before_commit:
@@ -477,14 +588,40 @@ class AtomicIngestionCoordinator:
                 validation = None
 
             # Phase 3: Compute embeddings BEFORE any writes
+            embed_start = time.time()
             embeddings = self._compute_embeddings(
                 document, sections, entities, prepared["builder"]
             )
+            embed_time_ms = (time.time() - embed_start) * 1000
+
+            # LGTM Phase 4: Verbose log event 4 - embeddings_generated
+            embedding_count = len(embeddings.get("section_embeddings", []))
+            sample_embedding = (
+                embeddings.get("section_embeddings", [{}])[0]
+                if embeddings.get("section_embeddings")
+                else {}
+            )
+            dense_dim = (
+                len(sample_embedding.get("dense", [])) if sample_embedding else 0
+            )
+            has_sparse = bool(sample_embedding.get("sparse"))
+            has_colbert = bool(
+                sample_embedding.get("colbert") or sample_embedding.get("multivector")
+            )
+            logger.info(
+                "embeddings_generated",
+                doc_id=document_id,
+                saga_id=saga_id,
+                embedding_count=embedding_count,
+                dense_dim=dense_dim,
+                has_sparse=has_sparse,
+                has_colbert=has_colbert,
+                embed_time_ms=round(embed_time_ms, 2),
+                vector_types=["content", "title", "entity"]
+                + (["late-interaction"] if has_colbert else []),
+            )
 
             # Phase 3b: Recompute document token aggregates after truncation
-            # Truncation in _compute_embeddings may reduce section token counts,
-            # so we must update document-level totals to maintain the invariant:
-            # document["total_tokens"] == sum(section["token_count"])
             truncated_sections = [s for s in sections if s.get("was_truncated")]
             if truncated_sections:
                 new_total = sum(int(s.get("token_count", 0)) for s in sections)
@@ -492,7 +629,7 @@ class AtomicIngestionCoordinator:
                 tokens_reduced = old_total - new_total
 
                 document["total_tokens"] = new_total
-                document["original_total_tokens"] = old_total  # Preserve for auditing
+                document["original_total_tokens"] = old_total
 
                 for section in sections:
                     section["document_total_tokens"] = new_total
@@ -507,26 +644,49 @@ class AtomicIngestionCoordinator:
                 )
 
             # Phase 4: Execute atomic writes with saga coordination
+            saga_start = time.time()
             saga_result = self._execute_atomic_saga(
                 saga_id=saga_id,
                 document=document,
                 sections=sections,
                 entities=entities,
                 mentions=mentions,
-                references=references,  # Phase 3: Cross-document REFERENCES
+                references=references,
                 embeddings=embeddings,
                 builder=prepared["builder"],
             )
+            saga_time_ms = (time.time() - saga_start) * 1000
+
+            # LGTM Phase 4: Verbose log events 5 & 6 are emitted inside _execute_atomic_saga
+            # (neo4j_write_complete and qdrant_upsert_complete)
 
             duration_ms = int((time.time() - start_time) * 1000)
 
             if saga_result["success"]:
+                # LGTM Phase 4: Enhanced completion logging
+                stats = saga_result.get("stats", {})
                 logger.info(
-                    "atomic_ingestion_completed",
+                    "ingestion_complete",
+                    doc_id=document_id,
                     saga_id=saga_id,
-                    document_id=document_id,
                     duration_ms=duration_ms,
+                    parse_time_ms=round(parse_time_ms, 2),
+                    embed_time_ms=round(embed_time_ms, 2),
+                    saga_time_ms=round(saga_time_ms, 2),
+                    total_chunks=len(sections),
+                    total_nodes=stats.get("nodes_created", 0),
+                    total_edges=stats.get("relationships_created", 0),
+                    cross_doc_edges=stats.get("cross_doc_edges", 0),
                 )
+
+                # Set span status if available
+                if OTEL_AVAILABLE and span_ctx:
+                    span = trace.get_current_span()
+                    if span and span.is_recording():
+                        span.set_status(Status(StatusCode.OK))
+                        span.set_attribute("ingestion.success", True)
+                        span.set_attribute("ingestion.duration_ms", duration_ms)
+                        span.set_attribute("ingestion.chunks_count", len(sections))
 
                 return AtomicIngestionResult(
                     success=True,
@@ -546,6 +706,16 @@ class AtomicIngestionCoordinator:
                     error=saga_result.get("error"),
                     compensated=saga_result.get("compensated", False),
                 )
+
+                # Set error span status
+                if OTEL_AVAILABLE and span_ctx:
+                    span = trace.get_current_span()
+                    if span and span.is_recording():
+                        span.set_status(
+                            Status(
+                                StatusCode.ERROR, saga_result.get("error", "unknown")
+                            )
+                        )
 
                 return AtomicIngestionResult(
                     success=False,
@@ -568,6 +738,13 @@ class AtomicIngestionCoordinator:
                 error=str(e),
             )
 
+            # Set exception span status
+            if OTEL_AVAILABLE and span_ctx:
+                span = trace.get_current_span()
+                if span and span.is_recording():
+                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    span.record_exception(e)
+
             return AtomicIngestionResult(
                 success=False,
                 document_id="unknown",
@@ -575,6 +752,10 @@ class AtomicIngestionCoordinator:
                 error=str(e),
                 duration_ms=duration_ms,
             )
+        finally:
+            # LGTM Phase 4: Close span if opened
+            if span_ctx:
+                span_ctx.__exit__(None, None, None)
 
     def _prepare_ingestion(
         self,
@@ -1449,12 +1630,23 @@ class AtomicIngestionCoordinator:
             )
             stats["embedding_metadata_upserted"] = embedding_meta_count
 
-            logger.debug(
-                "neo4j_writes_completed",
+            # LGTM Phase 4: Verbose log event 5 - neo4j_write_complete
+            logger.info(
+                "neo4j_write_complete",
+                doc_id=document_id,
                 saga_id=saga_id,
-                chunks=chunk_count,
-                entities=entity_count,
-                references=references_count,
+                nodes_created=chunk_count + entity_count + 1,  # +1 for document
+                relationships_created=references_count + len(mentions),
+                node_types={
+                    "Document": 1,
+                    "Section": chunk_count,
+                    "Entity": entity_count,
+                },
+                relationship_types={
+                    "HAS_SECTION": chunk_count,
+                    "MENTIONS": len(mentions),
+                    "REFERENCES": references_count,
+                },
                 embedding_metadata=embedding_meta_count,
             )
 
@@ -1468,10 +1660,23 @@ class AtomicIngestionCoordinator:
                 stats["vectors_upserted"] = qdrant_count
                 written_qdrant_points = [s["id"] for s in sections if "id" in s]
 
-                logger.debug(
-                    "qdrant_writes_completed",
+                # LGTM Phase 4: Verbose log event 6 - qdrant_upsert_complete
+                collection_name = getattr(builder, "collection_name", None) or getattr(
+                    self.config.search.vector, "collection", "chunks_multi_bge_m3"
+                )
+                logger.info(
+                    "qdrant_upsert_complete",
+                    doc_id=document_id,
                     saga_id=saga_id,
-                    vectors=qdrant_count,
+                    points_upserted=qdrant_count,
+                    collection=collection_name,
+                    vector_types=[
+                        "content",
+                        "title",
+                        "entity",
+                        "text-sparse",
+                        "late-interaction",
+                    ],
                 )
 
             if (

@@ -38,7 +38,25 @@ from src.shared.observability.metrics import (
     mcp_search_verbosity_total,
 )
 
+# LGTM Phase 4: OTEL tracing for MCP server observability
+try:
+    import uuid
+
+    from opentelemetry import trace
+    from opentelemetry.trace import Status, StatusCode
+
+    OTEL_AVAILABLE = True
+except ImportError:
+    OTEL_AVAILABLE = False
+    trace = None  # type: ignore
+    Status = None  # type: ignore
+    StatusCode = None  # type: ignore
+    import uuid
+
 logger = get_logger(__name__)
+
+# LGTM Phase 4: Tracer for MCP server spans
+_tracer = trace.get_tracer("wekadocs.mcp") if OTEL_AVAILABLE else None
 
 
 class QueryService:
@@ -469,6 +487,23 @@ class QueryService:
         """
         start_time = time.time()
 
+        # LGTM Phase 4: Generate unique request ID for tracing
+        request_id = str(uuid.uuid4())
+
+        # LGTM Phase 4: Verbose log event 1 - mcp_request_received
+        logger.info(
+            "mcp_request_received",
+            request_id=request_id,
+            method="query",
+            query=query[:100] if query else None,
+            top_k=top_k,
+            filters=filters,
+            verbosity=verbosity,
+            session_id=session_id,
+            turn=turn,
+            expand_graph=expand_graph,
+        )
+
         try:
             requested_verbosity = (
                 verbosity if verbosity is not None else Verbosity.GRAPH.value
@@ -759,12 +794,17 @@ class QueryService:
                 response_size
             )
 
+            # LGTM Phase 4: Verbose log event 2 - mcp_response_sent
             logger.info(
-                f"Query completed: verbosity={verb_enum.value}, "
-                f"response_size_kb={response_size / 1024:.1f}, "
-                f"confidence={response.answer_json.confidence:.2f}, "
-                f"evidence_count={len(response.answer_json.evidence)}, "
-                f"total_time={timing['total_ms']:.1f}ms"
+                "mcp_response_sent",
+                request_id=request_id,
+                verbosity=verb_enum.value,
+                response_size_bytes=response_size,
+                response_chunks=len(response.answer_json.evidence),
+                confidence=round(response.answer_json.confidence, 2),
+                total_time_ms=round(timing.get("total_ms", 0), 2),
+                session_id=session_id,
+                query_id=query_id if session_id else None,
             )
 
             if legacy_markdown:

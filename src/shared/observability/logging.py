@@ -1,6 +1,7 @@
 # Implements Phase 1, Task 1.2 (MCP server foundation)
 # See: /docs/spec.md §7 (Observability)
-# Structured logging with correlation IDs
+# Structured logging with correlation IDs and OTEL trace context
+# Enhanced for LGTM observability stack (Phase LGTM)
 
 import logging
 import os
@@ -10,6 +11,14 @@ from contextvars import ContextVar
 from typing import Any, Dict, Optional
 
 import structlog
+
+# Import OpenTelemetry for trace context correlation
+try:
+    from opentelemetry import trace
+
+    OTEL_AVAILABLE = True
+except ImportError:
+    OTEL_AVAILABLE = False
 
 # Context variable for correlation ID
 correlation_id_ctx: ContextVar[Optional[str]] = ContextVar(
@@ -41,6 +50,38 @@ def add_correlation_id(
     return event_dict
 
 
+def add_trace_context(
+    logger: Any, method_name: str, event_dict: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Add OpenTelemetry trace context to log entries.
+
+    This enables log-trace correlation in Grafana (Loki → Tempo).
+    Trace context fields:
+      - trace_id: 32-character hex trace identifier
+      - span_id: 16-character hex span identifier
+      - trace_flags: Trace flags (typically 01 for sampled)
+
+    Note: Only adds context if OTEL is available and a span is active.
+    """
+    if not OTEL_AVAILABLE:
+        return event_dict
+
+    try:
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            ctx = span.get_span_context()
+            if ctx.is_valid:
+                event_dict["trace_id"] = format(ctx.trace_id, "032x")
+                event_dict["span_id"] = format(ctx.span_id, "016x")
+                event_dict["trace_flags"] = ctx.trace_flags
+    except Exception:
+        # Don't let trace context errors break logging
+        pass
+
+    return event_dict
+
+
 def setup_logging(log_level: str = "INFO") -> None:
     """
     Setup structured logging with JSON output.
@@ -62,7 +103,7 @@ def setup_logging(log_level: str = "INFO") -> None:
             level=getattr(logging, log_level.upper()),
         )
 
-    # Configure structlog
+    # Configure structlog with OTEL trace context correlation
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
@@ -70,6 +111,7 @@ def setup_logging(log_level: str = "INFO") -> None:
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             add_correlation_id,
+            add_trace_context,  # LGTM: Add OTEL trace context for Loki→Tempo correlation
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,

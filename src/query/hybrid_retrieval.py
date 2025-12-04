@@ -60,7 +60,22 @@ from src.shared.observability.metrics import (
 from src.shared.qdrant_schema import validate_qdrant_schema
 from src.shared.schema import ensure_schema_version
 
+# LGTM Phase 4: OTEL tracing for retrieval pipeline observability
+try:
+    from opentelemetry import trace
+    from opentelemetry.trace import Status, StatusCode
+
+    OTEL_AVAILABLE = True
+except ImportError:
+    OTEL_AVAILABLE = False
+    trace = None  # type: ignore
+    Status = None  # type: ignore
+    StatusCode = None  # type: ignore
+
 logger = get_logger(__name__)
+
+# LGTM Phase 4: Tracer for retrieval pipeline spans
+_tracer = trace.get_tracer("wekadocs.retrieval") if OTEL_AVAILABLE else None
 HYBRID_INIT_LOGGED = False
 
 
@@ -2436,6 +2451,34 @@ class HybridRetriever:
             else raw_doc_tag
         )
 
+        # LGTM Phase 4: Extract feature flags for observability
+        feature_flags = {}
+        ff = getattr(self.config, "feature_flags", None)
+        if ff:
+            feature_flags = {
+                "structure_aware_expansion": getattr(
+                    ff, "structure_aware_expansion", False
+                ),
+                "query_api_weighted_fusion": getattr(
+                    ff, "query_api_weighted_fusion", False
+                ),
+                "graph_as_reranker": getattr(ff, "graph_as_reranker", False),
+                "dedup_best_score": getattr(ff, "dedup_best_score", False),
+            }
+
+        # LGTM Phase 4: Verbose log event 1 - retrieval_started
+        logger.info(
+            "retrieval_started",
+            query=query[:100],
+            top_k=top_k,
+            filters=normalized_filters,
+            doc_tag=doc_tag,
+            feature_flags=feature_flags,
+            colbert_enabled=self.colbert_rerank_enabled,
+            graph_channel_enabled=self.graph_channel_enabled,
+            expansion_enabled=self.expansion_enabled,
+        )
+
         # Step 1: Parallel BM25 and vector search
         # Retrieve more candidates for fusion (3x top_k)
         candidate_k = min(top_k * 3, 100)
@@ -2452,6 +2495,16 @@ class HybridRetriever:
             )
             metrics["bm25_time_ms"] = (time.time() - bm25_start) * 1000
             metrics["bm25_count"] = len(bm25_results)
+
+            # LGTM Phase 4: Verbose log event 2 - sparse_search_complete
+            logger.info(
+                "sparse_search_complete",
+                query=query[:50],
+                results_count=len(bm25_results),
+                top_scores=[r.bm25_score for r in bm25_results[:5] if r.bm25_score],
+                top_doc_ids=[r.document_id for r in bm25_results[:5]],
+                search_time_ms=round(metrics["bm25_time_ms"], 2),
+            )
         else:
             metrics["bm25_time_ms"] = 0.0
             metrics["bm25_count"] = 0
@@ -2478,6 +2531,18 @@ class HybridRetriever:
         if "sparse_topk_ratio" in vector_stats:
             metrics["sparse_topk_ratio"] = vector_stats["sparse_topk_ratio"]
 
+        # LGTM Phase 4: Verbose log event 3 - dense_search_complete
+        logger.info(
+            "dense_search_complete",
+            query=query[:50],
+            results_count=len(vec_results),
+            top_scores=[r.vector_score for r in vec_results[:5] if r.vector_score],
+            top_doc_ids=[r.document_id for r in vec_results[:5]],
+            search_time_ms=round(metrics["vec_time_ms"], 2),
+            vector_path=metrics.get("vector_path", "legacy"),
+            colbert_used=metrics.get("vector_colbert_used", False),
+        )
+
         # Step 2: Fuse rankings
         fusion_start = time.time()
         if self.hybrid_mode == "bge_reranker":
@@ -2498,12 +2563,33 @@ class HybridRetriever:
 
         fused_results = [r for r in fused_results if not r.is_microdoc_stub]
 
+        # LGTM Phase 4: Verbose log event 4 - rrf_fusion_complete
+        logger.info(
+            "rrf_fusion_complete",
+            dense_count=len(vec_results),
+            sparse_count=len(bm25_results),
+            fused_count=len(fused_results),
+            fusion_method=metrics.get("fusion_method", "unknown"),
+            rrf_k=self.rrf_k,
+            fusion_time_ms=round(metrics.get("fusion_time_ms", 0), 2),
+            fusion_scores=[
+                {
+                    "chunk_id": r.chunk_id[:8],
+                    "rrf_score": round(r.fused_score or 0, 4),
+                    "dense_score": round(r.vector_score or 0, 4),
+                    "sparse_score": round(r.bm25_score or 0, 4),
+                }
+                for r in fused_results[:10]
+            ],
+        )
+
         # Step 3: Take fused results as seeds and optionally rerank
         fused_results.sort(key=lambda x: x.fused_score or 0, reverse=True)
         self._log_stage_snapshot("post-fusion", fused_results)
 
         # Optional graph retrieval channel (entity-anchored, cross-doc allowed)
         graph_channel_stats: Dict[str, Any] = {}
+        graph_candidates: List[ChunkResult] = []  # Initialize for logging safety
         graph_as_reranker_flag = getattr(
             getattr(self.config, "feature_flags", None), "graph_as_reranker", False
         )
@@ -2519,6 +2605,23 @@ class HybridRetriever:
                 if graph_candidates:
                     fused_results.extend(graph_candidates)
                     fused_results = self._dedup_results(fused_results)
+
+            # LGTM Phase 4: Verbose log event 5 - graph_augmentation_complete
+            logger.info(
+                "graph_augmentation_complete",
+                initial_chunks=(
+                    len(fused_results) - len(graph_candidates)
+                    if graph_candidates
+                    else len(fused_results)
+                ),
+                nodes_retrieved=graph_channel_stats.get("graph_candidates", 0),
+                edges_traversed=graph_channel_stats.get("graph_edges_traversed", 0),
+                relationship_types_used=graph_channel_stats.get(
+                    "graph_relationship_types", []
+                ),
+                graph_mode="reranker" if graph_as_reranker_flag else "channel",
+                entity_anchors_found=graph_channel_stats.get("entity_anchors_found", 0),
+            )
         metrics.update(graph_channel_stats)
 
         # Optional ColBERT rerank between fusion and cross-encoder
@@ -2534,6 +2637,10 @@ class HybridRetriever:
             except Exception as exc:
                 logger.warning("ColBERT query embedding failed", error=str(exc))
             if query_bundle and query_bundle.multivector:
+                # Track pre-rerank order for rank change calculation
+                pre_rerank_order = {
+                    r.chunk_id: idx for idx, r in enumerate(fused_results)
+                }
                 hydrated = self._hydrate_colbert_vectors(fused_results)
                 colbert_limit = min(len(fused_results), max(top_k * 6, 120))
                 fused_results = self._colbert_rerank(
@@ -2543,6 +2650,26 @@ class HybridRetriever:
                 metrics["colbert_rerank_applied"] = True
                 metrics["colbert_candidates"] = len(fused_results)
                 metrics["colbert_rerank_time_ms"] = (time.time() - colbert_start) * 1000
+
+                # LGTM Phase 4: Verbose log event 6 - colbert_rerank_complete
+                logger.info(
+                    "colbert_rerank_complete",
+                    input_count=colbert_limit,
+                    output_count=len(fused_results),
+                    hydrated_count=len(hydrated),
+                    rerank_time_ms=round(metrics["colbert_rerank_time_ms"], 2),
+                    rerank_details=[
+                        {
+                            "chunk_id": r.chunk_id[:8],
+                            "original_score": round(r.fused_score or 0, 4),
+                            "colbert_score": round(
+                                r.rerank_score or 0, 4
+                            ),  # rerank_score holds ColBERT MaxSim
+                            "rank_change": pre_rerank_order.get(r.chunk_id, 0) - idx,
+                        }
+                        for idx, r in enumerate(fused_results[:10])
+                    ],
+                )
             else:
                 metrics["colbert_rerank_applied"] = False
 
@@ -2553,6 +2680,8 @@ class HybridRetriever:
             pool_cap = self.rerank_top_n or top_k
             rerank_pool_size = min(pool_cap, len(fused_results))
             rerank_candidates = fused_results[:rerank_pool_size]
+            # Track pre-rerank order for rank change calculation
+            pre_bge_order = {r.chunk_id: idx for idx, r in enumerate(rerank_candidates)}
             ordered_candidates = self._apply_reranker(query, rerank_candidates, metrics)
             reranker_active = bool(metrics.get("reranker_applied"))
             if reranker_active:
@@ -2564,6 +2693,24 @@ class HybridRetriever:
                     reverse=True,
                 )
                 seeds = ordered_candidates[:top_k]
+
+                # LGTM Phase 4: Verbose log event 7 - bge_rerank_complete
+                logger.info(
+                    "bge_rerank_complete",
+                    input_count=len(rerank_candidates),
+                    output_count=len(seeds),
+                    reranker_model=metrics.get("reranker_model", "unknown"),
+                    rerank_time_ms=round(metrics.get("reranker_time_ms", 0), 2),
+                    rerank_details=[
+                        {
+                            "chunk_id": r.chunk_id[:8],
+                            "bge_score": round(r.rerank_score or 0, 4),
+                            "original_rank": pre_bge_order.get(r.chunk_id, 0),
+                            "final_rank": idx,
+                        }
+                        for idx, r in enumerate(seeds[:10])
+                    ],
+                )
             else:
                 seeds = fused_results[:top_k]
         else:
@@ -2853,11 +3000,35 @@ class HybridRetriever:
                             max_threshold=config.monitoring.expansion_rate_max,
                         )
 
+        # LGTM Phase 4: Verbose log event 8 - retrieval_complete
         logger.info(
-            f"Hybrid retrieval complete: query='{query[:50]}...', "
-            f"results={len(final_results)}, tokens={metrics['total_tokens']}, "
-            f"microdocs={metrics['microdoc_extras']}, "
-            f"time={metrics['total_time_ms']:.2f}ms"
+            "retrieval_complete",
+            query=query[:100],
+            total_chunks_retrieved=len(final_results),
+            unique_documents=len(set(r.document_id for r in final_results)),
+            total_tokens=metrics.get("total_tokens", 0),
+            microdoc_extras=metrics.get("microdoc_extras", 0),
+            total_time_ms=round(metrics.get("total_time_ms", 0), 2),
+            reranker_applied=metrics.get("reranker_applied", False),
+            colbert_applied=metrics.get("colbert_rerank_applied", False),
+            expansion_triggered=metrics.get("expansion_triggered", False),
+            # Sample retrieved content per canonical plan
+            retrieved_chunks=[
+                {
+                    "rank": i + 1,
+                    "chunk_id": r.chunk_id[:8],
+                    "document_id": r.document_id[:8] if r.document_id else None,
+                    "document_title": (
+                        getattr(r, "document_title", "")[:50]
+                        if getattr(r, "document_title", None)
+                        else None
+                    ),
+                    "section_title": r.heading[:50] if r.heading else None,
+                    "final_score": round(r.fused_score or r.rerank_score or 0, 4),
+                    "content_preview": r.text[:150] if r.text else None,
+                }
+                for i, r in enumerate(final_results[:5])
+            ],
         )
 
         return final_results, metrics

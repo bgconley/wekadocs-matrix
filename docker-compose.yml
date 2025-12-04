@@ -179,8 +179,11 @@ services:
       # Auth & observability
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://alloy:4318}
       - OTEL_SERVICE_NAME=weka-mcp-server
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=otlp
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       neo4j:
@@ -278,6 +281,12 @@ services:
       # Auth & security
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      # OTEL Observability (Phase LGTM)
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://alloy:4318}
+      - OTEL_SERVICE_NAME=weka-ingestion-worker
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=otlp
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       neo4j:
@@ -368,6 +377,12 @@ services:
       - CACHE_MODE=epoch
       - CACHE_NS=rag:v1
       - CACHE_REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
+      # OTEL Observability (Phase LGTM)
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://alloy:4318}
+      - OTEL_SERVICE_NAME=weka-ingestion-service
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=otlp
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       redis:
@@ -387,7 +402,7 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # Optional: Jaeger for OpenTelemetry tracing
+  # Optional: Jaeger for OpenTelemetry tracing (legacy - being replaced by Tempo)
   jaeger:
     image: jaegertracing/all-in-one:1.51
     container_name: weka-jaeger
@@ -395,8 +410,9 @@ services:
       - weka-net
     ports:
       - "16686:16686"  # UI
-      - "4318:4318"    # OTLP HTTP receiver
-      - "4317:4317"    # OTLP gRPC receiver
+      # Note: Ports 4317/4318 moved to Alloy when LGTM stack is active
+      - "14317:4317"   # OTLP gRPC (remapped to avoid Alloy conflict)
+      - "14318:4318"   # OTLP HTTP (remapped to avoid Alloy conflict)
     environment:
       - COLLECTOR_OTLP_ENABLED=true
       - LOG_LEVEL=${JAEGER_LOG_LEVEL:-info}
@@ -411,3 +427,47 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+    profiles:
+      - legacy  # Only start with: docker compose --profile legacy up
+
+  # LGTM Observability: Grafana Alloy (unified telemetry collector)
+  # Forwards logs, traces, and metrics to GCP LGTM stack via Tailscale
+  alloy:
+    image: grafana/alloy:v1.4.0
+    container_name: weka-alloy
+    networks:
+      - weka-net
+    ports:
+      - "12345:12345"  # Alloy UI
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    volumes:
+      - ./config/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy
+      - /etc/alloy/config.alloy
+    environment:
+      - HOSTNAME=${HOSTNAME:-wekadocs-dev}
+      # GCP LGTM endpoints (via Tailscale)
+      - LOKI_ENDPOINT=${LOKI_ENDPOINT:-http://10.10.0.5:3100/loki/api/v1/push}
+      - TEMPO_ENDPOINT=${TEMPO_ENDPOINT:-10.10.0.5:4317}
+      - MIMIR_ENDPOINT=${MIMIR_ENDPOINT:-http://10.10.0.5:9009/api/v1/push}
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/12345' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - "metrics.scrape=false"  # Don't scrape Alloy itself circularly

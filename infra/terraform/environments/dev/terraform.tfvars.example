@@ -1,0 +1,29 @@
+# infra/terraform/environments/dev/terraform.tfvars.example
+# Copy this file to terraform.tfvars and fill in your values
+# DO NOT commit terraform.tfvars to version control (contains secrets)
+
+# GCP Project Configuration
+project_id = "your-gcp-project-id"
+region     = "us-central1"
+zone       = "us-central1-a"
+
+# Network Configuration
+# These should match your existing GCP VPC where Tailscale gateway resides
+network    = "default"
+subnetwork = "default"
+
+# Instance Configuration
+instance_name     = "lgtm-observability-dev"
+machine_type      = "e2-standard-4"  # 4 vCPU, 16 GB RAM (~$100/month)
+disk_size_gb      = 20
+data_disk_size_gb = 100
+
+# Retention Configuration
+loki_retention_days   = 7    # 7 days log retention
+tempo_retention_hours = 72   # 3 days trace retention
+
+# Grafana Admin Password (use a strong password!)
+grafana_admin_password = "your-secure-password-here"  # pragma: allowlist secret
+
+# Service Account (create one with minimal permissions)
+service_account_email = "lgtm-vm@your-project.iam.gserviceaccount.com"

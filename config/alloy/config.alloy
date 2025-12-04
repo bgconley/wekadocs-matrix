@@ -1,0 +1,209 @@
+// config/alloy/config.alloy
+// Grafana Alloy configuration for WekaDocs-Matrix Observability
+// Canonical plan reference: lines 694-887
+
+// ============================================================================
+// LOGGING CONFIGURATION
+// ============================================================================
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// ============================================================================
+// DOCKER LOG DISCOVERY AND COLLECTION
+// ============================================================================
+
+discovery.docker "wekadocs_containers" {
+  host = "unix:///var/run/docker.sock"
+
+  filter {
+    name   = "name"
+    values = ["weka-*"]  // Only discover weka containers
+  }
+}
+
+// Collect Docker container logs
+loki.source.docker "wekadocs_logs" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.docker.wekadocs_containers.targets
+  forward_to = [loki.process.add_labels.receiver]
+
+  labels = {
+    "project" = "wekadocs-matrix",
+    "env"     = "development",
+  }
+
+  relabel_rules = loki.relabel.docker_labels.rules
+}
+
+// Extract useful labels from Docker metadata
+loki.relabel "docker_labels" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+}
+
+// Process logs: parse JSON, extract fields
+loki.process "add_labels" {
+  forward_to = [loki.write.gcp_loki.receiver]
+
+  // Detect database logs by container name pattern and add log_type label
+  // Neo4j, Qdrant, Redis logs are NOT JSON - handle gracefully
+  stage.match {
+    selector = "{container=~\"weka-(neo4j|qdrant|redis)\"}"
+
+    stage.static_labels {
+      values = {
+        log_type = "database",
+      }
+    }
+  }
+
+  // Application logs (mcp-server, ingestion-worker, ingestion-service) ARE JSON
+  stage.match {
+    selector = "{container=~\"weka-(mcp-server|ingestion-worker|ingestion-service)\"}"
+
+    stage.static_labels {
+      values = {
+        log_type = "application",
+      }
+    }
+
+    // Parse JSON logs from structlog (only for application containers)
+    stage.json {
+      expressions = {
+        level     = "level",
+        event     = "event",
+        trace_id  = "trace_id",
+        span_id   = "span_id",
+        doc_id    = "doc_id",
+        phase     = "phase",
+      }
+    }
+
+    // Add parsed fields as labels (be selective to avoid high cardinality)
+    stage.labels {
+      values = {
+        level = "",
+        event = "",
+      }
+    }
+
+    // Keep trace_id as structured metadata for correlation
+    stage.structured_metadata {
+      values = {
+        trace_id = "",
+        span_id  = "",
+        doc_id   = "",
+        phase    = "",
+      }
+    }
+  }
+}
+
+// Send logs to GCP Loki via Tailscale
+loki.write "gcp_loki" {
+  endpoint {
+    url = env("LOKI_ENDPOINT")
+
+    // Batching and retry configuration
+    batch_wait = "1s"
+  }
+
+  external_labels = {
+    host = env("HOSTNAME"),
+  }
+}
+
+// ============================================================================
+// OPENTELEMETRY TRACE COLLECTION
+// ============================================================================
+
+// Receive OTEL traces from applications
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces  = [otelcol.processor.batch.default.input]
+    logs    = [otelcol.exporter.loki.gcp_loki.input]
+    metrics = [otelcol.exporter.prometheus.local.input]
+  }
+}
+
+// Batch processor for efficiency
+otelcol.processor.batch "default" {
+  timeout = "5s"
+  send_batch_size = 1000
+
+  output {
+    traces = [otelcol.exporter.otlp.gcp_tempo.input]
+  }
+}
+
+// Export traces to GCP Tempo
+otelcol.exporter.otlp "gcp_tempo" {
+  client {
+    endpoint = env("TEMPO_ENDPOINT")
+    tls {
+      insecure = true  // Tailscale provides encryption
+    }
+  }
+}
+
+// Export OTEL logs to Loki
+otelcol.exporter.loki "gcp_loki" {
+  forward_to = [loki.write.gcp_loki.receiver]
+}
+
+// Export metrics locally for Prometheus scraping
+otelcol.exporter.prometheus "local" {
+  forward_to = [prometheus.remote_write.gcp_mimir.receiver]
+}
+
+// ============================================================================
+// PROMETHEUS METRICS SCRAPING
+// ============================================================================
+
+// Scrape Qdrant metrics (has native Prometheus endpoint)
+prometheus.scrape "qdrant_metrics" {
+  targets = [{
+    __address__ = "qdrant:6333",
+    job         = "qdrant",
+    service     = "weka-qdrant",
+  }]
+
+  metrics_path    = "/metrics"
+  forward_to      = [prometheus.remote_write.gcp_mimir.receiver]
+  scrape_interval = "30s"
+}
+
+// Note: Neo4j metrics require enabling in neo4j.conf (metrics.prometheus.enabled=true)
+// Note: Redis metrics require redis_exporter sidecar - not implemented yet
+
+// Export metrics to GCP Mimir
+prometheus.remote_write "gcp_mimir" {
+  endpoint {
+    url = env("MIMIR_ENDPOINT")
+  }
+}

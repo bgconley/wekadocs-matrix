@@ -6,7 +6,6 @@ from typing import Any, Coroutine
 from urllib.parse import unquote, urlparse
 
 import redis
-import structlog
 
 # Atomic ingestion pipeline with saga-coordinated Neo4j + Qdrant writes
 # Guarantees: Neo4j commits only if Qdrant succeeds; compensates on failure
@@ -15,7 +14,11 @@ from src.ingestion.auto.queue import IngestJob, JobStatus, ack, brpoplpush, fail
 from src.ingestion.auto.reaper import JobReaper
 from src.shared.config import load_config
 
-log = structlog.get_logger()
+# LGTM Phase 4: Import observability components for trace-correlated logging
+from src.shared.observability import get_logger, setup_logging
+from src.shared.observability.tracing import init_tracing
+
+log = get_logger(__name__)
 
 # Global flag for graceful shutdown
 shutdown_requested = False
@@ -216,6 +219,19 @@ def handle_shutdown(signum, frame):
 
 async def main():
     global shutdown_requested
+
+    # LGTM Phase 4: Configure structlog with trace context processor
+    # Must be called before init_tracing() to enable log-trace correlation
+    setup_logging("INFO")
+
+    # LGTM Phase 4: Initialize OTEL tracing for ingestion worker
+    # This enables trace context propagation to Alloy → Tempo
+    init_tracing(
+        service_name="weka-ingestion-worker",
+        service_version="1.0.0",
+        instrument_redis=True,
+    )
+    log.info("otel_tracing_initialized", service="weka-ingestion-worker")
 
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGTERM, handle_shutdown)

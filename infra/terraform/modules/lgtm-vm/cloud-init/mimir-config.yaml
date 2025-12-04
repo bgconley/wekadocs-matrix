@@ -1,0 +1,60 @@
+# Mimir Configuration for LGTM Stack
+# Monolithic mode for single-VM deployment
+# NOTE: Docker volume mounts /mnt/lgtm-data/mimir:/data
+#       All paths should use /data as the base (not /data/mimir)
+
+multitenancy_enabled: false
+
+server:
+  http_listen_port: 9009
+  grpc_listen_port: 9095
+
+common:
+  storage:
+    backend: filesystem
+    filesystem:
+      dir: /data
+
+blocks_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/blocks
+  tsdb:
+    dir: /data/tsdb
+
+compactor:
+  data_dir: /data/compactor
+  sharding_ring:
+    kvstore:
+      store: inmemory
+
+distributor:
+  ring:
+    kvstore:
+      store: inmemory
+
+ingester:
+  ring:
+    kvstore:
+      store: inmemory
+    replication_factor: 1
+
+store_gateway:
+  sharding_ring:
+    kvstore:
+      store: inmemory
+
+ruler:
+  rule_path: /data/ruler-data
+
+ruler_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/rules
+
+limits:
+  # Increase limits for development
+  ingestion_rate: 100000
+  ingestion_burst_size: 200000
+  max_global_series_per_user: 1000000
+  max_fetched_series_per_query: 100000

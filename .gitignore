@@ -57,3 +57,11 @@ reports/**/*.csv
 
 # HuggingFace model cache (local test runs)
 hf-cache/
+
+# Terraform - standard ignores per Terraform best practices
+infra/terraform/environments/dev/terraform.tfvars
+**/.terraform/
+**/terraform.tfstate
+**/terraform.tfstate.backup
+**/tfplan
+**/tfplan.binary
