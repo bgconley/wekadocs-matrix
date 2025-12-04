@@ -1144,6 +1144,9 @@ def _legacy_env_override(
             current_value,
         )
         return current_value
+    # Only warn if the env value actually differs from the profile value
+    if parsed_value == current_value:
+        return current_value
     logger.warning(
         "Legacy env %s overriding embedding profile value %s -> %s",
         env_name,
