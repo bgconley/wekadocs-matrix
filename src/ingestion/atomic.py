@@ -562,7 +562,8 @@ class AtomicIngestionCoordinator:
                     if sample_chunk
                     else None
                 ),
-                sample_chunk_title=sample_chunk.get("title"),
+                sample_chunk_title=sample_chunk.get("title")
+                or sample_chunk.get("heading"),
             )
 
             # Phase 2: Pre-commit validation
