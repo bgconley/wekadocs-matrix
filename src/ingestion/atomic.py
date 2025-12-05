@@ -531,13 +531,19 @@ class AtomicIngestionCoordinator:
                 entities_count=len(entities),
                 mentions_count=len(mentions),
                 references_count=len(references),
-                total_chars=sum(len(s.get("content", "")) for s in sections),
+                total_chars=sum(
+                    len(s.get("text", "") or s.get("content", "")) for s in sections
+                ),
                 parse_time_ms=round(parse_time_ms, 2),
             )
 
             # LGTM Phase 4: Verbose log event 3 - chunking_complete
             # (sections are the chunks in our architecture)
-            total_tokens = sum(int(s.get("token_count", 0)) for s in sections)
+            # Note: Parser creates "tokens", assembler creates "token_count" - check both
+            def _get_tokens(s: Dict) -> int:
+                return int(s.get("token_count") or s.get("tokens") or 0)
+
+            total_tokens = sum(_get_tokens(s) for s in sections)
             avg_tokens = total_tokens / len(sections) if sections else 0
             sample_chunk = sections[0] if sections else {}
             logger.info(
@@ -547,14 +553,14 @@ class AtomicIngestionCoordinator:
                 chunks_count=len(sections),
                 total_tokens=total_tokens,
                 avg_tokens_per_chunk=round(avg_tokens, 1),
-                max_tokens=max(
-                    (int(s.get("token_count", 0)) for s in sections), default=0
-                ),
-                min_tokens=min(
-                    (int(s.get("token_count", 0)) for s in sections), default=0
-                ),
+                max_tokens=max((_get_tokens(s) for s in sections), default=0),
+                min_tokens=min((_get_tokens(s) for s in sections), default=0),
                 sample_chunk_text=(
-                    sample_chunk.get("content", "")[:200] if sample_chunk else None
+                    (sample_chunk.get("text", "") or sample_chunk.get("content", ""))[
+                        :200
+                    ]
+                    if sample_chunk
+                    else None
                 ),
                 sample_chunk_title=sample_chunk.get("title"),
             )
