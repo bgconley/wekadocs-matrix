@@ -8,7 +8,8 @@ Key Pattern: Deferred Commit
 1. Prepare Phase: Compute all embeddings and validate data BEFORE any writes
 2. Write Phase: Start Neo4j transaction, write to Neo4j, write to Qdrant
 3. Commit Phase: Only commit Neo4j AFTER Qdrant succeeds
-4. Compensate Phase: If Qdrant fails, rollback Neo4j; if Neo4j committed, delete from Qdrant
+4. Compensate Phase: If Qdrant fails, rollback Neo4j;
+   if Neo4j committed, delete from Qdrant
 
 This ensures that chunk IDs in Neo4j always have corresponding vectors in Qdrant.
 """
@@ -21,6 +22,7 @@ import random
 import re
 import time
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
@@ -178,7 +180,7 @@ logger = get_logger(__name__)
 _tracer = trace.get_tracer("wekadocs.ingestion") if OTEL_AVAILABLE else None
 
 # Allowlist of valid Entity→Entity relationship types for Cypher injection defense
-# Phase 1.2: These are the only relationship types allowed to be interpolated into Cypher
+# Phase 1.2: Only these rel types are allowed to be interpolated into Cypher
 # Phase 2 Cleanup: Removed DEPENDS_ON and REQUIRES (never materialized by ingestion)
 ALLOWED_ENTITY_RELATIONSHIP_TYPES = frozenset(
     {
@@ -253,8 +255,8 @@ class AtomicIngestionCoordinator:
             config: Application configuration
             validate_before_commit: Run pre-commit validation (recommended)
             strict_mode: Fail on validation warnings (not just errors).
-                         If None (default), reads from VALIDATION_STRICT_MODE env var.
-                         Explicit True/False overrides config for backward compatibility.
+                         If None, reads from VALIDATION_STRICT_MODE env var.
+                         Explicit True/False overrides config for compat.
         """
         self.neo4j_driver = neo4j_driver
         self.qdrant_client = qdrant_client
@@ -271,12 +273,12 @@ class AtomicIngestionCoordinator:
         else:
             self.strict_mode = strict_mode
 
-        # Phase 5: Entity vector support (default ON for GraphBuilder schema parity)
-        # Entity vector is a copy of content embedding under "entity" name slot.
-        # Disable via QDRANT_INCLUDE_ENTITY_VECTOR=false to save ~33% vector storage.
-        self.include_entity_vector = (
-            os.getenv("QDRANT_INCLUDE_ENTITY_VECTOR", "true").lower() == "true"
-        )
+        # DEPRECATED: Dense entity vector has been removed (2025-12-06)
+        # The entity dense vector was broken - it duplicated content embedding.
+        # Replaced by entity-sparse for lexical entity name matching.
+        # This flag is kept for backward compatibility but always evaluates to False.
+        # TODO: Remove this flag entirely in a future cleanup.
+        self.include_entity_vector = False  # Always False - entity dense removed
 
         self.validator = IngestionValidator(neo4j_driver, qdrant_client, config)
 
@@ -522,6 +524,39 @@ class AtomicIngestionCoordinator:
             references = prepared.get("references", [])  # Phase 3: Cross-doc refs
             document_id = document["id"]
 
+            # Attach mentions to sections for entity-sparse embedding generation
+            # Build section_id → mentions mapping (mirrors build_graph.py:454 logic)
+            mentions_by_section: Dict[str, List[Dict]] = defaultdict(list)
+            for mention in mentions:
+                # Section→Entity mentions have section_id key
+                section_id = mention.get("section_id")
+                if section_id:
+                    mentions_by_section[section_id].append(mention)
+
+            # Attach _mentions to each section
+            # Note: Chunk assembly creates new section IDs; original IDs are stored
+            # in 'original_section_ids'. Check both current ID and originals.
+            for section in sections:
+                section_mentions = []
+                # Check current section ID
+                section_id = section.get("id")
+                if section_id and section_id in mentions_by_section:
+                    section_mentions.extend(mentions_by_section[section_id])
+                # Check original section IDs (from chunk assembly)
+                original_ids = section.get("original_section_ids", [])
+                for orig_id in original_ids:
+                    if orig_id in mentions_by_section:
+                        section_mentions.extend(mentions_by_section[orig_id])
+                # Deduplicate by entity_id to avoid double-counting
+                seen_entity_ids = set()
+                unique_mentions = []
+                for m in section_mentions:
+                    eid = m.get("entity_id")
+                    if eid and eid not in seen_entity_ids:
+                        seen_entity_ids.add(eid)
+                        unique_mentions.append(m)
+                section["_mentions"] = unique_mentions
+
             # LGTM Phase 4: Verbose log event 2 - document_parsed
             logger.info(
                 "document_parsed",
@@ -539,7 +574,7 @@ class AtomicIngestionCoordinator:
 
             # LGTM Phase 4: Verbose log event 3 - chunking_complete
             # (sections are the chunks in our architecture)
-            # Note: Parser creates "tokens", assembler creates "token_count" - check both
+            # Note: Parser uses "tokens", assembler uses "token_count"
             def _get_tokens(s: Dict) -> int:
                 return int(s.get("token_count") or s.get("tokens") or 0)
 
@@ -624,7 +659,7 @@ class AtomicIngestionCoordinator:
                 has_sparse=has_sparse,
                 has_colbert=has_colbert,
                 embed_time_ms=round(embed_time_ms, 2),
-                vector_types=["content", "title", "entity"]
+                vector_types=["content", "title", "doc_title"]
                 + (["late-interaction"] if has_colbert else []),
             )
 
@@ -664,7 +699,7 @@ class AtomicIngestionCoordinator:
             )
             saga_time_ms = (time.time() - saga_start) * 1000
 
-            # LGTM Phase 4: Verbose log events 5 & 6 are emitted inside _execute_atomic_saga
+            # LGTM Phase 4: Verbose log events 5 & 6 emitted in _execute_atomic_saga
             # (neo4j_write_complete and qdrant_upsert_complete)
 
             duration_ms = int((time.time() - start_time) * 1000)
@@ -912,8 +947,8 @@ class AtomicIngestionCoordinator:
         # Respect feature flag
         references_cfg = getattr(config, "references", None)
         if references_cfg and getattr(references_cfg, "enabled", False):
-            # Extract other reference patterns from section text (see_also, related, refer_to)
-            # These patterns work on plain text without needing markdown link syntax
+            # Extract reference patterns from text (see_also, related, refer_to)
+            # Works on plain text without needing markdown link syntax
             reference_edges, ref_resolved, ref_unresolved = extract_chunk_references(
                 sections,
                 known_doc_titles=None,  # Target resolution happens in Neo4j transaction
@@ -975,12 +1010,12 @@ class AtomicIngestionCoordinator:
         """
         Compute all embeddings before any writes with production-grade batching.
 
-        This ensures we have all vector data ready before starting the atomic transaction.
-        Computes dense, sparse, and ColBERT embeddings to match build_graph.py behavior.
+        Ensures vector data is ready before the atomic transaction.
+        Computes dense, sparse, and ColBERT embeddings (build_graph.py parity).
 
-        Phase 1 Feature Parity: Token-budgeted batching (EMBED_BATCH_MAX_TOKENS=7000)
-        Phase 2 Feature Parity: Per-batch error isolation with None placeholders
-        Phase 3 Feature Parity: Comprehensive validation layer (dimension, schema, metadata)
+        Phase 1: Token-budgeted batching (EMBED_BATCH_MAX_TOKENS=7000)
+        Phase 2: Per-batch error isolation with None placeholders
+        Phase 3: Validation layer (dimension, schema, metadata)
 
         Returns:
             Dict with:
@@ -988,6 +1023,49 @@ class AtomicIngestionCoordinator:
             - entities: Dict[entity_id -> [...]] (reserved for future)
             - stats: Dict with sparse coverage and batch metrics
         """
+        # Build entity_id → name lookup for entity-sparse generation
+        # Entities is a Dict[entity_id → entity_dict] with 'id' and 'name' fields
+        entity_id_to_name: Dict[str, str] = {}
+        entity_name_fallback_count = 0
+        if entities:
+            for eid, entity in entities.items():
+                if not isinstance(entity, dict):
+                    continue
+                # Primary: use 'name' field (expected for all entity types)
+                ename = entity.get("name", "")
+                if not ename:
+                    # Safety-net fallback with explicit logging:
+                    # Try 'instruction' (Steps), 'description', or 'content'
+                    fallback_field = None
+                    if entity.get("instruction"):
+                        ename = entity["instruction"][:80]
+                        fallback_field = "instruction"
+                    elif entity.get("description"):
+                        ename = entity["description"][:80]
+                        fallback_field = "description"
+                    elif entity.get("content"):
+                        ename = entity["content"][:80]
+                        fallback_field = "content"
+                    if fallback_field:
+                        entity_name_fallback_count += 1
+                        logger.warning(
+                            "entity_missing_name_field_using_fallback",
+                            entity_id=eid[:16] if eid else "unknown",
+                            entity_label=entity.get("label", "unknown"),
+                            fallback_field=fallback_field,
+                            fallback_value_preview=ename[:40] if ename else "",
+                        )
+                if eid and ename:
+                    entity_id_to_name[eid] = ename
+
+        if entity_name_fallback_count > 0:
+            logger.warning(
+                "entity_name_fallback_summary",
+                total_entities=len(entities) if entities else 0,
+                fallback_count=entity_name_fallback_count,
+                message="Entities missing 'name' - fix extraction code",
+            )
+
         embeddings = {
             "sections": {},  # section_id -> {content, title, sparse, colbert}
             "entities": {},  # entity_id -> [...] (reserved)
@@ -996,13 +1074,13 @@ class AtomicIngestionCoordinator:
                 "sparse_eligible": 0,  # Non-stub chunks eligible for sparse
                 "sparse_success": 0,  # Chunks that got sparse vectors
                 "sparse_failures": 0,  # Batches where embed_sparse failed
-                "sparse_content_missing": 0,  # Non-stub chunks without sparse (SLO metric)
+                "sparse_content_missing": 0,  # Non-stub w/o sparse (SLO metric)
                 # Batch metrics
                 "batch_count": 0,
                 "total_tokens_processed": 0,
-                # Truncation tracking (consensus-identified enhancement for SLO monitoring)
-                "content_truncated": 0,  # Sections that exceeded max_embed_tokens
-                "tokens_dropped": 0,  # Total tokens lost to truncation
+                # Truncation tracking (SLO monitoring)
+                "content_truncated": 0,  # Sections exceeding max_embed_tokens
+                "tokens_dropped": 0,  # Tokens lost to truncation
             },
         }
         stats = embeddings["stats"]
@@ -1061,11 +1139,27 @@ class AtomicIngestionCoordinator:
         )
 
         # Check if doc_title-sparse vectors should be generated
-        # This flag allows disabling doc_title sparse vectors independently of text-sparse
-        # Default: True for backward compatibility with existing deployments
+        # Allows disabling doc_title sparse independently of text-sparse
+        # Default: True for backward compat
         enable_doc_title_sparse = getattr(
             getattr(self.config.search.vector, "qdrant", None),
             "enable_doc_title_sparse",
+            True,
+        )
+
+        # Check if title-sparse vectors should be generated
+        # (section heading lexical matching). Default: True
+        enable_title_sparse = getattr(
+            getattr(self.config.search.vector, "qdrant", None),
+            "enable_title_sparse",
+            True,
+        )
+
+        # Check if entity-sparse vectors should be generated
+        # (entity name lexical matching). Default: True
+        enable_entity_sparse = getattr(
+            getattr(self.config.search.vector, "qdrant", None),
+            "enable_entity_sparse",
             True,
         )
 
@@ -1092,8 +1186,8 @@ class AtomicIngestionCoordinator:
 
             content_text = builder._build_section_text_for_embedding(section)
 
-            # Skip sections with empty content to prevent HTTP 400 errors from embedding API
-            # This handles microdoc stubs created by GreedyCombinerV2 with stub["text"] = ""
+            # Skip sections with empty content to prevent HTTP 400 from embedding API
+            # Handles microdoc stubs from GreedyCombinerV2 with stub["text"] = ""
             if not content_text or not content_text.strip():
                 logger.debug(
                     "skipping_empty_section_embedding",
@@ -1246,6 +1340,16 @@ class AtomicIngestionCoordinator:
         doc_title_sparse_embeddings: Optional[List[Optional[dict]]] = (
             [] if (supports_sparse and enable_doc_title_sparse) else None
         )
+        # title-sparse: BM25-style lexical matching for section headings
+        # Enables exact term matching for heading-based queries
+        title_sparse_embeddings: Optional[List[Optional[dict]]] = (
+            [] if (supports_sparse and enable_title_sparse) else None
+        )
+        # entity-sparse: BM25-style lexical matching for entity names
+        # Enables exact term matching for entity-based queries (e.g., "WEKA", "NFS")
+        entity_sparse_embeddings: Optional[List[Optional[dict]]] = (
+            [] if (supports_sparse and enable_entity_sparse) else None
+        )
         colbert_embeddings: Optional[List[Optional[List[List[float]]]]] = (
             [] if supports_colbert else None
         )
@@ -1342,6 +1446,89 @@ class AtomicIngestionCoordinator:
                     # Insert None placeholders to maintain index alignment
                     doc_title_sparse_embeddings.extend([None] * len(batch_doc_title))
 
+            # title-sparse: BM25-style lexical matching for section headings
+            if title_sparse_embeddings is not None and hasattr(
+                builder.embedder, "embed_sparse"
+            ):
+                try:
+                    title_sparse_embeddings.extend(
+                        builder.embedder.embed_sparse(batch_title)
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "title_sparse_embedding_batch_failed_inserting_placeholders",
+                        error=str(exc),
+                        batch_index=batch_idx,
+                        batch_size=len(batch_title),
+                    )
+                    # Insert None placeholders to maintain index alignment
+                    title_sparse_embeddings.extend([None] * len(batch_title))
+
+            # entity-sparse: BM25-style lexical matching for entity names
+            # Build entity text from section mentions for each chunk in this batch
+            if entity_sparse_embeddings is not None and hasattr(
+                builder.embedder, "embed_sparse"
+            ):
+                try:
+                    # Build entity texts for this batch
+                    batch_entity_texts = []
+                    for i in batch_indices:
+                        section = section_data[i]["section"]
+                        # Get mentions attached to section (from ingest_document_atomic)
+                        section_mentions = section.get("_mentions", [])
+                        if section_mentions:
+                            # Look up entity names from entity_id using our lookup dict
+                            entity_names = []
+                            for m in section_mentions:
+                                entity_id = m.get("entity_id")
+                                if entity_id and entity_id in entity_id_to_name:
+                                    entity_names.append(entity_id_to_name[entity_id])
+                            entity_text = " ".join(entity_names) if entity_names else ""
+                        else:
+                            entity_text = ""
+                        batch_entity_texts.append(entity_text)
+
+                    # Only embed non-empty entity texts; use None for empty
+                    if any(t.strip() for t in batch_entity_texts):
+                        # Embed non-empty texts, None for empty ones
+                        embeddings_result = []
+                        non_empty_texts = []
+                        non_empty_indices = []
+                        for idx, text in enumerate(batch_entity_texts):
+                            if text.strip():
+                                non_empty_texts.append(text)
+                                non_empty_indices.append(idx)
+
+                        if non_empty_texts:
+                            sparse_results = builder.embedder.embed_sparse(
+                                non_empty_texts
+                            )
+                            result_iter = iter(sparse_results)
+                            for idx in range(len(batch_entity_texts)):
+                                if idx in non_empty_indices:
+                                    embeddings_result.append(next(result_iter))
+                                else:
+                                    embeddings_result.append(None)
+                            entity_sparse_embeddings.extend(embeddings_result)
+                        else:
+                            entity_sparse_embeddings.extend(
+                                [None] * len(batch_entity_texts)
+                            )
+                    else:
+                        # All empty - use None placeholders
+                        entity_sparse_embeddings.extend(
+                            [None] * len(batch_entity_texts)
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "entity_sparse_embedding_batch_failed_inserting_placeholders",
+                        error=str(exc),
+                        batch_index=batch_idx,
+                        batch_size=len(batch_indices),
+                    )
+                    # Insert None placeholders to maintain index alignment
+                    entity_sparse_embeddings.extend([None] * len(batch_indices))
+
             # Phase 2: Per-Batch Error Isolation for ColBERT Embeddings
             if colbert_embeddings is not None and hasattr(
                 builder.embedder, "embed_colbert"
@@ -1361,35 +1548,55 @@ class AtomicIngestionCoordinator:
                     colbert_embeddings.extend([None] * len(batch_content))
 
         # Validate batch output alignment
-        if len(content_embeddings) != len(section_data):
+        expected = len(section_data)
+        if len(content_embeddings) != expected:
             raise RuntimeError(
-                f"Content embedding count mismatch: expected {len(section_data)}, got {len(content_embeddings)}"
+                f"Content embedding mismatch: expected {expected}, "
+                f"got {len(content_embeddings)}"
             )
-        if len(title_embeddings) != len(section_data):
+        if len(title_embeddings) != expected:
             raise RuntimeError(
-                f"Title embedding count mismatch: expected {len(section_data)}, got {len(title_embeddings)}"
+                f"Title embedding mismatch: expected {expected}, "
+                f"got {len(title_embeddings)}"
             )
-        if len(doc_title_embeddings) != len(section_data):
+        if len(doc_title_embeddings) != expected:
             raise RuntimeError(
-                f"Doc title embedding count mismatch: expected {len(section_data)}, got {len(doc_title_embeddings)}"
+                f"Doc title embedding mismatch: expected {expected}, "
+                f"got {len(doc_title_embeddings)}"
             )
-        if sparse_embeddings is not None and len(sparse_embeddings) != len(
-            section_data
+        if sparse_embeddings is not None and len(sparse_embeddings) != expected:
+            raise RuntimeError(
+                f"Sparse embedding mismatch: expected {expected}, "
+                f"got {len(sparse_embeddings)}"
+            )
+        if (
+            doc_title_sparse_embeddings is not None
+            and len(doc_title_sparse_embeddings) != expected
         ):
             raise RuntimeError(
-                f"Sparse embedding count mismatch: expected {len(section_data)}, got {len(sparse_embeddings)}"
+                f"Doc title sparse mismatch: expected {expected}, "
+                f"got {len(doc_title_sparse_embeddings)}"
             )
-        if doc_title_sparse_embeddings is not None and len(
-            doc_title_sparse_embeddings
-        ) != len(section_data):
-            raise RuntimeError(
-                f"Doc title sparse embedding count mismatch: expected {len(section_data)}, got {len(doc_title_sparse_embeddings)}"
-            )
-        if colbert_embeddings is not None and len(colbert_embeddings) != len(
-            section_data
+        if (
+            title_sparse_embeddings is not None
+            and len(title_sparse_embeddings) != expected
         ):
             raise RuntimeError(
-                f"ColBERT embedding count mismatch: expected {len(section_data)}, got {len(colbert_embeddings)}"
+                f"Title sparse mismatch: expected {expected}, "
+                f"got {len(title_sparse_embeddings)}"
+            )
+        if (
+            entity_sparse_embeddings is not None
+            and len(entity_sparse_embeddings) != expected
+        ):
+            raise RuntimeError(
+                f"Entity sparse mismatch: expected {expected}, "
+                f"got {len(entity_sparse_embeddings)}"
+            )
+        if colbert_embeddings is not None and len(colbert_embeddings) != expected:
+            raise RuntimeError(
+                f"ColBERT embedding mismatch: expected {expected}, "
+                f"got {len(colbert_embeddings)}"
             )
 
         # =====================================================================
@@ -1411,6 +1618,18 @@ class AtomicIngestionCoordinator:
                 doc_title_sparse_embeddings[idx]
                 if doc_title_sparse_embeddings is not None
                 and idx < len(doc_title_sparse_embeddings)
+                else None
+            )
+            title_sparse_vector = (
+                title_sparse_embeddings[idx]
+                if title_sparse_embeddings is not None
+                and idx < len(title_sparse_embeddings)
+                else None
+            )
+            entity_sparse_vector = (
+                entity_sparse_embeddings[idx]
+                if entity_sparse_embeddings is not None
+                and idx < len(entity_sparse_embeddings)
                 else None
             )
             colbert_vector = (
@@ -1516,6 +1735,14 @@ class AtomicIngestionCoordinator:
             # Add doc_title sparse if computed (may be None for failed batches)
             if doc_title_sparse_embeddings is not None:
                 section_embedding["doc_title_sparse"] = doc_title_sparse_vector
+
+            # Add title sparse if computed (may be None for failed batches)
+            if title_sparse_embeddings is not None:
+                section_embedding["title_sparse"] = title_sparse_vector
+
+            # Add entity sparse if computed (may be None for failed batches)
+            if entity_sparse_embeddings is not None:
+                section_embedding["entity_sparse"] = entity_sparse_vector
 
             # Add ColBERT if computed (may be None for failed batches)
             if colbert_embeddings is not None:
@@ -1680,8 +1907,10 @@ class AtomicIngestionCoordinator:
                     vector_types=[
                         "content",
                         "title",
-                        "entity",
+                        "doc_title",
                         "text-sparse",
+                        "title-sparse",
+                        "entity-sparse",
                         "late-interaction",
                     ],
                 )
@@ -2111,7 +2340,7 @@ class AtomicIngestionCoordinator:
     def _neo4j_create_mentions(self, tx, mentions: List[Dict]):
         """Create MENTIONS and Entity→Entity relationships within a transaction.
 
-        Phase 1.2 Fix: This method now routes relationships based on their key structure:
+        Phase 1.2 Fix: Routes relationships based on their key structure:
         - Section→Entity mentions have 'section_id' and 'entity_id' keys
         - Entity→Entity relationships have 'from_id' and 'to_id' keys
 
@@ -2186,7 +2415,7 @@ class AtomicIngestionCoordinator:
         return self._neo4j_create_references_streaming(tx, references)
 
     def _neo4j_create_references_streaming(self, tx, references: List[Dict]) -> int:
-        """Streaming, rollback-safe creation of REFERENCES edges (production-grade fix for bug 11)."""
+        """Streaming REFERENCES edge creation (rollback-safe, bug 11 fix)."""
 
         if not references:
             return 0
@@ -2387,7 +2616,9 @@ class AtomicIngestionCoordinator:
 
                 query = """
                 UNWIND $hints AS hint
-                CALL db.index.fulltext.queryNodes('document_title_ft', hint) YIELD node AS d, score
+                CALL db.index.fulltext.queryNodes(
+                    'document_title_ft', hint
+                ) YIELD node AS d, score
                 WHERE score > 0.5
                 WITH hint, d, score
                 ORDER BY score DESC, size(d.title) ASC
@@ -2513,7 +2744,7 @@ class AtomicIngestionCoordinator:
 
         return created_count
 
-    # Override earlier definition to delegate to streaming, production-grade path (bug 11)
+    # Override to delegate to streaming path (bug 11 fix)
     def _neo4j_create_references(self, tx, references: List[Dict]) -> int:
         return self._neo4j_create_references_streaming(tx, references)
 
@@ -2568,14 +2799,14 @@ class AtomicIngestionCoordinator:
                 rejected_count += len(rels)
                 continue
 
-            # Since relationship types must be known at query compile time in Cypher,
-            # we use separate queries per type (validated above against allowlist)
+            # Relationship types must be known at query compile time in Cypher,
+            # so we use separate queries per type (validated via allowlist)
             #
-            # Issue #7 Fix: Use OPTIONAL MATCH and return counts to detect missing entities
-            # Issue #18 Fix: Use datetime({timezone: 'UTC'}) for explicit UTC timezone
+            # Issue #7 Fix: OPTIONAL MATCH + counts to detect missing entities
+            # Issue #18 Fix: datetime({timezone: 'UTC'}) for explicit UTC
             #
-            # Multi-model validation fix: Aggregate missing counts BEFORE filtering
-            # The collect/unwind pattern preserves missing counts through the WHERE clause
+            # Multi-model fix: Aggregate missing counts BEFORE filtering
+            # collect/unwind pattern preserves missing counts through WHERE
             query = f"""
             UNWIND $rels AS rel
             OPTIONAL MATCH (from:Entity {{id: rel.from_id}})
@@ -2812,8 +3043,8 @@ class AtomicIngestionCoordinator:
                 or not builder.embedding_settings
             ):
                 raise ValueError(
-                    "GraphBuilder missing embedding_settings - cannot create canonical payload. "
-                    "Ensure embedding configuration is properly set in config."
+                    "GraphBuilder missing embedding_settings - cannot create "
+                    "canonical payload. Ensure embedding config is set."
                 )
 
             embedding_metadata = canonicalize_embedding_metadata(
@@ -2898,7 +3129,7 @@ class AtomicIngestionCoordinator:
                 **embedding_metadata,
             }
 
-            # CRITICAL: Remove any legacy embedding_model field that might have leaked in
+            # CRITICAL: Remove legacy embedding_model field that may have leaked
             payload = ensure_no_embedding_model_in_payload(payload)
 
             # Build vectors dict with dense vectors
@@ -2908,10 +3139,9 @@ class AtomicIngestionCoordinator:
                 "doc_title": section_embeddings["doc_title"],
             }
 
-            # Phase 5: Add entity vector if enabled (copy of content embedding)
-            # This maintains schema parity with GraphBuilder when QDRANT_INCLUDE_ENTITY_VECTOR=true
-            if self.include_entity_vector:
-                vectors["entity"] = section_embeddings["content"]
+            # REMOVED: Dense entity vector was broken (duplicated content embedding)
+            # Now using entity-sparse for lexical entity name matching instead
+            # See: build_graph.py and qdrant_schema.py for details
 
             # Add sparse vector if available (matching build_graph.py pattern)
             sparse_vector = section_embeddings.get("sparse")
@@ -2931,7 +3161,7 @@ class AtomicIngestionCoordinator:
                         indices=list(indices), values=list(values)
                     )
 
-            # Add doc_title sparse vector if available (o3 recommendation for literal title matches)
+            # Add doc_title sparse vector if available (literal title matches)
             doc_title_sparse_vector = section_embeddings.get("doc_title_sparse")
             if doc_title_sparse_vector:
                 indices = (
@@ -2946,6 +3176,42 @@ class AtomicIngestionCoordinator:
                 )
                 if indices and values:
                     vectors["doc_title-sparse"] = SparseVector(
+                        indices=list(indices), values=list(values)
+                    )
+
+            # Add title sparse vector if available (lexical section heading match)
+            title_sparse_vector = section_embeddings.get("title_sparse")
+            if title_sparse_vector:
+                indices = (
+                    title_sparse_vector.get("indices")
+                    if isinstance(title_sparse_vector, dict)
+                    else None
+                )
+                values = (
+                    title_sparse_vector.get("values")
+                    if isinstance(title_sparse_vector, dict)
+                    else None
+                )
+                if indices and values:
+                    vectors["title-sparse"] = SparseVector(
+                        indices=list(indices), values=list(values)
+                    )
+
+            # Add entity sparse vector if available (lexical matching on entity names)
+            entity_sparse_vector = section_embeddings.get("entity_sparse")
+            if entity_sparse_vector:
+                indices = (
+                    entity_sparse_vector.get("indices")
+                    if isinstance(entity_sparse_vector, dict)
+                    else None
+                )
+                values = (
+                    entity_sparse_vector.get("values")
+                    if isinstance(entity_sparse_vector, dict)
+                    else None
+                )
+                if indices and values:
+                    vectors["entity-sparse"] = SparseVector(
                         indices=list(indices), values=list(values)
                     )
 
@@ -2973,24 +3239,25 @@ class AtomicIngestionCoordinator:
                 "title": builder.embedding_settings.dims,
                 "doc_title": builder.embedding_settings.dims,
             }
-            # Phase 5: Include entity dimension if entity vector is enabled
-            if self.include_entity_vector:
-                expected_dim["entity"] = builder.embedding_settings.dims
+            # REMOVED: Dense entity vector - replaced by entity-sparse
+            # (see build_graph.py for entity-sparse implementation)
 
-            # Phase 7F: Batch Qdrant upserts to prevent timeout for large ColBERT payloads
-            # Large documents with many chunks can produce 30MB+ JSON payloads that exceed
-            # the 30-second client timeout. Batching reduces payload size.
-            # See: Debug investigation 2025-12-01 - ResponseHandlingException timeout fix
+            # Phase 7F: Batch Qdrant upserts to prevent timeout on large ColBERT
+            # Large docs can produce 30MB+ JSON payloads exceeding 30s timeout.
+            # Batching reduces payload size. See: Debug 2025-12-01 fix.
             batch_size = int(os.getenv("QDRANT_UPSERT_BATCH_SIZE", "5"))
             max_bytes_per_batch = int(
                 os.getenv("QDRANT_UPSERT_MAX_BYTES", str(12 * 1024 * 1024))
             )  # ~12MB default target
 
             json_overhead_factor = 2.5  # conservative multiplier for JSON vs. binary
-            dense_vector_dims = 2 + (1 if self.include_entity_vector else 0)
+            # Dense vectors: content, title, doc_title (3 standard dense)
+            # late-interaction is multivector with variable size, handled separately
+            # entity dense removed (2025-12-06), replaced by entity-sparse
+            dense_vector_count = 3  # content + title + doc_title
             dense_dim_bytes = int(
                 builder.embedding_settings.dims
-                * dense_vector_dims
+                * dense_vector_count
                 * 4
                 * json_overhead_factor
             )
@@ -3059,7 +3326,7 @@ class AtomicIngestionCoordinator:
                     max_batch_mb=round(max_bytes_per_batch / 1_000_000, 2),
                 )
 
-                # Use retry wrapper with dimension validation for transient network failures
+                # Use retry wrapper with dimension validation for transient errors
                 self._qdrant_upsert_with_retry(collection, batch, expected_dim)
 
         return len(points)
@@ -3078,13 +3345,13 @@ class AtomicIngestionCoordinator:
         - Pre-upsert dimension validation for all vectors
         - Prometheus metrics (qdrant_upsert_total, qdrant_operation_latency_ms)
 
-        Handles transient network failures that are common in distributed systems.
-        Non-retriable errors (e.g., schema mismatch, dimension mismatch) fail immediately.
+        Handles transient network failures common in distributed systems.
+        Non-retriable errors (schema/dimension mismatch) fail immediately.
 
         Args:
             collection: Qdrant collection name
             points: List of PointStruct to upsert
-            expected_dim: Expected vector dimensions, e.g. {"content": 1024, "title": 1024}
+            expected_dim: Expected vector dims, e.g. {"content": 1024}
             max_retries: Maximum retry attempts
 
         Raises:
@@ -3109,8 +3376,8 @@ class AtomicIngestionCoordinator:
                 OSError,
                 _get_response_handling_exception(),
             ) as e:
-                # Phase 7F: Extended retry to include ResponseHandlingException
-                # which is raised by qdrant-client on HTTP timeouts (e.g., large ColBERT payloads)
+                # Phase 7F: Extended retry includes ResponseHandlingException
+                # (raised by qdrant-client on HTTP timeouts, e.g., large ColBERT)
                 last_exception = e
                 if attempt < max_retries:
                     delay = min(base_delay * (2**attempt), 30.0)
@@ -3139,7 +3406,7 @@ class AtomicIngestionCoordinator:
                 raise
             except Exception as e:
                 # Phase 7F: Log non-retriable exceptions before re-raising
-                # This preserves error context that was previously lost in silent re-raise
+                # Preserves error context that was previously lost
                 logger.error(
                     "qdrant_upsert_non_retriable_error",
                     error=str(e),
@@ -3177,8 +3444,8 @@ class AtomicIngestionCoordinator:
         """
         Delete points from Qdrant with retry logic and Prometheus telemetry.
 
-        Compensation is critical - we retry harder to ensure data consistency.
-        Phase 4: Records qdrant_delete_total counter and qdrant_operation_latency_ms histogram.
+        Compensation is critical - we retry harder to ensure consistency.
+        Phase 4: Records qdrant_delete_total and qdrant_operation_latency_ms.
 
         Args:
             collection: Qdrant collection name

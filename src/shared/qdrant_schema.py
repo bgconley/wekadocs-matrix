@@ -33,10 +33,12 @@ class QdrantSchemaPlan:
 def build_qdrant_schema(
     settings: EmbeddingSettings,
     *,
-    include_entity: bool = False,
+    include_entity: bool = False,  # DEPRECATED: Dense entity vector removed (was broken)
     enable_sparse: Optional[bool] = None,
     enable_colbert: Optional[bool] = None,
     enable_doc_title_sparse: Optional[bool] = None,
+    enable_title_sparse: Optional[bool] = None,  # NEW: Lexical heading matching
+    enable_entity_sparse: Optional[bool] = None,  # NEW: Lexical entity name matching
 ) -> QdrantSchemaPlan:
     """Return the desired Qdrant schema for the embedding profile."""
 
@@ -46,8 +48,14 @@ def build_qdrant_schema(
         "title": VectorParams(size=dims, distance=Distance.COSINE),
         "doc_title": VectorParams(size=dims, distance=Distance.COSINE),
     }
+    # REMOVED: Dense entity vector - it was broken (duplicated content embedding)
+    # and has been replaced by entity-sparse for lexical entity name matching.
+    # The include_entity parameter is now a no-op for backward compatibility.
     if include_entity:
-        vectors_config["entity"] = VectorParams(size=dims, distance=Distance.COSINE)
+        logger.warning(
+            "include_entity=True is deprecated. Dense entity vector has been removed "
+            "and replaced by entity-sparse. This parameter will be ignored."
+        )
 
     capabilities = settings.capabilities
     use_sparse = (
@@ -77,6 +85,34 @@ def build_qdrant_schema(
         else:
             notes.append(
                 "doc_title-sparse vector disabled via enable_doc_title_sparse=False."
+            )
+
+        # title-sparse: Lexical matching for section headings
+        # Enables exact term matching for heading-based queries
+        # Example: "NFS mount" matches section titled "Mounting NFS Filesystems"
+        use_title_sparse = (
+            enable_title_sparse if enable_title_sparse is not None else True
+        )
+        if use_title_sparse:
+            sparse_vectors_config["title-sparse"] = SparseVectorParams(
+                index=SparseIndexParams(on_disk=True)
+            )
+        else:
+            notes.append("title-sparse vector disabled via enable_title_sparse=False.")
+
+        # entity-sparse: Lexical matching for entity names mentioned in chunks
+        # Enables exact term matching for entity-based queries
+        # Example: "WEKA" or "NFS" matches chunks mentioning those entities
+        use_entity_sparse = (
+            enable_entity_sparse if enable_entity_sparse is not None else True
+        )
+        if use_entity_sparse:
+            sparse_vectors_config["entity-sparse"] = SparseVectorParams(
+                index=SparseIndexParams(on_disk=True)
+            )
+        else:
+            notes.append(
+                "entity-sparse vector disabled via enable_entity_sparse=False."
             )
     else:
         notes.append("Sparse vector support disabled for current profile or config.")
@@ -137,8 +173,10 @@ def validate_qdrant_schema(
     *,
     require_sparse: Optional[bool] = None,
     require_colbert: Optional[bool] = None,
-    include_entity: Optional[bool] = None,
+    include_entity: Optional[bool] = None,  # DEPRECATED: No longer validated
     require_doc_title_sparse: Optional[bool] = None,
+    require_title_sparse: Optional[bool] = None,  # NEW: Validate title-sparse
+    require_entity_sparse: Optional[bool] = None,  # NEW: Validate entity-sparse
     require_payload_fields: Optional[Sequence[str]] = None,
     strict: bool = False,
 ) -> None:
@@ -157,7 +195,7 @@ def validate_qdrant_schema(
         if require_colbert is None
         else require_colbert
     )
-    include_entity = bool(include_entity)
+    include_entity = bool(include_entity)  # Deprecated, ignored
     required_payload_fields = list(require_payload_fields or [])
     # Default require_doc_title_sparse to True when sparse is required (backward compat)
     effective_require_doc_title_sparse = (
@@ -165,10 +203,12 @@ def validate_qdrant_schema(
     )
     expected_plan = build_qdrant_schema(
         settings,
-        include_entity=include_entity,
+        include_entity=include_entity,  # Deprecated, passed for compatibility
         enable_sparse=require_sparse,
         enable_colbert=require_colbert,
         enable_doc_title_sparse=effective_require_doc_title_sparse,
+        enable_title_sparse=require_title_sparse,  # NEW
+        enable_entity_sparse=require_entity_sparse,  # NEW
     )
 
     try:
@@ -226,6 +266,30 @@ def validate_qdrant_schema(
                     f"Qdrant collection '{collection_name}' missing required sparse vector "
                     f"'doc_title-sparse'. Set require_doc_title_sparse=False to skip this check "
                     f"or recreate the collection with doc_title-sparse support."
+                )
+        # Validate title-sparse presence when required
+        effective_require_title_sparse = (
+            require_title_sparse if require_title_sparse is not None else require_sparse
+        )
+        if effective_require_title_sparse:
+            if not sparse or "title-sparse" not in sparse:
+                raise RuntimeError(
+                    f"Qdrant collection '{collection_name}' missing required sparse vector "
+                    f"'title-sparse'. Set require_title_sparse=False to skip this check "
+                    f"or recreate the collection with title-sparse support."
+                )
+        # Validate entity-sparse presence when required
+        effective_require_entity_sparse = (
+            require_entity_sparse
+            if require_entity_sparse is not None
+            else require_sparse
+        )
+        if effective_require_entity_sparse:
+            if not sparse or "entity-sparse" not in sparse:
+                raise RuntimeError(
+                    f"Qdrant collection '{collection_name}' missing required sparse vector "
+                    f"'entity-sparse'. Set require_entity_sparse=False to skip this check "
+                    f"or recreate the collection with entity-sparse support."
                 )
 
     if require_colbert:

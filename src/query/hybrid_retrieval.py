@@ -1,9 +1,11 @@
 """
-Phase 7E-2: Hybrid Retrieval Implementation
-Combines vector search (Qdrant) with BM25/keyword search (Neo4j full-text)
-Implements RRF fusion, weighted fusion, bounded adjacency expansion, and context budget enforcement
+Phase 7E-2: Hybrid Retrieval Implementation.
 
-Phase 7E-4: Enhanced with comprehensive metrics collection and SLO monitoring
+Combines vector search (Qdrant) with BM25/keyword search (Neo4j full-text).
+Implements RRF fusion, weighted fusion, bounded adjacency expansion,
+and context budget enforcement.
+
+Phase 7E-4: Enhanced with comprehensive metrics collection and SLO monitoring.
 
 Reference: Phase 7E Canonical Spec L1421-1444, L3781-3788
 """
@@ -242,7 +244,7 @@ def dedup_chunk_results(
         winner.bm25_score = (
             max(bm25_scores) if bm25_scores else (winner.bm25_score or 0.0)
         )
-        # Preserve rerank_score from any duplicate (cross-encoder scores are authoritative)
+        # Preserve rerank_score from any duplicate (cross-encoder is authoritative)
         if rerank_scores:
             winner.rerank_score = max(rerank_scores)
 
@@ -314,8 +316,10 @@ class BM25Retriever:
 
     def _ensure_fulltext_index(self):
         """
-        Ensure the full-text index targets both Chunk and CitationUnit nodes with text and heading fields.
-        If an index with the same name exists but uses a different definition, drop and recreate it.
+        Ensure the full-text index targets Chunk and CitationUnit nodes.
+
+        Uses text and heading fields. If an index with the same name exists
+        but uses a different definition, drop and recreate it.
         """
         desired_labels = {"Chunk", "CitationUnit"}
         desired_props = {"text", "heading"}
@@ -644,6 +648,7 @@ class QdrantMultiVectorRetriever:
         *,
         use_query_api: bool = False,
         query_api_weighted_fusion: bool = False,
+        multi_vector_fusion_method: str = "weighted",  # "weighted" or "rrf"
         query_api_dense_limit: int = 200,
         query_api_sparse_limit: int = 200,
         query_api_candidate_limit: int = 200,
@@ -651,6 +656,9 @@ class QdrantMultiVectorRetriever:
         schema_supports_sparse: bool = False,
         schema_supports_colbert: bool = False,
         schema_supports_doc_title_sparse: bool = False,
+        schema_supports_title_sparse: bool = False,  # NEW: Lexical heading matching
+        schema_supports_entity_sparse: bool = False,  # NEW: Lexical entity matching
+        rrf_debug_logging: bool = False,  # NEW: Per-field RRF contribution logging
     ):
         settings = get_settings()
         env = (
@@ -667,6 +675,7 @@ class QdrantMultiVectorRetriever:
         )
         self.use_query_api = use_query_api
         self.query_api_weighted_fusion = query_api_weighted_fusion
+        self.multi_vector_fusion_method = multi_vector_fusion_method
         self.query_api_dense_limit = query_api_dense_limit
         self.query_api_sparse_limit = query_api_sparse_limit
         self.query_api_candidate_limit = query_api_candidate_limit
@@ -679,10 +688,19 @@ class QdrantMultiVectorRetriever:
         self.schema_supports_colbert = schema_supports_colbert or bool(
             getattr(caps, "supports_colbert", False)
         )
-        # doc_title-sparse support: only enable if general sparse support is also enabled
+        # doc_title-sparse: only enable if general sparse support is also enabled
         self.schema_supports_doc_title_sparse = (
             schema_supports_doc_title_sparse and self.schema_supports_sparse
         )
+        # NEW: title-sparse and entity-sparse support flags
+        self.schema_supports_title_sparse = (
+            schema_supports_title_sparse and self.schema_supports_sparse
+        )
+        self.schema_supports_entity_sparse = (
+            schema_supports_entity_sparse and self.schema_supports_sparse
+        )
+        # NEW: RRF debug logging flag
+        self.rrf_debug_logging = rrf_debug_logging
         if self.schema_supports_colbert and not self.use_query_api:
             message = (
                 "Configuration error: ColBERT enabled but Query API is disabled. "
@@ -1269,13 +1287,101 @@ class QdrantMultiVectorRetriever:
                     vec_score_by_id[(str(hit.id), "doc_title-sparse")] = float(
                         hit.score or 0.0
                     )
-            except Exception:
+            except Exception as e:
                 # doc_title-sparse may not exist in older collections
-                pass
+                # Log at debug level to aid troubleshooting without noise
+                logger.debug(
+                    "sparse_scoring_skipped",
+                    sparse_field="doc_title-sparse",
+                    reason="field_unavailable_or_error",
+                    error_type=type(e).__name__,
+                    error_msg=str(e)[:100],
+                )
+
+        # NEW: title-sparse scoring - lexical heading matching
+        if (
+            self.schema_supports_title_sparse
+            and bundle.sparse
+            and bundle.sparse.indices
+            and bundle.sparse.values
+        ):
+            try:
+                title_sparse_hits = self._search_sparse_candidates(
+                    bundle.sparse.indices,
+                    bundle.sparse.values,
+                    scoring_ids,
+                    qdrant_filter,
+                    sparse_vector_name="title-sparse",
+                )
+                rankings["title-sparse"] = [
+                    (str(hit.id), float(hit.score or 0.0)) for hit in title_sparse_hits
+                ]
+                for hit in title_sparse_hits:
+                    vec_score_by_id[(str(hit.id), "title-sparse")] = float(
+                        hit.score or 0.0
+                    )
+            except Exception as e:
+                # title-sparse may not exist in older collections
+                # Log at debug level to aid troubleshooting without noise
+                logger.debug(
+                    "sparse_scoring_skipped",
+                    sparse_field="title-sparse",
+                    reason="field_unavailable_or_error",
+                    error_type=type(e).__name__,
+                    error_msg=str(e)[:100],
+                )
+
+        # NEW: entity-sparse scoring - lexical entity name matching
+        if (
+            self.schema_supports_entity_sparse
+            and bundle.sparse
+            and bundle.sparse.indices
+            and bundle.sparse.values
+        ):
+            try:
+                entity_sparse_hits = self._search_sparse_candidates(
+                    bundle.sparse.indices,
+                    bundle.sparse.values,
+                    scoring_ids,
+                    qdrant_filter,
+                    sparse_vector_name="entity-sparse",
+                )
+                rankings["entity-sparse"] = [
+                    (str(hit.id), float(hit.score or 0.0)) for hit in entity_sparse_hits
+                ]
+                for hit in entity_sparse_hits:
+                    vec_score_by_id[(str(hit.id), "entity-sparse")] = float(
+                        hit.score or 0.0
+                    )
+            except Exception as e:
+                # entity-sparse may not exist in older collections
+                # Log at debug level to aid troubleshooting without noise
+                logger.debug(
+                    "sparse_scoring_skipped",
+                    sparse_field="entity-sparse",
+                    reason="field_unavailable_or_error",
+                    error_type=type(e).__name__,
+                    error_msg=str(e)[:100],
+                )
 
         sparse_scored = len(rankings.get(self.sparse_query_name, []))
 
-        fused_scores = self._fuse_rankings(rankings)
+        # Choose fusion method based on config
+        if self.multi_vector_fusion_method == "rrf":
+            fused_scores = self._fuse_rankings_rrf(rankings, k=self.rrf_k)
+            fusion_method_used = "rrf"
+            # NEW: Log per-field contributions for debugging
+            if self.rrf_debug_logging:
+                self._log_rrf_field_contributions(
+                    rankings,
+                    fused_scores,
+                    top_k=min(top_k, 10),  # Limit log size to top 10
+                    k=self.rrf_k,
+                )
+        else:
+            fused_scores = self._fuse_rankings(rankings)
+            fusion_method_used = "weighted"
+
         sparse_ids = {
             pid
             for pid, _ in rankings.get(self.sparse_query_name, [])  # type: ignore[arg-type]
@@ -1306,8 +1412,8 @@ class QdrantMultiVectorRetriever:
                 ),
             )
             chunk.vector_rank = idx
-            chunk.vector_score_kind = "weighted_fusion"
-            chunk.fusion_method = "weighted"
+            chunk.vector_score_kind = f"{fusion_method_used}_fusion"
+            chunk.fusion_method = fusion_method_used
             results.append(chunk)
 
         results.sort(key=lambda x: x.fused_score or 0.0, reverse=True)
@@ -1394,7 +1500,27 @@ class QdrantMultiVectorRetriever:
                     Prefetch(
                         query=sparse_query,
                         using="doc_title-sparse",
-                        limit=50,  # Smaller limit for title term matching (high precision)
+                        limit=50,  # Smaller limit for title matching
+                        filter=qdrant_filter,
+                    )
+                )
+            # NEW: title-sparse - lexical matching for section headings
+            if self.schema_supports_title_sparse:
+                entries.append(
+                    Prefetch(
+                        query=sparse_query,
+                        using="title-sparse",
+                        limit=50,  # Smaller limit for heading term matching
+                        filter=qdrant_filter,
+                    )
+                )
+            # NEW: entity-sparse - lexical matching for entity names
+            if self.schema_supports_entity_sparse:
+                entries.append(
+                    Prefetch(
+                        query=sparse_query,
+                        using="entity-sparse",
+                        limit=50,  # Smaller limit for entity term matching
                         filter=qdrant_filter,
                     )
                 )
@@ -1492,6 +1618,121 @@ class QdrantMultiVectorRetriever:
                 fused[pid] += weight * normalized
         return fused
 
+    def _fuse_rankings_rrf(
+        self, rankings: Dict[str, List[Tuple[str, float]]], k: int = 60
+    ) -> Dict[str, float]:
+        """
+        Reciprocal Rank Fusion across multiple vector fields.
+
+        RRF score = Σ 1/(k + rank_i) for each field where the document appears.
+        Uses rank position only, not score magnitude - robust to scale differences.
+
+        Args:
+            rankings: Dict mapping field name to list of (doc_id, score) tuples
+            k: RRF constant (default 60) - higher k reduces impact of top ranks
+
+        Returns:
+            Dict mapping doc_id to fused RRF score
+        """
+        fused: Dict[str, float] = defaultdict(float)
+
+        for field_name, items in rankings.items():
+            if not items:
+                continue
+            # Sort by score descending to establish ranks
+            sorted_items = sorted(items, key=lambda x: x[1] or 0.0, reverse=True)
+            for rank, (doc_id, _score) in enumerate(sorted_items, start=1):
+                fused[doc_id] += 1.0 / (k + rank)
+
+        return fused
+
+    def _log_rrf_field_contributions(
+        self,
+        rankings: Dict[str, List[Tuple[str, float]]],
+        fused_scores: Dict[str, float],
+        top_k: int = 10,
+        k: int = 60,
+    ) -> None:
+        """Log per-field RRF contributions for debugging.
+
+        Shows how each field contributed to the final fused score for top results.
+        Helps diagnose which fields are providing useful signal vs noise.
+
+        RRF formula: score(d) = Σ 1/(k + rank_i(d)) for each field i
+
+        Args:
+            rankings: Dict mapping field name to list of (doc_id, score) tuples
+            fused_scores: Dict mapping doc_id to fused RRF score
+            top_k: Number of top results to log details for
+            k: RRF constant (default 60)
+
+        Log output example:
+            {
+                "chunk_id": "section_12345...",
+                "fused_score": 0.05892,
+                "fields": {
+                    "content": {"rank": 2, "contribution": 0.01613},
+                    "title": {"rank": 5, "contribution": 0.01538},
+                    "text-sparse": {"rank": 1, "contribution": 0.01639},
+                    "title-sparse": {"rank": 3, "contribution": 0.01587}
+                }
+            }
+        """
+        if not fused_scores:
+            return
+
+        # Sort by fused score to get top results
+        sorted_ids = sorted(
+            fused_scores.keys(), key=lambda x: fused_scores[x], reverse=True
+        )[:top_k]
+
+        # Build per-field rank lookup
+        field_ranks: Dict[str, Dict[str, int]] = {}
+        for field_name, items in rankings.items():
+            if not items:
+                continue
+            sorted_items = sorted(items, key=lambda x: x[1] or 0.0, reverse=True)
+            field_ranks[field_name] = {
+                doc_id: rank for rank, (doc_id, _) in enumerate(sorted_items, start=1)
+            }
+
+        # Build detailed breakdown for each top result
+        rrf_details = []
+        for doc_id in sorted_ids:
+            contributions = {}
+            total_contribution = 0.0
+
+            for field_name in rankings.keys():
+                rank = field_ranks.get(field_name, {}).get(doc_id)
+                if rank:
+                    contribution = 1.0 / (k + rank)
+                    total_contribution += contribution
+                    contributions[field_name] = {
+                        "rank": rank,
+                        "contribution": round(contribution, 5),
+                    }
+
+            rrf_details.append(
+                {
+                    "chunk_id": doc_id[:20] + "..." if len(doc_id) > 20 else doc_id,
+                    "fused_score": round(fused_scores[doc_id], 5),
+                    "computed_sum": round(total_contribution, 5),
+                    "fields": contributions,
+                }
+            )
+
+        logger.info(
+            "rrf_field_contributions",
+            extra={
+                "event": "rrf_fusion_debug",
+                "top_k_shown": len(rrf_details),
+                "rrf_k": k,
+                "fields_used": list(rankings.keys()),
+                "field_counts": {k: len(v) for k, v in rankings.items()},
+                "details": rrf_details,
+            },
+        )
+
 
 class VectorRetriever(QdrantMultiVectorRetriever):
     """
@@ -1556,13 +1797,15 @@ class HybridRetriever:
             and embedder.dims != self.embedding_settings.dims
         ):
             raise ValueError(
-                f"HybridRetriever embedder dims ({getattr(embedder, 'dims', 'unknown')}) "
-                f"do not match embedding profile dims ({self.embedding_settings.dims})."
+                f"HybridRetriever embedder dims "
+                f"({getattr(embedder, 'dims', 'unknown')}) do not match "
+                f"profile dims ({self.embedding_settings.dims})."
             )
 
         hybrid_config = getattr(config.search, "hybrid", None)
         qdrant_vector_cfg = getattr(config.search.vector, "qdrant", None)
-        bm25_config = getattr(config.search, "bm25", None)
+        # BM25 config is nested under hybrid, not directly under search
+        bm25_config = getattr(hybrid_config, "bm25", None)
         self.hybrid_mode = getattr(hybrid_config, "mode", "legacy")
         # Timeouts and index migration toggle (set early for downstream use)
         timeout_ms = getattr(hybrid_config, "bm25_timeout_ms", None)
@@ -1750,6 +1993,9 @@ class HybridRetriever:
                     False,
                 )
             ),
+            multi_vector_fusion_method=getattr(
+                hybrid_config, "multi_vector_fusion_method", "weighted"
+            ),
             query_api_dense_limit=getattr(
                 qdrant_vector_cfg, "query_api_dense_limit", 200
             ),
@@ -1764,9 +2010,24 @@ class HybridRetriever:
             ),
             schema_supports_sparse=getattr(qdrant_vector_cfg, "enable_sparse", False),
             schema_supports_colbert=getattr(qdrant_vector_cfg, "enable_colbert", False),
+            # Default True to match ingestion pipeline (atomic.py:1148)
             schema_supports_doc_title_sparse=getattr(
-                qdrant_vector_cfg, "enable_doc_title_sparse", False
+                qdrant_vector_cfg, "enable_doc_title_sparse", True
             ),
+            # NEW: Lexical heading matching (sparse vector for section titles)
+            schema_supports_title_sparse=getattr(
+                qdrant_vector_cfg,
+                "enable_title_sparse",
+                True,  # Default enabled
+            ),
+            # NEW: Lexical entity name matching (sparse vector for entity names)
+            schema_supports_entity_sparse=getattr(
+                qdrant_vector_cfg,
+                "enable_entity_sparse",
+                True,  # Default enabled
+            ),
+            # NEW: Per-field RRF contribution logging for debugging
+            rrf_debug_logging=getattr(hybrid_config, "rrf_debug_logging", False),
         )
         self.colbert_rerank_enabled = getattr(
             hybrid_config, "colbert_rerank_enabled", True
@@ -1840,7 +2101,7 @@ class HybridRetriever:
                     self.fusion_alpha = float(vector_weight) / total
             except Exception:
                 logger.debug(
-                    "Could not derive fusion_alpha from bm25/vector weights; using default"
+                    "Could not derive fusion_alpha from weights; using default"
                 )
         self.graph_propagation_decay = getattr(
             hybrid_config, "graph_propagation_decay", 0.85
@@ -2065,17 +2326,13 @@ class HybridRetriever:
             if rels_override:
                 return rels_override, cap
 
-        # Phase 3: Added REFERENCES for cross-document traversal where appropriate
-        # Fix #4 (Phase 3): Cross-document REFERENCES traversal is now implemented!
-        # The _compute_cross_doc_signals method handles the traversal pattern:
-        # (seed:Chunk) → [:REFERENCES] → (doc:Document) → [:HAS_SECTION] → (related:Chunk)
+        # Phase 3: Added REFERENCES for cross-document traversal
+        # Fix #4: Cross-doc REFERENCES traversal implemented via pattern:
+        # (seed:Chunk) → [:REFERENCES] → (doc:Document) → [:HAS_SECTION] → ...
         #
-        # Cross-doc signals are computed independently of entity extraction and merged
-        # into the graph reranker via a weighted three-way fusion:
-        # fused_score = w_vec * vector_score + w_entity * entity_graph + w_cross_doc * cross_doc_graph
-        #
-        # The weight allocation (70/30 split of graph weight) ensures entity signals
-        # remain primary while cross-doc signals provide structural relevance boost.
+        # Cross-doc signals merged into reranker via three-way fusion:
+        # fused = w_vec*vec + w_entity*entity_graph + w_cross*cross_doc_graph
+        # Weight allocation (70/30 split) keeps entity signals primary.
         if qtype == "conceptual":
             return ["MENTIONED_IN", "DEFINES", "IN_SECTION", "REFERENCES"], cap
         if qtype == "cli":
@@ -2115,7 +2372,7 @@ class HybridRetriever:
         query_type: str,
         doc_tag: Optional[str],
     ) -> Dict[str, Dict[str, Any]]:
-        """Compute graph signals for candidate chunks (reranker mode) using canonical_name matches."""
+        """Compute graph signals for chunks using canonical_name matches."""
         if not entity_names or not candidate_chunk_ids:
             return {}
         rels, _ = self._relationships_for_query(query_type)
@@ -2204,8 +2461,7 @@ class HybridRetriever:
         if "REFERENCES" not in rels:
             return {}
 
-        # Cypher traversal: find chunks whose documents are referenced by other candidate chunks
-        # This identifies cross-document relevance signals
+        # Cypher: find chunks whose docs are referenced by other candidates
         cypher = """
         // Start with candidate chunks that have REFERENCES edges
         UNWIND $chunk_ids AS seed_id
@@ -2213,12 +2469,12 @@ class HybridRetriever:
         // Follow REFERENCES directly from the chunk to target document
         MATCH (seed)-[:REFERENCES]->(ref_doc:Document)
         WHERE NOT ref_doc:GhostDocument
-        // Get chunks from the referenced document that are also candidates
+        // Get chunks from referenced document that are also candidates
         MATCH (ref_doc)-[:HAS_SECTION]->(related:Chunk)
         WHERE related.id IN $chunk_ids
           AND related.id <> seed_id
           AND ($doc_tag IS NULL OR related.doc_tag = $doc_tag)
-        // Aggregate: count how many candidate chunks reference each related chunk's document
+        // Aggregate: count candidates referencing each related chunk's doc
         RETURN related.id AS chunk_id,
                count(DISTINCT seed) AS ref_count,
                collect(DISTINCT ref_doc.title)[..3] AS referencing_docs
@@ -2279,8 +2535,8 @@ class HybridRetriever:
         # Cap candidates to avoid explosion
         candidate_ids = [str(r.chunk_id) for r in vector_results if r.chunk_id][:50]
 
-        # Fix #4: Compute cross-document signals (doesn't require entity extraction)
-        # This enables REFERENCES edges to boost relevance even when entity extraction fails
+        # Fix #4: Compute cross-document signals (no entity extraction needed)
+        # REFERENCES edges boost relevance even when entity extraction fails
         cross_doc_signals = self._compute_cross_doc_signals(
             candidate_chunk_ids=candidate_ids,
             query_type=qtype,
@@ -2437,7 +2693,7 @@ class HybridRetriever:
             expand: Whether to perform adjacency expansion
 
         Returns:
-            Tuple of (results, metrics) where metrics contains timing and diagnostic info
+            Tuple of (results, metrics) with timing and diagnostic info
         """
         start_time = time.time()
         self._last_query_text = query
@@ -2651,7 +2907,7 @@ class HybridRetriever:
                 logger.warning("ColBERT query embedding failed", error=str(exc))
             if query_bundle and query_bundle.multivector:
                 # Calculate limit FIRST to avoid fetching unnecessary vectors
-                # This dramatically reduces payload: 50 candidates ≈ 3.8 MB vs 120 ≈ 9.2 MB
+                # Reduces payload: 50 candidates ≈ 3.8 MB vs 120 ≈ 9.2 MB
                 colbert_limit = min(
                     len(fused_results),
                     max(
@@ -2761,10 +3017,8 @@ class HybridRetriever:
 
         metrics["seed_count"] = len(seeds)
         seed_ids: Optional[Set[str]] = None
-        seed_rank_map: Optional[Dict[str, int]] = None
         if reranker_active:
             seed_ids = {chunk.chunk_id for chunk in seeds}
-            seed_rank_map = {chunk.chunk_id: idx for idx, chunk in enumerate(seeds)}
 
         # Step 4: Optional dominance gating before expansion (stabilize doc continuity)
         # Gate seeds to a primary document only if dominance is clear
@@ -2915,7 +3169,8 @@ class HybridRetriever:
         primaries = [c for c in all_results if not c.is_microdoc_extra]
         extras = [c for c in all_results if c.is_microdoc_extra]
 
-        def _primary_score_key(chunk: ChunkResult) -> Tuple[int, float, float, float]:
+        def _primary_score_key(chunk: ChunkResult) -> Tuple[float, float, float, float]:
+            # Sort by rerank_score descending; seeds get priority via element 0
             rerank_val = (
                 float(chunk.rerank_score)
                 if chunk.rerank_score is not None
@@ -2923,8 +3178,8 @@ class HybridRetriever:
             )
             citation_weight = float(len(chunk.citation_labels or []))
             if reranker_active and seed_ids and chunk.chunk_id in seed_ids:
-                rank_idx = seed_rank_map.get(chunk.chunk_id, 0) if seed_rank_map else 0
-                return (1.0, -float(rank_idx), rerank_val, citation_weight)
+                # Seeds first (1.0), then sorted by rerank_score (not rank_idx!)
+                return (1.0, rerank_val, citation_weight, 0.0)
             return (0.0, rerank_val, citation_weight, float(chunk.fused_score or 0.0))
 
         primaries.sort(key=_primary_score_key, reverse=True)
@@ -3065,7 +3320,8 @@ class HybridRetriever:
         RRF formula: score = Σ(1 / (k + rank_i))
         where k is a constant (default 60) and rank_i is the rank in result list i
 
-        Reference: Cormack et al. "Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods"
+        Reference: Cormack et al. "Reciprocal Rank Fusion outperforms Condorcet
+        and individual Rank Learning Methods"
         """
         # Build rank dictionaries and preserve best modality scores
         bm25_ranks: Dict[str, int] = {}
@@ -3169,7 +3425,8 @@ class HybridRetriever:
         score = α * vector_score + (1-α) * bm25_score
         where α is the vector weight (default 0.6)
 
-        Note: Requires score normalization since BM25 and vector scores have different ranges.
+        Note: Requires score normalization since BM25 and vector scores
+        have different ranges.
         """
 
         def normalize_scores(results: List[ChunkResult], score_attr: str):
@@ -3257,7 +3514,9 @@ class HybridRetriever:
 
     def _hydrate_missing_citations(self, chunks: List[ChunkResult]) -> None:
         """
-        Ensure chunks surfaced by vectors also emit citation labels by fetching their CitationUnit headings.
+        Ensure chunks from vectors emit citation labels.
+
+        Fetches CitationUnit headings for chunks missing citation data.
         """
         query_ids = list({chunk.chunk_id for chunk in chunks})
 
@@ -3868,9 +4127,9 @@ class HybridRetriever:
         Structure-aware context expansion (Phase C.4).
 
         Finds additional context chunks via:
-        1. Sibling chunks - same parent_section_id (context_source="sibling")
-        2. Parent section chunks - traverse CHILD_OF to parent (context_source="parent_section")
-        3. Shared-entity chunks - chunks sharing entities with top results (context_source="shared_entities")
+        1. Sibling chunks - same parent_section_id (source="sibling")
+        2. Parent section chunks - CHILD_OF traversal (source="parent_section")
+        3. Shared-entity chunks - entities with top results (source="shared")
 
         Each expanded chunk gets:
         - is_expanded=True
@@ -4190,7 +4449,7 @@ class HybridRetriever:
         neighbors: List[ChunkResult],
         threshold: float,
     ) -> List[ChunkResult]:
-        """Filter or rescore expanded neighbors using BGE sparse lexical scores in Qdrant."""
+        """Filter/rescore expanded neighbors using BGE sparse scores in Qdrant."""
         sparse_vector = self.vector_retriever._build_sparse_query(query)
         if not sparse_vector:
             return neighbors
@@ -5054,7 +5313,7 @@ class HybridRetriever:
             return truncated_text, len(truncated_tokens)
 
         logger.warning(
-            "Tokenizer backend %s does not support decode; truncating text approximately",
+            "Tokenizer %s lacks decode; truncating text approximately",
             getattr(self.tokenizer, "backend_name", "unknown"),
         )
         ratio = token_budget / total if total else 0

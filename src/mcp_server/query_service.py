@@ -596,13 +596,9 @@ class QueryService:
                 filters.pop("embedding_version", None)
                 logger.debug("Embedding version not set; skipping filter enforcement")
 
-            use_phase7e = bool(
-                getattr(self.config.search.hybrid, "enabled", True)
-            ) and bool(
-                getattr(
-                    getattr(self.config.search.hybrid, "bm25", None), "enabled", False
-                )
-            )
+            # Use Phase 7E retriever when hybrid search is enabled
+            # BM25 status is handled internally by HybridRetriever based on config
+            use_phase7e = bool(getattr(self.config.search.hybrid, "enabled", True))
 
             assembled_md: Optional[str] = None
             ranked_results: List[RankedResult]

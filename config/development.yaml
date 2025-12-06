@@ -48,6 +48,9 @@ search:
       allow_recreate: false  # Set true to auto-rebuild collections during schema upgrades
       enable_sparse: true
       enable_colbert: true
+      # NEW: Sparse vectors for lexical matching on titles and entities
+      enable_title_sparse: true    # Lexical section heading matching
+      enable_entity_sparse: true   # Lexical entity name matching
       # Graph Channel Rehabilitation: Sparse embedding error handling mode
       # false = graceful degradation (default) - insert None placeholder on failure
       # true = strict mode - fail ingestion if sparse embedding fails
@@ -66,14 +69,16 @@ search:
     # Architecture mode: legacy (BM25+RRF) or bge_reranker (vector-only + cross-encoder)
     mode: "legacy"
     enabled: true  # Phase 7E: Enable hybrid retrieval
-    graph_channel_enabled: true  # Enable graph as independent scoring channel in fusion
-    colbert_rerank_enabled: true  # Ensure ColBERT late interaction rerank stays on
-    colbert_candidate_limit: 50  # Min candidates for ColBERT reranking (was 120 - reduced for latency)
-    colbert_candidate_multiplier: 3  # top_k multiplier (was 6 - reduced for latency)
+    graph_channel_enabled: false  # DISABLED: Phase 1 vector-only hardening
+    colbert_rerank_enabled: true  # Keep ColBERT reranking as mid-stage precision filter
+    colbert_candidate_limit: 50  # Min candidates for ColBERT reranking
+    colbert_candidate_multiplier: 3  # top_k multiplier
     method: "rrf"  # RRF fusion: rank-based, robust to score scale differences
+    multi_vector_fusion_method: "rrf"  # Python-side RRF for multi-vector (Dense+Sparse+Title+Entity)
 
     # RRF (Reciprocal Rank Fusion) settings
     rrf_k: 60  # Phase 7E: RRF constant (default: 60)
+    rrf_debug_logging: true  # NEW: Log per-field RRF contributions for debugging
 
     # Weighted fusion settings (alternative to RRF)
     fusion_alpha: 0.6  # Phase 7E: Vector weight (0.0-1.0), BM25 weight = 1-alpha
@@ -88,10 +93,12 @@ search:
     graph_propagation_decay: 0.85
 
     # Vector field weights (dense + sparse) for Qdrant multi-vector fusion
+    # NOTE: These weights are ONLY used if multi_vector_fusion_method="weighted"
+    # With RRF fusion (current setting), ranks are used instead of weights
+    # Dense entity vector REMOVED - replaced by entity-sparse
     vector_fields:
       content: 0.5
       title: 0.1
-      entity: 0.1
       text-sparse: 0.3
     query_type_weights:
       conceptual: { vector: 0.7, graph: 0.3 }
@@ -121,13 +128,13 @@ search:
 
     # BM25/keyword retrieval settings
     bm25:
-      enabled: true  # re-enable lexical recall
+      enabled: false  # DISABLED: Phase 1 vector-only hardening
       top_k: 50  # Retrieve more candidates for fusion
       weight: 0.15  # Lower weight while sparse is primary lexical channel
 
     # Bounded adjacency expansion (Phase 7E)
     expansion:
-      enabled: true  # Enable bounded neighbor expansion
+      enabled: false  # DISABLED: Phase 1 vector-only hardening
       max_neighbors: 1
       query_min_tokens: 8
       score_delta_max: 0.05
@@ -345,13 +352,13 @@ feature_flags:
   dual_write_1024d: false       # Phase 7C.4: Enable dual-write to both 384-D and 1024-D indices
   # New rollout flags for retrieval rehab
   query_api_weighted_fusion: true  # Enables _search_via_query_api_weighted() with per-field score tracking
-  graph_garbage_filter: true       # C.0.1: Filter short/stopword entities
-  graph_rel_types_wired: true      # C.0.2: Use query-adaptive relationship types
+  graph_garbage_filter: false      # DISABLED: Phase 1 vector-only hardening
+  graph_rel_types_wired: false     # DISABLED: Phase 1 vector-only hardening
   dedup_best_score: true           # C.0.3: Keep highest score in dedup (enabled 2025-11-26)
-  graph_score_normalized: true     # C.0.4: Saturating exponential normalization
-  graph_as_reranker: true  # C.2: Graph signals influence final ranking (enabled 2025-11-27)
+  graph_score_normalized: false    # DISABLED: Phase 1 vector-only hardening
+  graph_as_reranker: false         # DISABLED: Phase 1 vector-only hardening
   entity_embedding_fallback: false
-  structure_aware_expansion: true  # C.4: Sibling/parent/entity context expansion (enabled 2025-11-26)
+  structure_aware_expansion: false # DISABLED: Phase 1 vector-only hardening
 
 # Phase 7E-4: Monitoring and observability configuration
 # Reference: Canonical Spec L4916-4976, L3513-3528

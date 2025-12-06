@@ -1,10 +1,11 @@
 {
   "chunks_multi_bge_m3": {
-    "_generated_at": "2025-12-02T05:41:55.894461Z",
+    "_generated_at": "2025-12-06T01:10:00.000000Z",
     "_source": "live_qdrant_collection",
+    "_note": "Canonical schema - entity dense vector REMOVED, title-sparse and entity-sparse ADDED",
     "status": "green",
-    "points_count": 288,
-    "indexed_vectors_count": 2022,
+    "points_count": 0,
+    "indexed_vectors_count": 0,
     "vectors_config": {
       "content": {
         "size": 1024,
@@ -16,7 +17,7 @@
         "distance": "Cosine",
         "multivector_config": null
       },
-      "entity": {
+      "title": {
         "size": 1024,
         "distance": "Cosine",
         "multivector_config": null
@@ -27,50 +28,61 @@
         "multivector_config": {
           "comparator": "max_sim"
         }
-      },
-      "title": {
-        "size": 1024,
-        "distance": "Cosine",
-        "multivector_config": null
       }
     },
     "sparse_vectors_config": {
+      "text-sparse": {
+        "index": {
+          "on_disk": true
+        }
+      },
       "doc_title-sparse": {
         "index": {
           "on_disk": true
         }
       },
-      "text-sparse": {
+      "title-sparse": {
+        "index": {
+          "on_disk": true
+        }
+      },
+      "entity-sparse": {
         "index": {
           "on_disk": true
         }
       }
     },
+    "hnsw_config": {
+      "m": 48,
+      "ef_construct": 256,
+      "full_scan_threshold": 10000,
+      "on_disk": false
+    },
     "payload_indexes": [
-      "doc_title",
-      "tenant",
-      "parent_section_original_id",
-      "embedding_dimensions",
-      "snapshot_scope",
-      "kg_id",
+      "doc_id",
       "doc_tag",
-      "is_microdoc",
-      "shingle_hash",
-      "id",
-      "order",
-      "version",
-      "parent_section_id",
-      "embedding_version",
-      "node_id",
-      "source_path",
-      "heading",
-      "lang",
-      "token_count",
+      "doc_title",
       "document_id",
+      "embedding_dimensions",
       "embedding_provider",
+      "embedding_version",
+      "heading",
+      "id",
+      "is_microdoc",
+      "kg_id",
+      "lang",
+      "node_id",
+      "order",
+      "parent_section_id",
+      "parent_section_original_id",
+      "shingle_hash",
+      "snapshot_scope",
+      "source_path",
+      "tenant",
       "text_hash",
+      "token_count",
       "updated_at",
-      "doc_id"
+      "version"
     ]
   }
 }

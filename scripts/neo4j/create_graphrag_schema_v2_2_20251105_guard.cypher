@@ -438,16 +438,19 @@ SET sv.version = 'v2.2',
 // Primary collection: chunks_multi_bge_m3 (Phase 7E+ BGE-M3 embeddings)
 // Legacy collection:  chunks_multi (kept for backward compatibility)
 //
-// DENSE VECTORS (per collection):
+// DENSE VECTORS (4 per collection):
 //   - content:          1024D, Cosine  (main content embedding)
-//   - entity:           1024D, Cosine  (entity-name embedding)
 //   - title:            1024D, Cosine  (chunk title/heading embedding)
 //   - doc_title:        1024D, Cosine  (parent document title embedding)
 //   - late-interaction: 1024D, Cosine, MaxSim (ColBERT-style multi-vector)
+//   NOTE: Dense 'entity' vector REMOVED - was broken (duplicated content embedding)
+//         Replaced by entity-sparse for lexical entity name matching
 //
-// SPARSE VECTORS (per collection):
+// SPARSE VECTORS (4 per collection):
 //   - text-sparse:      BM25/BGE-M3 sparse, on-disk index (chunk content)
 //   - doc_title-sparse: BM25/BGE-M3 sparse, on-disk index (document title)
+//   - title-sparse:     BM25/BGE-M3 sparse, on-disk index (section heading)
+//   - entity-sparse:    BM25/BGE-M3 sparse, on-disk index (entity names)
 //
 // HNSW CONFIG:
 //   - m: 48                    (graph edges per node)

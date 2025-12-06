@@ -909,10 +909,9 @@ class Orchestrator:
             point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, section["id"]))
 
             title_vector = section.get("title_vector_embedding") or embedding
-            entity_vector = section.get("entity_vector_embedding") or embedding
+            # REMOVED: Dense entity vector - replaced by entity-sparse
+            # entity_vector is no longer used
             vectors = {"content": embedding, "title": title_vector}
-            if entity_vector:
-                vectors["entity"] = entity_vector
 
             text_value = section.get("text", "")
             embedding_metadata = canonicalize_embedding_metadata(

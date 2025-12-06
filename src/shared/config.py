@@ -206,6 +206,9 @@ class QdrantVectorConfig(BaseModel):
     enable_doc_title_sparse: bool = (
         True  # Enable doc_title-sparse prefetch for title term matching
     )
+    # NEW: Sparse vectors for lexical matching on titles and entities
+    enable_title_sparse: bool = True  # Lexical section heading matching
+    enable_entity_sparse: bool = True  # Lexical entity name matching
     use_query_api: bool = False
     query_api_dense_limit: int = 200
     query_api_sparse_limit: int = 200
@@ -295,6 +298,9 @@ class HybridSearchConfig(BaseModel):
     )
     colbert_candidate_multiplier: int = 3  # top_k multiplier for ColBERT candidates
     rrf_k: int = 60  # Phase 7E: RRF constant
+    rrf_debug_logging: bool = (
+        False  # NEW: Log per-field RRF contributions for debugging
+    )
     fusion_alpha: float = 0.6  # Phase 7E: Vector weight for weighted fusion
     vector_weight: float = 0.7  # Legacy
     graph_weight: float = 0.3  # Legacy

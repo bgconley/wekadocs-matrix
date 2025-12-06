@@ -441,6 +441,18 @@ class GraphBuilder:
             # Step 4: Create MENTIONS edges in batches
             stats["mentions_created"] = self._create_mentions(session, mentions)
 
+        # Step 4.5: Attach mentions to sections for entity sparse embedding
+        # This enables _process_embeddings to build entity text from mentions
+        from collections import defaultdict
+
+        mentions_by_section = defaultdict(list)
+        for m in mentions:
+            sid = m.get("section_id")
+            if sid:
+                mentions_by_section[sid].append(m)
+        for section in sections:
+            section["_mentions"] = mentions_by_section.get(section["id"], [])
+
         # Step 5: Compute embeddings and upsert to vector store
         embedding_stats = self._process_embeddings(document, sections, entities)
         stats["embeddings_computed"] = embedding_stats["computed"]
@@ -1531,11 +1543,15 @@ class GraphBuilder:
         sections_to_embed = []
         content_texts: List[str] = []
         title_texts: List[str] = []
+        entity_texts: List[str] = []  # NEW: Entity names for sparse embedding
         for section in sections:
             section.setdefault("source_uri", source_uri)
             section.setdefault("document_uri", document_uri)
             content_texts.append(self._build_section_text_for_embedding(section))
             title_texts.append(self._build_title_text_for_embedding(section))
+            entity_texts.append(
+                self._build_entity_text_for_embedding(section, entities)
+            )
             sections_to_embed.append(section)
 
         # Generate embeddings with token-budgeted micro-batches (do not split chunks)
@@ -1566,6 +1582,22 @@ class GraphBuilder:
             content_embeddings: List[List[float]] = []
             title_embeddings: List[List[float]] = []
             sparse_embeddings: Optional[List[dict]] = (
+                []
+                if getattr(
+                    self.embedding_settings.capabilities, "supports_sparse", False
+                )
+                else None
+            )
+            # NEW: Title sparse embeddings for lexical heading matching
+            title_sparse_embeddings: Optional[List[dict]] = (
+                []
+                if getattr(
+                    self.embedding_settings.capabilities, "supports_sparse", False
+                )
+                else None
+            )
+            # NEW: Entity sparse embeddings for lexical entity name matching
+            entity_sparse_embeddings: Optional[List[dict]] = (
                 []
                 if getattr(
                     self.embedding_settings.capabilities, "supports_sparse", False
@@ -1628,6 +1660,61 @@ class GraphBuilder:
                             # Only this batch's chunks lose sparse; others continue normally
                             sparse_embeddings.extend([None] * len(batch_content))
 
+                # NEW: Title sparse embeddings for lexical heading matching
+                if title_sparse_embeddings is not None and hasattr(
+                    self.embedder, "embed_sparse"
+                ):
+                    try:
+                        title_sparse_embeddings.extend(
+                            self.embedder.embed_sparse(batch_title)
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Title sparse embedding generation failed for batch; "
+                            "inserting None placeholders for affected chunks",
+                            error=str(exc),
+                            batch_size=len(batch_title),
+                            batch_indices=batch,
+                        )
+                        title_sparse_embeddings.extend([None] * len(batch_title))
+
+                # NEW: Entity sparse embeddings for lexical entity name matching
+                if entity_sparse_embeddings is not None and hasattr(
+                    self.embedder, "embed_sparse"
+                ):
+                    batch_entity = [entity_texts[i] for i in batch]
+                    # Only embed non-empty entity texts; use None for empty
+                    non_empty_indices = [
+                        i for i, text in enumerate(batch_entity) if text.strip()
+                    ]
+                    if non_empty_indices:
+                        try:
+                            # Embed only non-empty texts
+                            non_empty_texts = [
+                                batch_entity[i] for i in non_empty_indices
+                            ]
+                            non_empty_results = self.embedder.embed_sparse(
+                                non_empty_texts
+                            )
+                            # Build full result list with None for empty texts
+                            result_map = dict(zip(non_empty_indices, non_empty_results))
+                            batch_results = [
+                                result_map.get(i) for i in range(len(batch_entity))
+                            ]
+                            entity_sparse_embeddings.extend(batch_results)
+                        except Exception as exc:
+                            logger.warning(
+                                "Entity sparse embedding generation failed for batch; "
+                                "inserting None placeholders for affected chunks",
+                                error=str(exc),
+                                batch_size=len(non_empty_texts),
+                                batch_indices=batch,
+                            )
+                            entity_sparse_embeddings.extend([None] * len(batch_entity))
+                    else:
+                        # All entity texts empty - use None placeholders
+                        entity_sparse_embeddings.extend([None] * len(batch_entity))
+
                 # B.2: Per-batch error isolation for ColBERT embeddings
                 if colbert_embeddings is not None and hasattr(
                     self.embedder, "embed_colbert"
@@ -1654,6 +1741,20 @@ class GraphBuilder:
                 sparse_vector = (
                     sparse_embeddings[idx]
                     if sparse_embeddings is not None and idx < len(sparse_embeddings)
+                    else None
+                )
+                # NEW: Extract title sparse vector for this section
+                title_sparse_vector = (
+                    title_sparse_embeddings[idx]
+                    if title_sparse_embeddings is not None
+                    and idx < len(title_sparse_embeddings)
+                    else None
+                )
+                # NEW: Extract entity sparse vector for this section
+                entity_sparse_vector = (
+                    entity_sparse_embeddings[idx]
+                    if entity_sparse_embeddings is not None
+                    and idx < len(entity_sparse_embeddings)
                     else None
                 )
                 colbert_vector = (
@@ -1734,8 +1835,8 @@ class GraphBuilder:
 
                 section["vector_embedding"] = embedding
                 section["title_vector_embedding"] = title_embedding
-                if self.include_entity_vector:
-                    section["entity_vector_embedding"] = embedding
+                # REMOVED: Dense entity vector was broken (duplicated content)
+                # Now using entity-sparse for lexical entity name matching
 
                 # Upsert to vector store
                 if self.vector_primary == "qdrant":
@@ -1743,8 +1844,7 @@ class GraphBuilder:
                         "content": embedding,
                         "title": title_embedding,
                     }
-                    if self.include_entity_vector:
-                        vectors["entity"] = embedding
+                    # REMOVED: Dense entity vector - replaced by entity-sparse
 
                     self._upsert_to_qdrant(
                         section["id"],
@@ -1754,6 +1854,8 @@ class GraphBuilder:
                         "Section",
                         sparse_vector=sparse_vector,
                         colbert_vectors=colbert_vector,
+                        title_sparse_vector=title_sparse_vector,  # NEW
+                        entity_sparse_vector=entity_sparse_vector,  # NEW
                     )
                     stats["upserted"] += 1
 
@@ -1785,8 +1887,7 @@ class GraphBuilder:
                             "content": embedding,
                             "title": title_embedding,
                         }
-                        if self.include_entity_vector:
-                            vectors["entity"] = embedding
+                        # REMOVED: Dense entity vector - replaced by entity-sparse
                         self._upsert_to_qdrant(
                             section["id"],
                             vectors,
@@ -1795,6 +1896,8 @@ class GraphBuilder:
                             "Section",
                             sparse_vector=sparse_vector,
                             colbert_vectors=colbert_vector,
+                            title_sparse_vector=title_sparse_vector,  # NEW
+                            entity_sparse_vector=entity_sparse_vector,  # NEW
                         )
 
         logger.info("Embeddings processed", stats=stats)
@@ -1817,6 +1920,42 @@ class GraphBuilder:
             return heading
         text = (section.get("text") or "").strip()
         return text[:256]
+
+    def _build_entity_text_for_embedding(
+        self, section: Dict, entities: Dict[str, Dict]
+    ) -> str:
+        """Build concatenated entity names for sparse embedding.
+
+        Creates a space-separated string of unique entity names mentioned in this section.
+        Used for lexical entity matching via entity-sparse vector.
+
+        Args:
+            section: Section dict containing '_mentions' list (populated by upsert_document)
+            entities: Dict mapping entity_id to entity data with 'name' field
+
+        Returns:
+            Space-separated string of entity names, or empty string if no entities
+
+        Example:
+            If section mentions entities "WEKA", "NFS", and "SMB":
+            Returns: "WEKA NFS SMB"
+        """
+        # Get mentions from section - populated by upsert_document before _process_embeddings
+        mentions = section.get("_mentions", []) or []
+        if not mentions:
+            return ""
+
+        entity_names = []
+        for mention in mentions:
+            entity_id = mention.get("entity_id")
+            if entity_id and entity_id in entities:
+                name = entities[entity_id].get("name", "")
+                if name:
+                    entity_names.append(name)
+
+        # Deduplicate while preserving order
+        unique_names = list(dict.fromkeys(entity_names))
+        return " ".join(unique_names)
 
     def _compute_text_hash(self, text: str) -> str:
         value = text or ""
@@ -1875,6 +2014,13 @@ class GraphBuilder:
                 ),
                 enable_colbert=getattr(
                     self.config.search.vector.qdrant, "enable_colbert", False
+                ),
+                # NEW: Sparse vectors for lexical matching on titles and entities
+                enable_title_sparse=getattr(
+                    self.config.search.vector.qdrant, "enable_title_sparse", True
+                ),
+                enable_entity_sparse=getattr(
+                    self.config.search.vector.qdrant, "enable_entity_sparse", True
                 ),
             )
             vectors_config = schema_plan.vectors_config
@@ -2219,6 +2365,8 @@ class GraphBuilder:
         *,
         sparse_vector: Optional[Dict[str, List[float]]] = None,
         colbert_vectors: Optional[List[List[float]]] = None,
+        title_sparse_vector: Optional[Dict[str, List[float]]] = None,  # NEW
+        entity_sparse_vector: Optional[Dict[str, List[float]]] = None,  # NEW
     ):
         """
         Upsert embedding to Qdrant with deterministic UUID mapping.
@@ -2227,10 +2375,14 @@ class GraphBuilder:
 
         Args:
             node_id: Chunk identifier (deterministic)
-            vectors: Mapping of named vectors (content/title[/entity])
+            vectors: Mapping of named vectors (content/title)
             section: Section/Chunk data
             document: Document data
             label: Node label (Section/Chunk)
+            sparse_vector: Sparse embedding for text-sparse (content)
+            colbert_vectors: ColBERT multi-vector for late interaction
+            title_sparse_vector: Sparse embedding for title-sparse (heading)
+            entity_sparse_vector: Sparse embedding for entity-sparse (entity names)
         """
         collection = self.config.search.vector.qdrant.collection_name
         expected_suffix = get_expected_namespace_suffix(
@@ -2341,6 +2493,41 @@ class GraphBuilder:
                 vectors_payload["text-sparse"] = SparseVector(
                     indices=list(indices), values=list(values)
                 )
+
+        # NEW: title-sparse - lexical matching for section headings
+        if title_sparse_vector:
+            indices = (
+                title_sparse_vector.get("indices")
+                if isinstance(title_sparse_vector, dict)
+                else None
+            )
+            values = (
+                title_sparse_vector.get("values")
+                if isinstance(title_sparse_vector, dict)
+                else None
+            )
+            if indices and values:
+                vectors_payload["title-sparse"] = SparseVector(
+                    indices=list(indices), values=list(values)
+                )
+
+        # NEW: entity-sparse - lexical matching for entity names
+        if entity_sparse_vector:
+            indices = (
+                entity_sparse_vector.get("indices")
+                if isinstance(entity_sparse_vector, dict)
+                else None
+            )
+            values = (
+                entity_sparse_vector.get("values")
+                if isinstance(entity_sparse_vector, dict)
+                else None
+            )
+            if indices and values:
+                vectors_payload["entity-sparse"] = SparseVector(
+                    indices=list(indices), values=list(values)
+                )
+
         if colbert_vectors:
             vectors_payload["late-interaction"] = [
                 list(vector) for vector in colbert_vectors

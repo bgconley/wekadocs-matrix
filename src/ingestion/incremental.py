@@ -7,12 +7,16 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+import structlog
 from neo4j import Driver
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import PointStruct
 
 from src.shared.config import get_embedding_settings
 from src.shared.qdrant_schema import build_qdrant_schema
+from src.shared.vector_utils import vector_expected_dim
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -71,19 +75,24 @@ class IncrementalUpdater:
                 if qdrant_cfg
                 else True
             )
-            hybrid_cfg = getattr(search_cfg, "hybrid", None)
-            vector_fields = (
-                getattr(hybrid_cfg, "vector_fields", None) if hybrid_cfg else None
+            # NEW: Lexical sparse vectors for section headings and entity names
+            enable_title_sparse = (
+                getattr(qdrant_cfg, "enable_title_sparse", True) if qdrant_cfg else True
             )
-            include_entity = False
-            if isinstance(vector_fields, dict):
-                include_entity = "entity" in vector_fields
+            enable_entity_sparse = (
+                getattr(qdrant_cfg, "enable_entity_sparse", True)
+                if qdrant_cfg
+                else True
+            )
+            # NOTE: include_entity deprecated (dense entity vector removed)
             self._schema_plan = build_qdrant_schema(
                 self.embedding_settings,
-                include_entity=include_entity,
+                include_entity=False,  # Deprecated - always False
                 enable_sparse=enable_sparse,
                 enable_colbert=enable_colbert,
                 enable_doc_title_sparse=enable_doc_title_sparse,
+                enable_title_sparse=enable_title_sparse,
+                enable_entity_sparse=enable_entity_sparse,
             )
             self._dense_vector_names = [
                 name
@@ -186,7 +195,22 @@ class IncrementalUpdater:
         """
         Apply incremental update from a diff.
         This method signature matches test expectations.
+
+        Note: entities and mentions are accepted for API compatibility but graph
+        updates for these are not yet implemented. Use atomic ingestion for
+        full graph sync.
         """
+        # Defensive: Warn if entities/mentions passed but not synced to graph
+        # This prevents silent data loss where callers expect graph updates
+        if entities or mentions:
+            logger.warning(
+                "incremental_update_graph_sync_skipped",
+                reason="entities_mentions_not_implemented",
+                entities_count=len(entities) if entities else 0,
+                mentions_count=len(mentions) if mentions else 0,
+                hint="Use atomic ingestion for full graph sync including entities",
+            )
+
         document_id = sections[0].get("document_id") if sections else ""
 
         # Extract modified section objects from the modified list
@@ -249,7 +273,10 @@ class IncrementalUpdater:
                     {"rows": to_upsert, "doc": document_id, "v": self.version},
                 )
                 doc_tag_result = sess.run(
-                    "MATCH (d:Document {id:$doc}) RETURN d.doc_tag AS doc_tag, d.snapshot_scope AS snapshot_scope",
+                    """
+                    MATCH (d:Document {id:$doc})
+                    RETURN d.doc_tag AS doc_tag, d.snapshot_scope AS snapshot_scope
+                    """,
                     {"doc": document_id},
                 ).single()
                 doc_tag_value = doc_tag_result["doc_tag"] if doc_tag_result else None
@@ -320,20 +347,5 @@ class IncrementalUpdater:
 
     @staticmethod
     def _vector_expected_dim(vector: object) -> Optional[int]:
-        if vector is None:
-            return None
-        if hasattr(vector, "indices") and hasattr(vector, "values"):
-            return None
-        if isinstance(vector, list):
-            if not vector:
-                return None
-            first = vector[0]
-            if isinstance(first, list):
-                return len(first)
-            return len(vector)
-        if hasattr(vector, "__len__") and not isinstance(vector, (str, bytes)):
-            try:
-                return len(vector)
-            except TypeError:
-                return None
-        return None
+        """Delegate to shared utility for vector dimension detection."""
+        return vector_expected_dim(vector)
