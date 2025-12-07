@@ -2833,20 +2833,26 @@ class HybridRetriever:
         fused_results = [r for r in fused_results if not r.is_microdoc_stub]
 
         # LGTM Phase 4: Verbose log event 4 - rrf_fusion_complete
+        # Note: bm25_count = Neo4j full-text search results (legacy BM25 path)
+        # qdrant_sparse_* = Qdrant sparse vector search results (query_api_weighted)
         logger.info(
             "rrf_fusion_complete",
             dense_count=len(vec_results),
-            sparse_count=len(bm25_results),
+            bm25_count=len(bm25_results),  # Renamed from sparse_count for clarity
             fused_count=len(fused_results),
             fusion_method=metrics.get("fusion_method", "unknown"),
             rrf_k=self.rrf_k,
             fusion_time_ms=round(metrics.get("fusion_time_ms", 0), 2),
+            # Qdrant sparse vector metrics (from query_api_weighted path)
+            qdrant_sparse_scored=metrics.get("sparse_scored_ratio", 0),
+            qdrant_sparse_topk=metrics.get("sparse_topk_ratio", 0),
+            vector_path=metrics.get("vector_path", "legacy"),
             fusion_scores=[
                 {
                     "chunk_id": r.chunk_id[:8],
                     "rrf_score": round(r.fused_score or 0, 4),
                     "dense_score": round(r.vector_score or 0, 4),
-                    "sparse_score": round(r.bm25_score or 0, 4),
+                    "bm25_score": round(r.bm25_score or 0, 4),
                 }
                 for r in fused_results[:10]
             ],
@@ -4622,7 +4628,10 @@ class HybridRetriever:
             else:
                 colbert_vec = None
             if colbert_vec:
-                hydrated[str(point.id)] = colbert_vec
+                # Use kg_id from payload (matches chunk_id), not point.id (Qdrant UUID)
+                payload = getattr(point, "payload", None) or {}
+                kg_id = payload.get("kg_id") or payload.get("id") or str(point.id)
+                hydrated[kg_id] = colbert_vec
         for c in candidates:
             if c.chunk_id in hydrated:
                 c.colbert_vector = hydrated[c.chunk_id]
@@ -5056,7 +5065,9 @@ class HybridRetriever:
             remaining = self.micro_max_neighbors - len(cohort)
 
             if remaining > 0:
-                cohort.extend(self._microdoc_from_directory(base, used_docs, remaining))
+                cohort.extend(
+                    self._microdoc_from_directory(base, used_docs, remaining, filters)
+                )
                 remaining = self.micro_max_neighbors - len(cohort)
 
             if remaining > 0:
@@ -5139,19 +5150,39 @@ class HybridRetriever:
         return extras
 
     def _microdoc_from_directory(
-        self, base: ChunkResult, used_docs: Set[str], limit: int
+        self,
+        base: ChunkResult,
+        used_docs: Set[str],
+        limit: int,
+        filters: Dict[str, Any],
     ) -> List[ChunkResult]:
+        """
+        Find micro-doc candidates from the same directory as the base chunk.
+
+        Applies tenant/doc_tag/snapshot_scope filters to prevent cross-scope
+        data leakage when expanding micro-doc results.
+        """
         if limit <= 0:
             return []
         prefix = self._path_prefix(base.source_path)
         if not prefix:
             return []
 
+        # Extract filter values with None as default (NULL in Cypher)
+        doc_tag = filters.get("doc_tag") if filters else None
+        tenant = filters.get("tenant") if filters else None
+        snapshot_scope = filters.get("snapshot_scope") if filters else None
+
+        # Build Cypher query with optional filter conditions
+        # NULL parameters are handled with IS NULL OR equality checks
         query = """
         MATCH (c:Chunk)
         WHERE c.document_id <> $document_id
           AND c.document_total_tokens <= $doc_max
           AND c.source_path STARTS WITH $prefix
+          AND ($doc_tag IS NULL OR c.doc_tag = $doc_tag)
+          AND ($tenant IS NULL OR c.tenant = $tenant)
+          AND ($snapshot_scope IS NULL OR c.snapshot_scope = $snapshot_scope)
         RETURN c
         ORDER BY c.document_total_tokens ASC, c.token_count ASC
         LIMIT $limit
@@ -5166,6 +5197,9 @@ class HybridRetriever:
                     doc_max=self.micro_doc_max,
                     prefix=prefix,
                     limit=self.micro_knn_limit,
+                    doc_tag=doc_tag,
+                    tenant=tenant,
+                    snapshot_scope=snapshot_scope,
                 )
                 for record in records:
                     node = record.get("c")

@@ -475,12 +475,15 @@ async def search_sections(
             if chunk.rerank_score is not None
             else (chunk.fused_score or chunk.vector_score or chunk.bm25_score or 0.0)
         )
+        # Source detection: use explicit 'is not None' checks to handle 0.0 scores correctly
         source = "hybrid"
         if chunk.rerank_score is not None:
             source = "reranked"
-        elif chunk.vector_score and not chunk.bm25_score:
+        elif chunk.fusion_method == "rrf":
+            source = "rrf_fusion"
+        elif chunk.vector_score is not None and chunk.bm25_score is None:
             source = "vector"
-        elif chunk.bm25_score and not chunk.vector_score:
+        elif chunk.bm25_score is not None and chunk.vector_score is None:
             source = "bm25"
         results.append(
             {
@@ -491,11 +494,38 @@ async def search_sections(
                 "score": float(score),
                 "rank": offset + idx + 1,
                 "source": source,
+                # RRF fusion metadata - enables Agent to understand retrieval method
+                "fusion_method": chunk.fusion_method,
+                "fused_score": (
+                    float(chunk.fused_score) if chunk.fused_score is not None else None
+                ),
+                # Per-signal scores - enables Agent to understand WHY chunk matched
+                "title_vec_score": (
+                    float(chunk.title_vec_score)
+                    if chunk.title_vec_score is not None
+                    else None
+                ),
+                "entity_vec_score": (
+                    float(chunk.entity_vec_score)
+                    if chunk.entity_vec_score is not None
+                    else None
+                ),
+                "doc_title_sparse_score": (
+                    float(chunk.doc_title_sparse_score)
+                    if chunk.doc_title_sparse_score is not None
+                    else None
+                ),
+                "lexical_vec_score": (
+                    float(chunk.lexical_vec_score)
+                    if chunk.lexical_vec_score is not None
+                    else None
+                ),
                 "rerank_score": (
                     float(chunk.rerank_score)
                     if chunk.rerank_score is not None
                     else None
                 ),
+                # Graph enrichment scores
                 "graph_score": float(getattr(chunk, "graph_score", 0.0) or 0.0),
                 "graph_distance": int(getattr(chunk, "graph_distance", 0) or 0),
                 "connection_count": int(getattr(chunk, "connection_count", 0) or 0),
