@@ -659,6 +659,9 @@ class QdrantMultiVectorRetriever:
         schema_supports_title_sparse: bool = False,  # NEW: Lexical heading matching
         schema_supports_entity_sparse: bool = False,  # NEW: Lexical entity matching
         rrf_debug_logging: bool = False,  # NEW: Per-field RRF contribution logging
+        rrf_field_weights: Optional[
+            Dict[str, float]
+        ] = None,  # NEW: Per-field RRF weights
     ):
         settings = get_settings()
         env = (
@@ -701,6 +704,8 @@ class QdrantMultiVectorRetriever:
         )
         # NEW: RRF debug logging flag
         self.rrf_debug_logging = rrf_debug_logging
+        # NEW: RRF per-field weights (default 1.0 for all fields)
+        self.rrf_field_weights = rrf_field_weights or {}
         if self.schema_supports_colbert and not self.use_query_api:
             message = (
                 "Configuration error: ColBERT enabled but Query API is disabled. "
@@ -864,7 +869,7 @@ class QdrantMultiVectorRetriever:
                 doc_title_sparse_score=vec_score_by_id.get(
                     (pid, "doc_title-sparse"), 0.0
                 ),
-                entity_vec_score=vec_score_by_id.get((pid, "entity"), 0.0),
+                entity_vec_score=vec_score_by_id.get((pid, "entity-sparse"), 0.0),
                 lexical_vec_score=(
                     vec_score_by_id.get((pid, self.sparse_field_name), 0.0)
                     if self.sparse_field_name
@@ -1404,7 +1409,7 @@ class QdrantMultiVectorRetriever:
                 doc_title_sparse_score=vec_score_by_id.get(
                     (pid, "doc_title-sparse"), 0.0
                 ),
-                entity_vec_score=vec_score_by_id.get((pid, "entity"), 0.0),
+                entity_vec_score=vec_score_by_id.get((pid, "entity-sparse"), 0.0),
                 lexical_vec_score=(
                     vec_score_by_id.get((pid, self.sparse_query_name), 0.0)
                     if self.sparse_query_name
@@ -1622,10 +1627,11 @@ class QdrantMultiVectorRetriever:
         self, rankings: Dict[str, List[Tuple[str, float]]], k: int = 60
     ) -> Dict[str, float]:
         """
-        Reciprocal Rank Fusion across multiple vector fields.
+        Weighted Reciprocal Rank Fusion across multiple vector fields.
 
-        RRF score = Σ 1/(k + rank_i) for each field where the document appears.
+        RRF score = Σ weight_i * 1/(k + rank_i) for each field where the document appears.
         Uses rank position only, not score magnitude - robust to scale differences.
+        Field weights allow boosting specific signals (e.g., title-sparse for heading matches).
 
         Args:
             rankings: Dict mapping field name to list of (doc_id, score) tuples
@@ -1639,10 +1645,12 @@ class QdrantMultiVectorRetriever:
         for field_name, items in rankings.items():
             if not items:
                 continue
+            # Get field weight (default 1.0 if not specified)
+            weight = self.rrf_field_weights.get(field_name, 1.0)
             # Sort by score descending to establish ranks
             sorted_items = sorted(items, key=lambda x: x[1] or 0.0, reverse=True)
             for rank, (doc_id, _score) in enumerate(sorted_items, start=1):
-                fused[doc_id] += 1.0 / (k + rank)
+                fused[doc_id] += weight * 1.0 / (k + rank)
 
         return fused
 
@@ -1658,7 +1666,7 @@ class QdrantMultiVectorRetriever:
         Shows how each field contributed to the final fused score for top results.
         Helps diagnose which fields are providing useful signal vs noise.
 
-        RRF formula: score(d) = Σ 1/(k + rank_i(d)) for each field i
+        Weighted RRF formula: score(d) = Σ weight_i * 1/(k + rank_i(d)) for each field i
 
         Args:
             rankings: Dict mapping field name to list of (doc_id, score) tuples
@@ -1705,10 +1713,12 @@ class QdrantMultiVectorRetriever:
             for field_name in rankings.keys():
                 rank = field_ranks.get(field_name, {}).get(doc_id)
                 if rank:
-                    contribution = 1.0 / (k + rank)
+                    weight = self.rrf_field_weights.get(field_name, 1.0)
+                    contribution = weight * 1.0 / (k + rank)
                     total_contribution += contribution
                     contributions[field_name] = {
                         "rank": rank,
+                        "weight": weight,
                         "contribution": round(contribution, 5),
                     }
 
@@ -2028,6 +2038,10 @@ class HybridRetriever:
             ),
             # NEW: Per-field RRF contribution logging for debugging
             rrf_debug_logging=getattr(hybrid_config, "rrf_debug_logging", False),
+            # NEW: Per-field RRF weights for boosting specific signals
+            rrf_field_weights=dict(
+                getattr(hybrid_config, "rrf_field_weights", {}) or {}
+            ),
         )
         self.colbert_rerank_enabled = getattr(
             hybrid_config, "colbert_rerank_enabled", True
@@ -2041,9 +2055,14 @@ class HybridRetriever:
         self.graph_channel_enabled = getattr(
             hybrid_config, "graph_channel_enabled", False
         )
+        self.graph_enrichment_enabled = getattr(
+            hybrid_config, "graph_enrichment_enabled", False
+        )
         self.graph_adaptive_enabled = getattr(
             hybrid_config, "graph_adaptive_enabled", False
         )
+        # Master switch: completely disable ALL Neo4j queries in retrieval path
+        self.neo4j_disabled = getattr(hybrid_config, "neo4j_disabled", False)
         dense_active = True
         sparse_active = bool(
             self.vector_retriever.supports_sparse
@@ -2069,6 +2088,7 @@ class HybridRetriever:
                 "colbert_active": colbert_active,
                 "colbert_query_api": self.vector_retriever.use_query_api,
                 "has_sparse_field": bool(self.vector_retriever.sparse_field_name),
+                "neo4j_disabled": self.neo4j_disabled,  # PHASE 1 VECTOR-ONLY
             },
         )
         self._entity_extractor = None
@@ -2166,7 +2186,12 @@ class HybridRetriever:
                 "CONTAINS_STEP",
                 "HAS_PARAMETER",
             ]
-        self.graph_enabled = self.graph_max_related > 0 and self.graph_max_depth > 0
+        # Graph enrichment requires explicit enable flag AND valid depth/related settings
+        self.graph_enabled = (
+            self.graph_enrichment_enabled
+            and self.graph_max_related > 0
+            and self.graph_max_depth > 0
+        )
 
         # Micro-doc stitching configuration
         self.micro_max_neighbors = int(os.getenv("MICRODOC_MAX_NEIGHBORS", "2"))
@@ -2373,7 +2398,8 @@ class HybridRetriever:
         doc_tag: Optional[str],
     ) -> Dict[str, Dict[str, Any]]:
         """Compute graph signals for chunks using canonical_name matches."""
-        if not entity_names or not candidate_chunk_ids:
+        # PHASE 1 VECTOR-ONLY: Skip graph signals when neo4j_disabled
+        if not entity_names or not candidate_chunk_ids or self.neo4j_disabled:
             return {}
         rels, _ = self._relationships_for_query(query_type)
         cypher = """
@@ -2444,7 +2470,8 @@ class HybridRetriever:
         Returns:
             Dict mapping chunk_id to {score, ref_count, ref_titles}
         """
-        if not candidate_chunk_ids:
+        # PHASE 1 VECTOR-ONLY: Skip cross-doc signals when neo4j_disabled
+        if not candidate_chunk_ids or self.neo4j_disabled:
             return {}
 
         refs_cfg = getattr(self.config, "references", None)
@@ -2528,7 +2555,8 @@ class HybridRetriever:
             "graph_rerank_avg_delta": 0.0,
             "cross_doc_candidates": 0,  # Fix #4: Track cross-doc signal count
         }
-        if not vector_results:
+        # PHASE 1 VECTOR-ONLY: Skip graph reranker when neo4j_disabled
+        if not vector_results or self.neo4j_disabled:
             return stats
         qtype = self._classify_query_type(query)
 
@@ -2868,7 +2896,8 @@ class HybridRetriever:
         graph_as_reranker_flag = getattr(
             getattr(self.config, "feature_flags", None), "graph_as_reranker", False
         )
-        if self.graph_channel_enabled:
+        # PHASE 1 VECTOR-ONLY: Skip ALL graph operations when neo4j_disabled
+        if self.graph_channel_enabled and not self.neo4j_disabled:
             if graph_as_reranker_flag:
                 graph_channel_stats = self._apply_graph_reranker(
                     query, doc_tag, fused_results, metrics
@@ -3524,6 +3553,10 @@ class HybridRetriever:
 
         Fetches CitationUnit headings for chunks missing citation data.
         """
+        # PHASE 1 VECTOR-ONLY: Skip Neo4j queries when disabled
+        if self.neo4j_disabled:
+            return
+
         query_ids = list({chunk.chunk_id for chunk in chunks})
 
         lookup: Dict[str, List[Tuple[int, str, int]]] = {}
@@ -3972,7 +4005,8 @@ class HybridRetriever:
 
         Reference: Phase 7E Canonical Spec L1425-1434
         """
-        if not seeds:
+        # PHASE 1 VECTOR-ONLY: Skip expansion when neo4j_disabled
+        if not seeds or self.neo4j_disabled:
             return []
 
         # Limit to first 5 seeds for expansion (bounded)
@@ -4144,7 +4178,8 @@ class HybridRetriever:
 
         Returns combined list of expanded chunks (no duplicates).
         """
-        if not seeds:
+        # PHASE 1 VECTOR-ONLY: Skip structure expansion when neo4j_disabled
+        if not seeds or self.neo4j_disabled:
             return []
 
         # Check feature flag
@@ -4678,7 +4713,8 @@ class HybridRetriever:
             "graph_neighbors_considered": 0,
             "graph_neighbors_added": 0,
         }
-        if not self.graph_enabled or not seeds:
+        # PHASE 1 VECTOR-ONLY: Skip graph enrichment when neo4j_disabled
+        if not self.graph_enabled or not seeds or self.neo4j_disabled:
             return [], stats
 
         neighbors = self._fetch_graph_neighbors(seeds, doc_tag=doc_tag)
@@ -4722,7 +4758,11 @@ class HybridRetriever:
             "graph_channel_candidates": 0,
             "graph_channel_entities": 0,
         }
-        if not (self.graph_channel_enabled and self.graph_enabled):
+        # PHASE 1 VECTOR-ONLY: Skip graph channel when neo4j_disabled
+        if (
+            not (self.graph_channel_enabled and self.graph_enabled)
+            or self.neo4j_disabled
+        ):
             return [], stats
         extractor = self._get_entity_extractor()
         entities = extractor.extract_entities(query)
@@ -4860,7 +4900,8 @@ class HybridRetriever:
         self, seeds: List[ChunkResult], doc_tag: Optional[str]
     ) -> List[ChunkResult]:
         """Fetch graph neighbors for the given seed chunks."""
-        if not self.graph_enabled:
+        # PHASE 1 VECTOR-ONLY: Skip graph neighbors when neo4j_disabled
+        if not self.graph_enabled or self.neo4j_disabled:
             return []
 
         seed_lookup = {seed.chunk_id: seed for seed in seeds if seed.chunk_id}
@@ -4990,6 +5031,10 @@ class HybridRetriever:
 
     def _annotate_coverage(self, chunks: List[ChunkResult]) -> None:
         """Attach connection/mention counts used by ranker coverage features."""
+        # PHASE 1 VECTOR-ONLY: Skip Neo4j queries when disabled
+        if self.neo4j_disabled:
+            return
+
         ids = {chunk.chunk_id for chunk in chunks if chunk.chunk_id}
         if not ids:
             return
@@ -5162,7 +5207,8 @@ class HybridRetriever:
         Applies tenant/doc_tag/snapshot_scope filters to prevent cross-scope
         data leakage when expanding micro-doc results.
         """
-        if limit <= 0:
+        # PHASE 1 VECTOR-ONLY: Skip microdoc expansion when neo4j_disabled
+        if limit <= 0 or self.neo4j_disabled:
             return []
         prefix = self._path_prefix(base.source_path)
         if not prefix:

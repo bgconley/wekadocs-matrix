@@ -285,6 +285,8 @@ class RerankerConfig(BaseModel):
 
 class HybridSearchConfig(BaseModel):
     enabled: bool = True
+    # Master switch: completely disable ALL Neo4j queries in retrieval path
+    neo4j_disabled: bool = True  # PHASE 1 VECTOR-ONLY: bypass citation, coverage, graph
     mode: str = (
         "legacy"  # legacy (BM25+RRF) or bge_reranker (vector-only + cross-encoder)
     )
@@ -300,6 +302,18 @@ class HybridSearchConfig(BaseModel):
     rrf_k: int = 60  # Phase 7E: RRF constant
     rrf_debug_logging: bool = (
         False  # NEW: Log per-field RRF contributions for debugging
+    )
+    # NEW: Per-field RRF weights for boosting specific signals
+    # Higher weight = more influence on final ranking
+    rrf_field_weights: Dict[str, float] = Field(
+        default_factory=lambda: {
+            "content": 1.0,
+            "title": 1.0,
+            "text-sparse": 1.0,
+            "doc_title-sparse": 1.0,
+            "title-sparse": 2.0,  # Boost heading matches
+            "entity-sparse": 1.5,  # Boost entity matches
+        }
     )
     fusion_alpha: float = 0.6  # Phase 7E: Vector weight for weighted fusion
     vector_weight: float = 0.7  # Legacy

@@ -69,7 +69,13 @@ search:
     # Architecture mode: legacy (BM25+RRF) or bge_reranker (vector-only + cross-encoder)
     mode: "legacy"
     enabled: true  # Phase 7E: Enable hybrid retrieval
+
+    # Master switch: completely disable ALL Neo4j queries in retrieval path
+    # When true, bypasses: citation hydration, coverage annotation, graph channels
+    neo4j_disabled: true  # PHASE 1 VECTOR-ONLY: No graph operations whatsoever
+
     graph_channel_enabled: false  # DISABLED: Phase 1 vector-only hardening
+    graph_enrichment_enabled: false  # DISABLED: Post-retrieval graph neighbor expansion
     colbert_rerank_enabled: true  # Keep ColBERT reranking as mid-stage precision filter
     colbert_candidate_limit: 50  # Min candidates for ColBERT reranking
     colbert_candidate_multiplier: 3  # top_k multiplier
@@ -79,6 +85,18 @@ search:
     # RRF (Reciprocal Rank Fusion) settings
     rrf_k: 60  # Phase 7E: RRF constant (default: 60)
     rrf_debug_logging: true  # NEW: Log per-field RRF contributions for debugging
+
+    # RRF field weights: multiply each field's RRF contribution by its weight
+    # Higher weight = more influence on final ranking
+    # Default 1.0 for all fields; boost title-sparse and entity-sparse to prioritize
+    # documents where query terms appear in headings or entity names
+    rrf_field_weights:
+      content: 1.0           # Dense semantic content similarity
+      title: 1.0             # Dense semantic title similarity
+      text-sparse: 1.0       # Lexical content matching (BM25-style)
+      doc_title-sparse: 1.0  # Lexical document title matching
+      title-sparse: 2.0      # Lexical section heading matching - BOOSTED
+      entity-sparse: 1.5     # Lexical entity name matching - BOOSTED
 
     # Weighted fusion settings (alternative to RRF)
     fusion_alpha: 0.6  # Phase 7E: Vector weight (0.0-1.0), BM25 weight = 1-alpha
