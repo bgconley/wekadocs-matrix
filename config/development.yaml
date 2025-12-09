@@ -214,7 +214,7 @@ ingestion:
   # Batch processing
   batch_size: 500
   max_section_tokens: 1000
-  timeout_seconds: 300
+  timeout_seconds: 600  # Phase 5: Increased for GLiNER-enabled processing
   workers: 2
 
   # Phase 7E-2: Chunk assembly configuration
@@ -226,6 +226,12 @@ ingestion:
       target_tokens: 500
       hard_tokens: 750
       max_sections: 4
+    # Phase 7E-5: Disable microdoc stubs (empty chunks for graph traversal)
+    # These are invisible to vector search and waste storage
+    microdoc:
+      enabled: false
+      doc_token_threshold: 2000
+      min_split_tokens: 400
 
   # Queue recovery (Phase 6: job reaper)
   queue_recovery:
@@ -435,6 +441,32 @@ connectors:
     owner: null
     repo: null
     webhook_secret: null
+
+# Named Entity Recognition (GLiNER)
+# Zero-shot NER for domain-specific entity extraction
+ner:
+  enabled: true  # Master switch - GLiNER enrichment ENABLED for testing
+  model_name: "urchade/gliner_medium-v2.1"  # Balanced accuracy/speed
+  threshold: 0.45  # Minimum confidence (0.0-1.0)
+  device: "auto"  # auto-detect: MPS → CUDA → CPU
+  batch_size: 32  # Optimal for Apple Silicon (M1/M2/M3)
+  # External GLiNER service with MPS acceleration (5-10x faster than CPU)
+  # Run: cd services/gliner-ner && ./run.sh
+  # Falls back to local model if service unavailable
+  service_url: "http://host.docker.internal:9002"
+  labels:
+    # Domain-specific WEKA entity types with zero-shot examples
+    - "weka_software_component (e.g. backend, frontend, agent, client)"
+    - "operating_system (e.g. RHEL, Ubuntu, Rocky Linux)"
+    - "hardware_component (e.g. NVMe, NIC, GPU, switch)"
+    - "filesystem_object (e.g. inode, snapshot, file, directory)"
+    - "cloud_provider_or_service (e.g. AWS, S3, Azure, EC2)"
+    - "cli_command (e.g. weka fs, mount, systemctl)"
+    - "configuration_parameter (e.g. --net-apply, stripe-width)"
+    - "network_or_storage_protocol (e.g. NFS, SMB, S3, POSIX, TCP)"
+    - "error_message_or_code (e.g. 10054, Connection refused)"
+    - "performance_metric (e.g. IOPS, latency, throughput)"
+    - "file_system_path (e.g. /mnt/weka, /etc/fstab)"
 
 # Testing helpers
 use_mock_embeddings: false

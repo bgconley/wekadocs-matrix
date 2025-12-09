@@ -170,7 +170,9 @@ class GreedyCombinerV2:
                 ),
                 self.hard_max,
             )
-            self.microdoc_enabled = True
+            self.microdoc_enabled = (
+                os.getenv("COMBINE_MICRODOC_ENABLED", "true").lower() == "true"
+            )
             self.microdoc_threshold = max(self.target_max * 2, 2000)
             self.microdoc_min_split_tokens = 400
             self.split_enabled = True

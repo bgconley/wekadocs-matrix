@@ -443,6 +443,8 @@ class GraphBuilder:
 
         # Step 4.5: Attach mentions to sections for entity sparse embedding
         # This enables _process_embeddings to build entity text from mentions
+        # NOTE: Combined chunks have NEW IDs but mentions are keyed by ORIGINAL section IDs.
+        # We must check both current ID and original_section_ids to attach all mentions.
         from collections import defaultdict
 
         mentions_by_section = defaultdict(list)
@@ -450,8 +452,27 @@ class GraphBuilder:
             sid = m.get("section_id")
             if sid:
                 mentions_by_section[sid].append(m)
+
         for section in sections:
-            section["_mentions"] = mentions_by_section.get(section["id"], [])
+            section_mentions = []
+            # Check current section ID
+            section_id = section.get("id")
+            if section_id and section_id in mentions_by_section:
+                section_mentions.extend(mentions_by_section[section_id])
+            # Check original section IDs (from chunk assembly - combined chunks)
+            original_ids = section.get("original_section_ids", [])
+            for orig_id in original_ids:
+                if orig_id in mentions_by_section:
+                    section_mentions.extend(mentions_by_section[orig_id])
+            # Deduplicate by entity_id to avoid double-counting
+            seen_entity_ids = set()
+            unique_mentions = []
+            for m in section_mentions:
+                eid = m.get("entity_id")
+                if eid and eid not in seen_entity_ids:
+                    seen_entity_ids.add(eid)
+                    unique_mentions.append(m)
+            section["_mentions"] = unique_mentions
 
         # Step 5: Compute embeddings and upsert to vector store
         embedding_stats = self._process_embeddings(document, sections, entities)

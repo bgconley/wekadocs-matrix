@@ -78,3 +78,4 @@ transformers>=4.43.0  # HuggingFace tokenizer (primary backend)
 tokenizers>=0.15.0    # Fast Rust backend for transformers
 sentencepiece>=0.2.0  # Required by XLM-RoBERTa tokenizer
 huggingface_hub>=0.23.0  # For model/tokenizer downloads
+gliner>=0.2.24

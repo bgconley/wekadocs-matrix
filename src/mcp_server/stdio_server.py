@@ -476,9 +476,15 @@ async def search_sections(
             else (chunk.fused_score or chunk.vector_score or chunk.bm25_score or 0.0)
         )
         # Source detection: use explicit 'is not None' checks to handle 0.0 scores correctly
+        # Priority order: reranked > graph_expanded > rrf_fusion > vector > bm25 > hybrid
         source = "hybrid"
+        graph_distance = getattr(chunk, "graph_distance", 0) or 0
+        graph_score = getattr(chunk, "graph_score", 0.0) or 0.0
         if chunk.rerank_score is not None:
             source = "reranked"
+        elif graph_distance > 0 or graph_score > 0:
+            # Graph-expanded results bypass RRF fusion, so no per-signal scores
+            source = "graph_expanded"
         elif chunk.fusion_method == "rrf":
             source = "rrf_fusion"
         elif chunk.vector_score is not None and chunk.bm25_score is None:
@@ -530,6 +536,9 @@ async def search_sections(
                 "graph_distance": int(getattr(chunk, "graph_distance", 0) or 0),
                 "connection_count": int(getattr(chunk, "connection_count", 0) or 0),
                 "mention_count": int(getattr(chunk, "mention_count", 0) or 0),
+                # GLiNER entity boosting metadata (Phase 4) - enables Agent to see entity-aware ranking
+                "entity_boost_applied": getattr(chunk, "entity_boost_applied", False),
+                "entity_metadata": getattr(chunk, "entity_metadata", None),
             }
         )
 

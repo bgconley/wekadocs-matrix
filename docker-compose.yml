@@ -152,7 +152,7 @@ services:
       - ANSWER_MODEL=${ANSWER_MODEL:-search-result-formatting}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
-      - HF_CACHE=/opt/hf-cache
+      - HF_HOME=/opt/hf-cache
       - TRANSFORMERS_OFFLINE=false
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
@@ -242,7 +242,7 @@ services:
       - JINA_API_KEY=${JINA_API_KEY}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
-      - HF_CACHE=/opt/hf-cache
+      - HF_HOME=/opt/hf-cache
       - TRANSFORMERS_OFFLINE=false
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
@@ -274,6 +274,9 @@ services:
       - COMBINE_STOP_AT_LEVEL=${COMBINE_STOP_AT_LEVEL:-2}
       - COMBINE_BREAK_KEYWORDS=${COMBINE_BREAK_KEYWORDS:-faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting}
       - COMBINE_DEBUG=${COMBINE_DEBUG:-false}
+      # Phase 7E-5: Disable doc_fallback and microdoc stubs (vector-only mode)
+      - COMBINE_DOC_FALLBACK_ENABLED=false
+      - COMBINE_MICRODOC_ENABLED=false
       # Phase 7E-3: Cache Invalidation Configuration
       - CACHE_MODE=epoch
       - CACHE_NS=rag:v1
@@ -343,7 +346,7 @@ services:
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
       - HF_TOKENIZER_ID=jinaai/jina-embeddings-v3
-      - HF_CACHE=/opt/hf-cache
+      - HF_HOME=/opt/hf-cache
       - TRANSFORMERS_OFFLINE=false
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
@@ -373,6 +376,9 @@ services:
       - COMBINE_RESPECT_MAJOR_LEVELS=${COMBINE_RESPECT_MAJOR_LEVELS:-true}
       - COMBINE_STOP_AT_LEVEL=${COMBINE_STOP_AT_LEVEL:-2}
       - COMBINE_BREAK_KEYWORDS=${COMBINE_BREAK_KEYWORDS:-faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting}
+      # Phase 7E-5: Disable doc_fallback and microdoc stubs (vector-only mode)
+      - COMBINE_DOC_FALLBACK_ENABLED=false
+      - COMBINE_MICRODOC_ENABLED=false
       # Phase 7E-3: Cache Invalidation Configuration
       - CACHE_MODE=epoch
       - CACHE_NS=rag:v1

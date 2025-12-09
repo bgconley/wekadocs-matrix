@@ -988,6 +988,23 @@ class AtomicIngestionCoordinator:
             section.setdefault("doc_id", document.get("doc_id"))
             section["document_total_tokens"] = doc_total_tokens
 
+        # Phase 2 GLiNER: Enrich chunks with named entities (gated by config)
+        # This adds entity_metadata, _embedding_text, and _mentions to each chunk
+        # GLiNER entities are for vector enrichment only (filtered from Neo4j)
+        if getattr(config, "ner", None) and getattr(config.ner, "enabled", False):
+            try:
+                from src.ingestion.extract.ner_gliner import enrich_chunks_with_entities
+
+                enrich_chunks_with_entities(sections)
+            except Exception as e:
+                # Non-blocking: GLiNER failure should not abort ingestion
+                logger.warning(
+                    "gliner_enrichment_failed_non_blocking",
+                    error=str(e),
+                    document_id=document.get("id"),
+                    section_count=len(sections),
+                )
+
         # Create builder (without writing)
         builder = GraphBuilder(self.neo4j_driver, config, self.qdrant_client)
 
@@ -1184,7 +1201,12 @@ class AtomicIngestionCoordinator:
             if not section_id:
                 continue
 
-            content_text = builder._build_section_text_for_embedding(section)
+            # Prefer transient GLiNER-enriched text if available (Phase 2 GLiNER)
+            # _embedding_text contains entity context: "{title}\n\n{text}\n\n[Context: entities]"
+            # Falls back to standard builder method when GLiNER is disabled or no entities
+            content_text = section.get(
+                "_embedding_text"
+            ) or builder._build_section_text_for_embedding(section)
 
             # Skip sections with empty content to prevent HTTP 400 from embedding API
             # Handles microdoc stubs from GreedyCombinerV2 with stub["text"] = ""
@@ -2361,7 +2383,10 @@ class AtomicIngestionCoordinator:
                 entity_entity_relationships.append(mention)
             elif "section_id" in mention and "entity_id" in mention:
                 # Section→Entity mention (MENTIONED_IN)
-                section_entity_mentions.append(mention)
+                # Phase 2 GLiNER: Skip mentions with source="gliner"
+                # GLiNER entities enrich vectors only, not the Neo4j graph
+                if mention.get("source") != "gliner":
+                    section_entity_mentions.append(mention)
             else:
                 # Log unexpected mention structure for debugging
                 logger.warning(
@@ -3125,6 +3150,9 @@ class AtomicIngestionCoordinator:
                 or self._compute_shingle_hash(text_content),
                 # === Semantic metadata (1 field) ===
                 "semantic_metadata": self._extract_semantic_metadata(section),
+                # === GLiNER entity metadata (1 field, Phase 2) ===
+                # Added by enrich_chunks_with_entities() for filtering/boosting
+                "entity_metadata": section.get("entity_metadata"),
                 # === Embedding metadata (5+ fields via spread) ===
                 **embedding_metadata,
             }

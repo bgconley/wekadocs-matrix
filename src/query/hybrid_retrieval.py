@@ -47,6 +47,7 @@ from src.providers.rerank.base import RerankProvider
 from src.providers.settings import EmbeddingSettings
 from src.providers.tokenizer_service import TokenizerService
 from src.query.entity_extraction import EntityExtractor
+from src.query.processing.disambiguation import QueryAnalysis, QueryDisambiguator
 from src.shared.config import (
     get_config,
     get_embedding_settings,
@@ -161,6 +162,10 @@ class ChunkResult:
     embedding_version: Optional[str] = None
     tenant: Optional[str] = None
     is_microdoc_extra: bool = False
+
+    # GLiNER entity metadata (Phase 4: Entity-aware retrieval)
+    entity_metadata: Optional[Dict[str, Any]] = None
+    entity_boost_applied: bool = False  # Whether entity boosting was applied
 
     # Citation labels (order, title, level) derived from CitationUnits
     citation_labels: List[Tuple[int, str, int]] = field(default_factory=list)
@@ -1095,6 +1100,8 @@ class QdrantMultiVectorRetriever:
             entity_vec_score=entity_vec_score,
             lexical_vec_score=lexical_vec_score,
             citation_labels=payload.get("citation_labels") or [],
+            # Phase 4: Entity metadata for GLiNER-aware retrieval boosting
+            entity_metadata=payload.get("entity_metadata"),
         )
 
     def _build_query_bundle(self, query: str) -> QueryEmbeddingBundle:
@@ -2092,6 +2099,8 @@ class HybridRetriever:
             },
         )
         self._entity_extractor = None
+        # Phase 4: GLiNER query disambiguation for entity-aware retrieval
+        self._disambiguator: Optional[QueryDisambiguator] = None
         self._last_query_text: str = ""
         self.tokenizer = tokenizer or TokenizerService()
         self.reranker_config = getattr(hybrid_config, "reranker", None)
@@ -2763,6 +2772,26 @@ class HybridRetriever:
                 "dedup_best_score": getattr(ff, "dedup_best_score", False),
             }
 
+        # Phase 4: GLiNER Query Entity Disambiguation
+        # Extract entities from query for post-retrieval boosting
+        query_analysis: Optional[QueryAnalysis] = None
+        boost_terms: List[str] = []
+        entity_boost_enabled = getattr(self.config.ner, "enabled", False)
+
+        if entity_boost_enabled:
+            try:
+                disambiguator = self._get_disambiguator()
+                query_analysis = disambiguator.process(query)
+                boost_terms = query_analysis.boost_terms if query_analysis else []
+            except Exception as e:
+                logger.warning(
+                    "query_disambiguation_failed",
+                    query=query[:50],
+                    error=str(e),
+                )
+                query_analysis = None
+                boost_terms = []
+
         # LGTM Phase 4: Verbose log event 1 - retrieval_started
         logger.info(
             "retrieval_started",
@@ -2774,11 +2803,16 @@ class HybridRetriever:
             colbert_enabled=self.colbert_rerank_enabled,
             graph_channel_enabled=self.graph_channel_enabled,
             expansion_enabled=self.expansion_enabled,
+            # Phase 4: Entity boosting info
+            entity_boost_enabled=entity_boost_enabled,
+            query_entities=boost_terms[:5] if boost_terms else [],
         )
 
         # Step 1: Parallel BM25 and vector search
-        # Retrieve more candidates for fusion (3x top_k)
-        candidate_k = min(top_k * 3, 100)
+        # Retrieve more candidates for fusion (3x top_k, or 6x if entity boosting)
+        # Over-fetch when entities found to ensure good candidates aren't cut before boosting
+        entity_overfetch_multiplier = 2 if boost_terms else 1
+        candidate_k = min(top_k * 3 * entity_overfetch_multiplier, 200)
 
         # Branch: vector-only (bge_reranker) vs legacy (BM25 + fusion)
         bm25_results: List[ChunkResult] = []
@@ -2889,6 +2923,27 @@ class HybridRetriever:
         # Step 3: Take fused results as seeds and optionally rerank
         fused_results.sort(key=lambda x: x.fused_score or 0, reverse=True)
         self._log_stage_snapshot("post-fusion", fused_results)
+
+        # Phase 4: Apply GLiNER entity boosting (post-retrieval soft filtering)
+        entity_boosted_count = 0
+        if boost_terms and fused_results:
+            entity_boosted_count = self._apply_entity_boost(fused_results, boost_terms)
+            if entity_boosted_count > 0:
+                # Re-sort after boosting to reflect new scores
+                fused_results.sort(key=lambda x: x.fused_score or 0, reverse=True)
+                self._log_stage_snapshot("post-entity-boost", fused_results)
+
+            logger.info(
+                "entity_boost_complete",
+                query=query[:50],
+                boost_terms=boost_terms,
+                chunks_boosted=entity_boosted_count,
+                total_chunks=len(fused_results),
+            )
+
+        metrics["entity_boost_enabled"] = entity_boost_enabled
+        metrics["entity_boost_terms"] = boost_terms[:5] if boost_terms else []
+        metrics["entity_boosted_chunks"] = entity_boosted_count
 
         # Optional graph retrieval channel (entity-anchored, cross-doc allowed)
         graph_channel_stats: Dict[str, Any] = {}
@@ -4750,6 +4805,64 @@ class HybridRetriever:
         self._entity_extractor = EntityExtractor(self.neo4j_driver)
         return self._entity_extractor
 
+    def _get_disambiguator(self) -> QueryDisambiguator:
+        """Lazily initialize the GLiNER-based query disambiguator (Phase 4)."""
+        if self._disambiguator is None:
+            self._disambiguator = QueryDisambiguator()
+        return self._disambiguator
+
+    def _apply_entity_boost(
+        self,
+        results: List[ChunkResult],
+        boost_terms: List[str],
+        max_boost: float = 0.5,
+        per_entity_boost: float = 0.1,
+    ) -> int:
+        """
+        Apply post-retrieval entity boosting to fused results.
+
+        This implements "soft filtering" - entities in the query boost matching
+        chunks rather than filtering them out. This is more robust than hard
+        filtering since it doesn't exclude potentially relevant results.
+
+        Args:
+            results: List of ChunkResult to boost (modified in-place)
+            boost_terms: Normalized entity terms from query disambiguation
+            max_boost: Maximum total boost factor (default 50%)
+            per_entity_boost: Boost per matching entity (default 10%)
+
+        Returns:
+            Number of chunks that received a boost
+        """
+        if not boost_terms:
+            return 0
+
+        boost_terms_set = set(boost_terms)
+        boosted_count = 0
+
+        for res in results:
+            # Get entity values from chunk's entity_metadata
+            entity_metadata = res.entity_metadata or {}
+            doc_entities = entity_metadata.get("entity_values_normalized", [])
+
+            if not doc_entities:
+                continue
+
+            # Count matching entities
+            matches = sum(1 for term in boost_terms_set if term in doc_entities)
+
+            if matches > 0:
+                # Calculate boost factor (capped at max_boost)
+                boost_factor = 1.0 + min(max_boost, matches * per_entity_boost)
+
+                # Apply boost to fused score
+                if res.fused_score is not None:
+                    res.fused_score *= boost_factor
+                    res.entity_boost_applied = True
+                    boosted_count += 1
+
+        return boosted_count
+
     def _graph_retrieval_channel(
         self, query: str, doc_tag: Optional[str]
     ) -> Tuple[List[ChunkResult], Dict[str, int]]:
@@ -5374,6 +5487,8 @@ class HybridRetriever:
                 tenant=payload.get("tenant"),
                 fused_score=hit.score,
                 citation_labels=[],
+                # Phase 4: Entity metadata for GLiNER-aware retrieval boosting
+                entity_metadata=payload.get("entity_metadata"),
             )
             extras.append(candidate)
             if len(extras) >= limit:

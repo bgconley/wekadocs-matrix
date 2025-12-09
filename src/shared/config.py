@@ -789,6 +789,34 @@ class ReferencesConfig(BaseModel):
     query: ReferencesQueryConfig = Field(default_factory=ReferencesQueryConfig)
 
 
+class NERConfig(BaseModel):
+    """Named Entity Recognition configuration for GLiNER integration.
+
+    GLiNER provides zero-shot NER that enriches chunks with domain-specific
+    entity metadata for improved retrieval quality.
+
+    Attributes:
+        enabled: Master switch for NER enrichment (default: False)
+        model_name: HuggingFace model ID for GLiNER
+        threshold: Minimum confidence score for entity extraction (0.0-1.0)
+        device: Compute device - "auto" detects MPS/CUDA/CPU automatically
+        batch_size: Texts per batch (32 optimal for Apple Silicon)
+        labels: Domain-specific entity labels with examples for zero-shot
+        service_url: Optional URL for external GLiNER service (MPS accelerated)
+                     If set, tries HTTP service first with local model fallback
+    """
+
+    enabled: bool = False  # Default OFF - explicit opt-in required
+    model_name: str = "urchade/gliner_medium-v2.1"
+    threshold: float = 0.45
+    device: str = "auto"  # auto-detect: MPS → CUDA → CPU
+    batch_size: int = 32  # Optimal for M1/M2/M3 Max
+    labels: List[str] = Field(default_factory=list)  # Populated from YAML
+    service_url: Optional[str] = (
+        None  # External GLiNER service (e.g., http://host.docker.internal:9002)
+    )
+
+
 class Config(WekaBaseModel):
     """Main configuration model"""
 
@@ -812,6 +840,7 @@ class Config(WekaBaseModel):
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)  # Phase 7E-4
     connectors: Optional[ConnectorsConfig] = None
     references: ReferencesConfig = Field(default_factory=ReferencesConfig)
+    ner: NERConfig = Field(default_factory=NERConfig)  # GLiNER NER integration
 
     class Config:
         populate_by_name = True  # Allow both graph_schema and schema

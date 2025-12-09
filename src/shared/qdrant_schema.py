@@ -156,6 +156,25 @@ def build_qdrant_schema(
         ("embedding_dimensions", PayloadSchemaType.INTEGER),
         ("text_hash", PayloadSchemaType.KEYWORD),
         ("shingle_hash", PayloadSchemaType.KEYWORD),
+        # === GLiNER Entity Metadata Indexes (Phase 3) ===
+        # Enable efficient filtering and post-retrieval boosting for entity-enriched chunks
+        # Added as part of GLiNER NER integration for entity-aware hybrid search
+        (
+            "entity_metadata.entity_types",
+            PayloadSchemaType.KEYWORD,
+        ),  # Entity type labels
+        (
+            "entity_metadata.entity_values",
+            PayloadSchemaType.KEYWORD,
+        ),  # Raw entity texts
+        (
+            "entity_metadata.entity_values_normalized",
+            PayloadSchemaType.KEYWORD,
+        ),  # Lowercased
+        (
+            "entity_metadata.entity_count",
+            PayloadSchemaType.INTEGER,
+        ),  # Entity count per chunk
     ]
 
     return QdrantSchemaPlan(
@@ -177,6 +196,7 @@ def validate_qdrant_schema(
     require_doc_title_sparse: Optional[bool] = None,
     require_title_sparse: Optional[bool] = None,  # NEW: Validate title-sparse
     require_entity_sparse: Optional[bool] = None,  # NEW: Validate entity-sparse
+    require_entity_metadata_indexes: Optional[bool] = None,  # Phase 3: GLiNER indexes
     require_payload_fields: Optional[Sequence[str]] = None,
     strict: bool = False,
 ) -> None:
@@ -291,6 +311,25 @@ def validate_qdrant_schema(
                     f"'entity-sparse'. Set require_entity_sparse=False to skip this check "
                     f"or recreate the collection with entity-sparse support."
                 )
+
+    # Validate entity metadata payload indexes (Phase 3: GLiNER)
+    if require_entity_metadata_indexes:
+        entity_index_fields = [
+            "entity_metadata.entity_types",
+            "entity_metadata.entity_values",
+            "entity_metadata.entity_values_normalized",
+            "entity_metadata.entity_count",
+        ]
+        missing_entity_indexes = [
+            f for f in entity_index_fields if f not in payload_schema
+        ]
+        if missing_entity_indexes:
+            raise RuntimeError(
+                f"Qdrant collection '{collection_name}' missing required entity metadata "
+                f"payload indexes: {missing_entity_indexes}. These indexes are required for "
+                f"GLiNER entity-aware hybrid search. Run the Phase 3 index creation script "
+                f"or set require_entity_metadata_indexes=False to skip this check."
+            )
 
     if require_colbert:
         if isinstance(vectors, dict):
