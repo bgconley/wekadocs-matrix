@@ -192,6 +192,20 @@ def build_qdrant_schema(
             "line_start",
             PayloadSchemaType.INTEGER,
         ),  # Source line for citation correlation
+        # === Phase 5: Enhanced Structural Retrieval Indexes ===
+        # Enable query-type adaptive filtering and structural boosting
+        (
+            "line_end",
+            PayloadSchemaType.INTEGER,
+        ),  # Source line end for complete range
+        (
+            "parent_path_depth",
+            PayloadSchemaType.INTEGER,
+        ),  # Nesting level (0=root) for depth filtering
+        (
+            "block_type",
+            PayloadSchemaType.KEYWORD,
+        ),  # Dominant block type: "paragraph", "code", "table", "mixed"
     ]
 
     return QdrantSchemaPlan(

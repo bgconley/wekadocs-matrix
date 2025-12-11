@@ -48,6 +48,10 @@ from src.providers.settings import EmbeddingSettings
 from src.providers.tokenizer_service import TokenizerService
 from src.query.entity_extraction import EntityExtractor
 from src.query.processing.disambiguation import QueryAnalysis, QueryDisambiguator
+from src.query.structural_retrieval import StructuralRetrievalConfig as StructuralConfig
+from src.query.structural_retrieval import (
+    apply_structural_boost as _apply_structural_boost_pure,
+)
 from src.shared.config import (
     get_config,
     get_embedding_settings,
@@ -166,6 +170,11 @@ class ChunkResult:
     # GLiNER entity metadata (Phase 4: Entity-aware retrieval)
     entity_metadata: Optional[Dict[str, Any]] = None
     entity_boost_applied: bool = False  # Whether entity boosting was applied
+
+    # Phase 5: Structural metadata for query-type adaptive boosting
+    # Fields: has_code, has_table, parent_path_depth, block_type, code_ratio
+    structural_metadata: Optional[Dict[str, Any]] = None
+    structural_boost_applied: bool = False
 
     # RRF debug: per-field contributions to fused_score (when rrf_debug_logging=true)
     # Structure: {"field_name": {"rank": int, "weight": float, "contribution": float}, ...}
@@ -1169,6 +1178,14 @@ class QdrantMultiVectorRetriever:
             entity_metadata=_deduplicate_entity_metadata(
                 payload.get("entity_metadata")
             ),
+            # Phase 5: Structural metadata for query-type adaptive boosting
+            structural_metadata={
+                "has_code": payload.get("has_code", False),
+                "has_table": payload.get("has_table", False),
+                "parent_path_depth": payload.get("parent_path_depth", 0),
+                "block_type": payload.get("block_type", "paragraph"),
+                "code_ratio": payload.get("code_ratio", 0.0),
+            },
         )
 
     def _build_query_bundle(self, query: str) -> QueryEmbeddingBundle:
@@ -3062,6 +3079,30 @@ class HybridRetriever:
         metrics["entity_boost_enabled"] = entity_boost_enabled
         metrics["entity_boost_terms"] = boost_terms[:5] if boost_terms else []
         metrics["entity_boosted_chunks"] = entity_boosted_count
+
+        # Phase 5: Apply structural boosting based on query type
+        # Uses markdown-it-py metadata (has_code, has_table, parent_path_depth)
+        structural_boosted_count = 0
+        query_type = self._classify_query_type(query)
+        if fused_results:
+            structural_boosted_count = self._apply_structural_boost(
+                fused_results, query_type
+            )
+            if structural_boosted_count > 0:
+                # Re-sort after boosting to reflect new scores
+                fused_results.sort(key=lambda x: x.fused_score or 0, reverse=True)
+                self._log_stage_snapshot("post-structural-boost", fused_results)
+
+            logger.info(
+                "structural_boost_complete",
+                query=query[:50],
+                query_type=query_type,
+                chunks_boosted=structural_boosted_count,
+                total_chunks=len(fused_results),
+            )
+
+        metrics["structural_boost_query_type"] = query_type
+        metrics["structural_boosted_chunks"] = structural_boosted_count
 
         # Optional graph retrieval channel (entity-anchored, cross-doc allowed)
         graph_channel_stats: Dict[str, Any] = {}
@@ -4990,6 +5031,75 @@ class HybridRetriever:
                     res.fused_score *= boost_factor
                     res.entity_boost_applied = True
                     boosted_count += 1
+
+        return boosted_count
+
+    def _apply_structural_boost(
+        self,
+        results: List[ChunkResult],
+        query_type: str,
+    ) -> int:
+        """
+        Apply Phase 5 structural boosting based on query type.
+
+        Uses markdown-it-py enhanced metadata (has_code, has_table, parent_path_depth)
+        to adjust scores based on query type. For example:
+        - CLI queries get a boost for code-containing chunks
+        - Reference queries get a boost for table-containing chunks
+        - Conceptual queries get a penalty for deeply nested content
+
+        Args:
+            results: List of ChunkResult to boost (modified in-place)
+            query_type: Query type from _classify_query_type()
+
+        Returns:
+            Number of chunks that received a boost/penalty
+        """
+        # Get structural config from hybrid search config
+        hybrid_config = getattr(self.config.search, "hybrid", None)
+        structural_config = (
+            getattr(hybrid_config, "structural", None) if hybrid_config else None
+        )
+
+        # Convert to StructuralConfig for the pure function
+        if structural_config:
+            config = StructuralConfig(
+                enabled=getattr(structural_config, "enabled", True),
+                filter_by_block_type=getattr(
+                    structural_config, "filter_by_block_type", False
+                ),
+                boost_by_structure=getattr(
+                    structural_config, "boost_by_structure", True
+                ),
+            )
+        else:
+            config = StructuralConfig()
+
+        if not config.enabled or not config.boost_by_structure:
+            return 0
+
+        boosted_count = 0
+
+        # Convert ChunkResult to dict format for pure function
+        for res in results:
+            if not res.structural_metadata:
+                continue
+
+            # Build dict in format expected by pure function
+            result_dict = {
+                "score": res.fused_score or 0.0,
+                "payload": res.structural_metadata,
+            }
+
+            # Apply boost via pure function (single-item list)
+            boosted = _apply_structural_boost_pure([result_dict], query_type, config)
+
+            # Update score if changed
+            new_score = boosted[0]["score"]
+            if new_score != (res.fused_score or 0.0):
+                res.fused_score = new_score
+                res.structural_boost_applied = True
+                boosted_count += 1
 
         return boosted_count
 

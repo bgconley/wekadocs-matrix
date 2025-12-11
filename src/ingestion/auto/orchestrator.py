@@ -26,8 +26,8 @@ from neo4j import Driver
 from src.ingestion.build_graph import GraphBuilder
 from src.ingestion.extract import extract_entities
 from src.ingestion.incremental import IncrementalUpdater
+from src.ingestion.parsers import parse_markdown  # Router selects engine
 from src.ingestion.parsers.html import parse_html
-from src.ingestion.parsers.markdown import parse_markdown
 from src.ingestion.parsers.notion import parse_notion
 from src.ingestion.reconcile import Reconciler
 from src.providers.factory import ProviderFactory

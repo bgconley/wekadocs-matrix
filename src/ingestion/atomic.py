@@ -834,8 +834,8 @@ class AtomicIngestionCoordinator:
         from src.ingestion.build_graph import GraphBuilder
         from src.ingestion.chunk_assembler import get_chunk_assembler
         from src.ingestion.extract import extract_entities
+        from src.ingestion.parsers import parse_markdown  # Router selects engine
         from src.ingestion.parsers.html import parse_html
-        from src.ingestion.parsers.markdown import parse_markdown
         from src.shared.config import get_config, get_settings
 
         # Deep copy config to avoid mutating the global singleton when applying
@@ -3299,6 +3299,10 @@ class AtomicIngestionCoordinator:
                 "code_ratio": section.get("code_ratio", 0.0),
                 "has_code": section.get("has_code", False),
                 "has_table": section.get("has_table", False),
+                # === Phase 5: Derived structural fields for query-type adaptive retrieval ===
+                # Computed at ingestion time for efficient Qdrant filtering
+                "parent_path_depth": section.get("parent_path_depth", 0),
+                "block_type": section.get("block_type", "paragraph"),
                 # === Embedding metadata (5+ fields via spread) ===
                 **embedding_metadata,
             }

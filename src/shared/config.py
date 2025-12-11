@@ -283,6 +283,32 @@ class RerankerConfig(BaseModel):
     max_tokens_per_pair: int = 1024
 
 
+class StructuralRetrievalConfig(BaseModel):
+    """
+    Phase 5: Structural retrieval configuration for query-type adaptive search.
+
+    Controls how structural metadata (has_code, has_table, parent_path_depth,
+    block_type) influences retrieval scoring and filtering.
+
+    Attributes:
+        enabled: Master switch for structural enhancements
+        filter_by_block_type: Enable hard filtering by block type (strict)
+        boost_by_structure: Enable soft boosting by structural features (recommended)
+        cli_code_boost: Score multiplier for code chunks on CLI queries
+        reference_table_boost: Score multiplier for table chunks on reference queries
+        deep_nesting_penalty: Score multiplier for deeply nested content
+        max_depth_for_overview: Max nesting depth for overview/conceptual queries
+    """
+
+    enabled: bool = True
+    filter_by_block_type: bool = False  # Off by default - use boosting instead
+    boost_by_structure: bool = True  # Soft boosting enabled by default
+    cli_code_boost: float = 1.20  # 20% boost for code on CLI queries
+    reference_table_boost: float = 1.20  # 20% boost for tables on reference queries
+    deep_nesting_penalty: float = 0.90  # 10% penalty for deep content on overview
+    max_depth_for_overview: int = 2  # Depth threshold for nesting penalty
+
+
 class HybridSearchConfig(BaseModel):
     enabled: bool = True
     # Master switch: completely disable ALL Neo4j queries in retrieval path
@@ -364,6 +390,9 @@ class HybridSearchConfig(BaseModel):
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
     bm25: BM25Config = Field(default_factory=BM25Config)  # Phase 7E
     expansion: ExpansionConfig = Field(default_factory=ExpansionConfig)  # Phase 7E
+    structural: StructuralRetrievalConfig = Field(
+        default_factory=StructuralRetrievalConfig
+    )  # Phase 5
     bm25_timeout_ms: int = 2000
     expansion_timeout_ms: int = 2000
 

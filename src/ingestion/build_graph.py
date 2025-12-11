@@ -2954,8 +2954,8 @@ def ingest_document(
     from neo4j import GraphDatabase
 
     from src.ingestion.extract import extract_entities
+    from src.ingestion.parsers import parse_markdown  # Router selects engine
     from src.ingestion.parsers.html import parse_html
-    from src.ingestion.parsers.markdown import parse_markdown
     from src.shared.config import get_config, get_settings
     from src.shared.connections import CompatQdrantClient
 

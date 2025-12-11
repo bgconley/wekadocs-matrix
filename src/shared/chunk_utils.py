@@ -79,6 +79,9 @@ def create_chunk_metadata(
     code_ratio: Optional[float] = None,
     has_code: Optional[bool] = None,
     has_table: Optional[bool] = None,
+    # Phase 5: Derived structural fields for query-type adaptive retrieval
+    parent_path_depth: Optional[int] = None,
+    block_type: Optional[str] = None,
 ) -> Dict:
     """
     Create chunk metadata dict for a single-section chunk (Phase 7E-1 default).
@@ -142,6 +145,9 @@ def create_chunk_metadata(
         "code_ratio": code_ratio if code_ratio is not None else 0.0,
         "has_code": has_code if has_code is not None else False,
         "has_table": has_table if has_table is not None else False,
+        # Phase 5: Derived structural fields
+        "parent_path_depth": parent_path_depth if parent_path_depth is not None else 0,
+        "block_type": block_type if block_type is not None else "paragraph",
     }
 
 

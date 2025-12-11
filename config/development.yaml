@@ -173,6 +173,17 @@ search:
         shared_entity_limit: 3     # Max chunks sharing entities with top results
         timeout_ms: 100            # Max latency budget for structure expansion
 
+    # Phase 5: Structural retrieval for query-type adaptive search
+    # Leverages markdown-it-py metadata (has_code, has_table, parent_path_depth, block_type)
+    structural:
+      enabled: true                    # Master switch for structural enhancements
+      filter_by_block_type: false      # Hard filtering disabled (use boosting instead)
+      boost_by_structure: true         # Soft boosting based on structural features
+      cli_code_boost: 1.20             # 20% boost for code chunks on CLI queries
+      reference_table_boost: 1.20      # 20% boost for table chunks on reference queries
+      deep_nesting_penalty: 0.90       # 10% penalty for deeply nested content
+      max_depth_for_overview: 2        # Depth threshold for overview/conceptual queries
+
 # Graph search settings
   graph:
     max_depth: 3
