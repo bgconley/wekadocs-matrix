@@ -7,10 +7,13 @@ The enrichment adds three fields to each chunk:
 1. entity_metadata - Stored in Qdrant payload for filtering/boosting
 2. _embedding_text - Transient field for entity-enriched embedding generation
 3. _mentions - Appended with GLiNER entities (source="gliner") for entity-sparse
+              AND written to Neo4j MENTIONS edges (Phase 3.5)
 
 GLiNER entities are marked with source="gliner" to distinguish them from
-structural entities (regex-extracted). This marker is used to filter them
-from Neo4j MENTIONS edges (they only enrich vectors, not the graph).
+structural entities (regex-extracted). As of Phase 3.5, ALL entities
+(including GLiNER) are written to Neo4j MENTIONS edges to enable the
+GraphRAG hybrid retrieval pattern. Confidence filtering happens at
+query time via mentions_confidence_idx.
 
 See: /docs/plans/gliner_rag_implementation_plan_gemini_mods_apple.md
 """
@@ -19,7 +22,11 @@ import hashlib
 from typing import Any, Dict, List
 
 from src.providers.ner.gliner_service import GLiNERService
-from src.providers.ner.labels import extract_label_name, get_default_labels
+from src.providers.ner.labels import (
+    extract_label_name,
+    get_default_labels,
+    is_excluded_entity,
+)
 from src.shared.observability import get_logger
 
 logger = get_logger(__name__)
@@ -75,6 +82,22 @@ def enrich_chunks_with_entities(chunks: List[Dict[str, Any]]) -> None:
         )
         return
 
+    # Filter out excluded entities (e.g., "WEKA" - too common, pollutes queries)
+    excluded_count = 0
+    filtered_entities_list = []
+    for entities in entities_list:
+        filtered = [e for e in entities if not is_excluded_entity(e.text)]
+        excluded_count += len(entities) - len(filtered)
+        filtered_entities_list.append(filtered)
+    entities_list = filtered_entities_list
+
+    if excluded_count > 0:
+        logger.debug(
+            "gliner_entities_filtered",
+            excluded_count=excluded_count,
+            reason="domain_stopwords",
+        )
+
     enriched_count = 0
     total_entities = 0
     entity_type_counts: Dict[str, int] = {}
@@ -83,9 +106,14 @@ def enrich_chunks_with_entities(chunks: List[Dict[str, Any]]) -> None:
         # Always set entity_metadata for consistent Qdrant payload schema
         if entities:
             # Clean labels (strip parenthetical examples like "(e.g. ...)")
-            entity_types = list(set(extract_label_name(e.label) for e in entities))
-            entity_values = [e.text for e in entities]
-            entity_values_normalized = [e.text.lower().strip() for e in entities]
+            # Deduplicate all three lists while preserving insertion order
+            entity_types = list(
+                dict.fromkeys(extract_label_name(e.label) for e in entities)
+            )
+            entity_values = list(dict.fromkeys(e.text for e in entities))
+            entity_values_normalized = list(
+                dict.fromkeys(e.text.lower().strip() for e in entities)
+            )
 
             chunk["entity_metadata"] = {
                 "entity_types": entity_types,

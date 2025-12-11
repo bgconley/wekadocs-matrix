@@ -291,6 +291,10 @@ class HybridSearchConfig(BaseModel):
         "legacy"  # legacy (BM25+RRF) or bge_reranker (vector-only + cross-encoder)
     )
     method: str = "rrf"  # Phase 7E: rrf or weighted
+    # Multi-vector fusion method: how to combine scores from multiple vector fields
+    # "rrf" = Reciprocal Rank Fusion (rank-based, robust to score scale differences)
+    # "weighted" = Weighted sum (uses vector_fields weights)
+    multi_vector_fusion_method: str = "rrf"
     # Phase C: Graph channel configuration
     graph_channel_enabled: bool = False  # Enable graph as independent scoring channel
     graph_adaptive_enabled: bool = False  # Enable adaptive graph weight selection
@@ -344,15 +348,17 @@ class HybridSearchConfig(BaseModel):
         }
     )
     # Query-type adaptive relationship sets (used if graph_adaptive_enabled)
+    # Phase 3.5: MENTIONS is canonical direction (Chunk->Entity)
+    # Direction-agnostic queries work regardless of edge direction
     query_type_relationships: Dict[str, List[str]] = Field(
         default_factory=lambda: {
-            "conceptual": ["MENTIONED_IN", "DEFINES", "IN_SECTION"],
-            "cli": ["MENTIONED_IN", "CONTAINS_STEP", "HAS_PARAMETER"],
-            "config": ["MENTIONED_IN", "HAS_PARAMETER", "DEFINES"],
-            "procedural": ["MENTIONED_IN", "CONTAINS_STEP", "NEXT_CHUNK", "IN_SECTION"],
+            "conceptual": ["MENTIONS", "DEFINES", "IN_SECTION"],
+            "cli": ["MENTIONS", "CONTAINS_STEP", "HAS_PARAMETER"],
+            "config": ["MENTIONS", "HAS_PARAMETER", "DEFINES"],
+            "procedural": ["MENTIONS", "CONTAINS_STEP", "NEXT_CHUNK", "IN_SECTION"],
             # Phase 2 Cleanup: Removed AFFECTS, CAUSED_BY (never materialized)
-            "troubleshooting": ["MENTIONED_IN", "RESOLVES", "NEXT_CHUNK"],
-            "reference": ["MENTIONED_IN", "NEXT_CHUNK"],
+            "troubleshooting": ["MENTIONS", "RESOLVES", "NEXT_CHUNK"],
+            "reference": ["MENTIONS", "NEXT_CHUNK"],
         }
     )
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
@@ -474,12 +480,47 @@ class ChunkMicrodocConfig(BaseModel):
     min_split_tokens: int = 400
 
 
+class SemanticChunkingConfig(BaseModel):
+    """
+    Configuration for semantic-first chunking using Chonkie.
+
+    Research-aligned defaults (Anthropic, Pinecone, NVIDIA 2024-2025):
+    - target_tokens: 400 (Chroma/Firecrawl optimal)
+    - min_tokens: 100 (allow small coherent chunks)
+    - max_tokens: 512 (NVIDIA recommendation ceiling)
+    - similarity_threshold: 0.5 (topic boundary detection - balanced)
+
+    Consensus refinements (o3 + Gemini 3 Pro review):
+    - skip_code_blocks: Feature flag to avoid splitting code blocks
+    - Fallback uses RecursiveCharacterTextSplitter (not simple section chunks)
+    """
+
+    enabled: bool = False  # Start disabled for safe rollout
+    similarity_threshold: float = 0.5  # Balanced: split when similarity drops below 50%
+    target_tokens: int = 400
+    min_tokens: int = 100  # KEY: Allow small coherent chunks (research-aligned)
+    max_tokens: int = 512
+    respect_sentence_boundaries: bool = True
+    embedding_adapter: str = "bge_m3"
+
+    # Structural boundary handling
+    preserve_heading_boundaries: bool = True  # Never merge across headings
+    heading_context_in_chunks: bool = True  # Include heading in chunk text
+
+    # CONSENSUS REFINEMENT: Code block handling (o3 concern about technical docs)
+    skip_code_blocks: bool = True  # Feature flag: skip semantic for code blocks
+    code_block_pattern: str = r"```[\s\S]*?```"  # Regex to detect fenced code blocks
+
+
 class ChunkAssemblyConfig(BaseModel):
-    assembler: str = "structured"
+    assembler: str = "structured"  # Options: structured, semantic, greedy, pipeline
     structure: ChunkStructureConfig = Field(default_factory=ChunkStructureConfig)
     split: ChunkSplitConfig = Field(default_factory=ChunkSplitConfig)
     microdoc: ChunkMicrodocConfig = Field(default_factory=ChunkMicrodocConfig)
     semantic: SemanticEnrichmentConfig = Field(default_factory=SemanticEnrichmentConfig)
+    semantic_chunking: SemanticChunkingConfig = Field(
+        default_factory=SemanticChunkingConfig
+    )  # Phase: Semantic Chunking
 
 
 class CrossDocLinkingConfig(BaseModel):
@@ -697,7 +738,7 @@ class FeatureFlagsConfig(BaseModel):
     )
     graph_rel_types_wired: bool = Field(
         default=False,
-        description="Use rel_types instead of hardcoded MENTIONED_IN in graph Cypher",
+        description="Use rel_types from config instead of hardcoded relationships in graph Cypher",
     )
     dedup_best_score: bool = Field(
         default=False,

@@ -87,7 +87,6 @@ class GraphStats:
     next_count: int
     prev_count: int
     mentions_count: int
-    mentioned_in_count: int
     contains_step_count: int
     references_count: int  # M5: Phase 3 REFERENCES edges (Chunk→Document)
 
@@ -414,7 +413,6 @@ def collect_graph_stats() -> Optional[GraphStats]:
                     next_count=count_rel("NEXT"),
                     prev_count=count_rel("PREV"),
                     mentions_count=count_rel("MENTIONS"),
-                    mentioned_in_count=count_rel("MENTIONED_IN"),
                     contains_step_count=count_rel("CONTAINS_STEP"),
                     references_count=count_rel("REFERENCES"),  # M5: Phase 3 gate metric
                     cross_doc_edge_count=cross_doc,

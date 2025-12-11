@@ -12,31 +12,65 @@ from .queue import (
     KEY_PROCESSING,
     KEY_STATUS_HASH,
     IngestJob,
+    JobQueue,
     enqueue_file,
 )
-from .watcher import start_watcher
+from .watchers import FileSystemWatcher
 
 WATCH_DIR = os.getenv("INGEST_WATCH_DIR", "/app/ingest/incoming")
 PORT = int(os.getenv("INGEST_PORT", "8081"))
+WATCH_TAG = os.getenv("INGEST_TAG", "wekadocs")
+
+
+def _env_float(var_name: str, default: str) -> float:
+    try:
+        return float(os.getenv(var_name, default))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _env_bool(var_name: str, default: bool) -> bool:
+    raw = os.getenv(var_name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+WATCH_DEBOUNCE = _env_float("INGEST_WATCH_DEBOUNCE", "3.0")
+WATCH_POLL_INTERVAL = _env_float("INGEST_WATCH_POLL_INTERVAL", "5.0")
+WATCH_RECURSIVE = _env_bool("INGEST_WATCH_RECURSIVE", True)
+
+REDIS_URL = (
+    os.getenv("REDIS_URI") or os.getenv("CACHE_REDIS_URI") or "redis://redis:6379/0"
+)
+redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+job_queue = JobQueue(redis_client)
 
 app = FastAPI(title="Auto-Ingest Service")
 
-observer = None
+watcher = None
 request_counter = 0  # Simple counter for HTTP requests
 
 
 @app.on_event("startup")
 async def startup():
     os.makedirs(WATCH_DIR, exist_ok=True)
-    global observer
-    observer = start_watcher(WATCH_DIR)
+    global watcher
+    watcher = FileSystemWatcher(
+        watch_path=WATCH_DIR,
+        queue=job_queue,
+        tag=WATCH_TAG,
+        debounce_seconds=WATCH_DEBOUNCE,
+        poll_interval=WATCH_POLL_INTERVAL,
+        recursive=WATCH_RECURSIVE,
+    )
+    watcher.start()
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    if observer:
-        observer.stop()
-        observer.join()
+    if watcher:
+        watcher.stop()
 
 
 @app.get("/health")

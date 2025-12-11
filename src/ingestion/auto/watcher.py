@@ -1,7 +1,7 @@
 import os
 
 from watchdog.events import FileSystemEventHandler
-from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver as Observer
 
 from .queue import enqueue_file
 

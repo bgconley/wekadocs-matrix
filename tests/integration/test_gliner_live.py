@@ -113,7 +113,7 @@ class TestGLiNERLiveModel:
 
         print("\n  Batch extraction results:")
         for i, (text, entities) in enumerate(zip(texts, results)):
-            print(f"    Text {i+1}: {len(entities)} entities")
+            print(f"    Text {i + 1}: {len(entities)} entities")
             for e in entities:
                 print(f"      - {e.text!r} ({e.label})")
 

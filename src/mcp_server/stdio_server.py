@@ -115,6 +115,7 @@ from src.services.context_assembler import (  # noqa: E402
     SummarizationService,
 )
 from src.services.context_budget_manager import BudgetExceeded  # noqa: E402
+from src.shared.config import get_config  # noqa: E402
 from src.shared.connections import get_connection_manager  # noqa: E402
 from src.shared.observability import get_logger  # noqa: E402
 from src.shared.observability.metrics import (  # noqa: E402
@@ -301,7 +302,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[Deps]:
                 logger.info("STDIO server lifespan: connections closed")
 
 
-# Create FastMCP instance with lifespan and graph-first instructions
+# Create FastMCP instance with lifespan and mode-appropriate instructions
 GRAPH_FIRST_INSTRUCTIONS = (
     "You are connected to the Weka docs graph via MCP tools. "
     'Always start with search_sections using verbosity="snippet" to collect seed IDs; '
@@ -311,7 +312,26 @@ GRAPH_FIRST_INSTRUCTIONS = (
     "using conservative max_bytes_per (4–8KB) and multiple small calls. Avoid unbounded text dumps and prefer cursors."
 )
 
-mcp = FastMCP("wekadocs", instructions=GRAPH_FIRST_INSTRUCTIONS, lifespan=lifespan)
+VECTOR_ONLY_INSTRUCTIONS = (
+    "You are connected to the Weka docs via MCP vector search tools. "
+    "Graph traversal is DISABLED - do NOT use expand_neighbors, get_paths_between, list_children, list_parents, or traverse_relationships. "
+    "Use search_sections to find relevant documentation, then get_section_text to retrieve content. "
+    "Complete your response in 2-3 tool calls maximum. Do not loop or retry failed graph operations."
+)
+
+# Select instructions based on neo4j_disabled config
+_config = get_config()
+_neo4j_disabled = getattr(getattr(_config, "hybrid", None), "neo4j_disabled", False)
+_instructions = (
+    VECTOR_ONLY_INSTRUCTIONS if _neo4j_disabled else GRAPH_FIRST_INSTRUCTIONS
+)
+logger.info(
+    "MCP instructions mode",
+    neo4j_disabled=_neo4j_disabled,
+    mode="vector_only" if _neo4j_disabled else "graph_first",
+)
+
+mcp = FastMCP("wekadocs", instructions=_instructions, lifespan=lifespan)
 
 # Register a retrieval playbook resource (read-only)
 try:
@@ -539,6 +559,11 @@ async def search_sections(
                 # GLiNER entity boosting metadata (Phase 4) - enables Agent to see entity-aware ranking
                 "entity_boost_applied": getattr(chunk, "entity_boost_applied", False),
                 "entity_metadata": getattr(chunk, "entity_metadata", None),
+                # RRF per-field contributions (when rrf_debug_logging=true)
+                # Shows how each vector field contributed to the fused_score
+                "rrf_field_contributions": getattr(
+                    chunk, "rrf_field_contributions", None
+                ),
             }
         )
 
@@ -607,6 +632,19 @@ async def traverse_relationships(
                 "nodes": [],
                 "relationships": [],
                 "paths": [],
+            }
+
+        # Check if graph is disabled
+        if _neo4j_disabled:
+            logger.info(
+                "traverse_relationships called but neo4j_disabled=true, returning early"
+            )
+            return {
+                "error": "Graph traversal is disabled (neo4j_disabled=true). Use search_sections for vector search instead.",
+                "nodes": [],
+                "relationships": [],
+                "paths": [],
+                "neo4j_disabled": True,
             }
 
         # Get Neo4j driver from connection manager
@@ -681,6 +719,14 @@ async def describe_nodes(
     Recipe:
     - search_sections → expand_neighbors (1–2 hops) → describe_nodes → get_section_text (few)
     """
+    # Check if graph is disabled
+    if _neo4j_disabled:
+        logger.info("describe_nodes called but neo4j_disabled=true, returning early")
+        return {
+            "error": "Graph traversal is disabled (neo4j_disabled=true). Use search_sections for vector search instead.",
+            "nodes": [],
+            "neo4j_disabled": True,
+        }
 
     deps = _get_deps(ctx)
     if not deps.graph:
@@ -719,6 +765,14 @@ async def expand_neighbors(
     Recipe:
     - search_sections (seeds) → expand_neighbors → describe_nodes → get_section_text (few)
     """
+    # Check if graph is disabled
+    if _neo4j_disabled:
+        logger.info("expand_neighbors called but neo4j_disabled=true, returning early")
+        return {
+            "error": "Graph traversal is disabled (neo4j_disabled=true). Use search_sections for vector search instead.",
+            "neighbors": [],
+            "neo4j_disabled": True,
+        }
 
     deps = _get_deps(ctx)
     if not deps.graph:
@@ -762,6 +816,15 @@ async def get_paths_between(
     Recipe:
     - search_sections(A,B) → get_paths_between → describe_nodes → get_section_text (pivots)
     """
+    # Check if graph is disabled
+    if _neo4j_disabled:
+        logger.info("get_paths_between called but neo4j_disabled=true, returning early")
+        return {
+            "error": "Graph traversal is disabled (neo4j_disabled=true). Use search_sections for vector search instead.",
+            "paths": [],
+            "neo4j_disabled": True,
+        }
+
     deps = _get_deps(ctx)
     if not deps.graph:
         raise RuntimeError("GraphService not initialized")
@@ -796,6 +859,15 @@ async def list_children(
     Recipe:
     - search_sections → list_parents / list_children → describe_nodes → selective get_section_text
     """
+    # Check if graph is disabled
+    if _neo4j_disabled:
+        logger.info("list_children called but neo4j_disabled=true, returning early")
+        return {
+            "error": "Graph traversal is disabled (neo4j_disabled=true). Use search_sections for vector search instead.",
+            "children": [],
+            "neo4j_disabled": True,
+        }
+
     deps = _get_deps(ctx)
     if not deps.graph:
         raise RuntimeError("GraphService not initialized")
@@ -825,6 +897,15 @@ async def list_parents(
     Recipe:
     - search_sections → list_parents → describe_nodes → get_section_text (few)
     """
+    # Check if graph is disabled
+    if _neo4j_disabled:
+        logger.info("list_parents called but neo4j_disabled=true, returning early")
+        return {
+            "error": "Graph traversal is disabled (neo4j_disabled=true). Use search_sections for vector search instead.",
+            "parents": [],
+            "neo4j_disabled": True,
+        }
+
     deps = _get_deps(ctx)
     if not deps.graph:
         raise RuntimeError("GraphService not initialized")
@@ -851,6 +932,17 @@ async def get_entities_for_sections(
     Recipe:
     - search_sections → get_entities_for_sections → get_sections_for_entities → describe_nodes → get_section_text
     """
+    # Check if graph is disabled
+    if _neo4j_disabled:
+        logger.info(
+            "get_entities_for_sections called but neo4j_disabled=true, returning early"
+        )
+        return {
+            "error": "Graph traversal is disabled (neo4j_disabled=true). Use search_sections for vector search instead.",
+            "entities": [],
+            "neo4j_disabled": True,
+        }
+
     deps = _get_deps(ctx)
     if not deps.graph:
         raise RuntimeError("GraphService not initialized")
@@ -881,6 +973,17 @@ async def get_sections_for_entities(
     Recipe:
     - search_sections → get_entities_for_sections → get_sections_for_entities → describe_nodes → get_section_text
     """
+    # Check if graph is disabled
+    if _neo4j_disabled:
+        logger.info(
+            "get_sections_for_entities called but neo4j_disabled=true, returning early"
+        )
+        return {
+            "error": "Graph traversal is disabled (neo4j_disabled=true). Use search_sections for vector search instead.",
+            "sections": [],
+            "neo4j_disabled": True,
+        }
+
     deps = _get_deps(ctx)
     if not deps.graph:
         raise RuntimeError("GraphService not initialized")

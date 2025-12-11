@@ -175,6 +175,23 @@ def build_qdrant_schema(
             "entity_metadata.entity_count",
             PayloadSchemaType.INTEGER,
         ),  # Entity count per chunk
+        # === Phase 2: markdown-it-py Structural Metadata Indexes ===
+        # Enable query-time filtering by structural characteristics
+        # Added as part of markdown-it-py integration for query-type adaptive retrieval
+        (
+            "has_code",
+            PayloadSchemaType.BOOL,
+        ),  # Filter for code-heavy chunks (CLI queries)
+        (
+            "has_table",
+            PayloadSchemaType.BOOL,
+        ),  # Filter for table-heavy chunks (reference)
+        ("code_ratio", PayloadSchemaType.FLOAT),  # Range filter on code density
+        ("parent_path", PayloadSchemaType.TEXT),  # Text search on heading hierarchy
+        (
+            "line_start",
+            PayloadSchemaType.INTEGER,
+        ),  # Source line for citation correlation
     ]
 
     return QdrantSchemaPlan(

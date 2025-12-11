@@ -72,6 +72,28 @@ def get_chunk_assembler(
     else:
         name = (os.getenv("CHUNK_ASSEMBLER") or "greedy").lower().strip()
 
+    # NEW: Semantic-first chunking (research-aligned approach)
+    # Uses Chonkie SemanticChunker with BGE-M3 for boundary detection
+    # See: docs/plans/chonkie_semantic_chunking_integration_plan.md
+    if name == "semantic":
+        try:
+            from src.ingestion.semantic_chunker import SemanticChunkerAssembler
+
+            assembler = SemanticChunkerAssembler(assembly_config)
+            # Verify chunker initialized successfully; fall back if not
+            if assembler._chunker is not None:
+                return assembler
+            log.warning(
+                "Semantic chunker unavailable (service down?); falling back to structured"
+            )
+            return StructuredChunker(assembly_config)
+        except Exception as e:
+            log.warning(
+                "Failed to initialize semantic chunker: %s; falling back to structured",
+                e,
+            )
+            return StructuredChunker(assembly_config)
+
     if name == "structured":
         return StructuredChunker(assembly_config)
 
@@ -317,9 +339,21 @@ class GreedyCombinerV2:
                 and g_tokens < self.target_max  # <----- TARGET MAX controls growth
             ):
                 cand = sections[j]
-                # allow descendants OR same-level siblings within the block
+                # allow descendants within the block, but respect same-level H3+ boundaries
                 cand_level = int(cand.get("level", 3))
                 same_or_descendant = cand_level >= seed_level
+
+                # Phase 7E-3: Respect structural boundaries for same-level H3+ siblings
+                # Same-level sections (H3, H4, etc.) represent distinct topics and shouldn't
+                # be combined even if under token targets
+                if cand_level == seed_level and seed_level >= 3:
+                    if self.debug:
+                        log.debug(
+                            "stop: same-level H%d sibling, preserving topic boundary @j=%d",
+                            seed_level,
+                            j,
+                        )
+                    break
 
                 # Avoid explicit break keywords inside a block
                 if self.break_re.search(self._heading(cand)):
@@ -372,6 +406,19 @@ class GreedyCombinerV2:
                 cand_text = self._clean_text(cand)
                 cand_tok = self.tok.count_tokens(cand_text)
                 cand_level = int(cand.get("level", 3))
+
+                # Phase 7E-3: Respect structural boundaries for same-level H3+ siblings
+                # Don't force-combine distinct topics just to meet min_tokens threshold
+                # Accept undersized chunks rather than cross semantic boundaries
+                if cand_level == seed_level and seed_level >= 3:
+                    if self.debug:
+                        log.debug(
+                            "tail-stop: same-level H%d sibling, preserving topic boundary @j=%d",
+                            seed_level,
+                            j,
+                        )
+                    break
+
                 if self.break_re.search(self._heading(cand)):
                     if self.debug:
                         log.debug("tail-stop: break_keyword @j=%d", j)
@@ -798,9 +845,17 @@ class GreedyCombinerV2:
             same_block = (int(cur.get("order", 0)) // 100000) == (
                 int(nxt.get("order", 0)) // 100000
             )
+
+            # Phase 7E-3: Respect structural boundaries for same-level H3+ siblings
+            # Don't merge chunks that represent distinct topics even in balance pass
+            cur_level = int(cur.get("level", 3))
+            nxt_level = int(nxt.get("level", 3))
+            same_level_h3_plus = cur_level == nxt_level and cur_level >= 3
+
             if (
                 nxt["token_count"] < self.min_tokens
                 and same_block
+                and not same_level_h3_plus  # Preserve topic boundaries
                 and (cur["token_count"] + nxt["token_count"]) <= self.hard_max
             ):
                 merged_text = (

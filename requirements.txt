@@ -66,6 +66,15 @@ sentence-transformers==2.7.0
 beautifulsoup4==4.12.2
 html2text==2024.2.26
 markdown==3.5.1
+
+# Phase: markdown-it-py Integration (AST-based parsing with source line mapping)
+# markdown-it-py provides SyntaxTreeNode AST and Token.map for source positions
+# mdit-py-plugins provides frontmatter, footnote, and other extensions
+# linkify-it-py enables URL autolinking in gfm-like preset
+markdown-it-py>=3.0.0
+mdit-py-plugins>=0.4.0
+linkify-it-py>=2.0.0
+
 lxml==4.9.3
 mcp[cli]>=1.8.0  # MCP SDK with CLI tools for STDIO transport (requires FastMCP)
 
@@ -79,3 +88,9 @@ tokenizers>=0.15.0    # Fast Rust backend for transformers
 sentencepiece>=0.2.0  # Required by XLM-RoBERTa tokenizer
 huggingface_hub>=0.23.0  # For model/tokenizer downloads
 gliner>=0.2.24
+
+# Phase: Semantic Chunking (Research-aligned chunking approach)
+# Chonkie provides semantic boundary detection for chunking
+# langchain-text-splitters provides RecursiveCharacterTextSplitter for fallback
+chonkie[semantic]>=0.3.0
+langchain-text-splitters>=0.3.0

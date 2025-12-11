@@ -107,20 +107,41 @@ GENERIC_HEADING_BLACKLIST = frozenset(
 )
 
 # C.1.3: Entity validity criteria - entity_types that qualify for :Entity label
+# Updated for GLiNER v2 labels (2024-12)
 VALID_ENTITY_TYPES = frozenset(
     {
+        # Legacy structural entity types
         "heading_concept",
         "cli_command",
         "config_param",
         "concept",
         "api_endpoint",
         "parameter",
-        "command",
         "option",
         "feature",
-        "component",
         "service",
         "module",
+        # GLiNER v2 entity types (refined for retrieval)
+        "COMMAND",
+        "PARAMETER",
+        "COMPONENT",
+        "PROTOCOL",
+        "CLOUD_PROVIDER",
+        "STORAGE_CONCEPT",
+        "VERSION",
+        "PROCEDURE_STEP",
+        "ERROR",
+        "CAPACITY_METRIC",
+        # Lowercase variants (for case-insensitive matching)
+        "command",
+        "component",
+        "protocol",
+        "cloud_provider",
+        "storage_concept",
+        "version",
+        "procedure_step",
+        "error",
+        "capacity_metric",
     }
 )
 
@@ -647,6 +668,7 @@ class GraphBuilder:
             batch = chunks[i : i + batch_size]
 
             # Phase 7E-1: MERGE with dual-label :Section:Chunk + canonical chunk fields
+            # Phase 3 (markdown-it-py): Added enhanced metadata fields for structural queries
             query = """
             UNWIND $chunks as chunk
             MERGE (s:Section:Chunk {id: chunk.id})
@@ -669,6 +691,14 @@ class GraphBuilder:
                 s.document_total_tokens = chunk.document_total_tokens,
                 s.is_microdoc = chunk.is_microdoc,
                 s.doc_is_microdoc = coalesce(chunk.doc_is_microdoc, chunk.is_microdoc),
+                // Phase 3: Enhanced structural metadata from markdown-it-py
+                s.line_start = chunk.line_start,
+                s.line_end = chunk.line_end,
+                s.parent_path = coalesce(chunk.parent_path, ''),
+                s.block_types = coalesce(chunk.block_types, []),
+                s.code_ratio = coalesce(chunk.code_ratio, 0.0),
+                s.has_code = coalesce(chunk.has_code, false),
+                s.has_table = coalesce(chunk.has_table, false),
                 s.updated_at = datetime()
             WITH s, chunk
             MATCH (d:Document {id: $document_id})
@@ -701,7 +731,7 @@ class GraphBuilder:
         For each section heading that meets validity criteria:
         - Creates an :Entity:Concept node with entity_type="heading_concept"
         - Creates DEFINES relationship from entity to chunk
-        - Creates MENTIONED_IN relationship from entity to chunk
+        - Creates MENTIONS relationship (Chunk->Entity) per Neo4j best practice
 
         Criteria for qualifying headings:
         - Non-empty and >= 5 characters
@@ -794,12 +824,12 @@ class GraphBuilder:
             result = session.run(defines_query, entities=batch)
             stats["defines_created"] += result.single()["count"]
 
-            # Create MENTIONED_IN relationships (Entity -> Chunk)
+            # Create MENTIONS relationships (Chunk -> Entity) - canonical direction per Neo4j best practice
             mentions_query = """
             UNWIND $entities AS ent
             MATCH (e:Entity:Concept {id: ent.id})
             MATCH (c:Chunk {id: ent.source_section_id})
-            MERGE (e)-[r:MENTIONED_IN]->(c)
+            MERGE (c)-[r:MENTIONS]->(e)
             SET r.updated_at = datetime()
             RETURN count(r) AS count
             """
@@ -1026,6 +1056,58 @@ class GraphBuilder:
             MERGE (a)-[:NEXT]->(b)
             RETURN count(*) AS count
             """,
+            # Phase 3 (markdown-it-py): PARENT_HEADING based on parent_path hierarchy
+            # Creates heading-based parent-child edges distinct from PARENT_OF
+            # Direction: child→parent (Neo4j hierarchy convention)
+            "parent_heading": """
+            MATCH (child:Section)
+            WHERE child.document_id = $doc_id
+              AND child.parent_path IS NOT NULL
+              AND child.parent_path <> ''
+              AND NOT EXISTS {
+                MATCH (child)-[:PARENT_HEADING]->(:Section)
+              }
+            WITH child,
+                 split(child.parent_path, ' > ') AS path_parts,
+                 child.level AS child_level,
+                 child.order AS child_order
+            WHERE size(path_parts) > 0
+            WITH child,
+                 path_parts[size(path_parts) - 1] AS immediate_parent_title,
+                 child_level,
+                 child_order
+            MATCH (parent:Section)
+            WHERE parent.document_id = $doc_id
+              AND parent.title = immediate_parent_title
+              AND parent.level < child_level
+              AND parent.order < child_order
+            WITH child, parent
+            ORDER BY parent.order DESC
+            WITH child, collect(parent)[0] AS parent
+            WHERE parent IS NOT NULL
+            MERGE (child)-[r:PARENT_HEADING]->(parent)
+            SET r.level_delta = child.level - parent.level,
+                r.created_at = datetime()
+            RETURN count(r) AS count
+            """,
+            # Phase 3 (markdown-it-py): Apply :CodeSection label for structural filtering
+            "code_section_label": """
+            MATCH (s:Section)
+            WHERE s.document_id = $doc_id
+              AND s.has_code = true
+              AND NOT s:CodeSection
+            SET s:CodeSection
+            RETURN count(s) AS count
+            """,
+            # Phase 3 (markdown-it-py): Apply :TableSection label for structural filtering
+            "table_section_label": """
+            MATCH (s:Section)
+            WHERE s.document_id = $doc_id
+              AND s.has_table = true
+              AND NOT s:TableSection
+            SET s:TableSection
+            RETURN count(s) AS count
+            """,
         }
 
         log_rel_counts = (
@@ -1139,6 +1221,27 @@ class GraphBuilder:
             MATCH (c:Chunk)-[:NEXT]->(:Chunk)
             WHERE coalesce(c.document_id, c.doc_id) = $doc_id
             RETURN count(*) AS count
+            """
+        # Phase 3 (markdown-it-py): PARENT_HEADING relationship verification
+        elif builder == "parent_heading":
+            query = """
+            MATCH (child:Section)-[:PARENT_HEADING]->(:Section)
+            WHERE child.document_id = $doc_id
+            RETURN count(*) AS count
+            """
+        # Phase 3 (markdown-it-py): CodeSection label verification
+        elif builder == "code_section_label":
+            query = """
+            MATCH (s:Section:CodeSection)
+            WHERE s.document_id = $doc_id
+            RETURN count(s) AS count
+            """
+        # Phase 3 (markdown-it-py): TableSection label verification
+        elif builder == "table_section_label":
+            query = """
+            MATCH (s:Section:TableSection)
+            WHERE s.document_id = $doc_id
+            RETURN count(s) AS count
             """
         else:
             return 0
@@ -1402,6 +1505,8 @@ class GraphBuilder:
         for i in range(0, len(mentions), batch_size):
             batch = mentions[i : i + batch_size]
 
+            # Phase 3.5: Single MENTIONS direction (Chunk->Entity) per Neo4j best practice
+            # No bidirectional edges - use direction-agnostic queries instead
             query = """
             UNWIND $mentions as m
             MATCH (s:Section {id: m.section_id})
@@ -1412,12 +1517,6 @@ class GraphBuilder:
                 r.end = m.end,
                 r.source_section_id = m.source_section_id,
                 r.updated_at = datetime()
-            MERGE (e)-[rm:MENTIONED_IN {section_id: m.section_id}]->(s)
-            SET rm.confidence = m.confidence,
-                rm.start = m.start,
-                rm.end = m.end,
-                rm.source_section_id = m.source_section_id,
-                rm.updated_at = datetime()
             RETURN count(r) as count
             """
 

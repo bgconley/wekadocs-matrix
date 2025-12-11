@@ -167,6 +167,10 @@ class ChunkResult:
     entity_metadata: Optional[Dict[str, Any]] = None
     entity_boost_applied: bool = False  # Whether entity boosting was applied
 
+    # RRF debug: per-field contributions to fused_score (when rrf_debug_logging=true)
+    # Structure: {"field_name": {"rank": int, "weight": float, "contribution": float}, ...}
+    rrf_field_contributions: Optional[Dict[str, Dict[str, float]]] = None
+
     # Citation labels (order, title, level) derived from CitationUnits
     citation_labels: List[Tuple[int, str, int]] = field(default_factory=list)
     # Graph enrichment (Phase 2.3 legacy parity)
@@ -181,6 +185,38 @@ class ChunkResult:
         """Ensure required fields are populated."""
         if self.original_section_ids is None:
             self.original_section_ids = []
+
+
+def _deduplicate_entity_metadata(
+    entity_metadata: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """
+    Deduplicate entity_values and entity_values_normalized in entity_metadata.
+
+    GLiNER may extract the same entity multiple times from different spans.
+    This cleans up the payload by deduplicating while preserving insertion order.
+
+    Args:
+        entity_metadata: Raw entity_metadata dict from Qdrant payload (or None)
+
+    Returns:
+        Deduplicated entity_metadata dict (or None if input was None)
+    """
+    if not entity_metadata:
+        return entity_metadata
+
+    # Deduplicate lists while preserving order (dict.fromkeys is order-preserving in Python 3.7+)
+    entity_values = entity_metadata.get("entity_values") or []
+    entity_values_normalized = entity_metadata.get("entity_values_normalized") or []
+
+    return {
+        "entity_types": entity_metadata.get("entity_types") or [],
+        "entity_values": list(dict.fromkeys(entity_values)),
+        "entity_values_normalized": list(dict.fromkeys(entity_values_normalized)),
+        "entity_count": len(
+            list(dict.fromkeys(entity_values))
+        ),  # Update count to reflect deduped
+    }
 
 
 def dedup_chunk_results(
@@ -775,6 +811,8 @@ class QdrantMultiVectorRetriever:
             "original_section_ids",
             "text_hash",
             "shingle_hash",
+            # GLiNER entity metadata for Phase 4 entity-aware retrieval
+            "entity_metadata",
         ]
         self.supports_sparse = (
             hasattr(self.embedder, "embed_sparse") and self.schema_supports_sparse
@@ -794,6 +832,32 @@ class QdrantMultiVectorRetriever:
         self.dense_vector_names = [
             name for name in self.field_weights.keys() if name != self.sparse_field_name
         ] or ["content"]
+
+    def get_queried_vector_fields(self) -> List[str]:
+        """Return list of vector fields actually queried based on schema_supports_* flags.
+
+        This provides accurate metrics about which vectors participate in multi-vector
+        fusion, rather than the legacy vector_field_weights config which is only used
+        for weighted (non-RRF) fusion.
+
+        Returns:
+            List of vector field names that are included in Prefetch queries.
+        """
+        fields = []
+        # Dense vectors (always included if in field_weights)
+        for name in self.dense_vector_names:
+            if name in self.field_weights:
+                fields.append(name)
+        # Sparse vectors based on schema support flags
+        if self.schema_supports_sparse:
+            fields.append("text-sparse")
+        if self.schema_supports_doc_title_sparse:
+            fields.append("doc_title-sparse")
+        if self.schema_supports_title_sparse:
+            fields.append("title-sparse")
+        if self.schema_supports_entity_sparse:
+            fields.append("entity-sparse")
+        return fields
 
     def search(
         self,
@@ -1101,7 +1165,10 @@ class QdrantMultiVectorRetriever:
             lexical_vec_score=lexical_vec_score,
             citation_labels=payload.get("citation_labels") or [],
             # Phase 4: Entity metadata for GLiNER-aware retrieval boosting
-            entity_metadata=payload.get("entity_metadata"),
+            # Deduplicate to clean up repeated entity extractions from same chunk
+            entity_metadata=_deduplicate_entity_metadata(
+                payload.get("entity_metadata")
+            ),
         )
 
     def _build_query_bundle(self, query: str) -> QueryEmbeddingBundle:
@@ -1426,6 +1493,13 @@ class QdrantMultiVectorRetriever:
             chunk.vector_rank = idx
             chunk.vector_score_kind = f"{fusion_method_used}_fusion"
             chunk.fusion_method = fusion_method_used
+            # Populate RRF field contributions when debug logging is enabled
+            if self.rrf_debug_logging and fusion_method_used == "rrf":
+                chunk.rrf_field_contributions = (
+                    self._compute_rrf_contributions_for_chunk(
+                        pid, rankings, k=self.rrf_k
+                    )
+                )
             results.append(chunk)
 
         results.sort(key=lambda x: x.fused_score or 0.0, reverse=True)
@@ -1749,6 +1823,45 @@ class QdrantMultiVectorRetriever:
                 "details": rrf_details,
             },
         )
+
+    def _compute_rrf_contributions_for_chunk(
+        self,
+        chunk_id: str,
+        rankings: Dict[str, List[Tuple[str, float]]],
+        k: int = 60,
+    ) -> Dict[str, Dict[str, float]]:
+        """Compute per-field RRF contributions for a single chunk.
+
+        Used to populate ChunkResult.rrf_field_contributions when rrf_debug_logging=true.
+
+        Args:
+            chunk_id: The chunk ID to compute contributions for
+            rankings: Dict mapping field name to list of (doc_id, score) tuples
+            k: RRF constant (default 60)
+
+        Returns:
+            Dict mapping field_name to {"rank": int, "weight": float, "contribution": float}
+        """
+        contributions: Dict[str, Dict[str, float]] = {}
+
+        for field_name, items in rankings.items():
+            if not items:
+                continue
+            # Sort by score descending to establish ranks
+            sorted_items = sorted(items, key=lambda x: x[1] or 0.0, reverse=True)
+            # Find rank of this chunk in this field
+            for rank, (doc_id, _score) in enumerate(sorted_items, start=1):
+                if doc_id == chunk_id:
+                    weight = self.rrf_field_weights.get(field_name, 1.0)
+                    contribution = weight * 1.0 / (k + rank)
+                    contributions[field_name] = {
+                        "rank": rank,
+                        "weight": weight,
+                        "contribution": round(contribution, 6),
+                    }
+                    break
+
+        return contributions
 
 
 class VectorRetriever(QdrantMultiVectorRetriever):
@@ -2187,11 +2300,11 @@ class HybridRetriever:
                 rel.strip() for rel in rels_env.split(",") if rel.strip()
             ]
         else:
-            # Phase 2 Cleanup: Removed REQUIRES, AFFECTS (never materialized)
+            # Phase 3.5: Single canonical direction per Neo4j best practice
+            # Direction-agnostic queries work with any edge direction
             self.graph_relationships = [
-                "MENTIONED_IN",  # Entity->Chunk: most common (2962 edges)
-                "DEFINES",  # Entity->Chunk: second most common (2126 edges)
-                "MENTIONS",  # Legacy/alternative naming
+                "MENTIONS",  # Chunk->Entity: canonical direction (Phase 3.5)
+                "DEFINES",  # Entity->Chunk: definition relationships
                 "CONTAINS_STEP",
                 "HAS_PARAMETER",
             ]
@@ -2364,20 +2477,20 @@ class HybridRetriever:
         # Fix #4: Cross-doc REFERENCES traversal implemented via pattern:
         # (seed:Chunk) → [:REFERENCES] → (doc:Document) → [:HAS_SECTION] → ...
         #
-        # Cross-doc signals merged into reranker via three-way fusion:
-        # fused = w_vec*vec + w_entity*entity_graph + w_cross*cross_doc_graph
+        # Phase 3.5: MENTIONS replaces MENTIONED_IN (single canonical direction)
+        # Direction-agnostic queries work with either direction
         # Weight allocation (70/30 split) keeps entity signals primary.
         if qtype == "conceptual":
-            return ["MENTIONED_IN", "DEFINES", "IN_SECTION", "REFERENCES"], cap
+            return ["MENTIONS", "DEFINES", "IN_SECTION", "REFERENCES"], cap
         if qtype == "cli":
             # L4: CLI queries excluded from REFERENCES - CLI commands are self-contained
             # and cross-document references provide minimal value for command lookups
-            return ["MENTIONED_IN", "CONTAINS_STEP", "HAS_PARAMETER"], cap
+            return ["MENTIONS", "CONTAINS_STEP", "HAS_PARAMETER"], cap
         if qtype == "config":
-            return ["MENTIONED_IN", "HAS_PARAMETER", "DEFINES", "REFERENCES"], cap
+            return ["MENTIONS", "HAS_PARAMETER", "DEFINES", "REFERENCES"], cap
         if qtype == "procedural":
             return [
-                "MENTIONED_IN",
+                "MENTIONS",
                 "CONTAINS_STEP",
                 "NEXT_CHUNK",
                 "IN_SECTION",
@@ -2385,11 +2498,9 @@ class HybridRetriever:
             ], min(cap, 10)
         # Phase 2 Cleanup: Removed AFFECTS, CAUSED_BY (never materialized)
         if qtype == "troubleshooting":
-            return ["MENTIONED_IN", "RESOLVES", "NEXT_CHUNK", "REFERENCES"], min(
-                cap, 15
-            )
+            return ["MENTIONS", "RESOLVES", "NEXT_CHUNK", "REFERENCES"], min(cap, 15)
         if qtype == "reference":
-            return ["MENTIONED_IN", "NEXT_CHUNK", "REFERENCES"], min(cap, 5)
+            return ["MENTIONS", "NEXT_CHUNK", "REFERENCES"], min(cap, 5)
         return rels, cap
 
     def _get_query_type_weights(self, query_type: str) -> Tuple[float, float]:
@@ -2406,7 +2517,12 @@ class HybridRetriever:
         query_type: str,
         doc_tag: Optional[str],
     ) -> Dict[str, Dict[str, Any]]:
-        """Compute graph signals for chunks using canonical_name matches."""
+        """Compute graph signals for chunks using canonical_name matches.
+
+        Uses direction-agnostic traversal (Neo4j best practice) so MENTIONS edges
+        work regardless of direction. Neo4j traverses both directions with equal
+        performance, so (e)-[r]-(c) finds edges whether stored as e->c or c->e.
+        """
         # PHASE 1 VECTOR-ONLY: Skip graph signals when neo4j_disabled
         if not entity_names or not candidate_chunk_ids or self.neo4j_disabled:
             return {}
@@ -2415,7 +2531,7 @@ class HybridRetriever:
         UNWIND $entity_names AS ename
         MATCH (e:Entity)
         WHERE toLower(coalesce(e.canonical_name, e.name, '')) = toLower(ename)
-        MATCH (e)-[r]->(c:Chunk)
+        MATCH (e)-[r]-(c:Chunk)
         WHERE type(r) IN $rel_types
           AND c.id IN $chunk_ids
           AND ($doc_tag IS NULL OR c.doc_tag = $doc_tag)
@@ -2851,7 +2967,9 @@ class HybridRetriever:
             "duration_ms", (time.time() - vec_start) * 1000
         )
         metrics["vec_count"] = len(vec_results)
-        metrics["vector_fields"] = list(self.vector_field_weights.keys())
+        # Build accurate list of queried vector fields based on schema_supports_* flags
+        queried_vectors = self.vector_retriever.get_queried_vector_fields()
+        metrics["vector_fields"] = queried_vectors
         if "prefetch_count" in vector_stats:
             metrics["vector_prefetch_count"] = vector_stats["prefetch_count"]
         if "colbert_used" in vector_stats:
@@ -4343,13 +4461,14 @@ class HybridRetriever:
         """
 
         # 3. Shared-entity expansion - chunks sharing entities
+        # Phase 3.5: Uses MENTIONS (canonical) with direction-agnostic traversal
         entity_query = """
         UNWIND $chunk_ids AS cid
         MATCH (c:Chunk {id: cid})-[:MENTIONS|IN_CHUNK]-(e:Entity)
         WHERE e.name IS NOT NULL AND size(e.name) >= 4
         WITH cid, collect(DISTINCT e)[..5] AS entities
         UNWIND entities AS entity
-        MATCH (entity)-[:MENTIONED_IN|IN_CHUNK]-(other:Chunk)
+        MATCH (entity)-[:MENTIONS|IN_CHUNK]-(other:Chunk)
         WHERE other.id <> cid
           AND NOT other.id IN $exclude_ids
           AND ($doc_tag IS NULL OR other.doc_tag = $doc_tag)
@@ -4703,7 +4822,7 @@ class HybridRetriever:
                 collection_name=self.vector_retriever.collection,
                 scroll_filter=q_filter,
                 with_vectors=["late-interaction"],
-                with_payload=False,
+                with_payload=["kg_id"],  # FIXED: Need kg_id to match chunk_id
                 limit=len(missing),
             )
             points = scroll_res[0] if isinstance(scroll_res, tuple) else scroll_res
@@ -4733,7 +4852,16 @@ class HybridRetriever:
         query_bundle: QueryEmbeddingBundle,
         limit: int,
     ) -> List[ChunkResult]:
-        """Rerank using ColBERT late-interaction MaxSim scores."""
+        """Rerank using ColBERT late-interaction MaxSim scores.
+
+        Uses query-length normalization (Vespa production approach) to eliminate
+        document length bias. ColBERT pads queries to fixed length (32 tokens),
+        and each query token contributes max 1.0, so dividing by QUERY_MAXLEN
+        bounds scores to [0, 1]. See: https://blog.vespa.ai/pretrained-transformer-language-models-for-search-part-3/
+        """
+        # Standard ColBERT query length (queries are padded to this length)
+        QUERY_MAXLEN = 32
+
         if not query_bundle or not query_bundle.multivector:
             return candidates
         q_vectors = query_bundle.multivector.vectors or []
@@ -4748,7 +4876,9 @@ class HybridRetriever:
             if d_mat.size == 0:
                 continue
             sims = q_mat @ d_mat.T
-            score = float(np.max(sims, axis=1).sum()) if sims.size else 0.0
+            # MaxSim with query-length normalization to eliminate length bias
+            raw_score = float(np.max(sims, axis=1).sum()) if sims.size else 0.0
+            score = raw_score / QUERY_MAXLEN
             chunk.rerank_score = score
             chunk.reranker = "colbert"
             scored.append(chunk)
@@ -5488,7 +5618,10 @@ class HybridRetriever:
                 fused_score=hit.score,
                 citation_labels=[],
                 # Phase 4: Entity metadata for GLiNER-aware retrieval boosting
-                entity_metadata=payload.get("entity_metadata"),
+                # Deduplicate to clean up repeated entity extractions from same chunk
+                entity_metadata=_deduplicate_entity_metadata(
+                    payload.get("entity_metadata")
+                ),
             )
             extras.append(candidate)
             if len(extras) >= limit:

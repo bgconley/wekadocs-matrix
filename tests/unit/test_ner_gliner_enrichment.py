@@ -398,6 +398,58 @@ class TestMultipleChunks:
         assert "_embedding_text" in chunks[2]
 
 
+class TestEntityExclusions:
+    """Tests for entity exclusion filtering (domain stopwords like 'WEKA')."""
+
+    @patch("src.ingestion.extract.ner_gliner.GLiNERService")
+    @patch("src.ingestion.extract.ner_gliner.get_default_labels")
+    def test_weka_entities_excluded(self, mock_labels, mock_service_class):
+        """Verify WEKA and variants are filtered from enrichment."""
+        from src.ingestion.extract.ner_gliner import enrich_chunks_with_entities
+        from src.providers.ner.gliner_service import Entity
+
+        mock_service = MagicMock()
+        mock_service.is_available = True
+        # GLiNER might extract WEKA as a component - we want to filter it
+        mock_service.batch_extract_entities.return_value = [
+            [
+                Entity("WEKA", "COMPONENT", 0, 4, 0.95),
+                Entity("NFS", "PROTOCOL", 10, 13, 0.85),
+                Entity("Weka", "COMPONENT", 20, 24, 0.90),
+            ]
+        ]
+        mock_service_class.return_value = mock_service
+        mock_labels.return_value = ["COMPONENT", "PROTOCOL"]
+
+        chunks = [{"id": "chunk1", "text": "WEKA NFS mount with Weka"}]
+        enrich_chunks_with_entities(chunks)
+
+        # WEKA/Weka should be filtered out, only NFS remains
+        meta = chunks[0]["entity_metadata"]
+        assert meta["entity_count"] == 1
+        assert "NFS" in meta["entity_values"]
+        assert "WEKA" not in meta["entity_values"]
+        assert "Weka" not in meta["entity_values"]
+        assert "weka" not in meta["entity_values_normalized"]
+
+    def test_is_excluded_entity_function(self):
+        """Test the is_excluded_entity helper directly."""
+        from src.providers.ner.labels import is_excluded_entity
+
+        # Should be excluded
+        assert is_excluded_entity("WEKA") is True
+        assert is_excluded_entity("Weka") is True
+        assert is_excluded_entity("weka") is True
+        assert is_excluded_entity("WekaFS") is True
+        assert is_excluded_entity("  WEKA  ") is True  # With whitespace
+
+        # Should NOT be excluded
+        assert is_excluded_entity("NFS") is False
+        assert is_excluded_entity("AWS") is False
+        assert is_excluded_entity("weka-agent") is False  # Compound term
+        assert is_excluded_entity("weka fs") is False  # Command with space
+
+
 class TestEntityIdGeneration:
     """Tests for deterministic entity_id generation."""
 

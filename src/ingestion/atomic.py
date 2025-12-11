@@ -547,15 +547,29 @@ class AtomicIngestionCoordinator:
                 for orig_id in original_ids:
                     if orig_id in mentions_by_section:
                         section_mentions.extend(mentions_by_section[orig_id])
-                # Deduplicate by entity_id to avoid double-counting
+                # Merge structural mentions with any existing GLiNER mentions
+                # GLiNER adds _mentions in _prepare_ingestion; preserve them here
+                existing_gliner_mentions = section.get("_mentions", [])
+
+                # Deduplicate by entity_id across both sources to avoid double-counting
                 seen_entity_ids = set()
-                unique_mentions = []
+                merged_mentions = []
+
+                # Add GLiNER mentions first (they're higher quality - model-extracted)
+                for m in existing_gliner_mentions:
+                    eid = m.get("entity_id")
+                    if eid and eid not in seen_entity_ids:
+                        seen_entity_ids.add(eid)
+                        merged_mentions.append(m)
+
+                # Then add structural mentions (regex-extracted)
                 for m in section_mentions:
                     eid = m.get("entity_id")
                     if eid and eid not in seen_entity_ids:
                         seen_entity_ids.add(eid)
-                        unique_mentions.append(m)
-                section["_mentions"] = unique_mentions
+                        merged_mentions.append(m)
+
+                section["_mentions"] = merged_mentions
 
             # LGTM Phase 4: Verbose log event 2 - document_parsed
             logger.info(
@@ -867,22 +881,44 @@ class AtomicIngestionCoordinator:
         sections = result["Sections"]
 
         # Extract doc_tag and snapshot_scope
+        # Priority:
+        # 1. Explicit DocTag: header in content
+        # 2. First-level directory under data/ingest/ (category from path)
+        # 3. Filename with __ separator (scope__slug pattern)
+        # 4. Filename stem as fallback
         doc_tag = None
         snapshot_scope = None
+        doc_category = None  # New: category from directory path
 
         m = re.search(r"DocTag:\s*([A-Za-z0-9_\-]+)", content or "", flags=re.I)
         if m:
             doc_tag = m.group(1)
         else:
             try:
-                fname = Path(source_uri or "").name
+                source_path = Path(
+                    source_uri.replace("file://", "") if source_uri else ""
+                )
+                fname = source_path.name
                 stem = Path(fname).stem
+
+                # NEW: Extract category from directory path relative to data/ingest/
+                # e.g., /app/data/ingest/wekapod/overview.md → category="wekapod"
+                # e.g., /app/data/ingest/aws-solutions/sagemaker/guide.md → category="aws-solutions"
+                path_parts = source_path.parts
+                for i, part in enumerate(path_parts):
+                    if part == "ingest" or part.endswith("ingest"):
+                        # First directory after "ingest" is the category
+                        if i + 1 < len(path_parts) - 1:  # Not the filename itself
+                            doc_category = path_parts[i + 1]
+                        break
+
                 if "__" in stem:
                     scope_part, slug_part = stem.split("__", 1)
                     snapshot_scope = scope_part
                     doc_tag = slug_part
                 else:
-                    doc_tag = stem
+                    # Use category from path if available, otherwise filename
+                    doc_tag = doc_category if doc_category else stem
             except (ValueError, AttributeError) as e:
                 logger.debug(
                     "doc_tag_extraction_fallback",
@@ -892,10 +928,12 @@ class AtomicIngestionCoordinator:
                 # doc_tag remains None, which is acceptable
 
         document["doc_tag"] = doc_tag
+        document["doc_category"] = doc_category  # New: category from directory path
         document["snapshot_scope"] = snapshot_scope
 
         for section in sections:
             section["doc_tag"] = doc_tag
+            section["doc_category"] = doc_category
             section["snapshot_scope"] = snapshot_scope
 
         # Extract entities
@@ -990,7 +1028,7 @@ class AtomicIngestionCoordinator:
 
         # Phase 2 GLiNER: Enrich chunks with named entities (gated by config)
         # This adds entity_metadata, _embedding_text, and _mentions to each chunk
-        # GLiNER entities are for vector enrichment only (filtered from Neo4j)
+        # Phase 3.5: GLiNER entities are now written to Neo4j (Entity nodes + MENTIONS)
         if getattr(config, "ner", None) and getattr(config.ner, "enabled", False):
             try:
                 from src.ingestion.extract.ner_gliner import enrich_chunks_with_entities
@@ -1499,12 +1537,18 @@ class AtomicIngestionCoordinator:
                         # Get mentions attached to section (from ingest_document_atomic)
                         section_mentions = section.get("_mentions", [])
                         if section_mentions:
-                            # Look up entity names from entity_id using our lookup dict
+                            # Collect entity names from mentions
+                            # GLiNER mentions have 'name' directly; structural use lookup
                             entity_names = []
                             for m in section_mentions:
-                                entity_id = m.get("entity_id")
-                                if entity_id and entity_id in entity_id_to_name:
-                                    entity_names.append(entity_id_to_name[entity_id])
+                                # First: check for direct 'name' field (GLiNER mentions)
+                                if m.get("name"):
+                                    entity_names.append(m["name"])
+                                # Fallback: lookup by entity_id (structural entities)
+                                elif m.get("entity_id") in entity_id_to_name:
+                                    entity_names.append(
+                                        entity_id_to_name[m["entity_id"]]
+                                    )
                             entity_text = " ".join(entity_names) if entity_names else ""
                         else:
                             entity_text = ""
@@ -1873,7 +1917,43 @@ class AtomicIngestionCoordinator:
             entity_count = self._neo4j_upsert_entities(neo4j_tx, entities)
             stats["entities_upserted"] = entity_count
 
-            self._neo4j_create_mentions(neo4j_tx, mentions)
+            # Phase 3.5: Collect ALL mentions from sections for Neo4j
+            # Use section["_mentions"] which has the correct chunk ID mapping
+            # (prepared["mentions"] has original section IDs that don't match chunk nodes)
+            all_mentions = []
+            structural_count = 0
+            gliner_count = 0
+            for section in sections:
+                section_id = section.get("id")
+                if not section_id:
+                    continue
+                for m in section.get("_mentions", []):
+                    entity_id = m.get("entity_id")
+                    if not entity_id:
+                        continue
+                    # Create mention with current chunk ID
+                    mention_dict = {
+                        "section_id": section_id,
+                        "entity_id": entity_id,
+                        "name": m.get("name", ""),
+                        "type": m.get("type", ""),
+                        "confidence": m.get("confidence", 0.5),
+                        "source": m.get("source", "structural"),
+                    }
+                    all_mentions.append(mention_dict)
+                    if m.get("source") == "gliner":
+                        gliner_count += 1
+                    else:
+                        structural_count += 1
+
+            logger.debug(
+                "mentions_collected_for_neo4j",
+                structural_count=structural_count,
+                gliner_count=gliner_count,
+                total_count=len(all_mentions),
+            )
+
+            self._neo4j_create_mentions(neo4j_tx, all_mentions)
 
             # Phase 3: Create cross-document REFERENCES edges (Chunk → Document)
             references_count = self._neo4j_create_references(neo4j_tx, references)
@@ -2296,6 +2376,7 @@ class AtomicIngestionCoordinator:
 
     # Allowlist of valid entity labels to prevent Cypher injection
     # These map to the canonical plan's Entity subtypes
+    # Phase 3.5: Expanded to include GLiNER v2 entity types for GraphRAG
     ENTITY_LABEL_ALLOWLIST = frozenset(
         {
             "Entity",  # Base/fallback label
@@ -2305,8 +2386,31 @@ class AtomicIngestionCoordinator:
             "Step",  # Individual steps within procedures
             "Error",  # Error codes/messages
             "Concept",  # Abstract concepts
+            # Phase 3.5: GLiNER v2 entity types
+            "Parameter",  # CLI parameters and flags
+            "Component",  # System components (NFS, SMB, etc.)
+            "Protocol",  # Network protocols
+            "CloudProvider",  # AWS, Azure, GCP
+            "StorageConcept",  # Storage concepts (filesystem, snapshot, etc.)
+            "Version",  # Version numbers
+            "ProcedureStep",  # Steps in procedures
+            "CapacityMetric",  # Capacity/performance metrics
         }
     )
+
+    # Map GLiNER label names to Neo4j-safe labels (PascalCase)
+    GLINER_LABEL_MAP = {
+        "COMMAND": "Command",
+        "PARAMETER": "Parameter",
+        "COMPONENT": "Component",
+        "PROTOCOL": "Protocol",
+        "CLOUD_PROVIDER": "CloudProvider",
+        "STORAGE_CONCEPT": "StorageConcept",
+        "VERSION": "Version",
+        "PROCEDURE_STEP": "ProcedureStep",
+        "ERROR": "Error",
+        "CAPACITY_METRIC": "CapacityMetric",
+    }
 
     def _neo4j_upsert_entities(self, tx, entities: Dict[str, Dict]) -> int:
         """Upsert entity nodes within a transaction.
@@ -2360,33 +2464,51 @@ class AtomicIngestionCoordinator:
         return total
 
     def _neo4j_create_mentions(self, tx, mentions: List[Dict]):
-        """Create MENTIONS and Entity→Entity relationships within a transaction.
+        """Create MENTIONS relationships and Entity nodes within a transaction.
 
-        Phase 1.2 Fix: Routes relationships based on their key structure:
-        - Section→Entity mentions have 'section_id' and 'entity_id' keys
-        - Entity→Entity relationships have 'from_id' and 'to_id' keys
+        Phase 3.5 Rewrite: Full GraphRAG MENTIONS support
+        - Creates Entity nodes for GLiNER entities (those with source="gliner")
+        - Creates (Chunk)-[:MENTIONS]->(Entity) relationships
+        - Includes confidence score on relationship for query-time filtering
+        - Routes Entity→Entity relationships to separate handler
 
-        The Entity→Entity relationships (e.g., CONTAINS_STEP from Procedure to Step)
-        were previously being silently dropped because only the Section→Entity
-        pattern was handled.
+        Direction convention (Neo4j best practice - single direction, no duplicates):
+        - MENTIONS: Chunk → Entity ("this chunk mentions this entity")
+        - Queries needing Entity→Chunk traversal use direction-agnostic syntax
+        - Example: (e:Entity)-[r:MENTIONS]-(c:Chunk) traverses either direction
         """
         if not mentions:
             return
 
-        # Phase 1.2: Separate mentions by type based on key structure
+        # Separate mentions by type based on key structure
         section_entity_mentions = []
         entity_entity_relationships = []
+        gliner_entities_to_create = {}  # entity_id -> entity data
 
         for mention in mentions:
             if "from_id" in mention and "to_id" in mention:
                 # Entity→Entity relationship (e.g., Procedure→Step via CONTAINS_STEP)
                 entity_entity_relationships.append(mention)
             elif "section_id" in mention and "entity_id" in mention:
-                # Section→Entity mention (MENTIONED_IN)
-                # Phase 2 GLiNER: Skip mentions with source="gliner"
-                # GLiNER entities enrich vectors only, not the Neo4j graph
-                if mention.get("source") != "gliner":
-                    section_entity_mentions.append(mention)
+                # Section→Entity mention (MENTIONS)
+                section_entity_mentions.append(mention)
+
+                # Phase 3.5: Extract GLiNER entities that need Node creation
+                if mention.get("source") == "gliner":
+                    entity_id = mention["entity_id"]
+                    if entity_id not in gliner_entities_to_create:
+                        # Map GLiNER type to Neo4j label
+                        entity_type = mention.get("type", "Entity")
+                        neo4j_label = self.GLINER_LABEL_MAP.get(
+                            entity_type.upper(), "Entity"
+                        )
+                        gliner_entities_to_create[entity_id] = {
+                            "id": entity_id,
+                            "name": mention.get("name", ""),
+                            "entity_type": entity_type,
+                            "label": neo4j_label,
+                            "source": "gliner",
+                        }
             else:
                 # Log unexpected mention structure for debugging
                 logger.warning(
@@ -2395,18 +2517,33 @@ class AtomicIngestionCoordinator:
                     mention_type=mention.get("relationship", "unknown"),
                 )
 
-        # Process Section→Entity mentions (existing behavior)
+        # Phase 3.5: Create Entity nodes for GLiNER entities BEFORE creating mentions
+        if gliner_entities_to_create:
+            gliner_count = self._neo4j_upsert_entities(tx, gliner_entities_to_create)
+            logger.debug(
+                "gliner_entities_created",
+                count=gliner_count,
+                entity_types=list(
+                    set(e["entity_type"] for e in gliner_entities_to_create.values())
+                ),
+            )
+
+        # Process Section→Entity mentions with correct direction (Chunk→Entity)
         if section_entity_mentions:
+            # Phase 3.5: Fixed direction - (Chunk)-[:MENTIONS]->(Entity)
+            # Also add confidence property for query-time filtering
             query = """
             UNWIND $mentions AS mention
-            MATCH (e:Entity {id: mention.entity_id})
             MATCH (c:Chunk {id: mention.section_id})
-            MERGE (e)-[r:MENTIONED_IN]->(c)
-            SET r.count = coalesce(r.count, 0) + 1
+            MATCH (e:Entity {id: mention.entity_id})
+            MERGE (c)-[r:MENTIONS]->(e)
+            SET r.count = coalesce(r.count, 0) + 1,
+                r.confidence = coalesce(mention.confidence, 0.5),
+                r.source = coalesce(mention.source, 'structural')
             """
             tx.run(query, mentions=section_entity_mentions)
 
-        # Phase 1.2: Process Entity→Entity relationships
+        # Process Entity→Entity relationships
         if entity_entity_relationships:
             self._neo4j_create_entity_relationships(tx, entity_entity_relationships)
 
@@ -3153,6 +3290,15 @@ class AtomicIngestionCoordinator:
                 # === GLiNER entity metadata (1 field, Phase 2) ===
                 # Added by enrich_chunks_with_entities() for filtering/boosting
                 "entity_metadata": section.get("entity_metadata"),
+                # === Phase 2: markdown-it-py structural metadata (7 fields) ===
+                # Enable query-time filtering by structural characteristics
+                "line_start": section.get("line_start"),
+                "line_end": section.get("line_end"),
+                "parent_path": section.get("parent_path", ""),
+                "block_types": section.get("block_types", []),
+                "code_ratio": section.get("code_ratio", 0.0),
+                "has_code": section.get("has_code", False),
+                "has_table": section.get("has_table", False),
                 # === Embedding metadata (5+ fields via spread) ===
                 **embedding_metadata,
             }

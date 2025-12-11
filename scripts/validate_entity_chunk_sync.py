@@ -143,12 +143,13 @@ class EntityChunkSyncValidator:
             logger.warning("Failed to get Qdrant collection info", error=str(e))
             result.total_chunks_qdrant = 0
 
-        # Step 3: Get all Entity→Chunk relationship chunk IDs
+        # Step 3: Get all Entity-Chunk relationship chunk IDs
+        # Phase 3.5: Uses direction-agnostic queries for MENTIONS (Chunk->Entity) + DEFINES (Entity->Chunk)
         entity_chunk_ids: Set[str] = set()
         with self.driver.session() as session:
             r = session.run(
                 """
-                MATCH (e:Entity)-[r:MENTIONED_IN|DEFINES]->(c:Chunk)
+                MATCH (e:Entity)-[r:MENTIONS|DEFINES]-(c:Chunk)
                 RETURN DISTINCT c.id AS chunk_id
             """
             )
@@ -159,7 +160,7 @@ class EntityChunkSyncValidator:
             # Total entity-chunk relationships
             r = session.run(
                 """
-                MATCH (e:Entity)-[r:MENTIONED_IN|DEFINES]->(c:Chunk)
+                MATCH (e:Entity)-[r:MENTIONS|DEFINES]-(c:Chunk)
                 RETURN count(r) AS cnt
             """
             )
@@ -186,7 +187,7 @@ class EntityChunkSyncValidator:
             with self.driver.session() as session:
                 r = session.run(
                     """
-                    MATCH (e:Entity)-[r:MENTIONED_IN|DEFINES]->(c:Chunk)
+                    MATCH (e:Entity)-[r:MENTIONS|DEFINES]-(c:Chunk)
                     WHERE c.id IN $chunk_ids
                     RETURN e.name AS entity_name, e.id AS entity_id,
                            type(r) AS rel_type, c.id AS chunk_id
@@ -251,11 +252,11 @@ class EntityChunkSyncValidator:
             result.backup_file = str(backup_path)
             logger.info("Backup created", file=result.backup_file)
 
-        # Delete orphan relationships
+        # Delete orphan relationships (direction-agnostic for MENTIONS + DEFINES)
         with self.driver.session() as session:
             r = session.run(
                 """
-                MATCH (e:Entity)-[r:MENTIONED_IN|DEFINES]->(c:Chunk)
+                MATCH (e:Entity)-[r:MENTIONS|DEFINES]-(c:Chunk)
                 WHERE c.id IN $chunk_ids
                 DELETE r
                 RETURN count(r) AS deleted
@@ -325,7 +326,7 @@ class EntityChunkSyncValidator:
         with self.driver.session() as session:
             r = session.run(
                 """
-                MATCH (e:Entity)-[r:MENTIONED_IN|DEFINES]->(c:Chunk)
+                MATCH (e:Entity)-[r:MENTIONS|DEFINES]-(c:Chunk)
                 WHERE c.id IN $chunk_ids
                 RETURN
                     e.id AS entity_id,

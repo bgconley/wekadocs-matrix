@@ -76,7 +76,7 @@ search:
 
     graph_channel_enabled: false  # DISABLED: Phase 1 vector-only hardening
     graph_enrichment_enabled: false  # DISABLED: Post-retrieval graph neighbor expansion
-    colbert_rerank_enabled: true  # Keep ColBERT reranking as mid-stage precision filter
+    colbert_rerank_enabled: false  # TESTING: Disabled to test cross-encoder alone
     colbert_candidate_limit: 50  # Min candidates for ColBERT reranking
     colbert_candidate_multiplier: 3  # top_k multiplier
     method: "rrf"  # RRF fusion: rank-based, robust to score scale differences
@@ -88,15 +88,14 @@ search:
 
     # RRF field weights: multiply each field's RRF contribution by its weight
     # Higher weight = more influence on final ranking
-    # Default 1.0 for all fields; boost title-sparse and entity-sparse to prioritize
-    # documents where query terms appear in headings or entity names
+    # Dense boosted, sparse de-rated for semantic > lexical balance
     rrf_field_weights:
-      content: 1.0           # Dense semantic content similarity
-      title: 1.0             # Dense semantic title similarity
-      text-sparse: 1.0       # Lexical content matching (BM25-style)
-      doc_title-sparse: 1.0  # Lexical document title matching
-      title-sparse: 2.0      # Lexical section heading matching - BOOSTED
-      entity-sparse: 1.5     # Lexical entity name matching - BOOSTED
+      content: 2.0           # Dense semantic content similarity - BOOSTED
+      title: 1.5             # Dense semantic title similarity - BOOSTED
+      text-sparse: 0.5       # Lexical content matching - heavily de-rated
+      doc_title-sparse: 0.8  # Lexical document title matching - de-rated
+      title-sparse: 0.8      # Lexical section heading matching - de-rated
+      entity-sparse: 0.8     # Lexical entity name matching - de-rated
 
     # Weighted fusion settings (alternative to RRF)
     fusion_alpha: 0.6  # Phase 7E: Vector weight (0.0-1.0), BM25 weight = 1-alpha
@@ -126,21 +125,23 @@ search:
       troubleshooting: { vector: 0.7, graph: 0.3 }
       reference: { vector: 0.7, graph: 0.3 }
     # Optional: query-type relationship sets (used if graph_adaptive_enabled)
+    # Phase 3.5: MENTIONS is canonical direction (Chunk->Entity)
+    # Direction-agnostic queries work regardless of edge direction
     query_type_relationships:
-      conceptual: ["MENTIONED_IN", "DEFINES", "IN_SECTION"]
-      cli: ["MENTIONED_IN", "CONTAINS_STEP", "HAS_PARAMETER"]
-      config: ["MENTIONED_IN", "HAS_PARAMETER", "DEFINES"]
-      procedural: ["MENTIONED_IN", "CONTAINS_STEP", "NEXT_CHUNK", "IN_SECTION"]
-      troubleshooting: ["MENTIONED_IN", "AFFECTS", "CAUSED_BY", "RESOLVES", "NEXT_CHUNK"]
-      reference: ["MENTIONED_IN", "NEXT_CHUNK"]
+      conceptual: ["MENTIONS", "DEFINES", "IN_SECTION"]
+      cli: ["MENTIONS", "CONTAINS_STEP", "HAS_PARAMETER"]
+      config: ["MENTIONS", "HAS_PARAMETER", "DEFINES"]
+      procedural: ["MENTIONS", "CONTAINS_STEP", "NEXT_CHUNK", "IN_SECTION"]
+      troubleshooting: ["MENTIONS", "RESOLVES", "NEXT_CHUNK"]
+      reference: ["MENTIONS", "NEXT_CHUNK"]
 
     reranker:
-      enabled: true
+      enabled: true  # Cross-encoder enabled - eliminates length bias in final ranking
       provider: "bge-reranker-service"  # Must match factory: bge-reranker-service or bge-reranker
       model: "BAAI/bge-reranker-v2-m3"
       top_n: 20           # Final results after reranking
       max_pairs: 50       # Candidates to send to reranker (from RRF fusion)
-      max_tokens_per_pair: 512  # Max tokens per query-doc pair
+      max_tokens_per_pair: 2048  # Max tokens per query-doc pair (BGE-reranker-v2-m3 supports 8192)
 
     top_k: 20  # Number of candidates to retrieve
 
@@ -217,10 +218,29 @@ ingestion:
   timeout_seconds: 600  # Phase 5: Increased for GLiNER-enabled processing
   workers: 2
 
+  # Phase: markdown-it-py Integration (AST-based parsing)
+  # Options: "legacy" (markdown + BeautifulSoup), "markdown-it-py" (AST with source mapping)
+  parser:
+    engine: "markdown-it-py"  # NEW: AST-based parsing with source line mapping
+    shadow_mode: false         # If true, run both parsers and log differences
+    fail_on_mismatch: false    # If true in shadow mode, fail ingestion on differences
+
   # Phase 7E-2: Chunk assembly configuration
   # Controls intelligent combining and splitting for optimal retrieval quality
   chunk_assembly:
-    assembler: "structured"
+    assembler: "semantic"  # Phase 2: Semantic-first chunking (research-aligned)
+
+    # NEW: Semantic chunking config (Chonkie + BGE-M3)
+    # See: docs/plans/chonkie_semantic_chunking_integration_plan.md
+    semantic_chunking:
+      enabled: true
+      similarity_threshold: 0.5   # Balanced: split when similarity < 50%
+      target_tokens: 400          # Research optimal (Chroma/Firecrawl)
+      min_tokens: 100             # Allow naturally small chunks
+      max_tokens: 512             # NVIDIA recommendation ceiling
+      skip_code_blocks: true      # Skip semantic for code-heavy sections
+
+    # Legacy structured config (used as fallback if semantic unavailable)
     structure:
       min_tokens: 350
       target_tokens: 500
@@ -454,19 +474,21 @@ ner:
   # Run: cd services/gliner-ner && ./run.sh
   # Falls back to local model if service unavailable
   service_url: "http://host.docker.internal:9002"
+  # Entity exclusions: terms too common to be useful (filtered post-extraction)
+  # Note: "WEKA" and variants are excluded in src/providers/ner/labels.py
   labels:
-    # Domain-specific WEKA entity types with zero-shot examples
-    - "weka_software_component (e.g. backend, frontend, agent, client)"
-    - "operating_system (e.g. RHEL, Ubuntu, Rocky Linux)"
-    - "hardware_component (e.g. NVMe, NIC, GPU, switch)"
-    - "filesystem_object (e.g. inode, snapshot, file, directory)"
-    - "cloud_provider_or_service (e.g. AWS, S3, Azure, EC2)"
-    - "cli_command (e.g. weka fs, mount, systemctl)"
-    - "configuration_parameter (e.g. --net-apply, stripe-width)"
-    - "network_or_storage_protocol (e.g. NFS, SMB, S3, POSIX, TCP)"
-    - "error_message_or_code (e.g. 10054, Connection refused)"
-    - "performance_metric (e.g. IOPS, latency, throughput)"
-    - "file_system_path (e.g. /mnt/weka, /etc/fstab)"
+    # Refined WEKA entity types (v2) - optimized for retrieval value
+    # 10 focused types mapped to specific query patterns
+    - "COMMAND (e.g. weka fs, weka nfs permission add, mount)"
+    - "PARAMETER (e.g. --json, num_cores, memory_mb, stripe-width)"
+    - "COMPONENT (e.g. backend server, frontend process, drive process)"
+    - "PROTOCOL (e.g. NFS, SMB, S3, POSIX)"
+    - "CLOUD_PROVIDER (e.g. AWS, Azure, GCP, OCI)"
+    - "STORAGE_CONCEPT (e.g. tiering, snapshot, object store, SSD capacity)"
+    - "VERSION (e.g. 4.4, 4.4.x, v4.3)"
+    - "PROCEDURE_STEP (e.g. Select Save, Run the command, Click Apply)"
+    - "ERROR (e.g. error code 10054, Connection refused, timeout)"
+    - "CAPACITY_METRIC (e.g. GB, TB, IOPS, latency, throughput)"
 
 # Testing helpers
 use_mock_embeddings: false

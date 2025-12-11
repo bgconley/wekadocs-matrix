@@ -38,6 +38,7 @@ class FileSystemWatcher:
         tag: str = "default",
         debounce_seconds: float = 3.0,
         poll_interval: float = 5.0,
+        recursive: bool = True,
     ):
         """
         Initialize FS watcher
@@ -54,6 +55,7 @@ class FileSystemWatcher:
         self.tag = tag
         self.debounce_seconds = debounce_seconds
         self.poll_interval = poll_interval
+        self.recursive = recursive
 
         # Tracking
         self.seen_files: Set[str] = set()
@@ -111,10 +113,17 @@ class FileSystemWatcher:
     def _scan_directory(self):
         """Scan directory for new .ready files"""
         try:
-            ready_files = list(self.watch_path.glob("*.ready"))
+            if self.recursive:
+                ready_files = list(self.watch_path.rglob("*.ready"))
+            else:
+                ready_files = list(self.watch_path.glob("*.ready"))
 
             for ready_file in ready_files:
-                file_path = str(ready_file)
+                try:
+                    file_path = str(ready_file.resolve())
+                except OSError:
+                    # Fall back to absolute path if resolve fails
+                    file_path = str(ready_file.absolute())
 
                 # Skip if already processed
                 if file_path in self.seen_files:
@@ -339,6 +348,7 @@ class WatcherManager:
             paths = self.config["watch"].get("paths", [])
             debounce = self.config["watch"].get("debounce_seconds", 3.0)
             poll = self.config["watch"].get("poll_interval", 5.0)
+            recursive = self.config["watch"].get("recursive", True)
 
             for path in paths:
                 watcher = FileSystemWatcher(
@@ -347,6 +357,7 @@ class WatcherManager:
                     tag=self.config.get("tag", "default"),
                     debounce_seconds=debounce,
                     poll_interval=poll,
+                    recursive=recursive,
                 )
                 watcher.start()
                 self.watchers.append(watcher)

@@ -285,7 +285,18 @@ class QueryService:
     ) -> Tuple[List[ChunkResult], Dict[str, Any]]:
         """
         Lightweight helper that returns raw ChunkResult objects for section-level tools.
+
+        Note: Applies the same query rewriting as search() for consistency.
+        MCP clients often generate keyword-heavy queries that need reformulation.
         """
+        # Apply query rewriting for better cross-encoder performance
+        query, was_rewritten = self._rewrite_keyword_query(query)
+        if was_rewritten:
+            logger.info(
+                "search_sections_light: query rewritten",
+                original=query[:100],
+            )
+
         retriever = self._get_7e_retriever()
         chunks, metrics = retriever.retrieve(
             query=query,
@@ -293,6 +304,11 @@ class QueryService:
             filters=filters or {},
             expand=True,
         )
+
+        # Enforce fetch_k as hard limit (same as search())
+        if len(chunks) > fetch_k:
+            chunks = chunks[:fetch_k]
+
         return chunks, metrics
 
     def _get_context_assembler(self) -> ContextAssembler:
@@ -454,6 +470,158 @@ class QueryService:
             logger.info("Session tracker initialized")
         return self._session_tracker
 
+    def _rewrite_keyword_query(self, query: str) -> Tuple[str, bool]:
+        """
+        Detect and rewrite keyword-stuffed queries into natural language.
+
+        MCP clients (like Claude Code) often generate keyword-heavy queries like:
+        "data reduction clusterization blocks 4K dedupe how works architecture"
+
+        These lack the semantic structure that cross-encoders need for effective
+        reranking. This method detects such queries and reformulates them.
+
+        Args:
+            query: The original query string
+
+        Returns:
+            Tuple of (possibly rewritten query, was_rewritten flag)
+        """
+        if not query or len(query.strip()) < 10:
+            return query, False
+
+        words = query.lower().split()
+        if len(words) < 3:
+            return query, False
+
+        # Question indicators - if present, query likely has semantic structure
+        question_words = {
+            "how",
+            "what",
+            "why",
+            "when",
+            "where",
+            "which",
+            "who",
+            "can",
+            "does",
+            "is",
+            "are",
+            "do",
+            "will",
+            "should",
+            "could",
+            "explain",
+            "describe",
+            "tell",
+            "show",
+            "list",
+            "compare",
+        }
+
+        # Function words that indicate sentence structure
+        function_words = {
+            "the",
+            "a",
+            "an",
+            "to",
+            "of",
+            "in",
+            "for",
+            "on",
+            "with",
+            "and",
+            "or",
+            "is",
+            "are",
+            "be",
+            "that",
+            "this",
+            "it",
+            "by",
+            "from",
+            "as",
+            "at",
+            "but",
+            "if",
+            "not",
+            "my",
+            "your",
+        }
+
+        # Check for question structure
+        first_word = words[0]
+        has_question_start = first_word in question_words
+        has_question_mark = "?" in query
+
+        # Count function words
+        function_count = sum(1 for w in words if w in function_words)
+        function_ratio = function_count / len(words)
+
+        # Check for verb presence (simple heuristic)
+        common_verbs = {
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "work",
+            "works",
+            "use",
+            "uses",
+            "configure",
+            "create",
+            "enable",
+            "disable",
+            "set",
+            "get",
+            "run",
+            "start",
+            "stop",
+        }
+        has_verb = any(w in common_verbs for w in words)
+
+        # Query is well-formed if it has:
+        # - Question structure (starts with question word or has ?)
+        # - OR reasonable function word ratio (>15%) with a verb
+        # - OR is very short (likely a specific term lookup)
+        is_well_formed = (
+            has_question_start
+            or has_question_mark
+            or (function_ratio > 0.15 and has_verb)
+            or len(words) <= 4
+        )
+
+        if is_well_formed:
+            return query, False
+
+        # Query appears to be keyword-stuffed - rewrite it
+        logger.info(
+            "keyword_query_detected",
+            original_query=query[:100],
+            word_count=len(words),
+            function_ratio=round(function_ratio, 2),
+        )
+
+        # Build a natural language question from keywords
+        # Strategy: Wrap in an explanatory question template
+        rewritten = f"Explain {query}. How does this work and what is the technical architecture?"
+
+        logger.info(
+            "query_rewritten",
+            original=query[:100],
+            rewritten=rewritten[:150],
+        )
+
+        return rewritten, True
+
     def search(
         self,
         query: str,
@@ -503,6 +671,18 @@ class QueryService:
             turn=turn,
             expand_graph=expand_graph,
         )
+
+        # Rewrite keyword-stuffed queries for better cross-encoder performance
+        # MCP clients often generate keyword-heavy queries that lack semantic structure
+        original_query = query
+        query, was_rewritten = self._rewrite_keyword_query(query)
+        if was_rewritten:
+            logger.info(
+                "query_rewrite_applied",
+                request_id=request_id,
+                original=original_query[:100],
+                rewritten=query[:150],
+            )
 
         try:
             requested_verbosity = (
@@ -638,6 +818,16 @@ class QueryService:
                         len(chunks),
                         before,
                     )
+
+                # Enforce top_k as hard limit after all filtering
+                # The retriever may return more than top_k due to expansion and microdoc_extras
+                if len(chunks) > top_k_value:
+                    logger.info(
+                        "Enforcing top_k limit: %d -> %d chunks",
+                        len(chunks),
+                        top_k_value,
+                    )
+                    chunks = chunks[:top_k_value]
 
                 assembler = self._get_context_assembler()
                 assembled_context = assembler.assemble(chunks, query=query)

@@ -71,6 +71,14 @@ def create_chunk_metadata(
     version: Optional[str] = None,
     text_hash: Optional[str] = None,
     shingle_hash: Optional[str] = None,
+    # Phase 2: markdown-it-py enhanced metadata (additive, backward compatible)
+    line_start: Optional[int] = None,
+    line_end: Optional[int] = None,
+    parent_path: Optional[str] = None,
+    block_types: Optional[List[str]] = None,
+    code_ratio: Optional[float] = None,
+    has_code: Optional[bool] = None,
+    has_table: Optional[bool] = None,
 ) -> Dict:
     """
     Create chunk metadata dict for a single-section chunk (Phase 7E-1 default).
@@ -89,6 +97,13 @@ def create_chunk_metadata(
         is_split: Whether section was split into multiple chunks (default False)
         boundaries_json: Optional JSON-serialized boundary metadata
         token_count: Optional token count
+        line_start: Source line number start (Phase 2: markdown-it-py)
+        line_end: Source line number end (Phase 2: markdown-it-py)
+        parent_path: Heading hierarchy path (Phase 2: markdown-it-py)
+        block_types: List of block types in section (Phase 2: markdown-it-py)
+        code_ratio: Fraction of content that is code (Phase 2: markdown-it-py)
+        has_code: Whether section contains code blocks (Phase 2: markdown-it-py)
+        has_table: Whether section contains tables (Phase 2: markdown-it-py)
 
     Returns:
         Dict with chunk metadata fields
@@ -119,6 +134,14 @@ def create_chunk_metadata(
         "text_hash": text_hash,
         "shingle_hash": shingle_hash,
         "updated_at": datetime.utcnow(),
+        # Phase 2: markdown-it-py enhanced metadata (None if not available)
+        "line_start": line_start,
+        "line_end": line_end,
+        "parent_path": parent_path or "",
+        "block_types": block_types or [],
+        "code_ratio": code_ratio if code_ratio is not None else 0.0,
+        "has_code": has_code if has_code is not None else False,
+        "has_table": has_table if has_table is not None else False,
     }
 
 

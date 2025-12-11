@@ -576,7 +576,7 @@ class GLiNERService:
         total_entities = sum(len(ents) for ents in result)
         logger.debug(
             f"Batch extraction complete: {len(texts)} texts, "
-            f"{total_entities} entities in {elapsed*1000:.1f}ms (mode={self._mode})"
+            f"{total_entities} entities in {elapsed * 1000:.1f}ms (mode={self._mode})"
         )
 
         return result
