@@ -1,0 +1,16 @@
+# GLiNER NER Service - Native macOS with MPS support
+# Install with: pip install -r requirements.txt
+
+# Core ML
+torch>=2.0.0          # PyTorch with MPS support
+gliner>=0.2.0         # Zero-shot NER
+
+# API server
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+pydantic>=2.0.0
+
+# Note: For MPS acceleration on Apple Silicon, ensure you have:
+# - macOS 12.3+ (Monterey or later)
+# - Python 3.10+ built for arm64
+# - PyTorch installed via: pip install torch (arm64 wheel includes MPS)

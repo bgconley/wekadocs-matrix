@@ -1,64 +1,49 @@
--- impact_assessment: Analyze impact of configuration changes
+-- impact_assessment: Analyze mentions and relationships of configurations
 -- Phase 4, Task 4.1 - Complex query pattern
 -- Parameters: $config_name, $max_hops (default: 3)
--- Returns: affected entities with criticality assessment
+-- Returns: related entities via MENTIONS relationship
 -- Guardrails: max_hops bounded, typed relationships only
+-- Phase 2 Cleanup: Replaced AFFECTS/CRITICAL_FOR with MENTIONS (active relationships)
 
 -- Schema:
 -- Input: {config_name: str, max_hops?: int}
--- Output: [{config: Node, affected: [Node], critical_services: [Node], impact_level: str}]
+-- Output: [{config: Node, mentioned_by: [Section], related_count: int}]
 
--- Version 1: Direct impact analysis
+-- Version 1: Configuration mentions analysis
 MATCH (cfg:Configuration {name: $config_name})
-OPTIONAL MATCH (cfg)-[:AFFECTS*1..3]->(affected)
-WITH cfg, collect(DISTINCT affected) AS affected_entities
-RETURN cfg, affected_entities,
-  size(affected_entities) AS impact_count,
+OPTIONAL MATCH (cfg)<-[:MENTIONS]-(sec:Section)
+WITH cfg, collect(DISTINCT sec) AS mentioned_by_sections
+RETURN cfg, mentioned_by_sections,
+  size(mentioned_by_sections) AS mention_count,
   CASE
-    WHEN size(affected_entities) = 0 THEN 'NONE'
-    WHEN size(affected_entities) <= 3 THEN 'LOW'
-    WHEN size(affected_entities) <= 10 THEN 'MEDIUM'
+    WHEN size(mentioned_by_sections) = 0 THEN 'NONE'
+    WHEN size(mentioned_by_sections) <= 3 THEN 'LOW'
+    WHEN size(mentioned_by_sections) <= 10 THEN 'MEDIUM'
     ELSE 'HIGH'
-  END AS impact_level
+  END AS mention_level
 LIMIT 1;
 
--- Version 2: Impact with criticality assessment
+-- Version 2: Configuration with related entities via sections
 MATCH (cfg:Configuration {name: $config_name})
-OPTIONAL MATCH path=(cfg)-[:AFFECTS*1..3]->(affected)
-OPTIONAL MATCH (affected)-[:CRITICAL_FOR]->(svc)
-WITH cfg, affected, svc, length(path) AS distance
-ORDER BY distance ASC
-WITH cfg,
-  collect(DISTINCT {
-    node: affected,
-    labels: labels(affected),
-    distance: distance,
-    is_critical: svc IS NOT NULL,
-    critical_for: svc.name
-  }) AS impacts
-RETURN cfg, impacts,
-  size([i IN impacts WHERE i.is_critical]) AS critical_impact_count,
-  CASE
-    WHEN size([i IN impacts WHERE i.is_critical]) > 0 THEN 'CRITICAL'
-    WHEN size(impacts) > 10 THEN 'HIGH'
-    WHEN size(impacts) > 3 THEN 'MEDIUM'
-    WHEN size(impacts) > 0 THEN 'LOW'
-    ELSE 'NONE'
-  END AS impact_level
+OPTIONAL MATCH (cfg)<-[:MENTIONS]-(sec:Section)-[:MENTIONS]->(related)
+WHERE cfg.id <> related.id
+WITH cfg, collect(DISTINCT {
+  node: related,
+  labels: labels(related),
+  section: sec.id
+}) AS related_entities
+RETURN cfg, related_entities,
+  size(related_entities) AS related_count
 LIMIT 1;
 
--- Version 3: Full impact with change propagation
+-- Version 3: Configuration with command associations
 MATCH (cfg:Configuration {name: $config_name})
-OPTIONAL MATCH direct=(cfg)-[:AFFECTS]->(direct_impact)
-OPTIONAL MATCH indirect=(cfg)-[:AFFECTS*2..3]->(indirect_impact)
-OPTIONAL MATCH (cfg)<-[:HAS_PARAMETER]-(cmd:Command)
+OPTIONAL MATCH (cfg)<-[:MENTIONS]-(sec:Section)
+OPTIONAL MATCH (sec)-[:MENTIONS]->(cmd:Command)
 WITH cfg,
-  collect(DISTINCT direct_impact) AS direct,
-  collect(DISTINCT indirect_impact) AS indirect,
+  collect(DISTINCT sec) AS sections,
   collect(DISTINCT cmd) AS commands
-RETURN cfg, direct, indirect, commands,
-  size(direct) AS direct_count,
-  size(indirect) AS indirect_count,
-  size([d IN direct WHERE (d)-[:CRITICAL_FOR]->()]) AS critical_direct,
-  size([i IN indirect WHERE (i)-[:CRITICAL_FOR]->()]) AS critical_indirect
+RETURN cfg, sections, commands,
+  size(sections) AS section_count,
+  size(commands) AS command_count
 LIMIT 1;

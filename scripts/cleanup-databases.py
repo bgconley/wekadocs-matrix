@@ -111,6 +111,11 @@ class DatabaseCleaner:
         "Session",
         "Query",
         "Answer",
+        # Phase 4+ additions
+        "PendingReference",  # Unresolved document references
+        "GhostDocument",  # Placeholder for missing referenced docs
+        "Error",  # Error tracking nodes
+        "QueryFeedback",  # User feedback on queries
     }
 
     def __init__(self, args: argparse.Namespace):

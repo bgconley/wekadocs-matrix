@@ -146,7 +146,7 @@ class GraphService:
 
         projection = self._project_clause("n", fields)
         query = f"""
-        MATCH (n) WHERE n.id IN $node_ids
+        MATCH (n) WHERE (n:Section OR n:Chunk OR n:Document OR n:Entity) AND n.id IN $node_ids
         RETURN {projection}
         """
         logger.debug("describe_nodes query=%s", query)
@@ -239,6 +239,7 @@ class GraphService:
             target.id AS id,
             CASE
                 WHEN 'Section' IN labels(target) THEN 'Section'
+                WHEN 'Chunk' IN labels(target) THEN 'Chunk'
                 WHEN 'Document' IN labels(target) THEN 'Document'
                 WHEN 'Procedure' IN labels(target) THEN 'Procedure'
                 WHEN 'Step' IN labels(target) THEN 'Step'

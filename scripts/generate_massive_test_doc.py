@@ -85,11 +85,11 @@ for category in categories:
 
 **Full Name**: system.{category.lower()}.setting_{i}
 **Type**: {param_type}
-**Default**: {'true' if param_num % 2 == 0 else 'false' if param_type == 'boolean' else str(param_num * 100)}
+**Default**: {"true" if param_num % 2 == 0 else "false" if param_type == "boolean" else str(param_num * 100)}
 **Description**: This parameter controls critical {category.lower()} functionality for subsystem {i}. Proper configuration is essential for optimal system operation affecting resource allocation, performance characteristics, security posture, and operational reliability.
-**Impact**: {'High - directly affects throughput' if i % 3 == 0 else 'Medium - affects efficiency' if i % 3 == 1 else 'Low - minimal impact'}
+**Impact**: {"High - directly affects throughput" if i % 3 == 0 else "Medium - affects efficiency" if i % 3 == 1 else "Low - minimal impact"}
 **Tuning**: For production environments, adjust this parameter based on workload characteristics, available system resources, and observed performance metrics. Start with default values and make incremental adjustments while monitoring system behavior.
-**Related**: {category.lower()}_setting_{i-1 if i > 1 else 25}, {category.lower()}_setting_{i+1 if i < 25 else 1}
+**Related**: {category.lower()}_setting_{i - 1 if i > 1 else 25}, {category.lower()}_setting_{i + 1 if i < 25 else 1}
 
 """
         param_num += 1

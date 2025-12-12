@@ -49,8 +49,6 @@ spec:
             secretKeyRef:
               name: wekadocs-secrets
               key: jwt-secret
-        - name: OTEL_EXPORTER_JAEGER_ENDPOINT
-          value: "http://jaeger:14268/api/traces"
         volumeMounts:
         - name: config
           mountPath: /app/config

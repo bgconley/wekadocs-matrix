@@ -154,44 +154,44 @@ def main():
     # Create markdown report
     report = f"""# Baseline Counts for Embedding Field Migration
 
-**Generated:** {baseline['timestamp']}
+**Generated:** {baseline["timestamp"]}
 
 ## Neo4j Baseline
 
 | Metric | Count |
 |--------|-------|
-| Sections with `embedding_model` | {baseline['neo4j']['sections_with_embedding_model']} |
-| Sections with `embedding_version` | {baseline['neo4j']['sections_with_embedding_version']} |
-| Chunks with `embedding_model` | {baseline['neo4j']['chunks_with_embedding_model']} |
-| Chunks with `embedding_version` | {baseline['neo4j']['chunks_with_embedding_version']} |
-| Total Sections | {baseline['neo4j']['total_sections']} |
-| Total Chunks | {baseline['neo4j']['total_chunks']} |
+| Sections with `embedding_model` | {baseline["neo4j"]["sections_with_embedding_model"]} |
+| Sections with `embedding_version` | {baseline["neo4j"]["sections_with_embedding_version"]} |
+| Chunks with `embedding_model` | {baseline["neo4j"]["chunks_with_embedding_model"]} |
+| Chunks with `embedding_version` | {baseline["neo4j"]["chunks_with_embedding_version"]} |
+| Total Sections | {baseline["neo4j"]["total_sections"]} |
+| Total Chunks | {baseline["neo4j"]["total_chunks"]} |
 
 ### Sample Section Nodes
 ```json
-{json.dumps(baseline['neo4j']['sample_sections'], indent=2)}
+{json.dumps(baseline["neo4j"]["sample_sections"], indent=2)}
 ```
 
 ## Qdrant Baseline
 
 | Metric | Value |
 |--------|-------|
-| Collection exists | {baseline['qdrant']['collection_exists']} |
-| Points count | {baseline['qdrant'].get('points_count', 'N/A')} |
-| Vector size | {baseline['qdrant'].get('vector_size', 'N/A')} |
-| Distance metric | {baseline['qdrant'].get('distance', 'N/A')} |
-| Sample with `embedding_model` | {baseline['qdrant'].get('sample_with_embedding_model', 0)}/{baseline['qdrant'].get('total_checked', 100)} |
-| Sample with `embedding_version` | {baseline['qdrant'].get('sample_with_embedding_version', 0)}/{baseline['qdrant'].get('total_checked', 100)} |
+| Collection exists | {baseline["qdrant"]["collection_exists"]} |
+| Points count | {baseline["qdrant"].get("points_count", "N/A")} |
+| Vector size | {baseline["qdrant"].get("vector_size", "N/A")} |
+| Distance metric | {baseline["qdrant"].get("distance", "N/A")} |
+| Sample with `embedding_model` | {baseline["qdrant"].get("sample_with_embedding_model", 0)}/{baseline["qdrant"].get("total_checked", 100)} |
+| Sample with `embedding_version` | {baseline["qdrant"].get("sample_with_embedding_version", 0)}/{baseline["qdrant"].get("total_checked", 100)} |
 
 ### Sample Payloads
 ```json
-{json.dumps(baseline['qdrant'].get('sample_payloads', []), indent=2)}
+{json.dumps(baseline["qdrant"].get("sample_payloads", []), indent=2)}
 ```
 
 ## Summary
 
-- **Neo4j**: {baseline['neo4j']['sections_with_embedding_model'] + baseline['neo4j']['chunks_with_embedding_model']} nodes need field migration
-- **Qdrant**: {baseline['qdrant'].get('sample_with_embedding_model', 0)}% of sampled points have legacy field
+- **Neo4j**: {baseline["neo4j"]["sections_with_embedding_model"] + baseline["neo4j"]["chunks_with_embedding_model"]} nodes need field migration
+- **Qdrant**: {baseline["qdrant"].get("sample_with_embedding_model", 0)}% of sampled points have legacy field
 - **Target**: Migrate all `embedding_model` → `embedding_version`
 """
 

@@ -57,9 +57,103 @@ from src.shared.schema import ensure_schema_version
 logger = get_logger(__name__)
 GRAPH_BUILDER_INIT_LOGGED = False
 
+# C.1.1: Generic headings that should NOT become concept entities
+GENERIC_HEADING_BLACKLIST = frozenset(
+    {
+        "overview",
+        "introduction",
+        "summary",
+        "description",
+        "details",
+        "notes",
+        "note",
+        "example",
+        "examples",
+        "usage",
+        "syntax",
+        "parameters",
+        "options",
+        "arguments",
+        "returns",
+        "return value",
+        "see also",
+        "related",
+        "prerequisites",
+        "requirements",
+        "warning",
+        "warnings",
+        "caution",
+        "important",
+        "tip",
+        "tips",
+        "troubleshooting",
+        "faq",
+        "appendix",
+        "reference",
+        "references",
+        "contents",
+        "table of contents",
+        "index",
+        "glossary",
+        "about",
+        "getting started",
+        "quick start",
+        "installation",
+        "setup",
+        "configuration",
+        "conclusion",
+        "next steps",
+    }
+)
+
+# C.1.3: Entity validity criteria - entity_types that qualify for :Entity label
+# Updated for GLiNER v2 labels (2024-12)
+VALID_ENTITY_TYPES = frozenset(
+    {
+        # Legacy structural entity types
+        "heading_concept",
+        "cli_command",
+        "config_param",
+        "concept",
+        "api_endpoint",
+        "parameter",
+        "option",
+        "feature",
+        "service",
+        "module",
+        # GLiNER v2 entity types (refined for retrieval)
+        "COMMAND",
+        "PARAMETER",
+        "COMPONENT",
+        "PROTOCOL",
+        "CLOUD_PROVIDER",
+        "STORAGE_CONCEPT",
+        "VERSION",
+        "PROCEDURE_STEP",
+        "ERROR",
+        "CAPACITY_METRIC",
+        # Lowercase variants (for case-insensitive matching)
+        "command",
+        "component",
+        "protocol",
+        "cloud_provider",
+        "storage_concept",
+        "version",
+        "procedure_step",
+        "error",
+        "capacity_metric",
+    }
+)
+
 
 class GraphBuilder:
     """Builds graph from parsed documents, sections, and entities."""
+
+    # Class-level caches to track what has been ensured in this process.
+    # This prevents redundant DB calls when GraphBuilder is instantiated per-document.
+    _payload_indexes_ensured: set = set()  # Qdrant collections with payload indexes
+    _neo4j_indexes_ensured: set = set()  # Neo4j index names that have been ensured
+    _schema_metadata_ensured: bool = False  # SchemaVersion metadata reconciled
 
     def __init__(
         self,
@@ -218,6 +312,44 @@ class GraphBuilder:
             ).inc()
         self._profile_alignment_verified = True
 
+    def ensure_embedder(self) -> None:
+        """
+        Initialize the embedding provider if it has not been created.
+
+        This mirrors the initialization logic used in upsert_document and is a
+        no-op when the embedder is already available.
+        """
+        if self.embedder:
+            return
+
+        logger.info(
+            "Initializing embedding provider",
+            provider=self.embedding_settings.provider,
+            model=self.embedding_settings.model_id,
+            dims=self.embedding_settings.dims,
+            profile=self.embedding_settings.profile,
+        )
+
+        self.embedder = ProviderFactory.create_embedding_provider(
+            settings=self.embedding_settings
+        )
+
+        if self.embedder.dims != self.embedding_dims:
+            logger.warning(
+                "Embedding dims mismatch; aligning local settings to provider",
+                configured_dims=self.embedding_dims,
+                provider_dims=self.embedder.dims,
+                model=self.embedder.model_id,
+            )
+            self.embedding_dims = self.embedder.dims
+
+        logger.info(
+            "Embedding provider initialized",
+            provider_name=self.embedder.provider_name,
+            model_id=self.embedder.model_id,
+            actual_dims=self.embedder.dims,
+        )
+
     def upsert_document(
         self,
         document: Dict,
@@ -318,11 +450,50 @@ class GraphBuilder:
                     repaired_count=repaired,
                 )
 
+            # Step 2d: C.1.1 - Create heading concept entities from section headings
+            heading_concept_stats = self._create_heading_concept_entities(
+                session, document["id"], sections
+            )
+            stats["heading_concepts"] = heading_concept_stats
+
             # Step 3: Upsert Entities in batches
             stats["entities_upserted"] = self._upsert_entities(session, entities)
 
             # Step 4: Create MENTIONS edges in batches
             stats["mentions_created"] = self._create_mentions(session, mentions)
+
+        # Step 4.5: Attach mentions to sections for entity sparse embedding
+        # This enables _process_embeddings to build entity text from mentions
+        # NOTE: Combined chunks have NEW IDs but mentions are keyed by ORIGINAL section IDs.
+        # We must check both current ID and original_section_ids to attach all mentions.
+        from collections import defaultdict
+
+        mentions_by_section = defaultdict(list)
+        for m in mentions:
+            sid = m.get("section_id")
+            if sid:
+                mentions_by_section[sid].append(m)
+
+        for section in sections:
+            section_mentions = []
+            # Check current section ID
+            section_id = section.get("id")
+            if section_id and section_id in mentions_by_section:
+                section_mentions.extend(mentions_by_section[section_id])
+            # Check original section IDs (from chunk assembly - combined chunks)
+            original_ids = section.get("original_section_ids", [])
+            for orig_id in original_ids:
+                if orig_id in mentions_by_section:
+                    section_mentions.extend(mentions_by_section[orig_id])
+            # Deduplicate by entity_id to avoid double-counting
+            seen_entity_ids = set()
+            unique_mentions = []
+            for m in section_mentions:
+                eid = m.get("entity_id")
+                if eid and eid not in seen_entity_ids:
+                    seen_entity_ids.add(eid)
+                    unique_mentions.append(m)
+            section["_mentions"] = unique_mentions
 
         # Step 5: Compute embeddings and upsert to vector store
         embedding_stats = self._process_embeddings(document, sections, entities)
@@ -390,6 +561,10 @@ class GraphBuilder:
             # Phase 7E-4: Check SLOs if monitoring enabled
             if self.config.monitoring.slo_monitoring_enabled:
                 slo_metrics = collector.compute_slo_metrics(chunk_metrics)
+                # Graph Channel Rehabilitation: Add sparse coverage to SLO metrics
+                slo_metrics["sparse_content_missing"] = embedding_stats.get(
+                    "sparse_content_missing", 0
+                )
                 violations = check_slos_and_log(slo_metrics, logger)
 
                 stats["slo_metrics"] = slo_metrics
@@ -493,6 +668,7 @@ class GraphBuilder:
             batch = chunks[i : i + batch_size]
 
             # Phase 7E-1: MERGE with dual-label :Section:Chunk + canonical chunk fields
+            # Phase 3 (markdown-it-py): Added enhanced metadata fields for structural queries
             query = """
             UNWIND $chunks as chunk
             MERGE (s:Section:Chunk {id: chunk.id})
@@ -515,6 +691,14 @@ class GraphBuilder:
                 s.document_total_tokens = chunk.document_total_tokens,
                 s.is_microdoc = chunk.is_microdoc,
                 s.doc_is_microdoc = coalesce(chunk.doc_is_microdoc, chunk.is_microdoc),
+                // Phase 3: Enhanced structural metadata from markdown-it-py
+                s.line_start = chunk.line_start,
+                s.line_end = chunk.line_end,
+                s.parent_path = coalesce(chunk.parent_path, ''),
+                s.block_types = coalesce(chunk.block_types, []),
+                s.code_ratio = coalesce(chunk.code_ratio, 0.0),
+                s.has_code = coalesce(chunk.has_code, false),
+                s.has_table = coalesce(chunk.has_table, false),
                 s.updated_at = datetime()
             WITH s, chunk
             MATCH (d:Document {id: $document_id})
@@ -537,6 +721,130 @@ class GraphBuilder:
             )
 
         return total_sections
+
+    def _create_heading_concept_entities(
+        self, session, document_id: str, sections: List[Dict]
+    ) -> Dict[str, int]:
+        """
+        C.1.1: Create concept entities from qualifying section headings.
+
+        For each section heading that meets validity criteria:
+        - Creates an :Entity:Concept node with entity_type="heading_concept"
+        - Creates DEFINES relationship from entity to chunk
+        - Creates MENTIONS relationship (Chunk->Entity) per Neo4j best practice
+
+        Criteria for qualifying headings:
+        - Non-empty and >= 5 characters
+        - Not in GENERIC_HEADING_BLACKLIST
+        - Not purely numeric or bullet markers
+
+        Returns:
+            Dict with counts: entities_created, defines_created, mentions_created
+        """
+        stats = {"entities_created": 0, "defines_created": 0, "mentions_created": 0}
+
+        # Extract qualifying headings from sections
+        heading_entities = []
+        for section in sections:
+            heading = section.get("heading") or section.get("title") or ""
+            heading = heading.strip()
+
+            # Skip empty or too short
+            if not heading or len(heading) < 5:
+                continue
+
+            # Normalize for comparison
+            canonical = re.sub(r"\s+", " ", heading.lower().strip())
+            # Remove leading articles
+            canonical = re.sub(r"^(the|a|an)\s+", "", canonical)
+
+            # Skip generic headings
+            if canonical in GENERIC_HEADING_BLACKLIST:
+                continue
+
+            # Skip purely numeric or bullet markers (e.g., "1.", "1.2.3", "•", "-")
+            if re.match(r"^[\d\.\-\•\*\#]+$", heading.strip()):
+                continue
+
+            # Generate deterministic entity ID
+            entity_id = hashlib.sha256(
+                f"heading_concept:{document_id}:{canonical}".encode()
+            ).hexdigest()[:24]
+
+            heading_entities.append(
+                {
+                    "id": entity_id,
+                    "name": heading,
+                    "canonical_name": canonical,
+                    "entity_type": "heading_concept",
+                    "source_section_id": section.get("id"),
+                    "document_id": document_id,
+                    "doc_tag": section.get("doc_tag"),
+                }
+            )
+
+        if not heading_entities:
+            logger.debug(
+                "No qualifying heading concepts found",
+                document_id=document_id,
+                sections_checked=len(sections),
+            )
+            return stats
+
+        # Batch upsert heading concept entities
+        batch_size = self.config.ingestion.batch_size
+        for i in range(0, len(heading_entities), batch_size):
+            batch = heading_entities[i : i + batch_size]
+
+            # Create :Entity:Concept nodes
+            entity_query = """
+            UNWIND $entities AS ent
+            MERGE (e:Entity:Concept {id: ent.id})
+            SET e.name = ent.name,
+                e.canonical_name = ent.canonical_name,
+                e.entity_type = ent.entity_type,
+                e.source_section_id = ent.source_section_id,
+                e.document_id = ent.document_id,
+                e.doc_tag = ent.doc_tag,
+                e.updated_at = datetime()
+            RETURN count(e) AS count
+            """
+            result = session.run(entity_query, entities=batch)
+            stats["entities_created"] += result.single()["count"]
+
+            # Create DEFINES relationships (Entity -> Chunk)
+            defines_query = """
+            UNWIND $entities AS ent
+            MATCH (e:Entity:Concept {id: ent.id})
+            MATCH (c:Chunk {id: ent.source_section_id})
+            MERGE (e)-[r:DEFINES]->(c)
+            SET r.updated_at = datetime()
+            RETURN count(r) AS count
+            """
+            result = session.run(defines_query, entities=batch)
+            stats["defines_created"] += result.single()["count"]
+
+            # Create MENTIONS relationships (Chunk -> Entity) - canonical direction per Neo4j best practice
+            mentions_query = """
+            UNWIND $entities AS ent
+            MATCH (e:Entity:Concept {id: ent.id})
+            MATCH (c:Chunk {id: ent.source_section_id})
+            MERGE (c)-[r:MENTIONS]->(e)
+            SET r.updated_at = datetime()
+            RETURN count(r) AS count
+            """
+            result = session.run(mentions_query, entities=batch)
+            stats["mentions_created"] += result.single()["count"]
+
+        logger.info(
+            "Created heading concept entities",
+            document_id=document_id,
+            entities=stats["entities_created"],
+            defines=stats["defines_created"],
+            mentions=stats["mentions_created"],
+        )
+
+        return stats
 
     def _upsert_citation_units(
         self, session, document_id: str, chunks: List[Dict]
@@ -708,8 +1016,10 @@ class GraphBuilder:
         create_graphrag_schema_v2_2_20251105_guard.cypher, ensuring we build:
             - CHILD_OF (Chunk -> Section)
             - PARENT_OF (Section -> Section)
-            - NEXT/PREV (Chunk adjacency within parent/doc scope)
-            - SAME_HEADING (Chunk siblings sharing headings)
+            - NEXT (Chunk adjacency within parent/doc scope)
+
+        Phase 2 Cleanup: Removed PREV (redundant - use <-[:NEXT]-) and
+        SAME_HEADING (O(n²) fanout with zero query usage).
         """
 
         queries = {
@@ -730,7 +1040,10 @@ class GraphBuilder:
             MERGE (parent)-[:PARENT_OF]->(child)
             RETURN count(child) AS count
             """,
-            "next_prev": """
+            # Phase 2 Cleanup: Renamed from "next_prev", removed PREV edge creation
+            # Reverse traversal uses <-[:NEXT]- pattern instead of [:PREV]
+            # Also removed "same_heading" query - O(n²) fanout with zero query usage
+            "next": """
             MATCH (c:Chunk)
             WHERE c.text IS NOT NULL
               AND coalesce(c.document_id, c.doc_id) = $doc_id
@@ -741,24 +1054,59 @@ class GraphBuilder:
             UNWIND range(0, size(chunks)-2) AS idx
             WITH chunks[idx] AS a, chunks[idx+1] AS b
             MERGE (a)-[:NEXT]->(b)
-            MERGE (b)-[:PREV]->(a)
             RETURN count(*) AS count
             """,
-            "same_heading": """
-            MATCH (c:Chunk)
-            WHERE c.text IS NOT NULL
-              AND c.heading IS NOT NULL
-              AND coalesce(c.document_id, c.doc_id) = $doc_id
-            WITH c.parent_section_id AS parent_id, c.heading AS heading, c
-            ORDER BY c.order, c.id
-            WITH parent_id, heading, collect(c) AS chunks
-            WHERE size(chunks) > 1
-            UNWIND chunks AS a
-            UNWIND chunks AS b
-            WITH a, b
-            WHERE a.id <> b.id AND a.order < b.order AND a.order + 8 >= b.order
-            MERGE (a)-[:SAME_HEADING]->(b)
-            RETURN count(*) AS count
+            # Phase 3 (markdown-it-py): PARENT_HEADING based on parent_path hierarchy
+            # Creates heading-based parent-child edges distinct from PARENT_OF
+            # Direction: child→parent (Neo4j hierarchy convention)
+            "parent_heading": """
+            MATCH (child:Section)
+            WHERE child.document_id = $doc_id
+              AND child.parent_path IS NOT NULL
+              AND child.parent_path <> ''
+              AND NOT EXISTS {
+                MATCH (child)-[:PARENT_HEADING]->(:Section)
+              }
+            WITH child,
+                 split(child.parent_path, ' > ') AS path_parts,
+                 child.level AS child_level,
+                 child.order AS child_order
+            WHERE size(path_parts) > 0
+            WITH child,
+                 path_parts[size(path_parts) - 1] AS immediate_parent_title,
+                 child_level,
+                 child_order
+            MATCH (parent:Section)
+            WHERE parent.document_id = $doc_id
+              AND parent.title = immediate_parent_title
+              AND parent.level < child_level
+              AND parent.order < child_order
+            WITH child, parent
+            ORDER BY parent.order DESC
+            WITH child, collect(parent)[0] AS parent
+            WHERE parent IS NOT NULL
+            MERGE (child)-[r:PARENT_HEADING]->(parent)
+            SET r.level_delta = child.level - parent.level,
+                r.created_at = datetime()
+            RETURN count(r) AS count
+            """,
+            # Phase 3 (markdown-it-py): Apply :CodeSection label for structural filtering
+            "code_section_label": """
+            MATCH (s:Section)
+            WHERE s.document_id = $doc_id
+              AND s.has_code = true
+              AND NOT s:CodeSection
+            SET s:CodeSection
+            RETURN count(s) AS count
+            """,
+            # Phase 3 (markdown-it-py): Apply :TableSection label for structural filtering
+            "table_section_label": """
+            MATCH (s:Section)
+            WHERE s.document_id = $doc_id
+              AND s.has_table = true
+              AND NOT s:TableSection
+            SET s:TableSection
+            RETURN count(s) AS count
             """,
         }
 
@@ -829,6 +1177,8 @@ class GraphBuilder:
             },
         )
 
+        return results
+
     def _log_relationship_builder(
         self,
         *,
@@ -864,17 +1214,34 @@ class GraphBuilder:
             WHERE coalesce(child.document_id, child.doc_id) = $doc_id
             RETURN count(*) AS count
             """
-        elif builder == "next_prev":
+        # Phase 2 Cleanup: Renamed from "next_prev", removed PREV verification
+        # Also removed "same_heading" verification (edge type no longer created)
+        elif builder == "next":
             query = """
             MATCH (c:Chunk)-[:NEXT]->(:Chunk)
             WHERE coalesce(c.document_id, c.doc_id) = $doc_id
             RETURN count(*) AS count
             """
-        elif builder == "same_heading":
+        # Phase 3 (markdown-it-py): PARENT_HEADING relationship verification
+        elif builder == "parent_heading":
             query = """
-            MATCH (c:Chunk)-[:SAME_HEADING]->(:Chunk)
-            WHERE coalesce(c.document_id, c.doc_id) = $doc_id
+            MATCH (child:Section)-[:PARENT_HEADING]->(:Section)
+            WHERE child.document_id = $doc_id
             RETURN count(*) AS count
+            """
+        # Phase 3 (markdown-it-py): CodeSection label verification
+        elif builder == "code_section_label":
+            query = """
+            MATCH (s:Section:CodeSection)
+            WHERE s.document_id = $doc_id
+            RETURN count(s) AS count
+            """
+        # Phase 3 (markdown-it-py): TableSection label verification
+        elif builder == "table_section_label":
+            query = """
+            MATCH (s:Section:TableSection)
+            WHERE s.document_id = $doc_id
+            RETURN count(s) AS count
             """
         else:
             return 0
@@ -1007,14 +1374,55 @@ class GraphBuilder:
         return total_removed
 
     def _upsert_entities(self, session, entities: Dict[str, Dict]) -> int:
-        """Upsert Entity nodes in batches."""
+        """
+        Upsert Entity nodes in batches.
+
+        C.1.3: Entity Label Hygiene
+        - Only adds :Entity label to nodes that meet validity criteria
+        - Filters out entities with NULL/empty names, short names, or invalid types
+        - Logs filtered entities for debugging
+        """
         batch_size = self.config.ingestion.batch_size
         entities_list = list(entities.values())
         total_entities = 0
 
+        # C.1.3: Filter entities based on validity criteria
+        valid_entities = []
+        filtered_count = 0
+        for entity in entities_list:
+            name = entity.get("name") or ""
+            entity_type = entity.get("category") or entity.get("entity_type") or ""
+
+            # Skip entities with NULL or empty names
+            if not name or not name.strip():
+                filtered_count += 1
+                continue
+
+            # Skip entities with names too short (< 4 chars)
+            if len(name.strip()) < 4:
+                filtered_count += 1
+                continue
+
+            # Add canonical_name if not present
+            if "canonical_name" not in entity:
+                entity["canonical_name"] = re.sub(r"\s+", " ", name.lower().strip())
+
+            # Add entity_type for tracking (use category as fallback)
+            if "entity_type" not in entity:
+                entity["entity_type"] = entity_type
+
+            valid_entities.append(entity)
+
+        if filtered_count > 0:
+            logger.info(
+                "Entity label hygiene: filtered invalid entities",
+                filtered_count=filtered_count,
+                valid_count=len(valid_entities),
+            )
+
         # Group by label for efficient batching
         by_label = {}
-        for entity in entities_list:
+        for entity in valid_entities:
             label = entity["label"]
             if label not in by_label:
                 by_label[label] = []
@@ -1025,10 +1433,13 @@ class GraphBuilder:
                 batch = entity_batch[i : i + batch_size]
 
                 # Dynamic label in query
+                # C.1.3: Include canonical_name and entity_type for graph queries
                 query = f"""
                 UNWIND $entities as ent
-                MERGE (e:{label} {{id: ent.id}})
+                MERGE (e:Entity:{label} {{id: ent.id}})
                 SET e.name = ent.name,
+                    e.canonical_name = ent.canonical_name,
+                    e.entity_type = ent.entity_type,
                     e.description = ent.description,
                     e.category = ent.category,
                     e.introduced_in = ent.introduced_in,
@@ -1094,6 +1505,8 @@ class GraphBuilder:
         for i in range(0, len(mentions), batch_size):
             batch = mentions[i : i + batch_size]
 
+            # Phase 3.5: Single MENTIONS direction (Chunk->Entity) per Neo4j best practice
+            # No bidirectional edges - use direction-agnostic queries instead
             query = """
             UNWIND $mentions as m
             MATCH (s:Section {id: m.section_id})
@@ -1124,7 +1537,7 @@ class GraphBuilder:
     ) -> int:
         """
         Create Entity→Entity typed relationships in batches.
-        Supports dynamic relationship types (e.g., CONTAINS_STEP, REQUIRES, AFFECTS).
+        Supports dynamic relationship types (e.g., CONTAINS_STEP, CONFIGURES, RESOLVES).
         """
         if not relationships:
             return 0
@@ -1144,14 +1557,13 @@ class GraphBuilder:
                 batch = rels[i : i + batch_size]
 
                 # Build dynamic Cypher query with relationship type
-                # Using CALL {} subquery to work around Cypher's limitation
-                # on parameterized relationship types
+                # Using CALL (vars) {} subquery to work around Cypher's limitation
+                # on parameterized relationship types (Neo4j 5.x syntax)
                 query = f"""
                 UNWIND $rels as r
                 MATCH (from {{id: r.from_id}})
                 MATCH (to {{id: r.to_id}})
-                CALL {{
-                    WITH from, to, r
+                CALL (from, to, r) {{
                     MERGE (from)-[rel:{rel_type}]->(to)
                     SET rel.confidence = r.confidence,
                         rel.source_section_id = r.source_section_id,
@@ -1190,37 +1602,15 @@ class GraphBuilder:
         stats = {
             "computed": 0,
             "upserted": 0,
+            # Sparse coverage tracking (Graph Channel Rehabilitation)
+            "sparse_eligible": 0,  # Non-stub chunks eligible for sparse
+            "sparse_success": 0,  # Chunks that got sparse vectors
+            "sparse_failures": 0,  # Batches where embed_sparse failed
+            "sparse_content_missing": 0,  # Non-stub chunks without sparse (SLO metric)
         }
 
         # Phase 7C.7: Initialize embedding provider from factory
-        if not self.embedder:
-            logger.info(
-                "Initializing embedding provider",
-                provider=self.embedding_settings.provider,
-                model=self.embedding_settings.model_id,
-                dims=self.embedding_settings.dims,
-                profile=self.embedding_settings.profile,
-            )
-
-            self.embedder = ProviderFactory.create_embedding_provider(
-                settings=self.embedding_settings
-            )
-
-            if self.embedder.dims != self.embedding_dims:
-                logger.warning(
-                    "Embedding dims mismatch; aligning local settings to provider",
-                    configured_dims=self.embedding_dims,
-                    provider_dims=self.embedder.dims,
-                    model=self.embedder.model_id,
-                )
-                self.embedding_dims = self.embedder.dims
-
-            logger.info(
-                "Embedding provider initialized",
-                provider_name=self.embedder.provider_name,
-                model_id=self.embedder.model_id,
-                actual_dims=self.embedder.dims,
-            )
+        self.ensure_embedder()
 
         # Phase 7E-1: Replace-by-set GC for Qdrant chunks
         # Delete all chunks for this document BEFORE upserting current set
@@ -1273,11 +1663,15 @@ class GraphBuilder:
         sections_to_embed = []
         content_texts: List[str] = []
         title_texts: List[str] = []
+        entity_texts: List[str] = []  # NEW: Entity names for sparse embedding
         for section in sections:
             section.setdefault("source_uri", source_uri)
             section.setdefault("document_uri", document_uri)
             content_texts.append(self._build_section_text_for_embedding(section))
             title_texts.append(self._build_title_text_for_embedding(section))
+            entity_texts.append(
+                self._build_entity_text_for_embedding(section, entities)
+            )
             sections_to_embed.append(section)
 
         # Generate embeddings with token-budgeted micro-batches (do not split chunks)
@@ -1314,6 +1708,22 @@ class GraphBuilder:
                 )
                 else None
             )
+            # NEW: Title sparse embeddings for lexical heading matching
+            title_sparse_embeddings: Optional[List[dict]] = (
+                []
+                if getattr(
+                    self.embedding_settings.capabilities, "supports_sparse", False
+                )
+                else None
+            )
+            # NEW: Entity sparse embeddings for lexical entity name matching
+            entity_sparse_embeddings: Optional[List[dict]] = (
+                []
+                if getattr(
+                    self.embedding_settings.capabilities, "supports_sparse", False
+                )
+                else None
+            )
             colbert_embeddings: Optional[List[List[List[float]]]] = (
                 []
                 if getattr(
@@ -1328,6 +1738,10 @@ class GraphBuilder:
                 content_embeddings.extend(self.embedder.embed_documents(batch_content))
                 title_embeddings.extend(self.embedder.embed_documents(batch_title))
 
+                # B.2: Per-batch error isolation for sparse embeddings
+                # On failure, insert None placeholders to maintain index alignment
+                # This prevents one failed batch from disabling sparse for ALL chunks
+                # Graph Channel Rehabilitation: Added strict mode and failure tracking
                 if sparse_embeddings is not None and hasattr(
                     self.embedder, "embed_sparse"
                 ):
@@ -1336,12 +1750,92 @@ class GraphBuilder:
                             self.embedder.embed_sparse(batch_content)
                         )
                     except Exception as exc:
-                        logger.warning(
-                            "Sparse embedding generation failed; continuing without sparse vectors",
-                            error=str(exc),
+                        stats["sparse_failures"] += 1
+                        # Check if strict mode is enabled
+                        sparse_strict = getattr(
+                            self.config.search.vector.qdrant,
+                            "sparse_strict_mode",
+                            False,
                         )
-                        sparse_embeddings = None
+                        if sparse_strict:
+                            logger.error(
+                                "Sparse embedding generation failed (STRICT MODE); "
+                                "failing ingestion as sparse_strict_mode=true",
+                                error=str(exc),
+                                batch_size=len(batch_content),
+                                batch_indices=batch,
+                            )
+                            raise RuntimeError(
+                                f"Sparse embedding failed in strict mode: {exc}"
+                            ) from exc
+                        else:
+                            logger.warning(
+                                "Sparse embedding generation failed for batch; "
+                                "inserting None placeholders for affected chunks",
+                                error=str(exc),
+                                batch_size=len(batch_content),
+                                batch_indices=batch,
+                            )
+                            # Insert None placeholders to maintain index alignment
+                            # Only this batch's chunks lose sparse; others continue normally
+                            sparse_embeddings.extend([None] * len(batch_content))
 
+                # NEW: Title sparse embeddings for lexical heading matching
+                if title_sparse_embeddings is not None and hasattr(
+                    self.embedder, "embed_sparse"
+                ):
+                    try:
+                        title_sparse_embeddings.extend(
+                            self.embedder.embed_sparse(batch_title)
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Title sparse embedding generation failed for batch; "
+                            "inserting None placeholders for affected chunks",
+                            error=str(exc),
+                            batch_size=len(batch_title),
+                            batch_indices=batch,
+                        )
+                        title_sparse_embeddings.extend([None] * len(batch_title))
+
+                # NEW: Entity sparse embeddings for lexical entity name matching
+                if entity_sparse_embeddings is not None and hasattr(
+                    self.embedder, "embed_sparse"
+                ):
+                    batch_entity = [entity_texts[i] for i in batch]
+                    # Only embed non-empty entity texts; use None for empty
+                    non_empty_indices = [
+                        i for i, text in enumerate(batch_entity) if text.strip()
+                    ]
+                    if non_empty_indices:
+                        try:
+                            # Embed only non-empty texts
+                            non_empty_texts = [
+                                batch_entity[i] for i in non_empty_indices
+                            ]
+                            non_empty_results = self.embedder.embed_sparse(
+                                non_empty_texts
+                            )
+                            # Build full result list with None for empty texts
+                            result_map = dict(zip(non_empty_indices, non_empty_results))
+                            batch_results = [
+                                result_map.get(i) for i in range(len(batch_entity))
+                            ]
+                            entity_sparse_embeddings.extend(batch_results)
+                        except Exception as exc:
+                            logger.warning(
+                                "Entity sparse embedding generation failed for batch; "
+                                "inserting None placeholders for affected chunks",
+                                error=str(exc),
+                                batch_size=len(non_empty_texts),
+                                batch_indices=batch,
+                            )
+                            entity_sparse_embeddings.extend([None] * len(batch_entity))
+                    else:
+                        # All entity texts empty - use None placeholders
+                        entity_sparse_embeddings.extend([None] * len(batch_entity))
+
+                # B.2: Per-batch error isolation for ColBERT embeddings
                 if colbert_embeddings is not None and hasattr(
                     self.embedder, "embed_colbert"
                 ):
@@ -1351,10 +1845,14 @@ class GraphBuilder:
                         )
                     except Exception as exc:
                         logger.warning(
-                            "ColBERT embedding generation failed; continuing without ColBERT vectors",
+                            "ColBERT embedding generation failed for batch; "
+                            "inserting None placeholders for affected chunks",
                             error=str(exc),
+                            batch_size=len(batch_content),
+                            batch_indices=batch,
                         )
-                        colbert_embeddings = None
+                        # Insert None placeholders to maintain index alignment
+                        colbert_embeddings.extend([None] * len(batch_content))
 
             # Process each section with its embeddings
             for idx, section in enumerate(sections_to_embed):
@@ -1365,11 +1863,48 @@ class GraphBuilder:
                     if sparse_embeddings is not None and idx < len(sparse_embeddings)
                     else None
                 )
+                # NEW: Extract title sparse vector for this section
+                title_sparse_vector = (
+                    title_sparse_embeddings[idx]
+                    if title_sparse_embeddings is not None
+                    and idx < len(title_sparse_embeddings)
+                    else None
+                )
+                # NEW: Extract entity sparse vector for this section
+                entity_sparse_vector = (
+                    entity_sparse_embeddings[idx]
+                    if entity_sparse_embeddings is not None
+                    and idx < len(entity_sparse_embeddings)
+                    else None
+                )
                 colbert_vector = (
                     colbert_embeddings[idx]
                     if colbert_embeddings is not None and idx < len(colbert_embeddings)
                     else None
                 )
+
+                # Graph Channel Rehabilitation: Track sparse coverage for non-stub chunks
+                # Stubs are structural placeholders with empty text - expected to lack sparse
+                is_stub = section.get("is_microdoc_stub", False)
+                if not is_stub and sparse_embeddings is not None:
+                    stats["sparse_eligible"] += 1
+                    # Check if sparse_vector is valid (has indices)
+                    has_valid_sparse = (
+                        sparse_vector is not None
+                        and isinstance(sparse_vector, dict)
+                        and sparse_vector.get("indices")
+                    )
+                    if has_valid_sparse:
+                        stats["sparse_success"] += 1
+                    else:
+                        # Non-stub content chunk missing sparse - this is the SLO metric
+                        stats["sparse_content_missing"] += 1
+                        logger.warning(
+                            "Non-stub content chunk missing sparse vector",
+                            section_id=section.get("id"),
+                            heading=section.get("heading"),
+                            token_count=section.get("token_count", 0),
+                        )
 
                 # Phase 7E-1: CRITICAL - Comprehensive validation layer
 
@@ -1420,8 +1955,8 @@ class GraphBuilder:
 
                 section["vector_embedding"] = embedding
                 section["title_vector_embedding"] = title_embedding
-                if self.include_entity_vector:
-                    section["entity_vector_embedding"] = embedding
+                # REMOVED: Dense entity vector was broken (duplicated content)
+                # Now using entity-sparse for lexical entity name matching
 
                 # Upsert to vector store
                 if self.vector_primary == "qdrant":
@@ -1429,8 +1964,7 @@ class GraphBuilder:
                         "content": embedding,
                         "title": title_embedding,
                     }
-                    if self.include_entity_vector:
-                        vectors["entity"] = embedding
+                    # REMOVED: Dense entity vector - replaced by entity-sparse
 
                     self._upsert_to_qdrant(
                         section["id"],
@@ -1440,6 +1974,8 @@ class GraphBuilder:
                         "Section",
                         sparse_vector=sparse_vector,
                         colbert_vectors=colbert_vector,
+                        title_sparse_vector=title_sparse_vector,  # NEW
+                        entity_sparse_vector=entity_sparse_vector,  # NEW
                     )
                     stats["upserted"] += 1
 
@@ -1471,8 +2007,7 @@ class GraphBuilder:
                             "content": embedding,
                             "title": title_embedding,
                         }
-                        if self.include_entity_vector:
-                            vectors["entity"] = embedding
+                        # REMOVED: Dense entity vector - replaced by entity-sparse
                         self._upsert_to_qdrant(
                             section["id"],
                             vectors,
@@ -1481,6 +2016,8 @@ class GraphBuilder:
                             "Section",
                             sparse_vector=sparse_vector,
                             colbert_vectors=colbert_vector,
+                            title_sparse_vector=title_sparse_vector,  # NEW
+                            entity_sparse_vector=entity_sparse_vector,  # NEW
                         )
 
         logger.info("Embeddings processed", stats=stats)
@@ -1503,6 +2040,42 @@ class GraphBuilder:
             return heading
         text = (section.get("text") or "").strip()
         return text[:256]
+
+    def _build_entity_text_for_embedding(
+        self, section: Dict, entities: Dict[str, Dict]
+    ) -> str:
+        """Build concatenated entity names for sparse embedding.
+
+        Creates a space-separated string of unique entity names mentioned in this section.
+        Used for lexical entity matching via entity-sparse vector.
+
+        Args:
+            section: Section dict containing '_mentions' list (populated by upsert_document)
+            entities: Dict mapping entity_id to entity data with 'name' field
+
+        Returns:
+            Space-separated string of entity names, or empty string if no entities
+
+        Example:
+            If section mentions entities "WEKA", "NFS", and "SMB":
+            Returns: "WEKA NFS SMB"
+        """
+        # Get mentions from section - populated by upsert_document before _process_embeddings
+        mentions = section.get("_mentions", []) or []
+        if not mentions:
+            return ""
+
+        entity_names = []
+        for mention in mentions:
+            entity_id = mention.get("entity_id")
+            if entity_id and entity_id in entities:
+                name = entities[entity_id].get("name", "")
+                if name:
+                    entity_names.append(name)
+
+        # Deduplicate while preserving order
+        unique_names = list(dict.fromkeys(entity_names))
+        return " ".join(unique_names)
 
     def _compute_text_hash(self, text: str) -> str:
         value = text or ""
@@ -1562,6 +2135,13 @@ class GraphBuilder:
                 enable_colbert=getattr(
                     self.config.search.vector.qdrant, "enable_colbert", False
                 ),
+                # NEW: Sparse vectors for lexical matching on titles and entities
+                enable_title_sparse=getattr(
+                    self.config.search.vector.qdrant, "enable_title_sparse", True
+                ),
+                enable_entity_sparse=getattr(
+                    self.config.search.vector.qdrant, "enable_entity_sparse", True
+                ),
             )
             vectors_config = schema_plan.vectors_config
             sparse_vectors_config = schema_plan.sparse_vectors_config
@@ -1596,6 +2176,7 @@ class GraphBuilder:
         Auto-provision the namespaced Neo4j vector index for the active profile.
 
         Drops conflicting vector indexes on Section.vector_embedding to avoid dual index issues.
+        Uses class-level caching to avoid redundant DB calls per document.
         """
         if not self.driver:
             return
@@ -1603,6 +2184,10 @@ class GraphBuilder:
         index_name = getattr(self.config.search.vector.neo4j, "index_name", None)
         dims = self.embedding_dims
         if not index_name or not dims:
+            return
+
+        # Skip if this index has already been ensured in this process
+        if index_name in GraphBuilder._neo4j_indexes_ensured:
             return
 
         with self.driver.session() as session:
@@ -1644,6 +2229,8 @@ class GraphBuilder:
                     "Ensured Neo4j vector index exists",
                     extra={"index": index_name, "dimensions": dims},
                 )
+                # Mark index as ensured for this process
+                GraphBuilder._neo4j_indexes_ensured.add(index_name)
             except Exception as exc:  # pragma: no cover - defensive log path
                 logger.warning(
                     "Failed to auto-create Neo4j vector index",
@@ -1653,8 +2240,14 @@ class GraphBuilder:
     def _reconcile_schema_version_embedding_metadata(self) -> None:
         """
         Update SchemaVersion node to reflect the active embedding profile.
+
+        Uses class-level caching since embedding settings don't change between documents.
         """
         if not self.driver:
+            return
+
+        # Skip if already reconciled in this process
+        if GraphBuilder._schema_metadata_ensured:
             return
 
         settings = self.embedding_settings
@@ -1689,6 +2282,8 @@ class GraphBuilder:
                         "dimensions": self.embedding_dims,
                     },
                 )
+                # Mark as ensured for this process
+                GraphBuilder._schema_metadata_ensured = True
         except Exception as exc:  # pragma: no cover - defensive log path
             logger.warning(
                 "Failed to update SchemaVersion metadata",
@@ -1698,7 +2293,15 @@ class GraphBuilder:
     def _ensure_qdrant_payload_indexes(
         self, collection: str, fields: Sequence[tuple[str, PayloadSchemaType]]
     ) -> None:
-        """Ensure payload indexes exist for canonical hybrid fields."""
+        """Ensure payload indexes exist for canonical hybrid fields.
+
+        Uses class-level caching to avoid redundant HTTP calls when
+        GraphBuilder is instantiated multiple times (e.g., per document).
+        """
+        # Skip if indexes have already been ensured for this collection in this process
+        if collection in GraphBuilder._payload_indexes_ensured:
+            return
+
         for field_name, schema in fields:
             try:
                 self.qdrant_client.create_payload_index(
@@ -1708,6 +2311,9 @@ class GraphBuilder:
                 )
             except Exception:
                 continue
+
+        # Mark collection as having indexes ensured
+        GraphBuilder._payload_indexes_ensured.add(collection)
 
     def _create_qdrant_collection(
         self,
@@ -1879,6 +2485,8 @@ class GraphBuilder:
         *,
         sparse_vector: Optional[Dict[str, List[float]]] = None,
         colbert_vectors: Optional[List[List[float]]] = None,
+        title_sparse_vector: Optional[Dict[str, List[float]]] = None,  # NEW
+        entity_sparse_vector: Optional[Dict[str, List[float]]] = None,  # NEW
     ):
         """
         Upsert embedding to Qdrant with deterministic UUID mapping.
@@ -1887,10 +2495,14 @@ class GraphBuilder:
 
         Args:
             node_id: Chunk identifier (deterministic)
-            vectors: Mapping of named vectors (content/title[/entity])
+            vectors: Mapping of named vectors (content/title)
             section: Section/Chunk data
             document: Document data
             label: Node label (Section/Chunk)
+            sparse_vector: Sparse embedding for text-sparse (content)
+            colbert_vectors: ColBERT multi-vector for late interaction
+            title_sparse_vector: Sparse embedding for title-sparse (heading)
+            entity_sparse_vector: Sparse embedding for entity-sparse (entity names)
         """
         collection = self.config.search.vector.qdrant.collection_name
         expected_suffix = get_expected_namespace_suffix(
@@ -2001,6 +2613,41 @@ class GraphBuilder:
                 vectors_payload["text-sparse"] = SparseVector(
                     indices=list(indices), values=list(values)
                 )
+
+        # NEW: title-sparse - lexical matching for section headings
+        if title_sparse_vector:
+            indices = (
+                title_sparse_vector.get("indices")
+                if isinstance(title_sparse_vector, dict)
+                else None
+            )
+            values = (
+                title_sparse_vector.get("values")
+                if isinstance(title_sparse_vector, dict)
+                else None
+            )
+            if indices and values:
+                vectors_payload["title-sparse"] = SparseVector(
+                    indices=list(indices), values=list(values)
+                )
+
+        # NEW: entity-sparse - lexical matching for entity names
+        if entity_sparse_vector:
+            indices = (
+                entity_sparse_vector.get("indices")
+                if isinstance(entity_sparse_vector, dict)
+                else None
+            )
+            values = (
+                entity_sparse_vector.get("values")
+                if isinstance(entity_sparse_vector, dict)
+                else None
+            )
+            if indices and values:
+                vectors_payload["entity-sparse"] = SparseVector(
+                    indices=list(indices), values=list(values)
+                )
+
         if colbert_vectors:
             vectors_payload["late-interaction"] = [
                 list(vector) for vector in colbert_vectors
@@ -2307,8 +2954,8 @@ def ingest_document(
     from neo4j import GraphDatabase
 
     from src.ingestion.extract import extract_entities
+    from src.ingestion.parsers import parse_markdown  # Router selects engine
     from src.ingestion.parsers.html import parse_html
-    from src.ingestion.parsers.markdown import parse_markdown
     from src.shared.config import get_config, get_settings
     from src.shared.connections import CompatQdrantClient
 

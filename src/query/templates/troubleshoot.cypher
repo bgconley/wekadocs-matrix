@@ -23,12 +23,14 @@ WITH e, collect(DISTINCT sec) AS mentioning_sections,
 RETURN e, mentioning_sections, resolution_steps
 LIMIT $limit;
 
--- Version 3: Error with related configurations
+-- Version 3: Error with related configurations via MENTIONS
+-- Phase 2 Cleanup: Replaced RELATED_TO with MENTIONS (active relationship)
 MATCH (e:Error)
 WHERE e.code = $error_code OR e.name = $error_name
 OPTIONAL MATCH (e)<-[:RESOLVES]-(proc:Procedure)
-OPTIONAL MATCH (e)-[:RELATED_TO]->(cfg:Configuration)
-OPTIONAL MATCH (e)-[:RELATED_TO]->(concept:Concept)
+OPTIONAL MATCH (sec:Section)-[:MENTIONS]->(e)
+OPTIONAL MATCH (sec)-[:MENTIONS]->(cfg:Configuration)
+OPTIONAL MATCH (sec)-[:MENTIONS]->(concept:Concept)
 RETURN e, proc, collect(DISTINCT cfg) AS related_configs,
        collect(DISTINCT concept) AS related_concepts
 LIMIT $limit;

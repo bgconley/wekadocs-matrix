@@ -1,40 +1,49 @@
--- dependency_chain: Trace dependency chains for components
+-- dependency_chain: Trace relationship chains for components via MENTIONS
 -- Phase 4, Task 4.1 - Complex query pattern
 -- Parameters: $component_name, $max_depth (default: 5)
--- Returns: dependency paths with depth information
+-- Returns: related entities via MENTIONS traversal
 -- Guardrails: max_depth enforced, early LIMIT prevents explosion
+-- Phase 2 Cleanup: Replaced DEPENDS_ON/CRITICAL_FOR with MENTIONS (active relationship)
 
 -- Schema:
 -- Input: {component_name: str, max_depth?: int}
--- Output: [{path: Path, dependencies: [Node], depth: int, critical_services: [Node]}]
+-- Output: [{path: Path, related: [Node], depth: int}]
 
--- Version 1: Simple dependency chain (min depth 2 for multi-hop requirement)
+-- Version 1: Component mentions chain (entities mentioned in same sections)
 MATCH (c:Component {name: $component_name})
-MATCH path=(c)-[:DEPENDS_ON*2..5]->(dep)
-WITH path, dep, length(path) AS depth
-WHERE depth >= 2
-RETURN path, dep, depth, labels(dep) AS dep_types
-ORDER BY depth ASC
+OPTIONAL MATCH (c)<-[:MENTIONS]-(sec:Section)-[:MENTIONS]->(related)
+WHERE c.id <> related.id
+WITH c, sec, related
+RETURN c.name AS component,
+       collect(DISTINCT {
+         section: sec.id,
+         related: related,
+         labels: labels(related)
+       }) AS related_entities
 LIMIT $limit;
 
--- Version 2: Dependency chain with transitive closure (min depth 2)
+-- Version 2: Multi-hop section traversal for related components
 MATCH (c:Component {name: $component_name})
-MATCH path=(c)-[:DEPENDS_ON*2..5]->(dep)
-WITH path, collect(DISTINCT dep) AS all_deps, length(path) AS depth
-WHERE depth >= 2
-RETURN path, all_deps, depth,
-  size([d IN all_deps WHERE (d)-[:CRITICAL_FOR]->()]) AS critical_count
-ORDER BY depth ASC
-LIMIT $limit;
-
--- Version 3: Full impact analysis (dependencies + affected by)
-MATCH (c:Component {name: $component_name})
-OPTIONAL MATCH forward_path=(c)-[:DEPENDS_ON*2..5]->(dep)
-OPTIONAL MATCH reverse_path=(c)<-[:DEPENDS_ON*2..5]-(dependent)
-WITH c,
-  collect(DISTINCT {node: dep, path: forward_path, depth: length(forward_path)}) AS dependencies,
-  collect(DISTINCT {node: dependent, path: reverse_path, depth: length(reverse_path)}) AS dependents
-RETURN c, dependencies, dependents,
-  size(dependencies) AS dep_count,
-  size(dependents) AS dependent_count
+OPTIONAL MATCH (c)<-[:MENTIONS]-(sec1:Section)
+OPTIONAL MATCH (sec1)-[:NEXT*1..3]-(sec2:Section)-[:MENTIONS]->(related:Component)
+WHERE c.id <> related.id
+WITH c, collect(DISTINCT {
+  component: related,
+  via_section: sec1.id,
+  related_section: sec2.id
+}) AS related_components
+RETURN c, related_components,
+  size(related_components) AS related_count
 LIMIT 1;
+
+-- Version 3: Document-level component relationships
+MATCH (c:Component {name: $component_name})
+OPTIONAL MATCH (c)<-[:MENTIONS]-(sec:Section)<-[:HAS_SECTION]-(doc:Document)
+OPTIONAL MATCH (doc)-[:HAS_SECTION]->(other_sec:Section)-[:MENTIONS]->(other:Component)
+WHERE c.id <> other.id
+WITH c, doc,
+  collect(DISTINCT {component: other, section: other_sec.id}) AS doc_components
+RETURN c, doc.id AS document_id,
+  doc_components,
+  size(doc_components) AS component_count
+LIMIT 10;

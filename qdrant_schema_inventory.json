@@ -1,102 +1,88 @@
 {
-  "chunks_multi_bge_m3_baai_bge_m3": {
-    "vectors_config": "{'content': VectorParams(size=1024, distance=<Distance.COSINE: 'Cosine'>, hnsw_config=None, quantization_config=None, on_disk=None, datatype=None, multivector_config=None), 'entity': VectorParams(size=1024, distance=<Distance.COSINE: 'Cosine'>, hnsw_config=None, quantization_config=None, on_disk=None, datatype=None, multivector_config=None), 'late-interaction': VectorParams(size=1024, distance=<Distance.COSINE: 'Cosine'>, hnsw_config=HnswConfigDiff(m=0, ef_construct=None, full_scan_threshold=None, max_indexing_threads=None, on_disk=None, payload_m=None), quantization_config=None, on_disk=None, datatype=None, multivector_config=MultiVectorConfig(comparator=<MultiVectorComparator.MAX_SIM: 'max_sim'>)), 'title': VectorParams(size=1024, distance=<Distance.COSINE: 'Cosine'>, hnsw_config=None, quantization_config=None, on_disk=None, datatype=None, multivector_config=None)}",
-    "sparse_vectors_config": "{'text-sparse': SparseVectorParams(index=SparseIndexParams(full_scan_threshold=None, on_disk=True, datatype=None), modifier=None)}",
-    "shard_number": 1,
-    "replication_factor": 1,
-    "on_disk_payload": true,
-    "payload_schema_indexes": {
-      "tenant": {
-        "data_type": "keyword",
-        "points": 0
+  "chunks_multi_bge_m3": {
+    "_generated_at": "2025-12-06T01:10:00.000000Z",
+    "_source": "live_qdrant_collection",
+    "_note": "Canonical schema - entity dense vector REMOVED, title-sparse and entity-sparse ADDED",
+    "status": "green",
+    "points_count": 0,
+    "indexed_vectors_count": 0,
+    "vectors_config": {
+      "content": {
+        "size": 1024,
+        "distance": "Cosine",
+        "multivector_config": null
       },
-      "heading": {
-        "data_type": "text",
-        "points": 0
+      "doc_title": {
+        "size": 1024,
+        "distance": "Cosine",
+        "multivector_config": null
       },
-      "is_microdoc": {
-        "data_type": "bool",
-        "points": 0
+      "title": {
+        "size": 1024,
+        "distance": "Cosine",
+        "multivector_config": null
       },
-      "embedding_provider": {
-        "data_type": "keyword",
-        "points": 0
+      "late-interaction": {
+        "size": 1024,
+        "distance": "Cosine",
+        "multivector_config": {
+          "comparator": "max_sim"
+        }
+      }
+    },
+    "sparse_vectors_config": {
+      "text-sparse": {
+        "index": {
+          "on_disk": true
+        }
       },
-      "token_count": {
-        "data_type": "integer",
-        "points": 0
+      "doc_title-sparse": {
+        "index": {
+          "on_disk": true
+        }
       },
-      "embedding_version": {
-        "data_type": "keyword",
-        "points": 0
+      "title-sparse": {
+        "index": {
+          "on_disk": true
+        }
       },
-      "snapshot_scope": {
-        "data_type": "keyword",
-        "points": 0
-      },
-      "source_path": {
-        "data_type": "keyword",
-        "points": 0
-      },
-      "parent_section_original_id": {
-        "data_type": "keyword",
-        "points": 0
-      },
-      "doc_id": {
-        "data_type": "keyword",
-        "points": 0
-      },
-      "version": {
-        "data_type": "keyword",
-        "points": 0
-      },
-      "updated_at": {
-        "data_type": "integer",
-        "points": 0
-      },
-      "shingle_hash": {
-        "data_type": "keyword",
-        "points": 0
-      },
-      "id": {
-        "data_type": "keyword",
-        "points": 0
-      },
-      "order": {
-        "data_type": "integer",
-        "points": 0
-      },
-      "document_id": {
-        "data_type": "keyword",
-        "points": 0
-      },
-      "text_hash": {
-        "data_type": "keyword",
-        "points": 0
-      },
-      "embedding_dimensions": {
-        "data_type": "integer",
-        "points": 0
-      },
-      "parent_section_id": {
-        "data_type": "keyword",
-        "points": 0
-      },
-      "lang": {
-        "data_type": "keyword",
-        "points": 0
-      },
-      "doc_tag": {
-        "data_type": "keyword",
-        "points": 0
+      "entity-sparse": {
+        "index": {
+          "on_disk": true
+        }
       }
     },
     "hnsw_config": {
       "m": 48,
       "ef_construct": 256,
       "full_scan_threshold": 10000,
-      "max_indexing_threads": 0,
       "on_disk": false
-    }
+    },
+    "payload_indexes": [
+      "doc_id",
+      "doc_tag",
+      "doc_title",
+      "document_id",
+      "embedding_dimensions",
+      "embedding_provider",
+      "embedding_version",
+      "heading",
+      "id",
+      "is_microdoc",
+      "kg_id",
+      "lang",
+      "node_id",
+      "order",
+      "parent_section_id",
+      "parent_section_original_id",
+      "shingle_hash",
+      "snapshot_scope",
+      "source_path",
+      "tenant",
+      "text_hash",
+      "token_count",
+      "updated_at",
+      "version"
+    ]
   }
 }

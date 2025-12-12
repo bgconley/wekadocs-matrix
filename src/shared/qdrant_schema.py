@@ -33,9 +33,12 @@ class QdrantSchemaPlan:
 def build_qdrant_schema(
     settings: EmbeddingSettings,
     *,
-    include_entity: bool = False,
+    include_entity: bool = False,  # DEPRECATED: Dense entity vector removed (was broken)
     enable_sparse: Optional[bool] = None,
     enable_colbert: Optional[bool] = None,
+    enable_doc_title_sparse: Optional[bool] = None,
+    enable_title_sparse: Optional[bool] = None,  # NEW: Lexical heading matching
+    enable_entity_sparse: Optional[bool] = None,  # NEW: Lexical entity name matching
 ) -> QdrantSchemaPlan:
     """Return the desired Qdrant schema for the embedding profile."""
 
@@ -43,9 +46,16 @@ def build_qdrant_schema(
     vectors_config: Dict[str, VectorParams] = {
         "content": VectorParams(size=dims, distance=Distance.COSINE),
         "title": VectorParams(size=dims, distance=Distance.COSINE),
+        "doc_title": VectorParams(size=dims, distance=Distance.COSINE),
     }
+    # REMOVED: Dense entity vector - it was broken (duplicated content embedding)
+    # and has been replaced by entity-sparse for lexical entity name matching.
+    # The include_entity parameter is now a no-op for backward compatibility.
     if include_entity:
-        vectors_config["entity"] = VectorParams(size=dims, distance=Distance.COSINE)
+        logger.warning(
+            "include_entity=True is deprecated. Dense entity vector has been removed "
+            "and replaced by entity-sparse. This parameter will be ignored."
+        )
 
     capabilities = settings.capabilities
     use_sparse = (
@@ -62,6 +72,48 @@ def build_qdrant_schema(
         sparse_vectors_config["text-sparse"] = SparseVectorParams(
             index=SparseIndexParams(on_disk=True)
         )
+        # doc_title-sparse: BM25-style lexical matching for document titles
+        # Enables exact term matching for title-based queries (o3 recommendation)
+        # Only add if enable_doc_title_sparse is True (default) or not explicitly disabled
+        use_doc_title_sparse = (
+            enable_doc_title_sparse if enable_doc_title_sparse is not None else True
+        )
+        if use_doc_title_sparse:
+            sparse_vectors_config["doc_title-sparse"] = SparseVectorParams(
+                index=SparseIndexParams(on_disk=True)
+            )
+        else:
+            notes.append(
+                "doc_title-sparse vector disabled via enable_doc_title_sparse=False."
+            )
+
+        # title-sparse: Lexical matching for section headings
+        # Enables exact term matching for heading-based queries
+        # Example: "NFS mount" matches section titled "Mounting NFS Filesystems"
+        use_title_sparse = (
+            enable_title_sparse if enable_title_sparse is not None else True
+        )
+        if use_title_sparse:
+            sparse_vectors_config["title-sparse"] = SparseVectorParams(
+                index=SparseIndexParams(on_disk=True)
+            )
+        else:
+            notes.append("title-sparse vector disabled via enable_title_sparse=False.")
+
+        # entity-sparse: Lexical matching for entity names mentioned in chunks
+        # Enables exact term matching for entity-based queries
+        # Example: "WEKA" or "NFS" matches chunks mentioning those entities
+        use_entity_sparse = (
+            enable_entity_sparse if enable_entity_sparse is not None else True
+        )
+        if use_entity_sparse:
+            sparse_vectors_config["entity-sparse"] = SparseVectorParams(
+                index=SparseIndexParams(on_disk=True)
+            )
+        else:
+            notes.append(
+                "entity-sparse vector disabled via enable_entity_sparse=False."
+            )
     else:
         notes.append("Sparse vector support disabled for current profile or config.")
 
@@ -85,6 +137,7 @@ def build_qdrant_schema(
         ("kg_id", PayloadSchemaType.KEYWORD),
         ("document_id", PayloadSchemaType.KEYWORD),
         ("doc_id", PayloadSchemaType.KEYWORD),
+        ("doc_title", PayloadSchemaType.TEXT),
         ("parent_section_id", PayloadSchemaType.KEYWORD),
         ("parent_section_original_id", PayloadSchemaType.KEYWORD),
         ("order", PayloadSchemaType.INTEGER),
@@ -103,6 +156,56 @@ def build_qdrant_schema(
         ("embedding_dimensions", PayloadSchemaType.INTEGER),
         ("text_hash", PayloadSchemaType.KEYWORD),
         ("shingle_hash", PayloadSchemaType.KEYWORD),
+        # === GLiNER Entity Metadata Indexes (Phase 3) ===
+        # Enable efficient filtering and post-retrieval boosting for entity-enriched chunks
+        # Added as part of GLiNER NER integration for entity-aware hybrid search
+        (
+            "entity_metadata.entity_types",
+            PayloadSchemaType.KEYWORD,
+        ),  # Entity type labels
+        (
+            "entity_metadata.entity_values",
+            PayloadSchemaType.KEYWORD,
+        ),  # Raw entity texts
+        (
+            "entity_metadata.entity_values_normalized",
+            PayloadSchemaType.KEYWORD,
+        ),  # Lowercased
+        (
+            "entity_metadata.entity_count",
+            PayloadSchemaType.INTEGER,
+        ),  # Entity count per chunk
+        # === Phase 2: markdown-it-py Structural Metadata Indexes ===
+        # Enable query-time filtering by structural characteristics
+        # Added as part of markdown-it-py integration for query-type adaptive retrieval
+        (
+            "has_code",
+            PayloadSchemaType.BOOL,
+        ),  # Filter for code-heavy chunks (CLI queries)
+        (
+            "has_table",
+            PayloadSchemaType.BOOL,
+        ),  # Filter for table-heavy chunks (reference)
+        ("code_ratio", PayloadSchemaType.FLOAT),  # Range filter on code density
+        ("parent_path", PayloadSchemaType.TEXT),  # Text search on heading hierarchy
+        (
+            "line_start",
+            PayloadSchemaType.INTEGER,
+        ),  # Source line for citation correlation
+        # === Phase 5: Enhanced Structural Retrieval Indexes ===
+        # Enable query-type adaptive filtering and structural boosting
+        (
+            "line_end",
+            PayloadSchemaType.INTEGER,
+        ),  # Source line end for complete range
+        (
+            "parent_path_depth",
+            PayloadSchemaType.INTEGER,
+        ),  # Nesting level (0=root) for depth filtering
+        (
+            "block_type",
+            PayloadSchemaType.KEYWORD,
+        ),  # Dominant block type: "paragraph", "code", "table", "mixed"
     ]
 
     return QdrantSchemaPlan(
@@ -120,7 +223,11 @@ def validate_qdrant_schema(
     *,
     require_sparse: Optional[bool] = None,
     require_colbert: Optional[bool] = None,
-    include_entity: Optional[bool] = None,
+    include_entity: Optional[bool] = None,  # DEPRECATED: No longer validated
+    require_doc_title_sparse: Optional[bool] = None,
+    require_title_sparse: Optional[bool] = None,  # NEW: Validate title-sparse
+    require_entity_sparse: Optional[bool] = None,  # NEW: Validate entity-sparse
+    require_entity_metadata_indexes: Optional[bool] = None,  # Phase 3: GLiNER indexes
     require_payload_fields: Optional[Sequence[str]] = None,
     strict: bool = False,
 ) -> None:
@@ -139,13 +246,20 @@ def validate_qdrant_schema(
         if require_colbert is None
         else require_colbert
     )
-    include_entity = bool(include_entity)
+    include_entity = bool(include_entity)  # Deprecated, ignored
     required_payload_fields = list(require_payload_fields or [])
+    # Default require_doc_title_sparse to True when sparse is required (backward compat)
+    effective_require_doc_title_sparse = (
+        require_doc_title_sparse if require_doc_title_sparse is not None else True
+    )
     expected_plan = build_qdrant_schema(
         settings,
-        include_entity=include_entity,
+        include_entity=include_entity,  # Deprecated, passed for compatibility
         enable_sparse=require_sparse,
         enable_colbert=require_colbert,
+        enable_doc_title_sparse=effective_require_doc_title_sparse,
+        enable_title_sparse=require_title_sparse,  # NEW
+        enable_entity_sparse=require_entity_sparse,  # NEW
     )
 
     try:
@@ -195,6 +309,57 @@ def validate_qdrant_schema(
         if not sparse or "text-sparse" not in sparse:
             raise RuntimeError(
                 f"Qdrant collection '{collection_name}' missing required sparse vector 'text-sparse'"
+            )
+        # Validate doc_title-sparse presence when explicitly required
+        if effective_require_doc_title_sparse:
+            if not sparse or "doc_title-sparse" not in sparse:
+                raise RuntimeError(
+                    f"Qdrant collection '{collection_name}' missing required sparse vector "
+                    f"'doc_title-sparse'. Set require_doc_title_sparse=False to skip this check "
+                    f"or recreate the collection with doc_title-sparse support."
+                )
+        # Validate title-sparse presence when required
+        effective_require_title_sparse = (
+            require_title_sparse if require_title_sparse is not None else require_sparse
+        )
+        if effective_require_title_sparse:
+            if not sparse or "title-sparse" not in sparse:
+                raise RuntimeError(
+                    f"Qdrant collection '{collection_name}' missing required sparse vector "
+                    f"'title-sparse'. Set require_title_sparse=False to skip this check "
+                    f"or recreate the collection with title-sparse support."
+                )
+        # Validate entity-sparse presence when required
+        effective_require_entity_sparse = (
+            require_entity_sparse
+            if require_entity_sparse is not None
+            else require_sparse
+        )
+        if effective_require_entity_sparse:
+            if not sparse or "entity-sparse" not in sparse:
+                raise RuntimeError(
+                    f"Qdrant collection '{collection_name}' missing required sparse vector "
+                    f"'entity-sparse'. Set require_entity_sparse=False to skip this check "
+                    f"or recreate the collection with entity-sparse support."
+                )
+
+    # Validate entity metadata payload indexes (Phase 3: GLiNER)
+    if require_entity_metadata_indexes:
+        entity_index_fields = [
+            "entity_metadata.entity_types",
+            "entity_metadata.entity_values",
+            "entity_metadata.entity_values_normalized",
+            "entity_metadata.entity_count",
+        ]
+        missing_entity_indexes = [
+            f for f in entity_index_fields if f not in payload_schema
+        ]
+        if missing_entity_indexes:
+            raise RuntimeError(
+                f"Qdrant collection '{collection_name}' missing required entity metadata "
+                f"payload indexes: {missing_entity_indexes}. These indexes are required for "
+                f"GLiNER entity-aware hybrid search. Run the Phase 3 index creation script "
+                f"or set require_entity_metadata_indexes=False to skip this check."
             )
 
     if require_colbert:

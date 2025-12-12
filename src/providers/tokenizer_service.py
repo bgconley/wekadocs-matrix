@@ -547,6 +547,8 @@ class TokenizerService:
                     "char_count": len(text),
                     "overlap_start": False,
                     "overlap_end": False,
+                    "overlap_chars": 0,  # No overlap for single chunk
+                    "overlap_tokens": 0,  # No overlap for single chunk
                     "integrity_hash": self.compute_integrity_hash(text),
                     "parent_section_id": section_id,
                 }
@@ -577,6 +579,22 @@ class TokenizerService:
             # Decode chunk tokens back to text
             chunk_text = self.decode_tokens(chunk_tokens)
 
+            # Calculate precise overlap for this chunk (Plan 3 enhancement)
+            # For chunks after the first, the overlap is the tokens that were at the
+            # END of the previous chunk and now appear at the START of this chunk.
+            # These are tokens[start_idx : start_idx + overlap_tokens] if we have overlap.
+            if chunk_index > 0 and start_idx > 0:
+                # How many tokens of overlap do we actually have?
+                # It's min(overlap_tokens, start_idx) in case we're near the beginning
+                actual_overlap_tokens = min(self.overlap_tokens, start_idx)
+                # The overlap region is at the BEGINNING of this chunk
+                overlap_token_slice = chunk_tokens[:actual_overlap_tokens]
+                overlap_text = self.decode_tokens(overlap_token_slice)
+                overlap_chars = len(overlap_text)
+            else:
+                overlap_chars = 0
+                actual_overlap_tokens = 0
+
             # Create chunk metadata
             chunk = {
                 "text": chunk_text,
@@ -586,6 +604,8 @@ class TokenizerService:
                 "char_count": len(chunk_text),
                 "overlap_start": start_idx > 0,
                 "overlap_end": end_idx < total_tokens,
+                "overlap_chars": overlap_chars,  # NEW: Exact character count of overlap
+                "overlap_tokens": actual_overlap_tokens,  # NEW: Token count of overlap
                 "integrity_hash": self.compute_integrity_hash(chunk_text),
                 "parent_section_id": section_id,
             }
@@ -620,78 +640,319 @@ class TokenizerService:
 
         return chunks
 
-    def _verify_chunk_integrity(self, original: str, chunks: List[Dict]) -> None:
+    def _verify_chunk_integrity(
+        self, original: str, chunks: List[Dict], strict: bool = False
+    ) -> Dict[str, Any]:
         """
         Verify chunks can be reassembled to original (with overlap removal).
 
-        This is a spot-check that runs on a sample of splits to ensure
-        no data loss occurs during chunking.
+        Enhanced with precise overlap tracking (Plan 3). Uses stored overlap_chars
+        when available, with precise fallback for legacy chunks.
 
         Args:
             original: Original text before splitting
             chunks: List of chunk dictionaries
+            strict: If True, cross-validate stored vs calculated overlap
 
-        Raises:
-            RuntimeError: If integrity check fails (indicates bug in splitting logic)
+        Returns:
+            Dict with validation results:
+            {
+                "valid": bool,
+                "reassembled_length": int,
+                "original_length": int,
+                "length_diff": int,
+                "length_diff_percent": float,
+                "overlap_mismatches": List[Dict]
+            }
         """
+        results = {
+            "valid": True,
+            "reassembled_length": 0,
+            "original_length": len(original),
+            "overlap_mismatches": [],
+        }
+
         try:
             # Reassemble without overlaps
             reassembled = chunks[0]["text"]
+            prev_chunk = chunks[0]
 
             for i in range(1, len(chunks)):
                 chunk = chunks[i]
-                if chunk["overlap_start"]:
-                    # Find overlap boundary
-                    # Simple approach: skip overlap_tokens worth of text from start
-                    overlap_chars = self._estimate_overlap_chars(
-                        chunk["text"], self.overlap_tokens
-                    )
+                if chunk.get("overlap_start", False):
+                    # Try to use stored overlap_chars (Plan 3 enhancement)
+                    stored_overlap = chunk.get("overlap_chars")
+
+                    if stored_overlap is not None:
+                        # Use stored value directly
+                        overlap_chars = stored_overlap
+
+                        # Cross-validate if strict mode
+                        if strict and prev_chunk:
+                            calculated = self._calculate_overlap_chars_precise(
+                                chunk["text"],
+                                prev_chunk.get("text", ""),
+                                chunk.get("overlap_tokens", self.overlap_tokens),
+                            )
+                            if abs(calculated - stored_overlap) > 5:
+                                results["overlap_mismatches"].append(
+                                    {
+                                        "chunk_index": i,
+                                        "stored": stored_overlap,
+                                        "calculated": calculated,
+                                        "diff": abs(calculated - stored_overlap),
+                                    }
+                                )
+                                logger.error(
+                                    "overlap_mismatch_detected",
+                                    extra={
+                                        "chunk_index": i,
+                                        "stored": stored_overlap,
+                                        "calculated": calculated,
+                                    },
+                                )
+                    else:
+                        # Legacy chunk: calculate precisely
+                        overlap_chars = self._calculate_overlap_chars_precise(
+                            chunk["text"],
+                            prev_chunk.get("text", "") if prev_chunk else "",
+                            chunk.get("overlap_tokens", self.overlap_tokens),
+                        )
+
                     reassembled += chunk["text"][overlap_chars:]
                 else:
                     reassembled += chunk["text"]
 
-            # Compare lengths (should be close, allowing for tokenizer edge effects)
+                prev_chunk = chunk
+
+            results["reassembled_length"] = len(reassembled)
+
+            # Compare lengths (should be very close with precise overlap)
             len_diff = abs(len(reassembled) - len(original))
-            len_threshold = len(original) * 0.01  # Allow 1% difference for edge effects
+            len_threshold = len(original) * 0.001  # 0.1% tolerance with precise overlap
+
+            results["length_diff"] = len_diff
+            results["length_diff_percent"] = (
+                (len_diff / len(original)) * 100 if len(original) > 0 else 0
+            )
 
             if len_diff > len_threshold:
+                results["valid"] = False
                 logger.warning(
                     f"Integrity check: length difference {len_diff} chars "
-                    f"({len_diff / len(original) * 100:.2f}%), "
+                    f"({results['length_diff_percent']:.2f}%), "
                     f"original={len(original)}, reassembled={len(reassembled)}"
                 )
 
-            # Hash comparison (more lenient - we expect some difference due to overlap removal)
+            # Hash comparison
             original_hash = self.compute_integrity_hash(original)
             reassembled_hash = self.compute_integrity_hash(reassembled)
 
             if original_hash != reassembled_hash:
                 logger.debug(
-                    f"Integrity check: hash mismatch (expected with overlap), "
+                    f"Integrity check: hash mismatch, "
                     f"chunks={len(chunks)}, len_diff={len_diff}"
                 )
 
+            if results["overlap_mismatches"]:
+                results["valid"] = False
+
         except Exception as e:
             logger.error(f"Integrity verification failed: {e}")
-            # Don't raise - this is a spot-check, not a hard requirement
+            results["valid"] = False
+            results["error"] = str(e)
+
+        return results
 
     def _estimate_overlap_chars(self, text: str, overlap_tokens: int) -> int:
         """
         Estimate character count for overlap_tokens.
 
-        Uses rough heuristic: 3 chars per token for XLM-RoBERTa.
+        DEPRECATED: This uses a rough 3-chars/token heuristic which is incorrect
+        for XLM-RoBERTa (actual range: 2.2 to 4.75 chars/token). Use stored
+        overlap_chars from split_to_chunks() or _calculate_overlap_chars_precise()
+        for legacy chunks. See Plan 3 for details.
 
         Args:
             text: Chunk text
             overlap_tokens: Number of overlap tokens
 
         Returns:
-            Estimated character count for overlap
+            Estimated character count for overlap (INACCURATE)
         """
         # Conservative estimate: 3 chars per token
         estimated_chars = overlap_tokens * 3
         # Don't exceed chunk length
         return min(estimated_chars, len(text) // 2)
+
+    def _calculate_overlap_chars_precise(
+        self,
+        chunk_text: str,
+        prev_chunk_text: str,
+        overlap_tokens: int,
+    ) -> int:
+        """
+        Calculate precise character count for overlap by re-encoding.
+
+        Used for legacy chunks that don't have stored overlap_chars.
+        Re-encodes the previous chunk, decodes its tail, and finds the
+        exact boundary in the current chunk.
+
+        Args:
+            chunk_text: Current chunk text
+            prev_chunk_text: Previous chunk text
+            overlap_tokens: Number of overlap tokens
+
+        Returns:
+            Exact character count of overlap region
+        """
+        if not prev_chunk_text or overlap_tokens <= 0:
+            return 0
+
+        try:
+            # Re-tokenize the previous chunk
+            prev_tokens = self.encode(prev_chunk_text)
+
+            if len(prev_tokens) < overlap_tokens:
+                # Previous chunk is smaller than overlap - use entire chunk
+                overlap_token_slice = prev_tokens
+            else:
+                overlap_token_slice = prev_tokens[-overlap_tokens:]
+
+            # Decode the overlap tokens to get the expected overlap text
+            expected_overlap_text = self.decode_tokens(overlap_token_slice)
+
+            # Verify: current chunk should start with this text
+            if chunk_text.startswith(expected_overlap_text):
+                return len(expected_overlap_text)
+
+            # Handle tokenizer normalization edge cases
+            return self._fuzzy_find_overlap_boundary(chunk_text, expected_overlap_text)
+
+        except Exception as e:
+            logger.warning(f"Precise overlap calculation failed, using heuristic: {e}")
+            return self._estimate_overlap_chars(chunk_text, overlap_tokens)
+
+    def _fuzzy_find_overlap_boundary(
+        self,
+        chunk_text: str,
+        expected_overlap: str,
+    ) -> int:
+        """
+        Handle edge cases where tokenizer normalization causes slight mismatches.
+
+        Common causes:
+        - Leading/trailing whitespace normalization
+        - Unicode normalization (NFKC vs NFC)
+        - Special token insertions
+
+        Args:
+            chunk_text: Current chunk text
+            expected_overlap: Expected overlap text from decoding tokens
+
+        Returns:
+            Best-effort character count for overlap boundary
+        """
+        if not expected_overlap:
+            return 0
+
+        # Try with stripped whitespace
+        stripped_expected = expected_overlap.strip()
+        stripped_chunk = chunk_text.lstrip()
+
+        if stripped_chunk.startswith(stripped_expected):
+            # Account for stripped leading whitespace
+            leading_ws = len(chunk_text) - len(stripped_chunk)
+            return len(stripped_expected) + leading_ws
+
+        # Fallback: find longest common prefix
+        for length in range(len(expected_overlap), 0, -1):
+            if chunk_text[:length] == expected_overlap[:length]:
+                if length < len(expected_overlap):
+                    logger.warning(
+                        "fuzzy_overlap_match",
+                        extra={
+                            "expected_len": len(expected_overlap),
+                            "matched_len": length,
+                            "diff": len(expected_overlap) - length,
+                        },
+                    )
+                return length
+
+        logger.error(
+            "overlap_boundary_not_found",
+            extra={
+                "expected_start": expected_overlap[:50],
+                "actual_start": chunk_text[:50],
+            },
+        )
+        # Last resort: use heuristic
+        return self._estimate_overlap_chars(chunk_text, len(expected_overlap) // 3)
+
+    def verify_chunks(
+        self,
+        chunks: List[Dict],
+        original_text: Optional[str] = None,
+        strict: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Public API for verifying chunk integrity.
+
+        Reassembles chunks by stripping overlap regions and validates that
+        the result matches the original text (if provided).
+
+        Args:
+            chunks: List of chunk dictionaries from split_to_chunks()
+            original_text: Optional original text for comparison
+            strict: If True, cross-validate stored vs calculated overlap
+
+        Returns:
+            Dict with validation results including reassembled text
+        """
+        if not chunks:
+            return {"valid": True, "reassembled": "", "chunks": 0}
+
+        # Build reassembled text
+        reassembled_parts = [chunks[0]["text"]]
+        prev_chunk = chunks[0]
+
+        for i in range(1, len(chunks)):
+            chunk = chunks[i]
+            overlap_chars = chunk.get("overlap_chars", 0)
+
+            # Use stored value or calculate precisely
+            if overlap_chars == 0 and chunk.get("overlap_start", False):
+                overlap_chars = self._calculate_overlap_chars_precise(
+                    chunk["text"],
+                    prev_chunk.get("text", ""),
+                    chunk.get("overlap_tokens", self.overlap_tokens),
+                )
+
+            reassembled_parts.append(chunk["text"][overlap_chars:])
+            prev_chunk = chunk
+
+        reassembled = "".join(reassembled_parts)
+
+        result = {
+            "valid": True,
+            "reassembled": reassembled,
+            "reassembled_length": len(reassembled),
+            "chunks": len(chunks),
+        }
+
+        if original_text:
+            result["original_length"] = len(original_text)
+            result["length_diff"] = abs(len(reassembled) - len(original_text))
+            result["length_diff_percent"] = (
+                (result["length_diff"] / len(original_text)) * 100
+                if len(original_text) > 0
+                else 0
+            )
+            result["valid"] = (
+                result["length_diff_percent"] < 1.0
+            )  # 1% tolerance (improved from 6.72%)
+
+        return result
 
     def truncate_to_token_limit(
         self, text: str, max_tokens: Optional[int] = None

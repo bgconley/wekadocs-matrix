@@ -19,7 +19,8 @@ class TestProviderFactory:
     def test_create_jina_embedding_provider(self):
         """Test creating Jina embedding provider."""
         with patch.dict(
-            os.environ, {"JINA_API_KEY": "test-key"}  # pragma: allowlist secret
+            os.environ,
+            {"JINA_API_KEY": "test-key"},  # pragma: allowlist secret
         ):
             provider = ProviderFactory.create_embedding_provider(
                 provider="jina-ai",
@@ -83,7 +84,8 @@ class TestProviderFactory:
     def test_create_jina_rerank_provider(self):
         """Test creating Jina rerank provider."""
         with patch.dict(
-            os.environ, {"JINA_API_KEY": "test-key"}  # pragma: allowlist secret
+            os.environ,
+            {"JINA_API_KEY": "test-key"},  # pragma: allowlist secret
         ):
             provider = ProviderFactory.create_rerank_provider(
                 provider="jina-ai", model="jina-reranker-v3"

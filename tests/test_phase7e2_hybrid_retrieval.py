@@ -112,7 +112,7 @@ class TestHybridRetrievalIntegration:
         # Chunk 1: High BM25 relevance for "network configuration"
         chunks.append(
             {
-                "id": hashlib.sha256(f"{doc_id}|sec_1".encode()).hexdigest()[:24],
+                "id": hashlib.sha256(f"{doc_id}|sec_1".encode()).hexdigest(),
                 "document_id": doc_id,
                 "parent_section_id": "parent_1",
                 "order": 0,
@@ -131,7 +131,7 @@ class TestHybridRetrievalIntegration:
         # Chunk 2: Semantically similar to network but different keywords
         chunks.append(
             {
-                "id": hashlib.sha256(f"{doc_id}|sec_2".encode()).hexdigest()[:24],
+                "id": hashlib.sha256(f"{doc_id}|sec_2".encode()).hexdigest(),
                 "document_id": doc_id,
                 "parent_section_id": "parent_1",
                 "order": 1,
@@ -150,7 +150,7 @@ class TestHybridRetrievalIntegration:
         # Chunk 3: Adjacent chunk for expansion testing
         chunks.append(
             {
-                "id": hashlib.sha256(f"{doc_id}|sec_3".encode()).hexdigest()[:24],
+                "id": hashlib.sha256(f"{doc_id}|sec_3".encode()).hexdigest(),
                 "document_id": doc_id,
                 "parent_section_id": "parent_1",
                 "order": 2,
@@ -169,7 +169,7 @@ class TestHybridRetrievalIntegration:
         # Chunk 4: Different topic for contrast
         chunks.append(
             {
-                "id": hashlib.sha256(f"{doc_id}|sec_4".encode()).hexdigest()[:24],
+                "id": hashlib.sha256(f"{doc_id}|sec_4".encode()).hexdigest(),
                 "document_id": doc_id,
                 "parent_section_id": "parent_2",
                 "order": 0,
@@ -188,7 +188,7 @@ class TestHybridRetrievalIntegration:
         # Chunk 5: Large chunk for token budget testing (simulated)
         chunks.append(
             {
-                "id": hashlib.sha256(f"{doc_id}|sec_5".encode()).hexdigest()[:24],
+                "id": hashlib.sha256(f"{doc_id}|sec_5".encode()).hexdigest(),
                 "document_id": doc_id,
                 "parent_section_id": "parent_3",
                 "order": 0,
@@ -206,7 +206,7 @@ class TestHybridRetrievalIntegration:
         # Chunk 6: Adjacent to chunk 3 for expansion testing
         chunks.append(
             {
-                "id": hashlib.sha256(f"{doc_id}|sec_6".encode()).hexdigest()[:24],
+                "id": hashlib.sha256(f"{doc_id}|sec_6".encode()).hexdigest(),
                 "document_id": doc_id,
                 "parent_section_id": "parent_1",
                 "order": 3,
@@ -225,7 +225,7 @@ class TestHybridRetrievalIntegration:
         # Chunk 7: Another unrelated chunk
         chunks.append(
             {
-                "id": hashlib.sha256(f"{doc_id}|sec_7".encode()).hexdigest()[:24],
+                "id": hashlib.sha256(f"{doc_id}|sec_7".encode()).hexdigest(),
                 "document_id": doc_id,
                 "parent_section_id": "parent_2",
                 "order": 1,
@@ -244,7 +244,7 @@ class TestHybridRetrievalIntegration:
         # Chunk 8: Another adjacent for parent_1
         chunks.append(
             {
-                "id": hashlib.sha256(f"{doc_id}|sec_8".encode()).hexdigest()[:24],
+                "id": hashlib.sha256(f"{doc_id}|sec_8".encode()).hexdigest(),
                 "document_id": doc_id,
                 "parent_section_id": "parent_1",
                 "order": 4,
@@ -554,7 +554,9 @@ class TestHybridRetrievalIntegration:
         hybrid_retriever.context_max_tokens = 100
 
         results, metrics = hybrid_retriever.retrieve(
-            "system documentation", top_k=10, expand=False  # Request many results
+            "system documentation",
+            top_k=10,
+            expand=False,  # Request many results
         )
 
         # Verify token budget enforced
@@ -679,7 +681,9 @@ class TestHybridRetrievalIntegration:
         query = "complete guide for configuring network interfaces with IP addresses"
 
         results, metrics = hybrid_retriever.retrieve(
-            query, top_k=3, expand=True  # Small top_k to leave room for expansion
+            query,
+            top_k=3,
+            expand=True,  # Small top_k to leave room for expansion
         )
 
         # Assemble context

@@ -42,30 +42,60 @@ search:
     primary: "qdrant"
     dual_write: false  # Phase 7C: Set to true during migration
     qdrant:
-      collection_name: "chunks_multi"  # Phase 7E+: Multi-vector collection
+      collection_name: "chunks_multi_bge_m3"  # Phase 7E+: Multi-vector collection (BGE-M3)
       use_grpc: false
       timeout: 30
       allow_recreate: false  # Set true to auto-rebuild collections during schema upgrades
       enable_sparse: true
       enable_colbert: true
+      # NEW: Sparse vectors for lexical matching on titles and entities
+      enable_title_sparse: true    # Lexical section heading matching
+      enable_entity_sparse: true   # Lexical entity name matching
+      # Graph Channel Rehabilitation: Sparse embedding error handling mode
+      # false = graceful degradation (default) - insert None placeholder on failure
+      # true = strict mode - fail ingestion if sparse embedding fails
+      sparse_strict_mode: false
       use_query_api: true
       query_api_dense_limit: 200
       query_api_sparse_limit: 200
       query_api_candidate_limit: 200
       query_vector_name: "content"
-      query_strategy: "content_only"  # Options: content_only, weighted, max_field
+      query_strategy: "weighted"  # Options: content_only, weighted, max_field
     neo4j:
       index_name: "section_embeddings_v2"  # Phase 7C: New 1024-D index
 
   # Hybrid search settings (Phase 7E: RRF + BM25)
   hybrid:
     # Architecture mode: legacy (BM25+RRF) or bge_reranker (vector-only + cross-encoder)
-    mode: "bge_reranker"
+    mode: "legacy"
     enabled: true  # Phase 7E: Enable hybrid retrieval
-    method: "weighted"  # Architecture 2: magnitude-preserving fusion
+
+    # Master switch: completely disable ALL Neo4j queries in retrieval path
+    # When true, bypasses: citation hydration, coverage annotation, graph channels
+    neo4j_disabled: true  # PHASE 1 VECTOR-ONLY: No graph operations whatsoever
+
+    graph_channel_enabled: false  # DISABLED: Phase 1 vector-only hardening
+    graph_enrichment_enabled: false  # DISABLED: Post-retrieval graph neighbor expansion
+    colbert_rerank_enabled: false  # TESTING: Disabled to test cross-encoder alone
+    colbert_candidate_limit: 50  # Min candidates for ColBERT reranking
+    colbert_candidate_multiplier: 3  # top_k multiplier
+    method: "rrf"  # RRF fusion: rank-based, robust to score scale differences
+    multi_vector_fusion_method: "rrf"  # Python-side RRF for multi-vector (Dense+Sparse+Title+Entity)
 
     # RRF (Reciprocal Rank Fusion) settings
     rrf_k: 60  # Phase 7E: RRF constant (default: 60)
+    rrf_debug_logging: true  # NEW: Log per-field RRF contributions for debugging
+
+    # RRF field weights: multiply each field's RRF contribution by its weight
+    # Higher weight = more influence on final ranking
+    # Dense boosted, sparse de-rated for semantic > lexical balance
+    rrf_field_weights:
+      content: 2.0           # Dense semantic content similarity - BOOSTED
+      title: 1.5             # Dense semantic title similarity - BOOSTED
+      text-sparse: 0.5       # Lexical content matching - heavily de-rated
+      doc_title-sparse: 0.8  # Lexical document title matching - de-rated
+      title-sparse: 0.8      # Lexical section heading matching - de-rated
+      entity-sparse: 0.8     # Lexical entity name matching - de-rated
 
     # Weighted fusion settings (alternative to RRF)
     fusion_alpha: 0.6  # Phase 7E: Vector weight (0.0-1.0), BM25 weight = 1-alpha
@@ -80,31 +110,50 @@ search:
     graph_propagation_decay: 0.85
 
     # Vector field weights (dense + sparse) for Qdrant multi-vector fusion
+    # NOTE: These weights are ONLY used if multi_vector_fusion_method="weighted"
+    # With RRF fusion (current setting), ranks are used instead of weights
+    # Dense entity vector REMOVED - replaced by entity-sparse
     vector_fields:
       content: 0.5
       title: 0.1
-      entity: 0.1
       text-sparse: 0.3
+    query_type_weights:
+      conceptual: { vector: 0.7, graph: 0.3 }
+      cli: { vector: 0.5, graph: 0.5 }
+      config: { vector: 0.5, graph: 0.5 }
+      procedural: { vector: 0.6, graph: 0.4 }
+      troubleshooting: { vector: 0.7, graph: 0.3 }
+      reference: { vector: 0.7, graph: 0.3 }
+    # Optional: query-type relationship sets (used if graph_adaptive_enabled)
+    # Phase 3.5: MENTIONS is canonical direction (Chunk->Entity)
+    # Direction-agnostic queries work regardless of edge direction
+    query_type_relationships:
+      conceptual: ["MENTIONS", "DEFINES", "IN_SECTION"]
+      cli: ["MENTIONS", "CONTAINS_STEP", "HAS_PARAMETER"]
+      config: ["MENTIONS", "HAS_PARAMETER", "DEFINES"]
+      procedural: ["MENTIONS", "CONTAINS_STEP", "NEXT_CHUNK", "IN_SECTION"]
+      troubleshooting: ["MENTIONS", "RESOLVES", "NEXT_CHUNK"]
+      reference: ["MENTIONS", "NEXT_CHUNK"]
 
     reranker:
-      enabled: true
-      provider: "bge-reranker-service"  # options: bge-reranker-service, jina-ai, noop
+      enabled: true  # Cross-encoder enabled - eliminates length bias in final ranking
+      provider: "bge-reranker-service"  # Must match factory: bge-reranker-service or bge-reranker
       model: "BAAI/bge-reranker-v2-m3"
-      top_n: 20            # how many candidates to send to the reranker
-      max_pairs: 50        # hard cap to protect latency
-      max_tokens_per_pair: 1024  # truncate long docs before rerank
+      top_n: 20           # Final results after reranking
+      max_pairs: 50       # Candidates to send to reranker (from RRF fusion)
+      max_tokens_per_pair: 2048  # Max tokens per query-doc pair (BGE-reranker-v2-m3 supports 8192)
 
     top_k: 20  # Number of candidates to retrieve
 
     # BM25/keyword retrieval settings
     bm25:
-      enabled: true  # re-enable lexical recall
+      enabled: false  # DISABLED: Phase 1 vector-only hardening
       top_k: 50  # Retrieve more candidates for fusion
       weight: 0.15  # Lower weight while sparse is primary lexical channel
 
     # Bounded adjacency expansion (Phase 7E)
     expansion:
-      enabled: true  # Enable bounded neighbor expansion
+      enabled: false  # DISABLED: Phase 1 vector-only hardening
       max_neighbors: 1
       query_min_tokens: 8
       score_delta_max: 0.05
@@ -117,6 +166,23 @@ search:
           lexical: 0.4
           structural: 0.5
           proximity: 0.1
+      # Structure-aware expansion (Phase C.4)
+      structure:
+        sibling_limit: 3           # Max sibling chunks from same parent_section
+        parent_section_limit: 2    # Max chunks from parent section
+        shared_entity_limit: 3     # Max chunks sharing entities with top results
+        timeout_ms: 100            # Max latency budget for structure expansion
+
+    # Phase 5: Structural retrieval for query-type adaptive search
+    # Leverages markdown-it-py metadata (has_code, has_table, parent_path_depth, block_type)
+    structural:
+      enabled: true                    # Master switch for structural enhancements
+      filter_by_block_type: false      # Hard filtering disabled (use boosting instead)
+      boost_by_structure: true         # Soft boosting based on structural features
+      cli_code_boost: 1.20             # 20% boost for code chunks on CLI queries
+      reference_table_boost: 1.20      # 20% boost for table chunks on reference queries
+      deep_nesting_penalty: 0.90       # 10% penalty for deeply nested content
+      max_depth_for_overview: 2        # Depth threshold for overview/conceptual queries
 
 # Graph search settings
   graph:
@@ -160,34 +226,43 @@ ingestion:
   # Batch processing
   batch_size: 500
   max_section_tokens: 1000
-  timeout_seconds: 300
+  timeout_seconds: 600  # Phase 5: Increased for GLiNER-enabled processing
   workers: 2
+
+  # Phase: markdown-it-py Integration (AST-based parsing)
+  # Options: "legacy" (markdown + BeautifulSoup), "markdown-it-py" (AST with source mapping)
+  parser:
+    engine: "markdown-it-py"  # NEW: AST-based parsing with source line mapping
+    shadow_mode: false         # If true, run both parsers and log differences
+    fail_on_mismatch: false    # If true in shadow mode, fail ingestion on differences
 
   # Phase 7E-2: Chunk assembly configuration
   # Controls intelligent combining and splitting for optimal retrieval quality
   chunk_assembly:
-    assembler: "structured"
+    assembler: "semantic"  # Phase 2: Semantic-first chunking (research-aligned)
+
+    # NEW: Semantic chunking config (Chonkie + BGE-M3)
+    # See: docs/plans/chonkie_semantic_chunking_integration_plan.md
+    semantic_chunking:
+      enabled: true
+      similarity_threshold: 0.5   # Balanced: split when similarity < 50%
+      target_tokens: 400          # Research optimal (Chroma/Firecrawl)
+      min_tokens: 100             # Allow naturally small chunks
+      max_tokens: 512             # NVIDIA recommendation ceiling
+      skip_code_blocks: true      # Skip semantic for code-heavy sections
+
+    # Legacy structured config (used as fallback if semantic unavailable)
     structure:
       min_tokens: 350
       target_tokens: 500
       hard_tokens: 750
       max_sections: 4
-      respect_major_levels: true
-      stop_at_level: 2
-      break_keywords: "faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting"
-    split:
-      enabled: true
-      max_tokens: 750
-      overlap_tokens: 100
+    # Phase 7E-5: Disable microdoc stubs (empty chunks for graph traversal)
+    # These are invisible to vector search and waste storage
     microdoc:
-      enabled: true
+      enabled: false
       doc_token_threshold: 2000
       min_split_tokens: 400
-    semantic:
-      enabled: false
-      provider: "stub"
-      model_name: null
-      timeout_seconds: 5
 
   # Queue recovery (Phase 6: job reaper)
   queue_recovery:
@@ -202,6 +277,45 @@ ingestion:
     enabled: true
     schedule: "0 2 * * *"  # 2 AM daily
     drift_threshold: 0.01
+
+  # Cross-document linking (Phase 3.5)
+  # Creates RELATED_TO edges between semantically similar documents
+  cross_doc_linking:
+    enabled: true
+    method: "rrf"  # Options: dense, rrf, title_ft
+    dense_threshold: 0.70
+    rrf_threshold: 0.025
+    discovery_threshold: 0.50
+    chunk_limit: 100
+    max_edges_per_doc: 5
+    rrf_k: 60
+    min_corpus_size: 3
+    # ColBERT Reranking (Phase 4)
+    colbert_rerank: true          # Enable ColBERT MaxSim reranking
+    colbert_threshold: 0.30       # Minimum score to keep edge
+    colbert_max_chunks: 3         # Chunks to fetch per document
+    colbert_max_tokens: 200       # Token budget for comparison
+
+# References feature (Phase 3)
+references:
+  enabled: true
+  extraction:
+    max_text_length: 8192
+    window_overlap: 512
+    confidence_scores:
+      hyperlink: 0.95
+      see_also: 0.85
+      related: 0.80
+      refer_to: 0.70
+  resolution:
+    fuzzy_penalty: 0.25
+    batch_size: 100
+    min_hint_length: 3
+    use_fulltext_index: true
+  query:
+    enable_cross_doc_signals: true
+    cross_doc_weight_ratio: 0.3
+    max_referencing_docs: 3
 
 # Ranking configuration
 ranking:
@@ -287,13 +401,19 @@ cache:
   #   - {namespace}:chunk_epoch -> HSET {chunk_id} -> epoch_int
 
 # Feature flags for gradual rollout
+# NOTE: All flags here MUST have corresponding fields in FeatureFlagsConfig (src/shared/config.py)
+# Test: tests/test_config_schema_completeness.py validates this invariant
 feature_flags:
-  use_embedding_provider: true  # New in pre-phase7
-  validate_dimensions: true     # New in pre-phase7
-  coverage_enrichment: true      # New in pre-phase7
-  byte_cap_responses: true       # New in pre-phase7
-  schema_v2_1_dev: true         # Dev only for pre-phase7
   dual_write_1024d: false       # Phase 7C.4: Enable dual-write to both 384-D and 1024-D indices
+  # New rollout flags for retrieval rehab
+  query_api_weighted_fusion: true  # Enables _search_via_query_api_weighted() with per-field score tracking
+  graph_garbage_filter: false      # DISABLED: Phase 1 vector-only hardening
+  graph_rel_types_wired: false     # DISABLED: Phase 1 vector-only hardening
+  dedup_best_score: true           # C.0.3: Keep highest score in dedup (enabled 2025-11-26)
+  graph_score_normalized: false    # DISABLED: Phase 1 vector-only hardening
+  graph_as_reranker: false         # DISABLED: Phase 1 vector-only hardening
+  entity_embedding_fallback: false
+  structure_aware_expansion: false # DISABLED: Phase 1 vector-only hardening
 
 # Phase 7E-4: Monitoring and observability configuration
 # Reference: Canonical Spec L4916-4976, L3513-3528
@@ -352,6 +472,34 @@ connectors:
     owner: null
     repo: null
     webhook_secret: null
+
+# Named Entity Recognition (GLiNER)
+# Zero-shot NER for domain-specific entity extraction
+ner:
+  enabled: true  # Master switch - GLiNER enrichment ENABLED for testing
+  model_name: "urchade/gliner_medium-v2.1"  # Balanced accuracy/speed
+  threshold: 0.45  # Minimum confidence (0.0-1.0)
+  device: "auto"  # auto-detect: MPS → CUDA → CPU
+  batch_size: 32  # Optimal for Apple Silicon (M1/M2/M3)
+  # External GLiNER service with MPS acceleration (5-10x faster than CPU)
+  # Run: cd services/gliner-ner && ./run.sh
+  # Falls back to local model if service unavailable
+  service_url: "http://host.docker.internal:9002"
+  # Entity exclusions: terms too common to be useful (filtered post-extraction)
+  # Note: "WEKA" and variants are excluded in src/providers/ner/labels.py
+  labels:
+    # Refined WEKA entity types (v2) - optimized for retrieval value
+    # 10 focused types mapped to specific query patterns
+    - "COMMAND (e.g. weka fs, weka nfs permission add, mount)"
+    - "PARAMETER (e.g. --json, num_cores, memory_mb, stripe-width)"
+    - "COMPONENT (e.g. backend server, frontend process, drive process)"
+    - "PROTOCOL (e.g. NFS, SMB, S3, POSIX)"
+    - "CLOUD_PROVIDER (e.g. AWS, Azure, GCP, OCI)"
+    - "STORAGE_CONCEPT (e.g. tiering, snapshot, object store, SSD capacity)"
+    - "VERSION (e.g. 4.4, 4.4.x, v4.3)"
+    - "PROCEDURE_STEP (e.g. Select Save, Run the command, Click Apply)"
+    - "ERROR (e.g. error code 10054, Connection refused, timeout)"
+    - "CAPACITY_METRIC (e.g. GB, TB, IOPS, latency, throughput)"
 
 # Testing helpers
 use_mock_embeddings: false

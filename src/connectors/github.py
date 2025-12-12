@@ -175,8 +175,7 @@ class GitHubConnector(BaseConnector):
 
             except httpx.HTTPStatusError as e:
                 logger.error(
-                    f"GitHub API error: {e.response.status_code} - "
-                    f"{e.response.text}"
+                    f"GitHub API error: {e.response.status_code} - {e.response.text}"
                 )
                 raise
             except Exception as e:

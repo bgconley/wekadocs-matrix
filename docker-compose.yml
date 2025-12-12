@@ -32,9 +32,9 @@ services:
     environment:
       - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD}
       - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
-      - NEO4J_server_memory_heap_initial__size=${NEO4J_HEAP_INITIAL:-512m}
-      - NEO4J_server_memory_heap_max__size=${NEO4J_HEAP_MAX:-1G}
-      - NEO4J_server_memory_pagecache_size=${NEO4J_PAGECACHE:-512m}
+      - NEO4J_server_memory_heap_initial__size=${NEO4J_HEAP_INITIAL:-1280m}
+      - NEO4J_server_memory_heap_max__size=${NEO4J_HEAP_MAX:-2560m}
+      - NEO4J_server_memory_pagecache_size=${NEO4J_PAGECACHE:-2G}
       - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
       - NEO4J_dbms_security_procedures_allowlist=apoc.*,gds.*
       - NEO4J_apoc_export_file_enabled=true
@@ -46,10 +46,10 @@ services:
       resources:
         limits:
           cpus: '2'
-          memory: 2G
+          memory: 5G
         reservations:
           cpus: '1'
-          memory: 1G
+          memory: 2560M
     healthcheck:
       test: ["CMD", "cypher-shell", "-u", "${NEO4J_USER:-neo4j}", "-p", "${NEO4J_PASSWORD}", "RETURN 1"]
       interval: 10s
@@ -74,11 +74,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 1G
+          cpus: '2'
+          memory: 3G
         reservations:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '1'
+          memory: 1536M
     healthcheck:
       test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/6333' || exit 1"]
       interval: 10s
@@ -99,17 +99,17 @@ services:
       redis-server
       --appendonly yes
       --appendfsync everysec
-      --maxmemory ${REDIS_MAXMEMORY:-256mb}
+      --maxmemory ${REDIS_MAXMEMORY:-768mb}
       --maxmemory-policy allkeys-lru
       --requirepass ${REDIS_PASSWORD}
     deploy:
       resources:
         limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
           cpus: '0.5'
           memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 256M
     healthcheck:
       test: ["CMD", "redis-cli", "--pass", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
@@ -132,6 +132,8 @@ services:
       - ./scripts:/app/scripts:ro
       - ./tests:/app/tests:ro
       - ./hf-cache:/opt/hf-cache
+    env_file:
+      - .env
     environment:
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
@@ -139,10 +141,11 @@ services:
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
       # Legacy vars cleared to avoid override; set blank to prefer profile-driven config
-      - EMBEDDINGS_PROVIDER=
-      - EMBEDDINGS_MODEL=
-      - EMBEDDINGS_DIM=
-      - EMBEDDINGS_TASK=
+      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-bge-m3-service}
+      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
+      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
+      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-symmetric}
+      - HF_TOKENIZER_ID=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
       - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
       - RERANK_MODEL=${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
@@ -151,14 +154,21 @@ services:
       - ANSWER_MODEL=${ANSWER_MODEL:-search-result-formatting}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
-      - HF_CACHE=/opt/hf-cache
+      - HF_HOME=/opt/hf-cache
       - TRANSFORMERS_OFFLINE=false
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000
-      - EMBED_MAX_TOKENS=${EMBED_MAX_TOKENS:-750}
-      - EMBED_TARGET_TOKENS=${EMBED_TARGET_TOKENS:-500}
-      - EMBED_OVERLAP_TOKENS=${EMBED_OVERLAP_TOKENS:-100}
+      # Guard-Split Chunking Architecture (BGE-M3 model limits)
+      - BGE_M3_MAX_INPUT_TOKENS=${BGE_M3_MAX_INPUT_TOKENS:-8192}
+      - BGE_M3_SAFE_INPUT_TOKENS=${BGE_M3_SAFE_INPUT_TOKENS:-7500}
+      - BGE_M3_GUARD_OVERLAP_TOKENS=${BGE_M3_GUARD_OVERLAP_TOKENS:-200}
+      - BGE_M3_OVERSIZE_POLICY=${BGE_M3_OVERSIZE_POLICY:-raise}
+      - BGE_M3_MAX_BATCH_TOKENS=${BGE_M3_MAX_BATCH_TOKENS:-7500}
+      - SEMANTIC_FALLBACK_OVERLAP_TOKENS=${SEMANTIC_FALLBACK_OVERLAP_TOKENS:-80}
+      - EMBED_MAX_TOKENS=${EMBED_MAX_TOKENS:-8000}
+      - EMBED_TARGET_TOKENS=${EMBED_TARGET_TOKENS:-7500}
+      - EMBED_OVERLAP_TOKENS=${EMBED_OVERLAP_TOKENS:-200}
       - SPLIT_MIN_TOKENS=${SPLIT_MIN_TOKENS:-350}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
       - LOG_SPLIT_DECISIONS=true
@@ -178,8 +188,10 @@ services:
       # Auth & observability
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
       - OTEL_SERVICE_NAME=weka-mcp-server
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=otlp
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       neo4j:
@@ -192,10 +204,10 @@ services:
       resources:
         limits:
           cpus: '2'
-          memory: 2G
+          memory: 4G
         reservations:
           cpus: '1'
-          memory: 1G
+          memory: 2G
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -218,6 +230,8 @@ services:
       - ./tools:/app/tools:ro
       - ./data:/app/data:ro
       - ./hf-cache:/opt/hf-cache
+    env_file:
+      - .env
     environment:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest
@@ -226,10 +240,11 @@ services:
       # Phase 7C: Embedding Provider Configuration
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
-      - EMBEDDINGS_PROVIDER=
-      - EMBEDDINGS_MODEL=
-      - EMBEDDINGS_DIM=
-      - EMBEDDINGS_TASK=
+      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-bge-m3-service}
+      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
+      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
+      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-symmetric}
+      - HF_TOKENIZER_ID=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
       - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
       - RERANK_MODEL=${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
@@ -237,14 +252,21 @@ services:
       - JINA_API_KEY=${JINA_API_KEY}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
-      - HF_CACHE=/opt/hf-cache
+      - HF_HOME=/opt/hf-cache
       - TRANSFORMERS_OFFLINE=false
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000
-      - EMBED_MAX_TOKENS=${EMBED_MAX_TOKENS:-750}
-      - EMBED_TARGET_TOKENS=${EMBED_TARGET_TOKENS:-500}
-      - EMBED_OVERLAP_TOKENS=${EMBED_OVERLAP_TOKENS:-100}
+      # Guard-Split Chunking Architecture (BGE-M3 model limits)
+      - BGE_M3_MAX_INPUT_TOKENS=${BGE_M3_MAX_INPUT_TOKENS:-8192}
+      - BGE_M3_SAFE_INPUT_TOKENS=${BGE_M3_SAFE_INPUT_TOKENS:-7500}
+      - BGE_M3_GUARD_OVERLAP_TOKENS=${BGE_M3_GUARD_OVERLAP_TOKENS:-200}
+      - BGE_M3_OVERSIZE_POLICY=${BGE_M3_OVERSIZE_POLICY:-raise}
+      - BGE_M3_MAX_BATCH_TOKENS=${BGE_M3_MAX_BATCH_TOKENS:-7500}
+      - SEMANTIC_FALLBACK_OVERLAP_TOKENS=${SEMANTIC_FALLBACK_OVERLAP_TOKENS:-80}
+      - EMBED_MAX_TOKENS=${EMBED_MAX_TOKENS:-8000}
+      - EMBED_TARGET_TOKENS=${EMBED_TARGET_TOKENS:-7500}
+      - EMBED_OVERLAP_TOKENS=${EMBED_OVERLAP_TOKENS:-200}
       - SPLIT_MIN_TOKENS=${SPLIT_MIN_TOKENS:-350}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
       - LOG_SPLIT_DECISIONS=true
@@ -269,6 +291,9 @@ services:
       - COMBINE_STOP_AT_LEVEL=${COMBINE_STOP_AT_LEVEL:-2}
       - COMBINE_BREAK_KEYWORDS=${COMBINE_BREAK_KEYWORDS:-faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting}
       - COMBINE_DEBUG=${COMBINE_DEBUG:-false}
+      # Phase 7E-5: Disable doc_fallback and microdoc stubs (vector-only mode)
+      - COMBINE_DOC_FALLBACK_ENABLED=false
+      - COMBINE_MICRODOC_ENABLED=false
       # Phase 7E-3: Cache Invalidation Configuration
       - CACHE_MODE=epoch
       - CACHE_NS=rag:v1
@@ -276,6 +301,11 @@ services:
       # Auth & security
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      # OTEL Observability (Phase LGTM)
+      - OTEL_SERVICE_NAME=weka-ingestion-worker
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=otlp
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       neo4j:
@@ -288,10 +318,10 @@ services:
       resources:
         limits:
           cpus: '2'
-          memory: 2G
+          memory: 3584M
         reservations:
           cpus: '1'
-          memory: 1G
+          memory: 1792M
     restart: unless-stopped
 
   # Phase 6: Auto-Ingestion Service (Task 6.1)
@@ -310,6 +340,8 @@ services:
       - ./src:/app/src
       - ./data:/app/data
       - ./hf-cache:/opt/hf-cache
+    env_file:
+      - .env
     environment:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest
@@ -320,10 +352,11 @@ services:
       # Phase 7C: Embedding Provider Configuration
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
-      - EMBEDDINGS_PROVIDER=
-      - EMBEDDINGS_MODEL=
-      - EMBEDDINGS_DIM=
-      - EMBEDDINGS_TASK=
+      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-bge-m3-service}
+      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
+      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
+      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-symmetric}
+      - HF_TOKENIZER_ID=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
       - RERANK_MODEL=${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
       - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://host.docker.internal:9001}
@@ -331,14 +364,21 @@ services:
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
       - HF_TOKENIZER_ID=jinaai/jina-embeddings-v3
-      - HF_CACHE=/opt/hf-cache
+      - HF_HOME=/opt/hf-cache
       - TRANSFORMERS_OFFLINE=false
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000
-      - EMBED_MAX_TOKENS=${EMBED_MAX_TOKENS:-750}
-      - EMBED_TARGET_TOKENS=${EMBED_TARGET_TOKENS:-500}
-      - EMBED_OVERLAP_TOKENS=${EMBED_OVERLAP_TOKENS:-100}
+      # Guard-Split Chunking Architecture (BGE-M3 model limits)
+      - BGE_M3_MAX_INPUT_TOKENS=${BGE_M3_MAX_INPUT_TOKENS:-8192}
+      - BGE_M3_SAFE_INPUT_TOKENS=${BGE_M3_SAFE_INPUT_TOKENS:-7500}
+      - BGE_M3_GUARD_OVERLAP_TOKENS=${BGE_M3_GUARD_OVERLAP_TOKENS:-200}
+      - BGE_M3_OVERSIZE_POLICY=${BGE_M3_OVERSIZE_POLICY:-raise}
+      - BGE_M3_MAX_BATCH_TOKENS=${BGE_M3_MAX_BATCH_TOKENS:-7500}
+      - SEMANTIC_FALLBACK_OVERLAP_TOKENS=${SEMANTIC_FALLBACK_OVERLAP_TOKENS:-80}
+      - EMBED_MAX_TOKENS=${EMBED_MAX_TOKENS:-8000}
+      - EMBED_TARGET_TOKENS=${EMBED_TARGET_TOKENS:-7500}
+      - EMBED_OVERLAP_TOKENS=${EMBED_OVERLAP_TOKENS:-200}
       - SPLIT_MIN_TOKENS=${SPLIT_MIN_TOKENS:-350}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
       - LOG_SPLIT_DECISIONS=true
@@ -361,10 +401,18 @@ services:
       - COMBINE_RESPECT_MAJOR_LEVELS=${COMBINE_RESPECT_MAJOR_LEVELS:-true}
       - COMBINE_STOP_AT_LEVEL=${COMBINE_STOP_AT_LEVEL:-2}
       - COMBINE_BREAK_KEYWORDS=${COMBINE_BREAK_KEYWORDS:-faq|faqs|glossary|reference|api reference|cli reference|changelog|release notes|troubleshooting}
+      # Phase 7E-5: Disable doc_fallback and microdoc stubs (vector-only mode)
+      - COMBINE_DOC_FALLBACK_ENABLED=false
+      - COMBINE_MICRODOC_ENABLED=false
       # Phase 7E-3: Cache Invalidation Configuration
       - CACHE_MODE=epoch
       - CACHE_NS=rag:v1
       - CACHE_REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
+      # OTEL Observability (Phase LGTM)
+      - OTEL_SERVICE_NAME=weka-ingestion-service
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=otlp
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       redis:
@@ -384,27 +432,44 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # Optional: Jaeger for OpenTelemetry tracing
-  jaeger:
-    image: jaegertracing/all-in-one:1.51
-    container_name: weka-jaeger
+  # LGTM Observability: Grafana Alloy (unified telemetry collector)
+  # Forwards logs, traces, and metrics to GCP LGTM stack via Tailscale
+  alloy:
+    image: grafana/alloy:v1.4.0
+    container_name: weka-alloy
     networks:
       - weka-net
     ports:
-      - "16686:16686"  # UI
-      - "4318:4318"    # OTLP HTTP receiver
-      - "4317:4317"    # OTLP gRPC receiver
+      - "12345:12345"  # Alloy UI
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    volumes:
+      - ./config/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy
+      - /etc/alloy/config.alloy
     environment:
-      - COLLECTOR_OTLP_ENABLED=true
-      - LOG_LEVEL=${JAEGER_LOG_LEVEL:-info}
+      - HOSTNAME=${HOSTNAME:-wekadocs-dev}
+      # GCP LGTM endpoints (via Tailscale)
+      - LOKI_ENDPOINT=${LOKI_ENDPOINT:-http://10.10.0.5:3100/loki/api/v1/push}
+      - TEMPO_ENDPOINT=${TEMPO_ENDPOINT:-10.10.0.5:4317}
+      - MIMIR_ENDPOINT=${MIMIR_ENDPOINT:-http://10.10.0.5:9009/api/v1/push}
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: '1'
           memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:16686/"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/12345' || exit 1"]
+      interval: 30s
+      timeout: 10s
       retries: 3
     restart: unless-stopped
+    labels:
+      - "metrics.scrape=false"  # Don't scrape Alloy itself circularly

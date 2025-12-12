@@ -203,10 +203,20 @@ class QdrantVectorConfig(BaseModel):
     query_strategy: QdrantQueryStrategy = QdrantQueryStrategy.CONTENT_ONLY
     enable_sparse: bool = False
     enable_colbert: bool = False
+    enable_doc_title_sparse: bool = (
+        True  # Enable doc_title-sparse prefetch for title term matching
+    )
+    # NEW: Sparse vectors for lexical matching on titles and entities
+    enable_title_sparse: bool = True  # Lexical section heading matching
+    enable_entity_sparse: bool = True  # Lexical entity name matching
     use_query_api: bool = False
     query_api_dense_limit: int = 200
     query_api_sparse_limit: int = 200
     query_api_candidate_limit: int = 200
+    # Sparse embedding error handling mode
+    # If True: fail ingestion when sparse embedding fails (strict)
+    # If False: insert None placeholder, continue gracefully (default, B.2 behavior)
+    sparse_strict_mode: bool = False
 
 
 class Neo4jVectorConfig(BaseModel):
@@ -228,6 +238,26 @@ class BM25Config(BaseModel):
     index_name: str = "chunk_text_index_v3"
 
 
+class ExpansionRescoringConfig(BaseModel):
+    """Rescoring configuration for expansion neighbors"""
+
+    enabled: bool = False
+    mode: str = "threshold_only"  # threshold_only | weighted
+    normalize_method: str = "min_max"  # min_max | sigmoid | percentile
+    weights: Dict[str, float] = Field(
+        default_factory=lambda: {"lexical": 0.4, "structural": 0.5, "proximity": 0.1}
+    )
+
+
+class ExpansionStructureConfig(BaseModel):
+    """Structure-aware expansion configuration (Phase C.4)"""
+
+    sibling_limit: int = 3  # Max sibling chunks from same parent_section
+    parent_section_limit: int = 2  # Max chunks from parent section
+    shared_entity_limit: int = 3  # Max chunks sharing entities with top results
+    timeout_ms: int = 100  # Max latency budget for structure expansion
+
+
 class ExpansionConfig(BaseModel):
     """Bounded adjacency expansion configuration for Phase 7E"""
 
@@ -235,6 +265,13 @@ class ExpansionConfig(BaseModel):
     max_neighbors: int = 1
     query_min_tokens: int = 12
     score_delta_max: float = 0.02
+    sparse_score_threshold: float = 0.0  # Gating threshold for sparse lexical scores
+    rescoring: ExpansionRescoringConfig = Field(
+        default_factory=ExpansionRescoringConfig
+    )
+    structure: ExpansionStructureConfig = Field(
+        default_factory=ExpansionStructureConfig
+    )
 
 
 class RerankerConfig(BaseModel):
@@ -246,13 +283,68 @@ class RerankerConfig(BaseModel):
     max_tokens_per_pair: int = 1024
 
 
+class StructuralRetrievalConfig(BaseModel):
+    """
+    Phase 5: Structural retrieval configuration for query-type adaptive search.
+
+    Controls how structural metadata (has_code, has_table, parent_path_depth,
+    block_type) influences retrieval scoring and filtering.
+
+    Attributes:
+        enabled: Master switch for structural enhancements
+        filter_by_block_type: Enable hard filtering by block type (strict)
+        boost_by_structure: Enable soft boosting by structural features (recommended)
+        cli_code_boost: Score multiplier for code chunks on CLI queries
+        reference_table_boost: Score multiplier for table chunks on reference queries
+        deep_nesting_penalty: Score multiplier for deeply nested content
+        max_depth_for_overview: Max nesting depth for overview/conceptual queries
+    """
+
+    enabled: bool = True
+    filter_by_block_type: bool = False  # Off by default - use boosting instead
+    boost_by_structure: bool = True  # Soft boosting enabled by default
+    cli_code_boost: float = 1.20  # 20% boost for code on CLI queries
+    reference_table_boost: float = 1.20  # 20% boost for tables on reference queries
+    deep_nesting_penalty: float = 0.90  # 10% penalty for deep content on overview
+    max_depth_for_overview: int = 2  # Depth threshold for nesting penalty
+
+
 class HybridSearchConfig(BaseModel):
     enabled: bool = True
+    # Master switch: completely disable ALL Neo4j queries in retrieval path
+    neo4j_disabled: bool = True  # PHASE 1 VECTOR-ONLY: bypass citation, coverage, graph
     mode: str = (
         "legacy"  # legacy (BM25+RRF) or bge_reranker (vector-only + cross-encoder)
     )
     method: str = "rrf"  # Phase 7E: rrf or weighted
+    # Multi-vector fusion method: how to combine scores from multiple vector fields
+    # "rrf" = Reciprocal Rank Fusion (rank-based, robust to score scale differences)
+    # "weighted" = Weighted sum (uses vector_fields weights)
+    multi_vector_fusion_method: str = "rrf"
+    # Phase C: Graph channel configuration
+    graph_channel_enabled: bool = False  # Enable graph as independent scoring channel
+    graph_adaptive_enabled: bool = False  # Enable adaptive graph weight selection
+    colbert_rerank_enabled: bool = True  # Enable ColBERT late-interaction reranking
+    colbert_candidate_limit: int = (
+        50  # Min candidates for ColBERT reranking (reduces payload)
+    )
+    colbert_candidate_multiplier: int = 3  # top_k multiplier for ColBERT candidates
     rrf_k: int = 60  # Phase 7E: RRF constant
+    rrf_debug_logging: bool = (
+        False  # NEW: Log per-field RRF contributions for debugging
+    )
+    # NEW: Per-field RRF weights for boosting specific signals
+    # Higher weight = more influence on final ranking
+    rrf_field_weights: Dict[str, float] = Field(
+        default_factory=lambda: {
+            "content": 1.0,
+            "title": 1.0,
+            "text-sparse": 1.0,
+            "doc_title-sparse": 1.0,
+            "title-sparse": 2.0,  # Boost heading matches
+            "entity-sparse": 1.5,  # Boost entity matches
+        }
+    )
     fusion_alpha: float = 0.6  # Phase 7E: Vector weight for weighted fusion
     vector_weight: float = 0.7  # Legacy
     graph_weight: float = 0.3  # Legacy
@@ -264,11 +356,43 @@ class HybridSearchConfig(BaseModel):
     graph_propagation_decay: float = 0.85
     top_k: int = 20
     vector_fields: Dict[str, float] = Field(
-        default_factory=lambda: {"content": 1.0, "title": 0.35, "entity": 0.2}
+        default_factory=lambda: {
+            "content": 1.0,
+            "title": 0.35,
+            "doc_title": 0.2,  # Document-level title signal for title-matching queries
+            "entity": 0.2,
+        }
+    )
+    query_type_weights: Dict[str, Dict[str, float]] = Field(
+        default_factory=lambda: {
+            "conceptual": {"vector": 0.7, "graph": 0.3},
+            "cli": {"vector": 0.5, "graph": 0.5},
+            "config": {"vector": 0.5, "graph": 0.5},
+            "procedural": {"vector": 0.6, "graph": 0.4},
+            "troubleshooting": {"vector": 0.7, "graph": 0.3},
+            "reference": {"vector": 0.7, "graph": 0.3},
+        }
+    )
+    # Query-type adaptive relationship sets (used if graph_adaptive_enabled)
+    # Phase 3.5: MENTIONS is canonical direction (Chunk->Entity)
+    # Direction-agnostic queries work regardless of edge direction
+    query_type_relationships: Dict[str, List[str]] = Field(
+        default_factory=lambda: {
+            "conceptual": ["MENTIONS", "DEFINES", "IN_SECTION"],
+            "cli": ["MENTIONS", "CONTAINS_STEP", "HAS_PARAMETER"],
+            "config": ["MENTIONS", "HAS_PARAMETER", "DEFINES"],
+            "procedural": ["MENTIONS", "CONTAINS_STEP", "NEXT_CHUNK", "IN_SECTION"],
+            # Phase 2 Cleanup: Removed AFFECTS, CAUSED_BY (never materialized)
+            "troubleshooting": ["MENTIONS", "RESOLVES", "NEXT_CHUNK"],
+            "reference": ["MENTIONS", "NEXT_CHUNK"],
+        }
     )
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
     bm25: BM25Config = Field(default_factory=BM25Config)  # Phase 7E
     expansion: ExpansionConfig = Field(default_factory=ExpansionConfig)  # Phase 7E
+    structural: StructuralRetrievalConfig = Field(
+        default_factory=StructuralRetrievalConfig
+    )  # Phase 5
     bm25_timeout_ms: int = 2000
     expansion_timeout_ms: int = 2000
 
@@ -385,12 +509,129 @@ class ChunkMicrodocConfig(BaseModel):
     min_split_tokens: int = 400
 
 
+class SemanticChunkingConfig(BaseModel):
+    """
+    Configuration for semantic-first chunking using Chonkie.
+
+    Research-aligned defaults (Anthropic, Pinecone, NVIDIA 2024-2025):
+    - target_tokens: 400 (Chroma/Firecrawl optimal)
+    - min_tokens: 100 (allow small coherent chunks)
+    - max_tokens: 512 (NVIDIA recommendation ceiling)
+    - similarity_threshold: 0.5 (topic boundary detection - balanced)
+
+    Consensus refinements (o3 + Gemini 3 Pro review):
+    - skip_code_blocks: Feature flag to avoid splitting code blocks
+    - Fallback uses RecursiveCharacterTextSplitter (not simple section chunks)
+    """
+
+    enabled: bool = False  # Start disabled for safe rollout
+    similarity_threshold: float = 0.5  # Balanced: split when similarity drops below 50%
+    target_tokens: int = 400
+    min_tokens: int = 100  # KEY: Allow small coherent chunks (research-aligned)
+    max_tokens: int = 512
+    respect_sentence_boundaries: bool = True
+    embedding_adapter: str = "bge_m3"
+
+    # Structural boundary handling
+    preserve_heading_boundaries: bool = True  # Never merge across headings
+    heading_context_in_chunks: bool = True  # Include heading in chunk text
+
+    # CONSENSUS REFINEMENT: Code block handling (o3 concern about technical docs)
+    skip_code_blocks: bool = True  # Feature flag: skip semantic for code blocks
+    code_block_pattern: str = r"```[\s\S]*?```"  # Regex to detect fenced code blocks
+
+
 class ChunkAssemblyConfig(BaseModel):
-    assembler: str = "structured"
+    assembler: str = "structured"  # Options: structured, semantic, greedy, pipeline
     structure: ChunkStructureConfig = Field(default_factory=ChunkStructureConfig)
     split: ChunkSplitConfig = Field(default_factory=ChunkSplitConfig)
     microdoc: ChunkMicrodocConfig = Field(default_factory=ChunkMicrodocConfig)
     semantic: SemanticEnrichmentConfig = Field(default_factory=SemanticEnrichmentConfig)
+    semantic_chunking: SemanticChunkingConfig = Field(
+        default_factory=SemanticChunkingConfig
+    )  # Phase: Semantic Chunking
+
+
+class CrossDocLinkingConfig(BaseModel):
+    """
+    Cross-document linking configuration (Phase 3.5).
+
+    Controls semantic similarity edge creation between documents.
+    Used by both incremental (ingestion) and batch (backfill) modes.
+    """
+
+    enabled: bool = Field(default=True, description="Enable cross-document linking")
+    method: str = Field(
+        default="rrf",
+        description="Linking method: 'dense', 'rrf', 'title_ft'",
+    )
+    dense_threshold: float = Field(
+        default=0.70,
+        description="Cosine similarity threshold for dense-only mode",
+    )
+    rrf_threshold: float = Field(
+        default=0.025,
+        description="RRF score threshold for fusion mode",
+    )
+    discovery_threshold: float = Field(
+        default=0.50,
+        description="Initial discovery threshold (relaxed, filtered later)",
+    )
+    chunk_limit: int = Field(
+        default=100,
+        description="Max chunks to fetch per query before aggregation",
+    )
+    max_edges_per_doc: int = Field(
+        default=5,
+        description="Maximum edges to create per source document",
+    )
+    rrf_k: int = Field(
+        default=60,
+        description="RRF constant (standard value from literature)",
+    )
+    min_corpus_size: int = Field(
+        default=3,
+        description="Minimum documents required before linking is attempted",
+    )
+    collection_name: str = Field(
+        default="chunks_multi_bge_m3",
+        description="Qdrant collection name for vector searches",
+    )
+
+    # ColBERT Reranking (Phase 4)
+    colbert_rerank: bool = Field(
+        default=True,
+        description="Enable ColBERT MaxSim reranking of new edges",
+    )
+    colbert_threshold: float = Field(
+        default=0.30,
+        description="Minimum ColBERT score to keep edge (prune below)",
+    )
+    colbert_max_chunks: int = Field(
+        default=3,
+        description="Maximum chunks to fetch for ColBERT vectors",
+    )
+    colbert_max_tokens: int = Field(
+        default=200,
+        description="Maximum tokens for ColBERT comparison (truncate beyond)",
+    )
+
+
+class ParserConfig(BaseModel):
+    """Parser configuration for document ingestion."""
+
+    engine: str = Field(
+        default="markdown-it-py",
+        description="Parser engine: 'legacy' or 'markdown-it-py'",
+    )
+    shadow_mode: bool = Field(
+        default=False,
+        description="Run both parsers and log differences for comparison",
+    )
+    fail_on_mismatch: bool = Field(
+        default=False,
+        description="Fail ingestion if parsers produce different results (only in shadow mode)",
+    )
 
 
 class IngestionConfig(BaseModel):
@@ -398,9 +639,13 @@ class IngestionConfig(BaseModel):
     max_section_tokens: int = 1000
     timeout_seconds: int = 300
     workers: int = 2
+    parser: ParserConfig = Field(default_factory=ParserConfig)
     chunk_assembly: ChunkAssemblyConfig = Field(default_factory=ChunkAssemblyConfig)
     queue_recovery: QueueRecoveryConfig = Field(default_factory=QueueRecoveryConfig)
     reconciliation: ReconciliationConfig
+    cross_doc_linking: CrossDocLinkingConfig = Field(
+        default_factory=CrossDocLinkingConfig
+    )
 
 
 class SchemaConfig(BaseModel):
@@ -527,6 +772,46 @@ class FeatureFlagsConfig(BaseModel):
         default=False, description="Enable entity focus bias in retrieval"
     )
 
+    # Query API weighted fusion rollout (Phase A)
+    query_api_weighted_fusion: bool = Field(
+        default=False,
+        description="Enable weighted per-field fusion on Query API path (Strategy 2)",
+    )
+
+    # Graph harm-reduction flags (Phase C.0)
+    graph_garbage_filter: bool = Field(
+        default=False,
+        description="Filter short/stopword entities before graph matching",
+    )
+    graph_rel_types_wired: bool = Field(
+        default=False,
+        description="Use rel_types from config instead of hardcoded relationships in graph Cypher",
+    )
+    dedup_best_score: bool = Field(
+        default=False,
+        description="Deduplicate by keeping best fused score and merging signals",
+    )
+    graph_score_normalized: bool = Field(
+        default=False,
+        description="Normalize graph scores to [0,1] using saturating exponential",
+    )
+
+    # Graph reranker / entity embedding rollout (Phase C.2 / C.3)
+    graph_as_reranker: bool = Field(
+        default=False,
+        description="Use graph as reranker over vector candidates instead of channel",
+    )
+    entity_embedding_fallback: bool = Field(
+        default=False,
+        description="Enable entity embedding fallback when trie resolution fails",
+    )
+
+    # Structure-aware context expansion (Phase C.4)
+    structure_aware_expansion: bool = Field(
+        default=False,
+        description="Enable sibling, parent section, and shared-entity context expansion",
+    )
+
 
 class GitHubConnectorSettings(BaseModel):
     enabled: bool = False
@@ -555,6 +840,71 @@ class ConnectorsConfig(BaseModel):
     github: Optional[GitHubConnectorSettings] = None
 
 
+class ReferencesExtractionConfig(BaseModel):
+    max_text_length: int = 8192
+    window_overlap: int = 512
+    confidence_scores: Dict[str, float] = Field(
+        default_factory=lambda: {
+            "hyperlink": 0.95,
+            "see_also": 0.85,
+            "related": 0.80,
+            "refer_to": 0.70,
+        }
+    )
+
+
+class ReferencesResolutionConfig(BaseModel):
+    fuzzy_penalty: float = 0.25
+    batch_size: int = 100
+    min_hint_length: int = 3
+    use_fulltext_index: bool = True
+
+
+class ReferencesQueryConfig(BaseModel):
+    enable_cross_doc_signals: bool = True
+    cross_doc_weight_ratio: float = 0.3
+    max_referencing_docs: int = 3
+
+
+class ReferencesConfig(BaseModel):
+    enabled: bool = False  # Disabled by default until verified
+    extraction: ReferencesExtractionConfig = Field(
+        default_factory=ReferencesExtractionConfig
+    )
+    resolution: ReferencesResolutionConfig = Field(
+        default_factory=ReferencesResolutionConfig
+    )
+    query: ReferencesQueryConfig = Field(default_factory=ReferencesQueryConfig)
+
+
+class NERConfig(BaseModel):
+    """Named Entity Recognition configuration for GLiNER integration.
+
+    GLiNER provides zero-shot NER that enriches chunks with domain-specific
+    entity metadata for improved retrieval quality.
+
+    Attributes:
+        enabled: Master switch for NER enrichment (default: False)
+        model_name: HuggingFace model ID for GLiNER
+        threshold: Minimum confidence score for entity extraction (0.0-1.0)
+        device: Compute device - "auto" detects MPS/CUDA/CPU automatically
+        batch_size: Texts per batch (32 optimal for Apple Silicon)
+        labels: Domain-specific entity labels with examples for zero-shot
+        service_url: Optional URL for external GLiNER service (MPS accelerated)
+                     If set, tries HTTP service first with local model fallback
+    """
+
+    enabled: bool = False  # Default OFF - explicit opt-in required
+    model_name: str = "urchade/gliner_medium-v2.1"
+    threshold: float = 0.45
+    device: str = "auto"  # auto-detect: MPS → CUDA → CPU
+    batch_size: int = 32  # Optimal for M1/M2/M3 Max
+    labels: List[str] = Field(default_factory=list)  # Populated from YAML
+    service_url: Optional[str] = (
+        None  # External GLiNER service (e.g., http://host.docker.internal:9002)
+    )
+
+
 class Config(WekaBaseModel):
     """Main configuration model"""
 
@@ -577,6 +927,8 @@ class Config(WekaBaseModel):
     )  # Phase 7C
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)  # Phase 7E-4
     connectors: Optional[ConnectorsConfig] = None
+    references: ReferencesConfig = Field(default_factory=ReferencesConfig)
+    ner: NERConfig = Field(default_factory=NERConfig)  # GLiNER NER integration
 
     class Config:
         populate_by_name = True  # Allow both graph_schema and schema
@@ -595,6 +947,7 @@ class Settings(BaseSettings):
         default=None, alias="EMBEDDING_PROFILES_PATH"
     )
     embedding_strict_mode: bool = Field(default=True, alias="EMBEDDING_STRICT_MODE")
+    validation_strict_mode: bool = Field(default=False, alias="VALIDATION_STRICT_MODE")
     embedding_namespace_mode: str = Field(
         default="none", alias="EMBEDDING_NAMESPACE_MODE"
     )
@@ -927,6 +1280,9 @@ def _legacy_env_override(
             raw_value,
             current_value,
         )
+        return current_value
+    # Only warn if the env value actually differs from the profile value
+    if parsed_value == current_value:
         return current_value
     logger.warning(
         "Legacy env %s overriding embedding profile value %s -> %s",

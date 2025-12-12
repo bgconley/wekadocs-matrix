@@ -6,6 +6,7 @@ Runs both modes against a small gold set and reports recall/MRR/latency,
 using the existing HybridRetriever pipeline. Designed to work with the
 sample_ingest docs without requiring schema changes.
 """
+
 from __future__ import annotations
 
 import argparse

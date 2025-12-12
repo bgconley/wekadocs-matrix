@@ -30,7 +30,7 @@ class TestChunkIDDeterminism:
         id2 = generate_chunk_id(doc_id, section_ids)
 
         assert id1 == id2, "Same inputs must produce identical IDs"
-        assert len(id1) == 24, "ID must be 24 characters"
+        assert len(id1) == 64, "Combined chunk ID must be 64-char SHA256 hex"
 
     def test_order_matters(self):
         """CRITICAL: Order preservation - different orders → different IDs."""
@@ -98,7 +98,10 @@ class TestChunkMetadata:
 
         # Verify required fields present
         assert meta["id"] is not None
-        assert len(meta["id"]) == 24
+        # Single-section chunks preserve the original section_id
+        assert (
+            meta["id"] == "sec_abc123"
+        ), "Single-section chunk ID should equal original section_id"
         assert meta["document_id"] == "doc_xyz789"
         assert meta["level"] == 2
         assert meta["order"] == 5
@@ -440,10 +443,10 @@ class TestChunkIngestionIntegration:
 
                 assert (
                     chunk_ids == chunk_ids_initial
-                ), f"Neo4j state changed on iteration {i+1}: {chunk_ids} != {chunk_ids_initial}"
+                ), f"Neo4j state changed on iteration {i + 1}: {chunk_ids} != {chunk_ids_initial}"
                 assert (
                     point_count == point_count_initial
-                ), f"Qdrant state changed on iteration {i+1}: {point_count} != {point_count_initial}"
+                ), f"Qdrant state changed on iteration {i + 1}: {point_count} != {point_count_initial}"
 
             # Step 3: Final verification - counts stable
             assert len(chunk_ids_initial) == 3

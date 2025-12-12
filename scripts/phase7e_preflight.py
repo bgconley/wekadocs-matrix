@@ -500,7 +500,7 @@ class PreflightChecker:
             self.results["summary"] = {
                 "passed": passed,
                 "total": total,
-                "pass_rate": f"{passed}/{total} ({100*passed//total}%)",
+                "pass_rate": f"{passed}/{total} ({100 * passed // total}%)",
             }
 
         finally:

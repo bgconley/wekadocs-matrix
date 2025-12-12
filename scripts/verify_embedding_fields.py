@@ -223,7 +223,7 @@ class EmbeddingFieldVerifier:
                     total=total,
                     with_version=with_version,
                     percentage=(
-                        f"{(with_version/total*100):.1f}%" if total > 0 else "N/A"
+                        f"{(with_version / total * 100):.1f}%" if total > 0 else "N/A"
                     ),
                 )
 

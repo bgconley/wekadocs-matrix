@@ -63,7 +63,7 @@ def measure_latency(verbosity: str) -> List[float]:
                 timeout=30,
             )
         except Exception as e:
-            print(f"Warmup request {i+1} failed: {e}")
+            print(f"Warmup request {i + 1} failed: {e}")
 
     print(f"Running {len(QUERIES) * TEST_ITERATIONS} test requests...")
 

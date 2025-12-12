@@ -48,10 +48,9 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
    curl http://localhost:9090/api/v1/query?query='topk(5, histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])))'
    ```
 
-2. Review OpenTelemetry traces in Jaeger
+2. Review OpenTelemetry traces in your OTLP backend (New Relic by default)
    ```bash
-   open http://localhost:16686
-   # Filter by service=wekadocs-mcp, minDuration=2s
+   # Use New Relic Distributed tracing UI for service=weka-mcp-server
    ```
 
 3. Check for slow Cypher queries
@@ -213,9 +212,9 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
    curl http://localhost:9090/api/v1/query?query='histogram_quantile(0.95, rate(graph_expansion_duration_seconds_bucket[5m]))'
    ```
 
-3. Review slow query traces in Jaeger
+3. Review slow query traces in your OTLP backend (New Relic by default)
    ```bash
-   # Look for traces with operation=hybrid.search and duration > 500ms
+   # Look for traces with operation=hybrid.search and duration > 500ms in New Relic
    ```
 
 4. Verify Neo4j indexes
@@ -658,7 +657,7 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 - **Grafana:** http://localhost:3000 (default: admin/admin)
 - **Prometheus:** http://localhost:9090
-- **Jaeger UI:** http://localhost:16686
+- **Tracing UI:** New Relic Distributed tracing (or your configured OTLP backend)
 - **Metrics Endpoint:** http://localhost:8000/metrics
 
 ## Escalation Contacts

@@ -75,7 +75,7 @@ def test_jina_embedding_generation(provider):
             print(f"   - Dimensions: {dims}")
             print(f"   - Vector norm: {vector_norm:.4f}")
             print(
-                f"   - Non-zero elements: {non_zero}/{dims} ({100*non_zero/dims:.1f}%)"
+                f"   - Non-zero elements: {non_zero}/{dims} ({100 * non_zero / dims:.1f}%)"
             )
             print(f"   - Max absolute value: {max_val:.4f}")
 
