@@ -62,7 +62,10 @@ class FileSystemWatcher:
         self.mode = (mode or "ready").strip().lower()
 
         # Tracking
-        self.seen_files: Set[str] = set()
+        # file_path -> (last_size, last_mtime) at time of last processing
+        # Used to prevent reprocessing unchanged files while still allowing
+        # re-ingest when content changes.
+        self.seen_files: Dict[str, Tuple[int, float]] = {}
         # path -> (first_seen_ts, stable_since_ts, last_size, last_mtime)
         self.pending_files: Dict[str, Tuple[float, float, int, float]] = {}
 
@@ -180,10 +183,6 @@ class FileSystemWatcher:
                     # Fall back to absolute path if resolve fails
                     file_path = str(scan_file.absolute())
 
-                # Skip if already processed
-                if file_path in self.seen_files:
-                    continue
-
                 now = time.time()
                 try:
                     stat = scan_file.stat()
@@ -192,6 +191,14 @@ class FileSystemWatcher:
                 except Exception:
                     size = -1
                     mtime = 0.0
+
+                # Skip if already processed and unchanged; reprocess if changed.
+                if file_path in self.seen_files:
+                    last_size, last_mtime = self.seen_files[file_path]
+                    if size == last_size and mtime == last_mtime:
+                        continue
+                    # File has changed since last processing; allow re-ingest.
+                    self.seen_files.pop(file_path, None)
 
                 if file_path not in self.pending_files:
                     # New file: stable_since starts now
@@ -233,7 +240,15 @@ class FileSystemWatcher:
         for file_path in to_process:
             try:
                 self._process_file(file_path)
-                self.seen_files.add(file_path)
+                # Record size/mtime after processing so unchanged files won't be reprocessed.
+                try:
+                    stat = Path(file_path).stat()
+                    self.seen_files[file_path] = (
+                        int(stat.st_size),
+                        float(stat.st_mtime),
+                    )
+                except Exception:
+                    self.seen_files[file_path] = (-1, 0.0)
             except Exception as e:
                 logger.error(f"Failed to process {file_path}: {e}", exc_info=True)
 
