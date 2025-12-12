@@ -201,7 +201,7 @@ def seed_graph():
 
             session.run(
                 """
-                MERGE (s:Section {id: $id})
+                MERGE (s:Chunk {id: $id})
                 SET s += $props, s.updated_at = datetime()
             """,
                 id=section["id"],
@@ -212,8 +212,8 @@ def seed_graph():
             session.run(
                 """
                 MATCH (d:Document {id: $doc_id})
-                MATCH (s:Section {id: $sec_id})
-                MERGE (d)-[:HAS_SECTION {order: $order}]->(s)
+                MATCH (s:Chunk {id: $sec_id})
+                MERGE (d)-[:HAS_CHUNK {order: $order}]->(s)
             """,
                 doc_id=section["document_id"],
                 sec_id=section["id"],
@@ -267,7 +267,7 @@ def seed_graph():
         # Create relationships (MENTIONS)
         session.run(
             """
-            MATCH (s:Section {id: $sec_id})
+            MATCH (s:Chunk {id: $sec_id})
             MATCH (c:Command {id: $cmd_id})
             MERGE (s)-[:MENTIONS {confidence: 0.95, source_section_id: $sec_id}]->(c)
         """,
@@ -277,7 +277,7 @@ def seed_graph():
 
         session.run(
             """
-            MATCH (s:Section {id: $sec_id})
+            MATCH (s:Chunk {id: $sec_id})
             MATCH (c:Command {id: $cmd_id})
             MERGE (s)-[:MENTIONS {confidence: 0.90, source_section_id: $sec_id}]->(c)
         """,
@@ -287,7 +287,7 @@ def seed_graph():
 
         session.run(
             """
-            MATCH (s:Section {id: $sec_id})
+            MATCH (s:Chunk {id: $sec_id})
             MATCH (e:Error {id: $err_id})
             MERGE (s)-[:MENTIONS {confidence: 0.98, source_section_id: $sec_id}]->(e)
         """,
@@ -297,7 +297,7 @@ def seed_graph():
 
         session.run(
             """
-            MATCH (s:Section {id: $sec_id})
+            MATCH (s:Chunk {id: $sec_id})
             MATCH (c:Configuration {id: $cfg_id})
             MERGE (s)-[:MENTIONS {confidence: 0.92, source_section_id: $sec_id}]->(c)
         """,
@@ -307,7 +307,7 @@ def seed_graph():
 
         session.run(
             """
-            MATCH (s:Section {id: $sec_id})
+            MATCH (s:Chunk {id: $sec_id})
             MATCH (c:Configuration {id: $cfg_id})
             MERGE (s)-[:MENTIONS {confidence: 0.88, source_section_id: $sec_id}]->(c)
         """,

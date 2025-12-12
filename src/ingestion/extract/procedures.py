@@ -112,9 +112,17 @@ def extract_procedures(section: Dict) -> Tuple[List, List, List]:
 
     # Create step entities
     for step_info in found_steps:
+        # Build a meaningful name for the step (used by entity-sparse embeddings)
+        # Format: "Step {order}: {truncated_instruction}" (max 80 chars)
+        instruction_preview = step_info["instruction"][:60].strip()
+        if len(step_info["instruction"]) > 60:
+            instruction_preview += "..."
+        step_name = f"Step {step_info['order']}: {instruction_preview}"
+
         step = {
             "id": step_info["id"],
             "label": "Step",
+            "name": step_name,  # Required for entity-sparse embedding lookup
             "order": step_info["order"],
             "instruction": step_info["instruction"],
             "procedure_id": procedure_id,  # Link to procedure if exists
@@ -150,8 +158,12 @@ def extract_procedures(section: Dict) -> Tuple[List, List, List]:
             )
 
     if procedures or steps:
+        # Use accurate log message based on what was actually extracted
+        log_event = (
+            "procedure_extracted" if procedures else "steps_extracted_standalone"
+        )
         logger.info(
-            "Extracted procedure from section",
+            log_event,
             section_id=section["id"],
             procedures_found=len(procedures),
             steps_count=len(steps),

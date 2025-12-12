@@ -1,0 +1,377 @@
+# Golden Query Test Set for WekaDocs GraphRAG Smoke Testing
+# Generated: 2025-12-01
+# Purpose: Verifiable queries against the currently ingested document set (54 docs)
+#
+# Each query includes:
+#   - id: Unique identifier
+#   - text: Natural language query
+#   - type: Query classification (procedural, reference, command, conceptual, troubleshooting)
+#   - expected_doc_titles: Document titles that MUST appear in top-k results
+#   - expected_keywords: Keywords that should appear in retrieved chunk content
+#   - difficulty: easy/medium/hard
+#   - notes: Optional context about the query
+#
+# Scoring:
+#   - hit@k: At least one expected doc in top k results
+#   - mrr: Mean reciprocal rank of first expected doc
+#   - keyword_recall: Fraction of expected_keywords found in top result
+
+queries:
+  # =============================================================================
+  # NFS PROTOCOL QUERIES (4 docs ingested)
+  # =============================================================================
+  - id: nfs_001
+    text: "How do I configure NFS global settings?"
+    type: procedural
+    expected_doc_titles:
+      - "Manage NFS networking using the CLI"
+    expected_keywords: ["weka nfs global-config set", "config-fs", "mountd-port"]
+    difficulty: easy
+
+  - id: nfs_002
+    text: "What NFS client mount options are supported?"
+    type: reference
+    expected_doc_titles:
+      - "Supported NFS client mount parameters"
+    expected_keywords: ["mount", "nfs", "client", "parameters"]
+    difficulty: easy
+
+  - id: nfs_003
+    text: "How to create NFS interface groups?"
+    type: command
+    expected_doc_titles:
+      - "Manage NFS networking using the CLI"
+    expected_keywords: ["weka nfs interface-group add", "subnet", "gateway"]
+    difficulty: medium
+
+  - id: nfs_004
+    text: "Configure NFS exports and permissions"
+    type: procedural
+    expected_doc_titles:
+      - "Manage NFS networking using the CLI"
+      - "Manage NFS networking using the GUI"
+    expected_keywords: ["export", "permission", "nfs"]
+    difficulty: medium
+
+  # =============================================================================
+  # S3 PROTOCOL QUERIES (15+ docs ingested)
+  # =============================================================================
+  - id: s3_001
+    text: "How do I create an S3 bucket using the CLI?"
+    type: command
+    expected_doc_titles:
+      - "Manage S3 buckets using the CLI"
+    expected_keywords: ["weka s3 bucket add", "policy", "quota"]
+    difficulty: easy
+
+  - id: s3_002
+    text: "How to configure AWS CLI for WEKA S3?"
+    type: procedural
+    expected_doc_titles:
+      - "Configure and use AWS CLI with WEKA S3 storage"
+    expected_keywords: ["aws", "configure", "endpoint", "access key"]
+    difficulty: easy
+
+  - id: s3_003
+    text: "What are the S3 API limitations in WEKA?"
+    type: reference
+    expected_doc_titles:
+      - "S3 supported APIs and limitations"
+    expected_keywords: ["limitation", "supported", "API"]
+    difficulty: easy
+
+  - id: s3_004
+    text: "How to create S3 users and manage authentication?"
+    type: procedural
+    expected_doc_titles:
+      - "Manage S3 users and authentication using the CLI"
+      - "S3 users and authentication"
+    expected_keywords: ["user", "authentication", "access key", "secret"]
+    difficulty: medium
+
+  - id: s3_005
+    text: "How to set up S3 bucket lifecycle rules?"
+    type: procedural
+    expected_doc_titles:
+      - "Manage S3 lifecycle rules using the CLI"
+      - "S3 lifecycle rules management"
+    expected_keywords: ["lifecycle", "rule", "expiration"]
+    difficulty: medium
+
+  - id: s3_006
+    text: "S3 audit events for security tracking"
+    type: conceptual
+    expected_doc_titles:
+      - "Example: How to use S3 audit events for tracking and security"
+      - "Audit S3 APIs"
+    expected_keywords: ["audit", "event", "security", "tracking"]
+    difficulty: medium
+
+  - id: s3_007
+    text: "How to use boto3 with WEKA S3?"
+    type: procedural
+    expected_doc_titles:
+      - "S3 examples using boto3"
+    expected_keywords: ["boto3", "python", "example"]
+    difficulty: easy
+
+  - id: s3_008
+    text: "Configure S3 audit webhook"
+    type: procedural
+    expected_doc_titles:
+      - "Configure audit webhook using the CLI"
+      - "Configure audit webhook using the GUI"
+    expected_keywords: ["webhook", "audit", "configure"]
+    difficulty: medium
+
+  - id: s3_009
+    text: "How to integrate S3 audit with Splunk?"
+    type: procedural
+    expected_doc_titles:
+      - "Example: How to use Splunk to audit S3"
+    expected_keywords: ["splunk", "audit", "S3"]
+    difficulty: medium
+
+  - id: s3_010
+    text: "weka s3 bucket quota command"
+    type: command
+    expected_doc_titles:
+      - "Manage S3 buckets using the CLI"
+    expected_keywords: ["weka s3 bucket quota", "set", "reset"]
+    difficulty: easy
+
+  # =============================================================================
+  # SMB PROTOCOL QUERIES (2 docs ingested)
+  # =============================================================================
+  - id: smb_001
+    text: "How to manage SMB shares using the CLI?"
+    type: procedural
+    expected_doc_titles:
+      - "Manage SMB using the CLI"
+    expected_keywords: ["smb", "share", "cli"]
+    difficulty: easy
+
+  - id: smb_002
+    text: "Configure SMB using the GUI"
+    type: procedural
+    expected_doc_titles:
+      - "Manage SMB using the GUI"
+    expected_keywords: ["smb", "gui", "configure"]
+    difficulty: easy
+
+  # =============================================================================
+  # MONITORING & OBSERVABILITY QUERIES (10+ docs ingested)
+  # =============================================================================
+  - id: mon_001
+    text: "How to export WEKA metrics to Prometheus?"
+    type: procedural
+    expected_doc_titles:
+      - "Export cluster metrics to Prometheus"
+    expected_keywords: ["prometheus", "metrics", "export"]
+    difficulty: easy
+
+  - id: mon_002
+    text: "Set up external monitoring with WEKAmon"
+    type: procedural
+    expected_doc_titles:
+      - "Set up WEKAmon for external monitoring"
+    expected_keywords: ["wekamon", "monitoring", "external"]
+    difficulty: medium
+
+  - id: mon_003
+    text: "How to view performance statistics in Grafana?"
+    type: procedural
+    expected_doc_titles:
+      - "Explore performance statistics in Grafana"
+    expected_keywords: ["grafana", "performance", "statistics"]
+    difficulty: easy
+
+  - id: mon_004
+    text: "What is Local WEKA Home?"
+    type: conceptual
+    expected_doc_titles:
+      - "Local WEKA Home overview"
+      - "WEKA Home - The WEKA support cloud"
+    expected_keywords: ["weka home", "local", "support"]
+    difficulty: easy
+
+  - id: mon_005
+    text: "How to deploy Local WEKA Home v3?"
+    type: procedural
+    expected_doc_titles:
+      - "Deploy Local WEKA Home v3.0 or higher"
+    expected_keywords: ["deploy", "local weka home", "v3"]
+    difficulty: medium
+
+  - id: mon_006
+    text: "Explore cluster insights and statistics"
+    type: procedural
+    expected_doc_titles:
+      - "Explore cluster insights"
+    expected_keywords: ["cluster", "insights", "statistics"]
+    difficulty: easy
+
+  # =============================================================================
+  # ALERTS & EVENTS QUERIES (6+ docs ingested)
+  # =============================================================================
+  - id: alert_001
+    text: "List of WEKA alerts and how to fix them"
+    type: reference
+    expected_doc_titles:
+      - "List of alerts and corrective actions"
+    expected_keywords: ["alert", "corrective", "action"]
+    difficulty: easy
+
+  - id: alert_002
+    text: "How to manage alerts using the CLI?"
+    type: command
+    expected_doc_titles:
+      - "Manage alerts using the CLI"
+    expected_keywords: ["weka alerts", "cli", "manage"]
+    difficulty: easy
+
+  - id: alert_003
+    text: "Configure alert integrations"
+    type: procedural
+    expected_doc_titles:
+      - "Manage alerts and integrations"
+    expected_keywords: ["alert", "integration", "configure"]
+    difficulty: medium
+
+  - id: alert_004
+    text: "How to view and manage events?"
+    type: procedural
+    expected_doc_titles:
+      - "Manage events using the CLI"
+      - "Events list"
+    expected_keywords: ["event", "manage", "view"]
+    difficulty: easy
+
+  # =============================================================================
+  # AUDIT & FORWARDING QUERIES (4+ docs ingested)
+  # =============================================================================
+  - id: audit_001
+    text: "How to configure audit forwarding?"
+    type: procedural
+    expected_doc_titles:
+      - "Audit and forwarding management"
+      - "Manage audit and forwarding using the CLI"
+    expected_keywords: ["audit", "forwarding", "configure"]
+    difficulty: medium
+
+  - id: audit_002
+    text: "Manage audit forwarding using GUI"
+    type: procedural
+    expected_doc_titles:
+      - "Manage audit and forwarding using the GUI"
+    expected_keywords: ["audit", "forwarding", "gui"]
+    difficulty: easy
+
+  # =============================================================================
+  # BACKGROUND TASKS QUERIES (4 docs ingested)
+  # =============================================================================
+  - id: task_001
+    text: "How to set up a Data Services container?"
+    type: procedural
+    expected_doc_titles:
+      - "Set up a Data Services container for background tasks"
+    expected_keywords: ["data services", "container", "background"]
+    difficulty: medium
+
+  - id: task_002
+    text: "Manage background tasks using CLI"
+    type: command
+    expected_doc_titles:
+      - "Manage background tasks using the CLI"
+    expected_keywords: ["background", "task", "cli"]
+    difficulty: easy
+
+  # =============================================================================
+  # SNAPSHOTS QUERIES (1 doc ingested)
+  # =============================================================================
+  - id: snap_001
+    text: "How to set up SnapTool for snapshot management?"
+    type: procedural
+    expected_doc_titles:
+      - "Set up the SnapTool external snapshots manager"
+    expected_keywords: ["snaptool", "snapshot", "schedule"]
+    difficulty: medium
+
+  - id: snap_002
+    text: "Configure SnapTool authentication"
+    type: procedural
+    expected_doc_titles:
+      - "Set up the SnapTool external snapshots manager"
+    expected_keywords: ["snaptool", "authentication", "token"]
+    difficulty: medium
+
+  # =============================================================================
+  # SECURITY & COMPLIANCE QUERIES
+  # =============================================================================
+  - id: sec_001
+    text: "Enforce security and compliance in WEKA"
+    type: conceptual
+    expected_doc_titles:
+      - "Enforce security and compliance"
+    expected_keywords: ["security", "compliance", "enforce"]
+    difficulty: medium
+
+  # =============================================================================
+  # CROSS-TOPIC / COMPLEX QUERIES
+  # =============================================================================
+  - id: cross_001
+    text: "CLI vs GUI for S3 bucket management"
+    type: reference
+    expected_doc_titles:
+      - "Manage S3 buckets using the CLI"
+      - "Manage S3 buckets using the GUI"
+    expected_keywords: ["s3", "bucket", "cli", "gui"]
+    difficulty: medium
+    notes: "Should return both CLI and GUI docs"
+
+  - id: cross_002
+    text: "All ways to configure NFS"
+    type: reference
+    expected_doc_titles:
+      - "Manage NFS networking using the CLI"
+      - "Manage NFS networking using the GUI"
+      - "Manage the NFS protocol"
+    expected_keywords: ["nfs", "configure", "manage"]
+    difficulty: hard
+    notes: "Should return multiple NFS-related docs"
+
+  - id: cross_003
+    text: "S3 service management options"
+    type: reference
+    expected_doc_titles:
+      - "Manage the S3 service using the CLI"
+      - "Manage the S3 service using the GUI"
+      - "Manage the S3 protocol"
+    expected_keywords: ["s3", "service", "manage"]
+    difficulty: hard
+    notes: "Should return S3 service management docs"
+
+# =============================================================================
+# SUMMARY
+# =============================================================================
+# Total queries: 35
+# By type:
+#   - procedural: 19
+#   - reference: 6
+#   - command: 6
+#   - conceptual: 4
+# By topic:
+#   - NFS: 4
+#   - S3: 10
+#   - SMB: 2
+#   - Monitoring: 6
+#   - Alerts/Events: 4
+#   - Audit: 2
+#   - Background Tasks: 2
+#   - Snapshots: 2
+#   - Security: 1
+#   - Cross-topic: 3
+# By difficulty:
+#   - easy: 17
+#   - medium: 15
+#   - hard: 3

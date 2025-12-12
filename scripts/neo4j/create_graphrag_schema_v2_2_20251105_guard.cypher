@@ -1,13 +1,26 @@
 // ============================================================================
-// WekaDocs GraphRAG Schema v2.2 - BACKWARD COMPATIBLE + HYBRID RAG
+// WekaDocs GraphRAG Schema v3.0 - PHASE 3.5 MENTIONS BRIDGE
 // ============================================================================
 // Created:     2025-11-05
-// Base:        v2.1 clean snapshot (kept intact)
+// Updated:     2025-12-11 (Phase 3 + Phase 3.5)
+// Base:        v2.2 (hybrid retrieval) + Phase 3 (markdown-it-py) + Phase 3.5 (MENTIONS)
 // Edition:     Neo4j Community Edition (no property-existence constraints)
-// Purpose:     Enable Strategy 1 (smaller chunks) & Strategy 3 (hybrid retrieval)
-//              while remaining 100% backward compatible.
+// Purpose:     Enable Strategy 1 (smaller chunks), Strategy 3 (hybrid retrieval),
+//              and full GraphRAG MENTIONS bridge for entity-chunk traversal.
 // Canonical:   document_id (canonical) ; doc_id (legacy alias)
 // Idempotent:  Yes (IF NOT EXISTS / MERGE everywhere).
+//
+// PHASE 3 ADDITIONS:
+//   - Source line mapping (line_start, line_end) for citation correlation
+//   - Parent path hierarchy (parent_path) for contextual queries
+//   - Structural metadata (has_code, has_table, code_ratio) for query filtering
+//   - PARENT_HEADING relationship for heading hierarchy traversal
+//
+// PHASE 3.5 ADDITIONS:
+//   - GLiNER entity types (Parameter, Component, Protocol, etc.)
+//   - MENTIONS relationship with confidence and source properties
+//   - MENTIONED_IN inverse edge for bidirectional traversal
+//   - Entity-chunk bridge for GraphRAG hybrid retrieval pattern
 // ============================================================================
 
 
@@ -51,6 +64,25 @@ FOR (p:Parameter) REQUIRE p.id IS UNIQUE;
 CREATE CONSTRAINT component_id_unique IF NOT EXISTS
 FOR (c:Component) REQUIRE c.id IS UNIQUE;
 
+// Phase 3.5: GLiNER entity type constraints (expanded entity model)
+CREATE CONSTRAINT protocol_id_unique IF NOT EXISTS
+FOR (p:Protocol) REQUIRE p.id IS UNIQUE;
+
+CREATE CONSTRAINT cloudprovider_id_unique IF NOT EXISTS
+FOR (c:CloudProvider) REQUIRE c.id IS UNIQUE;
+
+CREATE CONSTRAINT storageconcept_id_unique IF NOT EXISTS
+FOR (s:StorageConcept) REQUIRE s.id IS UNIQUE;
+
+CREATE CONSTRAINT version_id_unique IF NOT EXISTS
+FOR (v:Version) REQUIRE v.id IS UNIQUE;
+
+CREATE CONSTRAINT procedurestep_id_unique IF NOT EXISTS
+FOR (ps:ProcedureStep) REQUIRE ps.id IS UNIQUE;
+
+CREATE CONSTRAINT capacitymetric_id_unique IF NOT EXISTS
+FOR (cm:CapacityMetric) REQUIRE cm.id IS UNIQUE;
+
 CREATE CONSTRAINT session_id_unique IF NOT EXISTS
 FOR (s:Session) REQUIRE s.session_id IS UNIQUE;
 
@@ -62,6 +94,16 @@ FOR (a:Answer) REQUIRE a.answer_id IS UNIQUE;
 
 CREATE CONSTRAINT schema_version_singleton IF NOT EXISTS
 FOR (sv:SchemaVersion) REQUIRE sv.id IS UNIQUE;
+
+// Phase 3: GhostDocument for forward reference resolution
+// Ghost Documents are placeholders created when a reference target doesn't exist yet
+CREATE CONSTRAINT ghost_document_id_unique IF NOT EXISTS
+FOR (g:GhostDocument) REQUIRE g.id IS UNIQUE;
+
+// Phase 3: PendingReference for fuzzy title forward references
+// Created when a non-hyperlink reference can't be resolved at ingestion time
+CREATE CONSTRAINT pending_reference_hint_unique IF NOT EXISTS
+FOR (p:PendingReference) REQUIRE p.hint IS UNIQUE;
 
 
 // ---------------------------------------------------------------------------
@@ -78,14 +120,22 @@ FOR (d:Document) ON (d.version);
 CREATE INDEX document_last_edited IF NOT EXISTS
 FOR (d:Document) ON (d.last_edited);
 
-// Section indexes (v2.1)
-CREATE INDEX section_document_id IF NOT EXISTS
+// Fulltext index to accelerate fuzzy REFERENCES resolution
+CALL db.index.fulltext.createNodeIndex(
+  'document_title_ft',
+  ['Document'],
+  ['title'],
+  {analyzer: 'standard-folding'}
+) IF NOT EXISTS;
+
+// Section indexes (v2.1) - names match running DB with _idx suffix
+CREATE INDEX section_document_id_idx IF NOT EXISTS
 FOR (s:Section) ON (s.document_id);
 
-CREATE INDEX section_level IF NOT EXISTS
+CREATE INDEX section_level_idx IF NOT EXISTS
 FOR (s:Section) ON (s.level);
 
-CREATE INDEX section_order IF NOT EXISTS
+CREATE INDEX section_order_idx IF NOT EXISTS
 FOR (s:Section) ON (s.order);
 
 CREATE INDEX section_parent_section_id IF NOT EXISTS
@@ -132,6 +182,31 @@ FOR (c:Concept) ON (c.term);
 
 CREATE INDEX component_name IF NOT EXISTS
 FOR (c:Component) ON (c.name);
+
+// Entity indexes (C.1.1 / C.1.3 - heading concepts and entity hygiene)
+CREATE INDEX entity_canonical_name IF NOT EXISTS
+FOR (e:Entity) ON (e.canonical_name);
+
+CREATE INDEX entity_name IF NOT EXISTS
+FOR (e:Entity) ON (e.name);
+
+CREATE INDEX entity_type IF NOT EXISTS
+FOR (e:Entity) ON (e.entity_type);
+
+CREATE INDEX entity_document_id IF NOT EXISTS
+FOR (e:Entity) ON (e.document_id);
+
+// Phase 3.5: Entity source tracking for GLiNER provenance
+CREATE INDEX entity_source IF NOT EXISTS
+FOR (e:Entity) ON (e.source);
+
+// Phase 3.5: Composite index for entity lookup by document + name
+CREATE INDEX entity_document_name_idx IF NOT EXISTS
+FOR (e:Entity) ON (e.document_id, e.name);
+
+// Phase 3.5: Entity source section tracking
+CREATE INDEX entity_source_section_idx IF NOT EXISTS
+FOR (e:Entity) ON (e.source_section_id);
 
 // Session indexes (v2.1)
 CREATE INDEX session_started_at IF NOT EXISTS
@@ -220,16 +295,88 @@ FOR (s:Section) ON (s.doc_id);
 
 
 // ---------------------------------------------------------------------------
+// PART 1B: PHASE 3 STRUCTURAL METADATA INDEXES (markdown-it-py)
+// ---------------------------------------------------------------------------
+// These support enhanced metadata from markdown-it-py parser
+
+// Section source line mapping for citation correlation
+CREATE INDEX section_line_start_idx IF NOT EXISTS
+FOR (s:Section) ON (s.line_start);
+
+CREATE INDEX section_line_end_idx IF NOT EXISTS
+FOR (s:Section) ON (s.line_end);
+
+// Section structural filtering flags
+CREATE INDEX section_has_code_idx IF NOT EXISTS
+FOR (s:Section) ON (s.has_code);
+
+CREATE INDEX section_has_table_idx IF NOT EXISTS
+FOR (s:Section) ON (s.has_table);
+
+CREATE INDEX section_code_ratio_idx IF NOT EXISTS
+FOR (s:Section) ON (s.code_ratio);
+
+// Section parent path for hierarchy search
+CREATE INDEX section_parent_path_idx IF NOT EXISTS
+FOR (s:Section) ON (s.parent_path);
+
+// Chunk structural filtering (mirrors Section indexes)
+CREATE INDEX chunk_has_code_idx IF NOT EXISTS
+FOR (c:Chunk) ON (c.has_code);
+
+CREATE INDEX chunk_has_table_idx IF NOT EXISTS
+FOR (c:Chunk) ON (c.has_table);
+
+CREATE INDEX chunk_line_start_idx IF NOT EXISTS
+FOR (c:Chunk) ON (c.line_start);
+
+CREATE INDEX chunk_parent_path_idx IF NOT EXISTS
+FOR (c:Chunk) ON (c.parent_path);
+
+
+// ---------------------------------------------------------------------------
+// PART 1C: PHASE 3.5 MENTIONS RELATIONSHIP INDEXES (GraphRAG bridge)
+// ---------------------------------------------------------------------------
+// Critical for hybrid retrieval: Vector search -> Graph expansion via MENTIONS
+
+// Index on MENTIONS confidence for filtering high-quality extractions
+CREATE INDEX mentions_confidence_idx IF NOT EXISTS
+FOR ()-[r:MENTIONS]-() ON (r.confidence);
+
+// Index on MENTIONS source for distinguishing GLiNER vs structural
+CREATE INDEX mentions_source_idx IF NOT EXISTS
+FOR ()-[r:MENTIONS]-() ON (r.source);
+
+// Index on MENTIONED_IN (reverse edge) for entity->chunk traversal
+CREATE INDEX mentioned_in_confidence_idx IF NOT EXISTS
+FOR ()-[r:MENTIONED_IN]-() ON (r.confidence);
+
+CREATE INDEX mentioned_in_source_idx IF NOT EXISTS
+FOR ()-[r:MENTIONED_IN]-() ON (r.source);
+
+// Index on PARENT_HEADING level_delta for hierarchy traversal
+CREATE INDEX parent_heading_level_delta_idx IF NOT EXISTS
+FOR ()-[r:PARENT_HEADING]-() ON (r.level_delta);
+
+
+// ---------------------------------------------------------------------------
 // PART 2: FULL-TEXT INDEXES (lexical tier for hybrid retrieval)
 // ---------------------------------------------------------------------------
 
-CREATE FULLTEXT INDEX chunk_text_index_v3 IF NOT EXISTS
+// Legacy single-field fulltext index (kept for backward compatibility)
+CREATE FULLTEXT INDEX chunk_text_fulltext IF NOT EXISTS
+FOR (n:Chunk) ON EACH [n.text];
+
+// Primary fulltext index for hybrid retrieval (text + heading)
+CREATE FULLTEXT INDEX chunk_text_index_v3_bge_m3 IF NOT EXISTS
 FOR (n:Chunk|CitationUnit) ON EACH [n.text, n.heading];
 
 CREATE FULLTEXT INDEX heading_fulltext_v1 IF NOT EXISTS
 FOR (n:Chunk|Section) ON EACH [n.heading];
 
-CREATE FULLTEXT INDEX document_title_fulltext_v1 IF NOT EXISTS
+// Phase 3: Document title fulltext index for efficient REFERENCES resolution
+// Supports fuzzy CONTAINS queries on Document.title without O(N) scan
+CREATE FULLTEXT INDEX document_title_ft IF NOT EXISTS
 FOR (d:Document) ON EACH [d.title];
 
 
@@ -237,7 +384,7 @@ FOR (d:Document) ON EACH [d.title];
 // PART 3: VECTOR INDEXES
 // ---------------------------------------------------------------------------
 // Keep the original 1024-D content vectors (both labels for compatibility)
-CREATE VECTOR INDEX section_embeddings_v2 IF NOT EXISTS
+CREATE VECTOR INDEX section_embeddings_v2_bge_m3 IF NOT EXISTS
 FOR (s:Section)
 ON s.vector_embedding
 OPTIONS {
@@ -315,27 +462,36 @@ SET s.document_id = s.doc_id;
 // PART 6: RELATIONSHIP TYPE MARKER (documentation)
 // ---------------------------------------------------------------------------
 
+// Phase 2 Cleanup: Removed PREV and SAME_HEADING from marker
+// Phase 3: Added REFERENCES for cross-document connectivity (Chunk → Document)
+// Phase 3: Added PARENT_HEADING for heading hierarchy traversal
+// Phase 3.5: MENTIONS is now (Chunk → Entity) with confidence/source properties
+// Phase 3.5: MENTIONED_IN is inverse edge (Entity → Chunk) for bidirectional traversal
 MERGE (m:RelationshipTypesMarker {id: 'chunk_rel_types_v1'})
-  ON CREATE SET m.types = ['NEXT','PREV','SAME_HEADING','CHILD_OF','MENTIONS','PARENT_OF'],
-                m.created_at = datetime();
+  ON CREATE SET m.types = ['NEXT','CHILD_OF','MENTIONS','MENTIONED_IN','PARENT_OF','PARENT_HEADING','REFERENCES','PENDING_REF'],
+                m.created_at = datetime()
+  ON MATCH SET m.types = ['NEXT','CHILD_OF','MENTIONS','MENTIONED_IN','PARENT_OF','PARENT_HEADING','REFERENCES','PENDING_REF'],
+               m.updated_at = datetime();
 
 
 // ---------------------------------------------------------------------------
-// PART 7: SCHEMA VERSION MARKER (v2.2)
+// PART 7: SCHEMA VERSION MARKER (v3.0)
 // ---------------------------------------------------------------------------
 
 MERGE (sv:SchemaVersion {id: 'singleton'})
-SET sv.version = 'v2.2',
+SET sv.version = 'v3.0',
     sv.edition = 'community',
     sv.vector_dimensions = 1024,
-    sv.embedding_provider = 'jina-ai',
-    sv.embedding_model = 'jina-embeddings-v3',
+    sv.embedding_provider = 'bge-m3',
+    sv.embedding_model = 'BAAI/bge-m3',
     sv.updated_at = datetime(),
-    sv.description = 'Phase 7E+: Hybrid retrieval enablement (multi-vector, lexical boost, graph expansion) with small-chunk ingestion',
+    sv.description = 'Phase 3.5: Full GraphRAG MENTIONS bridge with GLiNER entity types and bidirectional entity-chunk traversal',
     sv.validation_note = 'Property existence constraints enforced in application layer (Community Edition)',
-    sv.backup_source = 'v2.1 clean state upgraded to v2.2 hybrid-ready on 2025-11-05',
-    sv.reform_note = 'Chunk sizes converge to ~400 target with ~32 token overlap; dynamic assembly at query time',
-    sv.compatibility = 'All v2.1 objects preserved; new indexes are additive';
+    sv.backup_source = 'v2.2 hybrid-ready upgraded to v3.0 MENTIONS bridge on 2025-12-11',
+    sv.reform_note = 'MENTIONS: (Chunk)-[:MENTIONS {confidence, source}]->(Entity); MENTIONED_IN is inverse edge',
+    sv.compatibility = 'All v2.2 objects preserved; Phase 3 structural indexes and Phase 3.5 MENTIONS indexes are additive',
+    sv.phase3_features = 'Source line mapping, parent_path hierarchy, structural flags (has_code, has_table, code_ratio)',
+    sv.phase35_features = 'GLiNER entity types, MENTIONS with confidence/source, bidirectional traversal';
 
 
 // ---------------------------------------------------------------------------
@@ -355,7 +511,8 @@ SET sv.version = 'v2.2',
 // MATCH (parent:Section {id: child.parent_section_id})
 // MERGE (parent)-[:PARENT_OF]->(child);
 
-// -- NEXT/PREV within same document/parent ordered by c.order  [guarded]
+// -- NEXT within same document/parent ordered by c.order  [guarded]
+// Phase 2 Cleanup: Removed PREV (redundant - use <-[:NEXT]-)
 // MATCH (c:Chunk)
 // WHERE exists(c.text)
 // WITH coalesce(c.document_id, c.doc_id) AS d, c.parent_section_id AS p, c
@@ -363,17 +520,10 @@ SET sv.version = 'v2.2',
 // WITH d, p, collect(c) AS chunks
 // UNWIND range(0, size(chunks)-2) AS i
 // WITH chunks[i] AS a, chunks[i+1] AS b
-// MERGE (a)-[:NEXT]->(b)
-// MERGE (b)-[:PREV]->(a);
+// MERGE (a)-[:NEXT]->(b);
 
-// -- SAME_HEADING among siblings (bounded fanout)  [guarded]
-// MATCH (c:Chunk) WHERE exists(c.text) AND c.heading IS NOT NULL
-// WITH coalesce(c.document_id, c.doc_id) AS d, c.parent_section_id AS p, c.heading AS h, collect(c) AS chunks
-// UNWIND chunks AS a
-// UNWIND chunks AS b
-// WITH a, b
-// WHERE a.id <> b.id AND a.order < b.order AND a.order + 8 >= b.order
-// MERGE (a)-[:SAME_HEADING]->(b);
+// Phase 2 Cleanup: Removed SAME_HEADING builder entirely
+// (O(n²) edge fanout with zero query usage)
 
 
 // ---------------------------------------------------------------------------
@@ -384,4 +534,146 @@ SET sv.version = 'v2.2',
 // SHOW INDEXES YIELD name, type WHERE type = 'FULLTEXT' RETURN name;
 // SHOW INDEXES YIELD name, type, labelsOrTypes WHERE type = 'VECTOR' RETURN name, labelsOrTypes;
 // MATCH (c:Chunk) RETURN exists(c.document_id) AS has_document_id, exists(c.doc_id) AS has_doc_id LIMIT 1;
-// ============================================================================
+
+
+// ===========================================================================
+// PART 10: QDRANT SCHEMA (Reference Only - Apply via Python/REST)
+// ===========================================================================
+// This section documents the Qdrant vector store schema for completeness.
+// It cannot be applied via Cypher - use the Python script or Qdrant REST API.
+//
+// To apply: python scripts/neo4j/schema_ddl_complete_20251125.py --apply-qdrant
+//
+// ---------------------------------------------------------------------------
+// COLLECTIONS
+// ---------------------------------------------------------------------------
+// Primary collection: chunks_multi_bge_m3 (Phase 7E+ BGE-M3 embeddings)
+// Legacy collection:  chunks_multi (kept for backward compatibility)
+//
+// DENSE VECTORS (4 per collection):
+//   - content:          1024D, Cosine  (main content embedding)
+//   - title:            1024D, Cosine  (chunk title/heading embedding)
+//   - doc_title:        1024D, Cosine  (parent document title embedding)
+//   - late-interaction: 1024D, Cosine, MaxSim (ColBERT-style multi-vector)
+//   NOTE: Dense 'entity' vector REMOVED - was broken (duplicated content embedding)
+//         Replaced by entity-sparse for lexical entity name matching
+//
+// SPARSE VECTORS (4 per collection):
+//   - text-sparse:      BM25/BGE-M3 sparse, on-disk index (chunk content)
+//   - doc_title-sparse: BM25/BGE-M3 sparse, on-disk index (document title)
+//   - title-sparse:     BM25/BGE-M3 sparse, on-disk index (section heading)
+//   - entity-sparse:    BM25/BGE-M3 sparse, on-disk index (entity names)
+//
+// HNSW CONFIG:
+//   - m: 48                    (graph edges per node)
+//   - ef_construct: 256        (construction beam width)
+//   - full_scan_threshold: 10000
+//   - on_disk: false
+//
+// OPTIMIZER CONFIG:
+//   - deleted_threshold: 0.2
+//   - vacuum_min_vector_number: 1000
+//   - indexing_threshold: 10000
+//   - flush_interval_sec: 5
+//
+// WAL CONFIG:
+//   - wal_capacity_mb: 32
+//   - wal_segments_ahead: 0
+//
+// ---------------------------------------------------------------------------
+// PAYLOAD INDEXES (22 fields per collection)
+// ---------------------------------------------------------------------------
+// Identifiers:
+//   - id (keyword)
+//   - document_id (keyword)     -- canonical
+//   - doc_id (keyword)          -- legacy alias
+//   - parent_section_id (keyword)
+//   - parent_section_original_id (keyword)
+//   - node_id (keyword)         -- BGE-M3 collection only
+//   - kg_id (keyword)           -- knowledge graph ID
+//
+// Structure & ordering:
+//   - order (integer)
+//   - heading (text)
+//   - doc_title (text)          -- parent document title for filtering/display
+//
+// Metadata filters:
+//   - doc_tag (keyword)
+//   - tenant (keyword)
+//   - lang (keyword)
+//   - version (keyword)
+//   - source_path (keyword)
+//   - snapshot_scope (keyword)
+//
+// Token/size:
+//   - token_count (integer)
+//   - is_microdoc (bool)
+//
+// Embedding audit:
+//   - embedding_version (keyword)
+//   - embedding_provider (keyword)
+//   - embedding_dimensions (integer)
+//
+// Deduplication:
+//   - text_hash (keyword)
+//   - shingle_hash (keyword)
+//
+// Phase 3: Structural metadata (markdown-it-py):
+//   - has_code (bool)              -- for CLI query filtering
+//   - has_table (bool)             -- for reference query filtering
+//   - code_ratio (float)           -- code density 0.0-1.0
+//   - parent_path (text)           -- heading hierarchy path
+//   - line_start (integer)         -- source line correlation
+//
+// Timestamps:
+//   - updated_at (integer)      -- epoch seconds
+//
+// ===========================================================================
+// PART 11: MENTIONS RELATIONSHIP SCHEMA (Phase 3.5 GraphRAG Bridge)
+// ===========================================================================
+// The MENTIONS relationship is the critical bridge for GraphRAG hybrid retrieval:
+//   Vector search -> Find relevant chunks -> Graph expansion -> Related entities
+//
+// DIRECTION CONVENTION:
+//   - MENTIONS:     (Chunk)-[:MENTIONS]->(Entity)
+//                   "This chunk mentions this entity"
+//   - MENTIONED_IN: (Entity)-[:MENTIONED_IN]->(Chunk)
+//                   "This entity is mentioned in this chunk" (inverse edge)
+//
+// RELATIONSHIP PROPERTIES:
+//   - confidence (float):  0.0-1.0, extraction confidence score
+//                          GLiNER entities: model confidence
+//                          Structural entities: default 0.5 or higher
+//   - source (string):     "gliner" | "structural"
+//                          Enables filtering by extraction method
+//   - count (integer):     Co-occurrence count (incremented on re-ingestion)
+//
+// ENTITY NODE PROPERTIES (for GLiNER entities):
+//   - id:          "gliner:{TYPE}:{hash}" (e.g., "gliner:COMMAND:9eafb5aa")
+//   - name:        Entity text as extracted
+//   - entity_type: GLiNER label (COMMAND, PARAMETER, COMPONENT, etc.)
+//   - label:       Neo4j label (Command, Parameter, Component, etc.)
+//   - source:      "gliner"
+//
+// GLINER ENTITY TYPE → NEO4J LABEL MAPPING:
+//   COMMAND         → Command
+//   PARAMETER       → Parameter
+//   COMPONENT       → Component
+//   PROTOCOL        → Protocol
+//   CLOUD_PROVIDER  → CloudProvider
+//   STORAGE_CONCEPT → StorageConcept
+//   VERSION         → Version
+//   PROCEDURE_STEP  → ProcedureStep
+//   ERROR           → Error
+//   CAPACITY_METRIC → CapacityMetric
+//
+// EXAMPLE QUERY PATTERN (GraphRAG hybrid retrieval):
+//   MATCH (s:Section)-[r:MENTIONS]->(e:Entity)
+//   WHERE s.id IN $chunk_ids_from_vector_search
+//     AND r.confidence >= 0.5
+//   RETURN s, e, r.confidence
+//   ORDER BY r.confidence DESC
+//
+// ===========================================================================
+// END OF SCHEMA DEFINITION
+// ===========================================================================

@@ -9,6 +9,7 @@ from src.providers.embeddings.contracts import DocumentEmbeddingBundle
 from src.providers.factory import ProviderFactory
 from src.shared.config import get_embedding_settings, namespace_identifier
 from src.shared.qdrant_schema import build_qdrant_schema
+from src.shared.vector_utils import vector_expected_dim
 
 
 @dataclass
@@ -23,7 +24,9 @@ class DriftStats:
 
 class Reconciler:
     """
-    Keeps Qdrant strictly in sync with graph Section nodes for a given embedding_version.
+    Keeps Qdrant strictly in sync with graph Section nodes.
+
+    Synchronizes for a given embedding_version.
     """
 
     def __init__(
@@ -83,19 +86,27 @@ class Reconciler:
         enable_colbert = (
             getattr(qdrant_cfg, "enable_colbert", False) if qdrant_cfg else False
         )
-        hybrid_cfg = getattr(search_cfg, "hybrid", None) if search_cfg else None
-        vector_fields = (
-            getattr(hybrid_cfg, "vector_fields", None) if hybrid_cfg else None
+        # Extract doc_title sparse flag - defaults to True for backward compatibility
+        enable_doc_title_sparse = (
+            getattr(qdrant_cfg, "enable_doc_title_sparse", True) if qdrant_cfg else True
         )
-        include_entity = False
-        if isinstance(vector_fields, dict):
-            include_entity = "entity" in vector_fields
+        # NEW: Lexical sparse vectors for section headings and entity names
+        enable_title_sparse = (
+            getattr(qdrant_cfg, "enable_title_sparse", True) if qdrant_cfg else True
+        )
+        enable_entity_sparse = (
+            getattr(qdrant_cfg, "enable_entity_sparse", True) if qdrant_cfg else True
+        )
+        # NOTE: include_entity is deprecated (dense entity vector removed 2025-12-06)
 
         self._schema_plan = build_qdrant_schema(
             self.embedding_settings,
-            include_entity=include_entity,
+            include_entity=False,  # Deprecated - always False
             enable_sparse=enable_sparse,
             enable_colbert=enable_colbert,
+            enable_doc_title_sparse=enable_doc_title_sparse,
+            enable_title_sparse=enable_title_sparse,
+            enable_entity_sparse=enable_entity_sparse,
         )
         self._dense_vector_names = [
             name
@@ -148,7 +159,8 @@ class Reconciler:
         if self._embedder is None:
             if not self.config and self.embedding_settings is None:
                 raise RuntimeError(
-                    "Embedding configuration unavailable; provide embedding_fn explicitly."
+                    "Embedding configuration unavailable; "
+                    "provide embedding_fn explicitly."
                 )
             factory = ProviderFactory()
             settings = self.embedding_settings or get_embedding_settings(self.config)
@@ -177,11 +189,11 @@ class Reconciler:
         return vectors
 
     def _graph_section_ids(self) -> Set[str]:
-        """Get all Section IDs from Neo4j with matching embedding_version (synchronous)."""
+        """Get all Chunk IDs from Neo4j with matching embedding_version."""
         cypher = """
-        MATCH (s:Section)
-        WHERE s.embedding_version = $v
-        RETURN s.id AS id
+        MATCH (c:Chunk)
+        WHERE c.embedding_version = $v
+        RETURN c.id AS id
         """
         ids: Set[str] = set()
         with self.neo4j.session() as sess:
@@ -193,12 +205,17 @@ class Reconciler:
     def _qdrant_section_ids(self) -> Set[str]:
         # Scroll all points for the version; small datasets in tests
         # Returns original node_ids (not UUIDs) from payload
+        # Note: node_label may be "Chunk" (new) or "Section" (legacy) during migration
 
         filt = {
             "must": [
-                {"key": "node_label", "match": {"value": "Section"}},
                 {"key": "embedding_version", "match": {"value": self.version}},
-            ]
+            ],
+            "should": [
+                {"key": "node_label", "match": {"value": "Chunk"}},
+                {"key": "node_label", "match": {"value": "Section"}},
+            ],
+            "min_should": {"min_count": 1},
         }
 
         out: Set[str] = set()
@@ -309,8 +326,10 @@ class Reconciler:
         self, embedding_fn: Optional[Callable[[str], List[float]]] = None
     ) -> DriftStats:
         """
-        Make Qdrant contain exactly the Section nodes at embedding_version=self.version.
-        If embedding_fn is None, uses SentenceTransformers(all-MiniLM-L6-v2) if available.
+        Make Qdrant contain exactly the Section nodes at embedding_version.
+
+        Uses embedding_version=self.version. If embedding_fn is None, uses
+        SentenceTransformers(all-MiniLM-L6-v2) if available.
         """
         graph_ids = self._graph_section_ids()
         vec_ids = self._qdrant_section_ids()
@@ -327,16 +346,16 @@ class Reconciler:
             else:
                 emb_fn = embedding_fn
 
-            # Fetch section text to embed
+            # Fetch chunk text to embed
             text_map: Dict[str, Dict[str, str]] = {}
             cypher = """
             UNWIND $ids AS sid
-            MATCH (d:Document)-[:HAS_SECTION]->(s:Section {id: sid})
+            MATCH (d:Document)-[:HAS_SECTION]->(c:Chunk {id: sid})
             RETURN
-                s.id AS id,
-                coalesce(s.text, s.content, '') AS text,
-                s.title AS title,
-                coalesce(s.document_id, d.id) AS document_id,
+                c.id AS id,
+                coalesce(c.text, c.content, '') AS text,
+                c.title AS title,
+                coalesce(c.document_id, d.id) AS document_id,
                 d.source_uri AS source_uri,
                 d.doc_tag AS doc_tag,
                 d.snapshot_scope AS snapshot_scope
@@ -387,7 +406,7 @@ class Reconciler:
                 if title_vec:
                     named_vecs["title"] = title_vec
                 elif "title" in self._schema_plan.vectors_config:
-                    # Fallback: use content vector if title is missing but schema requires it
+                    # Fallback: use content if title missing but schema requires it
                     named_vecs["title"] = list(content_bundle.dense)
 
                 # 3. Sparse Vector (from Content)
@@ -478,20 +497,5 @@ class Reconciler:
 
     @staticmethod
     def _vector_expected_dim(vector: object) -> Optional[int]:
-        if vector is None:
-            return None
-        if hasattr(vector, "indices") and hasattr(vector, "values"):
-            return None
-        if isinstance(vector, list):
-            if not vector:
-                return None
-            first = vector[0]
-            if isinstance(first, list):
-                return len(first)
-            return len(vector)
-        if hasattr(vector, "__len__") and not isinstance(vector, (str, bytes)):
-            try:
-                return len(vector)
-            except TypeError:
-                return None
-        return None
+        """Delegate to shared utility for vector dimension detection."""
+        return vector_expected_dim(vector)

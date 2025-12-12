@@ -57,7 +57,12 @@ The auto-ingestion system monitors file systems for new documents, enqueues them
 
 ### 2. `watchers.py` — File System Watchers
 
-**Spool Pattern:**
+**Watch Modes (`INGEST_WATCH_MODE`):**
+- `ready` (production default): spool pattern with `*.ready` markers only
+- `direct` (development default): process actual documents after a stability window
+- `auto`: prefer `*.ready` markers; fall back to direct for unmarked docs
+
+**Spool Pattern (`ready` mode):**
 1. Write file as `*.part`
 2. Rename to `*.ready` when complete
 3. Watcher only processes `*.ready` files
@@ -70,7 +75,7 @@ The auto-ingestion system monitors file systems for new documents, enqueues them
 - S3 watcher stub (for future)
 
 **Classes:**
-- `FileSystemWatcher` — FS monitoring with spool pattern
+- `FileSystemWatcher` — FS monitoring with spool or direct modes
 - `HTTPWatcher` — HTTP endpoint polling
 - `WatcherManager` — Manages multiple watchers from config
 
@@ -156,6 +161,7 @@ curl http://localhost:9108/metrics
 ### Drop a File for Ingestion
 
 ```bash
+# Production spool pattern (default):
 # Write file
 cat > ingest/watch/guide.md.part << 'EOF'
 # Example Guide
@@ -171,6 +177,13 @@ mv ingest/watch/guide.md.part ingest/watch/guide.md.ready
 2. Compute checksum
 3. Enqueue job to Redis
 4. Mark as processed
+
+**Development direct mode:**
+Set `INGEST_WATCH_MODE=direct` (default when `ENV=development`) and drop files directly:
+
+```bash
+cp docs/example.md data/ingest/example.md
+```
 
 ### Monitor Queue
 

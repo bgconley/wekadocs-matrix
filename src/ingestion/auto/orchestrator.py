@@ -26,8 +26,8 @@ from neo4j import Driver
 from src.ingestion.build_graph import GraphBuilder
 from src.ingestion.extract import extract_entities
 from src.ingestion.incremental import IncrementalUpdater
+from src.ingestion.parsers import parse_markdown  # Router selects engine
 from src.ingestion.parsers.html import parse_html
-from src.ingestion.parsers.markdown import parse_markdown
 from src.ingestion.parsers.notion import parse_notion
 from src.ingestion.reconcile import Reconciler
 from src.providers.factory import ProviderFactory
@@ -909,10 +909,9 @@ class Orchestrator:
             point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, section["id"]))
 
             title_vector = section.get("title_vector_embedding") or embedding
-            entity_vector = section.get("entity_vector_embedding") or embedding
+            # REMOVED: Dense entity vector - replaced by entity-sparse
+            # entity_vector is no longer used
             vectors = {"content": embedding, "title": title_vector}
-            if entity_vector:
-                vectors["entity"] = entity_vector
 
             text_value = section.get("text", "")
             embedding_metadata = canonicalize_embedding_metadata(
@@ -983,7 +982,7 @@ class Orchestrator:
         return len(points)
 
     def _upsert_to_neo4j(self, sections: List[Dict]) -> int:
-        """Upsert section embeddings to Neo4j."""
+        """Upsert chunk embeddings to Neo4j."""
         with self.neo4j.session() as session:
             for section in sections:
                 embedding = section.get("vector_embedding")
@@ -991,9 +990,9 @@ class Orchestrator:
                     continue
 
                 query = """
-                MATCH (s:Section {id: $section_id})
-                SET s.vector_embedding = $embedding,
-                    s.embedding_version = $version
+                MATCH (c:Chunk {id: $section_id})
+                SET c.vector_embedding = $embedding,
+                    c.embedding_version = $version
                 """
                 session.run(
                     query,
@@ -1009,8 +1008,8 @@ class Orchestrator:
         with self.neo4j.session() as session:
             for section in sections:
                 query = """
-                MATCH (s:Section {id: $section_id})
-                SET s.embedding_version = $version
+                MATCH (c:Chunk {id: $section_id})
+                SET c.embedding_version = $version
                 """
                 session.run(
                     query,
@@ -1056,17 +1055,17 @@ class Orchestrator:
         """Render report as Markdown."""
         md = f"""# Ingestion Report
 
-**Job ID:** `{report['job_id']}`
-**Tag:** `{report['tag']}`
-**Source:** `{report['source_uri']}`
+**Job ID:** `{report["job_id"]}`
+**Tag:** `{report["tag"]}`
+**Source:** `{report["source_uri"]}`
 
 ## Summary
 
-- **Sections:** {report['sections']}
-- **Entities:** {report['entities']}
-- **Mentions:** {report['mentions']}
-- **Drift:** {report['drift_pct']:.2%}
-- **Ready for Queries:** {'✅ Yes' if report['ready_for_queries'] else '❌ No'}
+- **Sections:** {report["sections"]}
+- **Entities:** {report["entities"]}
+- **Mentions:** {report["mentions"]}
+- **Drift:** {report["drift_pct"]:.2%}
+- **Ready for Queries:** {"✅ Yes" if report["ready_for_queries"] else "❌ No"}
 
 ## Timings
 

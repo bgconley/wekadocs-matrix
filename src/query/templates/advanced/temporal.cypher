@@ -19,19 +19,15 @@ RETURN e, e.introduced_in AS introduced, e.deprecated_in AS deprecated,
 ORDER BY e.introduced_in DESC
 LIMIT 100;
 
--- Version 2: Configuration state at version
+-- Version 2: Configuration state at version (Phase 2 Cleanup: removed AFFECTS)
 MATCH (cfg:Configuration)
 WHERE (cfg.introduced_in IS NULL OR cfg.introduced_in <= $version)
   AND (cfg.deprecated_in IS NULL OR cfg.deprecated_in > $version)
-OPTIONAL MATCH (cfg)-[r:AFFECTS]->(target)
-WHERE (r.introduced_in IS NULL OR r.introduced_in <= $version)
-  AND (r.deprecated_in IS NULL OR r.deprecated_in > $version)
+OPTIONAL MATCH (cfg)<-[r:MENTIONS]-(sec:Chunk)
 RETURN cfg, collect(DISTINCT {
-  target: target,
-  relationship: type(r),
-  introduced: r.introduced_in,
-  deprecated: r.deprecated_in
-}) AS relationships_at_version
+  chunk: sec,
+  relationship: type(r)
+}) AS mentioned_by
 ORDER BY cfg.name
 LIMIT 100;
 

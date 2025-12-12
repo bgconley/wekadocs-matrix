@@ -750,7 +750,7 @@ Content two.
         for i in range(1, len(percentages)):
             assert (
                 percentages[i] >= percentages[i - 1] - 0.1
-            ), f"Progress decreased: {percentages[i-1]} -> {percentages[i]}"
+            ), f"Progress decreased: {percentages[i - 1]} -> {percentages[i]}"
 
         # Verify reaches 100%
         assert max(percentages) >= 95.0, "Should reach near 100%"

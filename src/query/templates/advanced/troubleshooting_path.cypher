@@ -26,13 +26,15 @@ RETURN e, proc, ordered_steps,
 ORDER BY proc.name
 LIMIT 10;
 
--- Version 2: Troubleshooting with related configurations
+-- Version 2: Troubleshooting with related configurations via MENTIONS
+-- Phase 2 Cleanup: Replaced RELATED_TO with MENTIONS (active relationship)
 MATCH (e:Error)
 WHERE e.code = $error_code OR e.name = $error_name
 OPTIONAL MATCH (e)<-[:RESOLVES]-(proc:Procedure)
 OPTIONAL MATCH (proc)-[:CONTAINS_STEP]->(step:Step)
 OPTIONAL MATCH (step)-[:EXECUTES]->(cmd:Command)
-OPTIONAL MATCH (e)-[:RELATED_TO]->(cfg:Configuration)
+OPTIONAL MATCH (error_sec:Chunk)-[:MENTIONS]->(e)
+OPTIONAL MATCH (error_sec)-[:MENTIONS]->(cfg:Configuration)
 OPTIONAL MATCH (cfg)<-[:HAS_PARAMETER]-(param_cmd:Command)
 WITH e, proc,
   collect(DISTINCT {step: step, order: step.order, command: cmd}) AS steps,
@@ -43,26 +45,27 @@ RETURN e, proc, steps, related_configs,
 ORDER BY proc.name
 LIMIT 10;
 
--- Version 3: Full troubleshooting context with sections and concepts
+-- Version 3: Full troubleshooting context with chunks and concepts
+-- Phase 2 Cleanup: Replaced RELATED_TO with MENTIONS (active relationship)
 MATCH (e:Error)
 WHERE e.code = $error_code OR e.name = $error_name
-OPTIONAL MATCH (error_sec:Section)-[:MENTIONS]->(e)
+OPTIONAL MATCH (error_sec:Chunk)-[:MENTIONS]->(e)
 OPTIONAL MATCH (e)<-[:RESOLVES]-(proc:Procedure)
-OPTIONAL MATCH (proc_sec:Section)-[:MENTIONS]->(proc)
+OPTIONAL MATCH (proc_sec:Chunk)-[:MENTIONS]->(proc)
 OPTIONAL MATCH (proc)-[:CONTAINS_STEP]->(step:Step)
 OPTIONAL MATCH (step)-[:EXECUTES]->(cmd:Command)
-OPTIONAL MATCH (e)-[:RELATED_TO]->(cfg:Configuration)
-OPTIONAL MATCH (e)-[:RELATED_TO]->(concept:Concept)
+OPTIONAL MATCH (error_sec)-[:MENTIONS]->(cfg:Configuration)
+OPTIONAL MATCH (error_sec)-[:MENTIONS]->(concept:Concept)
 WITH e,
-  collect(DISTINCT error_sec)[0..3] AS error_sections,
+  collect(DISTINCT error_sec)[0..3] AS error_chunks,
   collect(DISTINCT {
     procedure: proc,
-    section: proc_sec,
+    chunk: proc_sec,
     steps: collect(DISTINCT {step: step, order: step.order, command: cmd})
   }) AS resolution_paths,
   collect(DISTINCT cfg) AS related_configs,
   collect(DISTINCT concept) AS related_concepts
-RETURN e, error_sections, resolution_paths, related_configs, related_concepts,
+RETURN e, error_chunks, resolution_paths, related_configs, related_concepts,
   size(resolution_paths) AS resolution_count,
   size(related_configs) AS config_count,
   size(related_concepts) AS concept_count

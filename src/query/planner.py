@@ -262,13 +262,12 @@ class QueryPlanner:
             params["section_ids"] = None
 
         # For traverse intent, ensure rel_types is a list
+        # Phase 2 Cleanup: Removed REQUIRES, AFFECTS (never materialized)
         if "rel_types" not in params:
             params["rel_types"] = [
                 "MENTIONS",
                 "CONTAINS_STEP",
                 "HAS_PARAMETER",
-                "REQUIRES",
-                "AFFECTS",
             ]
 
         return params
@@ -308,11 +307,11 @@ class QueryPlanner:
         """Generate a safe fallback query when no template matches."""
         # Use basic search template as fallback
         fallback_cypher = """
-        MATCH (s:Section)
-        WITH s, coalesce($section_ids, []) AS allowed_ids
-        WHERE size(allowed_ids) = 0 OR s.id IN allowed_ids
-        RETURN s
-        ORDER BY s.document_id, s.order
+        MATCH (c:Chunk)
+        WITH c, coalesce($section_ids, []) AS allowed_ids
+        WHERE size(allowed_ids) = 0 OR c.id IN allowed_ids
+        RETURN c
+        ORDER BY c.document_id, c.order
         LIMIT $limit
         """
 

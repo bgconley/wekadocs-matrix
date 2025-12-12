@@ -136,7 +136,7 @@ class ReportGenerator:
                     RETURN
                         count(n) AS total_nodes,
                         count{(n)-[]->()} AS total_rels,
-                        count{(n:Section)} AS sections,
+                        count{(n:Chunk)} AS chunks,
                         count{(n:Document)} AS documents
                     """
                 )
@@ -146,7 +146,7 @@ class ReportGenerator:
                     return {
                         "nodes_total": record["total_nodes"],
                         "rels_total": record["total_rels"],
-                        "sections_total": record["sections"],
+                        "chunks_total": record["chunks"],
                         "documents_total": record["documents"],
                     }
         except Exception as e:
@@ -155,7 +155,7 @@ class ReportGenerator:
         return {
             "nodes_total": 0,
             "rels_total": 0,
-            "sections_total": 0,
+            "chunks_total": 0,
             "documents_total": 0,
         }
 
@@ -176,10 +176,10 @@ class ReportGenerator:
                 with self.driver.session() as session:
                     result = session.run(
                         """
-                        MATCH (s:Section)
-                        WHERE s.vector_embedding IS NOT NULL
-                          AND s.embedding_version = $version
-                        RETURN count(s) AS count
+                        MATCH (c:Chunk)
+                        WHERE c.vector_embedding IS NOT NULL
+                          AND c.embedding_version = $version
+                        RETURN count(c) AS count
                         """,
                         version=self.embedding_version,
                     )
@@ -188,7 +188,7 @@ class ReportGenerator:
 
                 return {
                     "sot": "neo4j",
-                    "sections_indexed": count,
+                    "chunks_indexed": count,
                     "embedding_version": self.embedding_version,
                 }
 

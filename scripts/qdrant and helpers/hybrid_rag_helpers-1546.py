@@ -473,7 +473,7 @@ def expand_graph_neighbors(
     MATCH (c:Chunk)
     WHERE c.id = $seed
       AND exists(c.text) AND exists(c.token_count)
-      {'AND c.tenant = $tenant' if tenant else ''}
+      {"AND c.tenant = $tenant" if tenant else ""}
 
     MATCH p=(c)-[r:{rel_union}*1..$max_hops]{arrow}(n:Chunk)
     WHERE exists(n.text) AND exists(n.token_count)
@@ -481,7 +481,7 @@ def expand_graph_neighbors(
         $same_doc_only = false OR
         coalesce(n.document_id, n.doc_id) = coalesce(c.document_id, c.doc_id)
       )
-      {'AND n.tenant = $tenant' if tenant else ''}
+      {"AND n.tenant = $tenant" if tenant else ""}
 
     WITH n, [rel IN relationships(p) | type(rel)] AS types
     WITH n, types,

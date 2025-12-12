@@ -211,11 +211,6 @@ class TestKubernetesManifests:
         manifest = BASE_DIR / "deploy/k8s/base/ingestion-worker-deployment.yaml"
         assert Path(manifest).exists()
 
-    def test_jaeger_deployment_exists(self):
-        """Verify Jaeger deployment exists."""
-        manifest = BASE_DIR / "deploy/k8s/base/jaeger-deployment.yaml"
-        assert Path(manifest).exists()
-
     def test_ingress_manifest_exists(self):
         """Verify ingress manifest exists."""
         manifest = BASE_DIR / "deploy/k8s/base/ingress.yaml"

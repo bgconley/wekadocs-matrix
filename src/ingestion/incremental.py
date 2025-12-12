@@ -7,12 +7,16 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+import structlog
 from neo4j import Driver
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import PointStruct
 
 from src.shared.config import get_embedding_settings
 from src.shared.qdrant_schema import build_qdrant_schema
+from src.shared.vector_utils import vector_expected_dim
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -25,10 +29,10 @@ class Diff:
 class IncrementalUpdater:
     """
     Incremental update with stage→swap:
-    - Detect adds/updates/deletes by Section.id and checksum
-    - Stage new/modified sections as :StagedSection
-    - Delete removed sections
-    - Promote staged to :Section (atomic swap)
+    - Detect adds/updates/deletes by Chunk.id and checksum
+    - Stage new/modified chunks as :StagedChunk
+    - Delete removed chunks
+    - Promote staged to :Chunk (atomic swap)
     - Keeps counts stable for 'minimal delta' scenarios
     """
 
@@ -66,18 +70,29 @@ class IncrementalUpdater:
             enable_colbert = (
                 getattr(qdrant_cfg, "enable_colbert", False) if qdrant_cfg else False
             )
-            hybrid_cfg = getattr(search_cfg, "hybrid", None)
-            vector_fields = (
-                getattr(hybrid_cfg, "vector_fields", None) if hybrid_cfg else None
+            enable_doc_title_sparse = (
+                getattr(qdrant_cfg, "enable_doc_title_sparse", True)
+                if qdrant_cfg
+                else True
             )
-            include_entity = False
-            if isinstance(vector_fields, dict):
-                include_entity = "entity" in vector_fields
+            # NEW: Lexical sparse vectors for section headings and entity names
+            enable_title_sparse = (
+                getattr(qdrant_cfg, "enable_title_sparse", True) if qdrant_cfg else True
+            )
+            enable_entity_sparse = (
+                getattr(qdrant_cfg, "enable_entity_sparse", True)
+                if qdrant_cfg
+                else True
+            )
+            # NOTE: include_entity deprecated (dense entity vector removed)
             self._schema_plan = build_qdrant_schema(
                 self.embedding_settings,
-                include_entity=include_entity,
+                include_entity=False,  # Deprecated - always False
                 enable_sparse=enable_sparse,
                 enable_colbert=enable_colbert,
+                enable_doc_title_sparse=enable_doc_title_sparse,
+                enable_title_sparse=enable_title_sparse,
+                enable_entity_sparse=enable_entity_sparse,
             )
             self._dense_vector_names = [
                 name
@@ -86,10 +101,10 @@ class IncrementalUpdater:
             ]
 
     def _existing_sections(self, document_id: str) -> Dict[str, Dict]:
-        """Get existing sections from the database (synchronous)."""
+        """Get existing chunks from the database (synchronous)."""
         cypher = """
-        MATCH (:Document {id: $doc})-[:HAS_SECTION]->(s:Section)
-        RETURN s.id AS id, coalesce(s.checksum, '') AS checksum, s.title AS title
+        MATCH (:Document {id: $doc})-[:HAS_SECTION]->(c:Chunk)
+        RETURN c.id AS id, coalesce(c.checksum, '') AS checksum, c.title AS title
         """
         out: Dict[str, Dict] = {}
         with self.neo4j.session() as sess:
@@ -180,7 +195,22 @@ class IncrementalUpdater:
         """
         Apply incremental update from a diff.
         This method signature matches test expectations.
+
+        Note: entities and mentions are accepted for API compatibility but graph
+        updates for these are not yet implemented. Use atomic ingestion for
+        full graph sync.
         """
+        # Defensive: Warn if entities/mentions passed but not synced to graph
+        # This prevents silent data loss where callers expect graph updates
+        if entities or mentions:
+            logger.warning(
+                "incremental_update_graph_sync_skipped",
+                reason="entities_mentions_not_implemented",
+                entities_count=len(entities) if entities else 0,
+                mentions_count=len(mentions) if mentions else 0,
+                hint="Use atomic ingestion for full graph sync including entities",
+            )
+
         document_id = sections[0].get("document_id") if sections else ""
 
         # Extract modified section objects from the modified list
@@ -199,14 +229,14 @@ class IncrementalUpdater:
         deleted_count = 0
         upserted_count = 0
 
-        # 1) Delete removed sections
+        # 1) Delete removed chunks
         if internal_diff.deletes:
             with self.neo4j.session() as sess:
                 sess.run(
                     """
                     UNWIND $ids AS sid
-                    MATCH (d:Document {id: $doc})-[:HAS_SECTION]->(s:Section {id: sid})
-                    DETACH DELETE s
+                    MATCH (d:Document {id: $doc})-[:HAS_SECTION]->(c:Chunk {id: sid})
+                    DETACH DELETE c
                     """,
                     {"ids": internal_diff.deletes, "doc": document_id},
                 )
@@ -220,7 +250,7 @@ class IncrementalUpdater:
                     wait=True,
                 )
 
-        # 2) Upsert added/modified sections
+        # 2) Upsert added/modified chunks
         to_upsert = internal_diff.adds + internal_diff.updates
         doc_tag_value = None
         if to_upsert:
@@ -228,22 +258,25 @@ class IncrementalUpdater:
                 sess.run(
                     """
                     UNWIND $rows AS row
-                    MERGE (s:Section {id: row.id})
-                    SET s.title = row.title,
-                        s.content = coalesce(row.content, row.text),
-                        s.checksum = row.checksum,
-                        s.document_id = $doc,
-                        s.embedding_version = $v,
-                        s.updated_at = datetime()
+                    MERGE (c:Chunk {id: row.id})
+                    SET c.title = row.title,
+                        c.content = coalesce(row.content, row.text),
+                        c.checksum = row.checksum,
+                        c.document_id = $doc,
+                        c.embedding_version = $v,
+                        c.updated_at = datetime()
                     MERGE (d:Document {id: $doc})
-                    SET s.doc_tag = d.doc_tag,
-                        s.snapshot_scope = d.snapshot_scope
-                    MERGE (d)-[:HAS_SECTION]->(s)
+                    SET c.doc_tag = d.doc_tag,
+                        c.snapshot_scope = d.snapshot_scope
+                    MERGE (d)-[:HAS_SECTION]->(c)
                     """,
                     {"rows": to_upsert, "doc": document_id, "v": self.version},
                 )
                 doc_tag_result = sess.run(
-                    "MATCH (d:Document {id:$doc}) RETURN d.doc_tag AS doc_tag, d.snapshot_scope AS snapshot_scope",
+                    """
+                    MATCH (d:Document {id:$doc})
+                    RETURN d.doc_tag AS doc_tag, d.snapshot_scope AS snapshot_scope
+                    """,
                     {"doc": document_id},
                 ).single()
                 doc_tag_value = doc_tag_result["doc_tag"] if doc_tag_result else None
@@ -314,20 +347,5 @@ class IncrementalUpdater:
 
     @staticmethod
     def _vector_expected_dim(vector: object) -> Optional[int]:
-        if vector is None:
-            return None
-        if hasattr(vector, "indices") and hasattr(vector, "values"):
-            return None
-        if isinstance(vector, list):
-            if not vector:
-                return None
-            first = vector[0]
-            if isinstance(first, list):
-                return len(first)
-            return len(vector)
-        if hasattr(vector, "__len__") and not isinstance(vector, (str, bytes)):
-            try:
-                return len(vector)
-            except TypeError:
-                return None
-        return None
+        """Delegate to shared utility for vector dimension detection."""
+        return vector_expected_dim(vector)

@@ -365,8 +365,8 @@ class SessionTracker:
         query = """
         MATCH (q:Query {query_id: $query_id})
         UNWIND $sections as section
-        MATCH (s:Section {id: section.section_id})
-        MERGE (q)-[r:RETRIEVED]->(s)
+        MATCH (c:Chunk {id: section.section_id})
+        MERGE (q)-[r:RETRIEVED]->(c)
         ON CREATE SET
             r.rank = section.rank,
             r.score_vec = section.score_vec,
@@ -449,16 +449,16 @@ class SessionTracker:
             if not record:
                 raise RuntimeError(f"Failed to create answer for query {query_id}")
 
-            # Create SUPPORTED_BY relationships to cited sections
+            # Create SUPPORTED_BY relationships to cited chunks
             if supporting_section_ids:
                 citation_query = """
                 MATCH (a:Answer {answer_id: $answer_id})
                 UNWIND $citations as citation
-                MATCH (s:Section {id: citation.section_id})
+                MATCH (c:Chunk {id: citation.section_id})
                 CREATE (a)-[r:SUPPORTED_BY {
                     rank: citation.rank,
                     created_at: datetime()
-                }]->(s)
+                }]->(c)
                 RETURN count(r) as citation_count
                 """
 
@@ -513,8 +513,8 @@ class SessionTracker:
             score: f.score
         }) as focused_entities
 
-        // Collect retrieved sections
-        OPTIONAL MATCH (q)-[r:RETRIEVED]->(sec:Section)
+        // Collect retrieved chunks
+        OPTIONAL MATCH (q)-[r:RETRIEVED]->(sec:Chunk)
         WITH q, s, focused_entities, collect(DISTINCT {
             id: sec.id,
             title: sec.title,
@@ -524,7 +524,7 @@ class SessionTracker:
 
         // Collect answer and citations
         OPTIONAL MATCH (q)-[:ANSWERED_AS]->(a:Answer)
-        OPTIONAL MATCH (a)-[c:SUPPORTED_BY]->(cited:Section)
+        OPTIONAL MATCH (a)-[c:SUPPORTED_BY]->(cited:Chunk)
         WITH q, s, focused_entities, retrieved_sections,
              a.answer_id as answer_id,
              a.text as answer_text,

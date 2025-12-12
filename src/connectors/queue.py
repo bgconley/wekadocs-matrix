@@ -42,7 +42,7 @@ class IngestionQueue:
         self.backpressure_threshold = backpressure_threshold
 
         logger.info(
-            f"Ingestion queue initialized: {queue_name}, " f"max_size={max_queue_size}"
+            f"Ingestion queue initialized: {queue_name}, max_size={max_queue_size}"
         )
 
     async def enqueue(self, event: IngestionEvent, priority: bool = False) -> bool:

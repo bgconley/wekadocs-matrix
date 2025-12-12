@@ -1,0 +1,39 @@
+{
+  "timestamp": "2025-11-30T01:24:58.142853+00:00",
+  "git_commit": "72e76c5",
+  "git_branch": "dense-graph-enhance",
+  "phase": "phase-1-complete",
+  "reranker_latency": {
+    "p50": 312.84020794555545,
+    "p95": 573.5033330274746,
+    "mean": 339.4493082887493,
+    "min": 310.5151249328628,
+    "max": 573.5033330274746,
+    "sample_count": 10
+  },
+  "graph": {
+    "document_count": 28,
+    "section_count": 73,
+    "chunk_count": 77,
+    "entity_count": 76,
+    "procedure_count": 15,
+    "step_count": 2,
+    "command_count": 6,
+    "configuration_count": 13,
+    "concept_count": 37,
+    "contains_step_count": 6,
+    "next_count": 38,
+    "child_of_count": 4,
+    "mentions_count": 3,
+    "mentioned_in_count": 75,
+    "has_section_count": 59,
+    "contains_step_labeled_count": 2
+  },
+  "comparison_to_baseline": {
+    "baseline_reranker_p95_ms": 1911,
+    "current_reranker_p95_ms": 573.5033330274746,
+    "improvement_factor": 3.3,
+    "baseline_contains_step_count": 0,
+    "current_contains_step_count": 6
+  }
+}

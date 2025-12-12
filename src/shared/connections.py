@@ -96,14 +96,52 @@ class CompatQdrantClient(QdrantClient):
     """
     Subclass of QdrantClient that normalizes delete selectors and converts
     deterministic Section IDs (SHA-256 hex) to UUIDs expected by the vector store.
+
+    Supports two modes:
+    1. Direct instantiation: Pass connection params, inherits from QdrantClient
+    2. Wrapper mode: Pass existing QdrantClient, delegates via composition
+
+    The wrapper mode properly delegates ALL QdrantClient methods (search, query_points,
+    upsert, etc.) to the wrapped client while allowing custom overrides.
     """
 
+    # Use __slots__ style attribute to avoid __getattr__ recursion
+    _wrapped_client: Optional[QdrantClient]
+
     def __init__(self, *args, **kwargs):
+        # Must set _wrapped_client BEFORE any other attribute access to avoid
+        # __getattr__ recursion during initialization
+        object.__setattr__(self, "_wrapped_client", None)
+
         if args and isinstance(args[0], QdrantClient):
-            base_client: QdrantClient = args[0]
-            self.__dict__ = base_client.__dict__
+            # Wrapper mode: store reference, delegate via __getattr__
+            object.__setattr__(self, "_wrapped_client", args[0])
         else:
+            # Direct mode: normal QdrantClient initialization
             super().__init__(*args, **kwargs)
+
+    def __getattr__(self, name: str):
+        """Delegate missing attributes to wrapped client (wrapper mode only)."""
+        # Avoid recursion: _wrapped_client is set via object.__setattr__
+        wrapped = object.__getattribute__(self, "_wrapped_client")
+        if wrapped is not None:
+            return getattr(wrapped, name)
+        # Not in wrapper mode, raise standard AttributeError
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )
+
+    def _base_delete(self, **kwargs):
+        """Delegate delete to wrapped client or parent class."""
+        if self._wrapped_client is not None:
+            return self._wrapped_client.delete(**kwargs)
+        return super().delete(**kwargs)
+
+    def _base_upsert(self, **kwargs):
+        """Delegate upsert to wrapped client or parent class."""
+        if self._wrapped_client is not None:
+            return self._wrapped_client.upsert(**kwargs)
+        return super().upsert(**kwargs)
 
     def delete_compat(
         self,
@@ -116,7 +154,9 @@ class CompatQdrantClient(QdrantClient):
         normalized = _normalize_points_selector(
             points=points, points_selector=points_selector
         )
-        return super().delete(collection_name=collection_name, wait=wait, **normalized)
+        return self._base_delete(
+            collection_name=collection_name, wait=wait, **normalized
+        )
 
     def delete(self, collection_name: str, wait: bool | None = None, **kwargs):
         normalized = _normalize_points_selector(
@@ -124,7 +164,7 @@ class CompatQdrantClient(QdrantClient):
             points_selector=kwargs.pop("points_selector", None),
         )
         wait_arg = wait if wait is not None else kwargs.pop("wait", True)
-        return super().delete(
+        return self._base_delete(
             collection_name=collection_name, wait=wait_arg, **normalized
         )
 
@@ -135,7 +175,7 @@ class CompatQdrantClient(QdrantClient):
                 FieldCondition(key="document_id", match=MatchValue(value=document_id))
             ]
         )
-        return super().delete(
+        return self._base_delete(
             collection_name=collection_name,
             points_selector=FilterSelector(filter=filt),
             wait=True,
@@ -219,7 +259,7 @@ class CompatQdrantClient(QdrantClient):
                         )
 
             # All dimensions valid, proceed with upsert
-            result = super().upsert(
+            result = self._base_upsert(
                 collection_name=collection_name,
                 points=points,
                 wait=wait,
@@ -400,7 +440,8 @@ class ConnectionManager:
             raw_client = CompatQdrantClient(
                 host=self.settings.qdrant_host,
                 port=self.settings.qdrant_port,
-                timeout=30,
+                timeout=90,
+                prefer_grpc=True,
             )
             self._qdrant_client = raw_client
             logger.info("Qdrant client initialized successfully")

@@ -16,7 +16,9 @@ MATCH (c:Chunk)
 WHERE c.doc_id IS NULL AND c.document_id IS NOT NULL
 SET c.doc_id = c.document_id;
 
-MATCH (s:Section)
+// Note: :Section label deprecated - all content nodes are now :Chunk
+// Legacy backfill for any remaining Section nodes during migration
+MATCH (s:Chunk)
 WHERE s.doc_id IS NULL AND s.document_id IS NOT NULL
 SET s.doc_id = s.document_id;
 
@@ -37,8 +39,8 @@ CALL {
     RETURN 0
   } IN TRANSACTIONS OF 50000 ROWS;
 
-  // Delete edges that originate from sections in scope
-  MATCH (s:Section)
+  // Delete edges that originate from parent chunks in scope
+  MATCH (s:Chunk)
   WHERE ($document_id IS NULL OR coalesce(s.document_id, s.doc_id) = $document_id)
     AND ($tenant IS NULL OR s.tenant = $tenant)
   OPTIONAL MATCH (s)-[r:PARENT_OF]->()
@@ -52,28 +54,28 @@ CALL {
   RETURN 0
 };
 
-// ---------- 2) CHILD_OF: (Chunk)-[:CHILD_OF]->(Section) ----------
+// ---------- 2) CHILD_OF: (Chunk)-[:CHILD_OF]->(Chunk) ----------
 MATCH (c:Chunk)
 WHERE c.parent_section_id IS NOT NULL
   AND ($document_id IS NULL OR coalesce(c.document_id, c.doc_id) = $document_id)
   AND ($tenant IS NULL OR c.tenant = $tenant)
 CALL {
   WITH c
-  MATCH (s:Section {id: c.parent_section_id})
-  WHERE ($tenant IS NULL OR s.tenant = $tenant)
-    AND ($document_id IS NULL OR coalesce(s.document_id, s.doc_id) = coalesce(c.document_id, c.doc_id))
-  MERGE (c)-[:CHILD_OF]->(s)
+  MATCH (parent:Chunk {id: c.parent_section_id})
+  WHERE ($tenant IS NULL OR parent.tenant = $tenant)
+    AND ($document_id IS NULL OR coalesce(parent.document_id, parent.doc_id) = coalesce(c.document_id, c.doc_id))
+  MERGE (c)-[:CHILD_OF]->(parent)
   RETURN 0
 } IN TRANSACTIONS OF 20000 ROWS;
 
-// ---------- 3) PARENT_OF: (Section)-[:PARENT_OF]->(Section) ----------
-MATCH (child:Section)
+// ---------- 3) PARENT_OF: (Chunk)-[:PARENT_OF]->(Chunk) ----------
+MATCH (child:Chunk)
 WHERE child.parent_section_id IS NOT NULL
   AND ($document_id IS NULL OR coalesce(child.document_id, child.doc_id) = $document_id)
   AND ($tenant IS NULL OR child.tenant = $tenant)
 CALL {
   WITH child
-  MATCH (parent:Section {id: child.parent_section_id})
+  MATCH (parent:Chunk {id: child.parent_section_id})
   WHERE ($tenant IS NULL OR parent.tenant = $tenant)
     AND ($document_id IS NULL OR coalesce(parent.document_id, parent.doc_id) = coalesce(child.document_id, child.doc_id))
   MERGE (parent)-[:PARENT_OF]->(child)

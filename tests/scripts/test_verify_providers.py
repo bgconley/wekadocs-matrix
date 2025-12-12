@@ -23,11 +23,15 @@ def test_verify_providers_lists_profiles(monkeypatch, capsys):
             _provider_name="noop",
             _model="noop",
         )
-        with patch(
-            "scripts.verify_providers.create_embedding_provider",
-            return_value=fake_embed,
-        ), patch(
-            "scripts.verify_providers.create_rerank_provider", return_value=fake_rerank
+        with (
+            patch(
+                "scripts.verify_providers.create_embedding_provider",
+                return_value=fake_embed,
+            ),
+            patch(
+                "scripts.verify_providers.create_rerank_provider",
+                return_value=fake_rerank,
+            ),
         ):
             rc = verify_providers.main()
     assert rc == 0

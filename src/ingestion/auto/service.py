@@ -1,10 +1,13 @@
 import json
 import os
 import time
+from types import SimpleNamespace
 
 import redis
 import uvicorn
 from fastapi import FastAPI, Response
+
+from src.shared.observability import get_logger, setup_logging, setup_tracing
 
 from .queue import (
     KEY_DLQ,
@@ -12,38 +15,97 @@ from .queue import (
     KEY_PROCESSING,
     KEY_STATUS_HASH,
     IngestJob,
+    JobQueue,
     enqueue_file,
 )
-from .watcher import start_watcher
+from .watchers import FileSystemWatcher
 
 WATCH_DIR = os.getenv("INGEST_WATCH_DIR", "/app/ingest/incoming")
 PORT = int(os.getenv("INGEST_PORT", "8081"))
+WATCH_TAG = os.getenv("INGEST_TAG", "wekadocs")
+
+# Configure structured logging and OTEL export (if enabled via env)
+setup_logging(os.getenv("LOG_LEVEL", "INFO"))
+log = get_logger(__name__)
+
+
+def _env_float(var_name: str, default: str) -> float:
+    try:
+        return float(os.getenv(var_name, default))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _env_bool(var_name: str, default: bool) -> bool:
+    raw = os.getenv(var_name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _env_str(var_name: str, default: str) -> str:
+    raw = os.getenv(var_name)
+    if raw is None:
+        return default
+    raw = raw.strip()
+    return raw if raw else default
+
+
+WATCH_DEBOUNCE = _env_float("INGEST_WATCH_DEBOUNCE", "3.0")
+WATCH_POLL_INTERVAL = _env_float("INGEST_WATCH_POLL_INTERVAL", "5.0")
+WATCH_RECURSIVE = _env_bool("INGEST_WATCH_RECURSIVE", True)
+_env_name = os.getenv("ENV", "development").strip().lower()
+_default_mode = "ready" if _env_name in {"production", "prod", "staging"} else "direct"
+WATCH_MODE = _env_str("INGEST_WATCH_MODE", _default_mode).strip().lower()
+if WATCH_MODE not in {"ready", "direct", "auto"}:
+    WATCH_MODE = _default_mode
+
+REDIS_URL = (
+    os.getenv("REDIS_URI") or os.getenv("CACHE_REDIS_URI") or "redis://redis:6379/0"
+)
+redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+job_queue = JobQueue(redis_client)
 
 app = FastAPI(title="Auto-Ingest Service")
 
-observer = None
+# Setup OpenTelemetry tracing with minimal settings from env
+_otel_settings = SimpleNamespace(
+    otel_exporter_otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+    otel_service_name=os.getenv("OTEL_SERVICE_NAME", "weka-ingestion-service"),
+)
+setup_tracing(app, _otel_settings)
+
+watcher = None
 request_counter = 0  # Simple counter for HTTP requests
 
 
 @app.on_event("startup")
 async def startup():
     os.makedirs(WATCH_DIR, exist_ok=True)
-    global observer
-    observer = start_watcher(WATCH_DIR)
+    global watcher
+    watcher = FileSystemWatcher(
+        watch_path=WATCH_DIR,
+        queue=job_queue,
+        tag=WATCH_TAG,
+        debounce_seconds=WATCH_DEBOUNCE,
+        poll_interval=WATCH_POLL_INTERVAL,
+        recursive=WATCH_RECURSIVE,
+        mode=WATCH_MODE,
+    )
+    watcher.start()
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    if observer:
-        observer.stop()
-        observer.join()
+    if watcher:
+        watcher.stop()
 
 
 @app.get("/health")
 async def health():
     global request_counter
     request_counter += 1
-    return {"status": "ok", "watch_dir": WATCH_DIR}
+    return {"status": "ok", "watch_dir": WATCH_DIR, "watch_mode": WATCH_MODE}
 
 
 @app.post("/enqueue")

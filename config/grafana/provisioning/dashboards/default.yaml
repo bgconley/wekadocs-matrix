@@ -1,0 +1,16 @@
+# Dashboard provisioning configuration for WekaDocs-Matrix LGTM stack
+# This file tells Grafana where to find dashboard JSON files
+
+apiVersion: 1
+
+providers:
+  - name: 'WekaDocs Dashboards'
+    orgId: 1
+    folder: 'WekaDocs'
+    folderUid: 'wekadocs'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

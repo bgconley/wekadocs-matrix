@@ -6,9 +6,10 @@
 import hashlib
 import re
 import unicodedata
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import markdown
+import yaml
 from bs4 import BeautifulSoup
 
 from src.shared.observability import get_logger
@@ -17,6 +18,10 @@ logger = get_logger(__name__)
 
 # Fixed slug generation
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+# YAML frontmatter pattern: matches --- delimited block at start of document
+# Uses DOTALL to allow . to match newlines within the YAML block
+_FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 
 def _slugify(title: str) -> str:
@@ -43,6 +48,53 @@ def _section_id(source_uri: str, anchor: str, checksum: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _extract_frontmatter(raw_text: str) -> Tuple[Dict, str]:
+    """
+    Extract YAML frontmatter from markdown document.
+
+    Frontmatter must be at the very start of the document, delimited by --- markers.
+    Example:
+        ---
+        title: "My Document"
+        doc_id: "doc-001"
+        ---
+
+        ## Content starts here
+
+    Args:
+        raw_text: Raw markdown text, potentially with YAML frontmatter
+
+    Returns:
+        Tuple of (metadata_dict, content_without_frontmatter)
+        If no valid frontmatter found, returns ({}, raw_text)
+    """
+    match = _FRONTMATTER_PATTERN.match(raw_text)
+    if not match:
+        return {}, raw_text
+
+    yaml_content = match.group(1)
+    try:
+        metadata = yaml.safe_load(yaml_content)
+        # Handle case where YAML parses but returns None (empty block)
+        if metadata is None:
+            metadata = {}
+    except yaml.YAMLError as e:
+        logger.warning(
+            "Failed to parse YAML frontmatter, skipping",
+            error=str(e),
+        )
+        return {}, raw_text
+
+    # Strip frontmatter from content, preserving rest of document
+    content = raw_text[match.end() :]
+    logger.debug(
+        "Extracted frontmatter",
+        keys=list(metadata.keys()),
+        content_length=len(content),
+    )
+    return metadata, content
+
+
 def parse_markdown(source_uri: str, raw_text: str) -> Dict[str, any]:
     """
     Parse Markdown document into Document and Sections with deterministic IDs.
@@ -56,9 +108,15 @@ def parse_markdown(source_uri: str, raw_text: str) -> Dict[str, any]:
     """
     logger.info("Parsing markdown document", source_uri=source_uri)
 
+    # Extract YAML frontmatter first (if present)
+    # This separates metadata from content and prevents --- from being misinterpreted
+    frontmatter, content = _extract_frontmatter(raw_text)
+
     # Create Document metadata
     document_id = _compute_document_id(source_uri)
-    title = _extract_title(raw_text)
+    # Pass frontmatter to title extraction for priority over heading fallback
+    title = _extract_title(content, metadata=frontmatter)
+    # Use original raw_text for checksum to maintain consistency with existing documents
     checksum = _compute_checksum(raw_text)
 
     document = {
@@ -71,29 +129,55 @@ def parse_markdown(source_uri: str, raw_text: str) -> Dict[str, any]:
         "last_edited": None,  # Can be set from file metadata
     }
 
-    # Parse sections
-    sections = _parse_sections(source_uri, raw_text)
+    # Parse sections from content (without frontmatter) to avoid --- misinterpretation
+    sections = _parse_sections(source_uri, content)
 
     logger.info(
         "Markdown parsed successfully",
         source_uri=source_uri,
         sections_count=len(sections),
+        has_frontmatter=bool(frontmatter),
     )
 
     return {"Document": document, "Sections": sections}
 
 
-def _extract_title(raw_text: str) -> str:
-    """Extract title from first heading or first line."""
+def _extract_title(raw_text: str, metadata: Optional[Dict] = None) -> str:
+    """
+    Extract title from frontmatter, first heading, or first line.
+
+    Priority order:
+    1. Frontmatter 'title' field (if metadata provided)
+    2. First markdown heading (# Title)
+    3. First non-empty line (fallback)
+    4. "Untitled" (last resort)
+
+    Args:
+        raw_text: Markdown content (ideally with frontmatter already stripped)
+        metadata: Optional dict from YAML frontmatter parsing
+
+    Returns:
+        Extracted title string, limited to 100 characters
+    """
+    # Priority 1: Frontmatter title field
+    if metadata and metadata.get("title"):
+        title = metadata["title"]
+        # Handle edge case where title might be a list (from meta extension format)
+        if isinstance(title, list):
+            title = str(title[0])
+        return str(title).strip()[:100]
+
+    # Priority 2 & 3: First heading or first non-empty line
     lines = raw_text.split("\n")
     for line in lines:
         line = line.strip()
         if line.startswith("#"):
             # Remove markdown heading markers
-            return re.sub(r"^#+\s*", "", line).strip()
-        elif line:
-            # Use first non-empty line
-            return line[:100]  # Limit length
+            return re.sub(r"^#+\s*", "", line).strip()[:100]
+        elif line and line != "---":
+            # Use first non-empty line, but skip stray frontmatter delimiters
+            return line[:100]
+
     return "Untitled"
 
 

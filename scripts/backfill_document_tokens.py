@@ -48,7 +48,7 @@ class DocumentTokenBackfiller:
         query = """
         MATCH (d:Document)
         WHERE d.token_count IS NULL OR d.token_count = 0
-        OPTIONAL MATCH (d)-[:HAS_SECTION]->(s:Section)
+        OPTIONAL MATCH (d)-[:HAS_CHUNK]->(s:Chunk)
         WITH d, count(s) as section_count
         RETURN d.id as doc_id,
                d.token_count as current_token_count,
@@ -64,7 +64,7 @@ class DocumentTokenBackfiller:
         """Get statistics for all documents"""
         query = """
         MATCH (d:Document)
-        OPTIONAL MATCH (d)-[:HAS_SECTION]->(s:Section)
+        OPTIONAL MATCH (d)-[:HAS_CHUNK]->(s:Chunk)
         WITH d,
              count(s) as section_count,
              sum(s.tokens) as calculated_tokens
@@ -137,7 +137,7 @@ class DocumentTokenBackfiller:
         # Execute backfill
         logger.info("Executing backfill...")
         backfill_query = """
-        MATCH (d:Document)-[:HAS_SECTION]->(s:Section)
+        MATCH (d:Document)-[:HAS_CHUNK]->(s:Chunk)
         WITH d, sum(s.tokens) AS section_tokens
         SET d.token_count = section_tokens
         RETURN d.id as doc_id,

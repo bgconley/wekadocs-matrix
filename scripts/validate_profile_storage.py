@@ -8,6 +8,7 @@ Fails fast when:
 
 Intended for CI rollout safety and manual checks.
 """
+
 import sys
 
 from src.shared.config import get_config, get_embedding_settings

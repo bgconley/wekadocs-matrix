@@ -22,11 +22,11 @@ def get_neo4j_counts():
 
     counts = {}
     with driver.session() as session:
-        # Count Section nodes with embedding_model
+        # Count Chunk nodes with embedding_model (legacy field)
         result = session.run(
-            "MATCH (n:Section) WHERE n.embedding_model IS NOT NULL RETURN count(n) as count"
+            "MATCH (n:Chunk) WHERE n.embedding_model IS NOT NULL RETURN count(n) as count"
         )
-        counts["sections_with_embedding_model"] = result.single()["count"]
+        counts["chunks_with_embedding_model_legacy"] = result.single()["count"]
 
         # Count Chunk nodes with embedding_model
         result = session.run(
@@ -34,11 +34,11 @@ def get_neo4j_counts():
         )
         counts["chunks_with_embedding_model"] = result.single()["count"]
 
-        # Count Section nodes with embedding_version
+        # Count Chunk nodes with embedding_version
         result = session.run(
-            "MATCH (n:Section) WHERE n.embedding_version IS NOT NULL RETURN count(n) as count"
+            "MATCH (n:Chunk) WHERE n.embedding_version IS NOT NULL RETURN count(n) as count"
         )
-        counts["sections_with_embedding_version"] = result.single()["count"]
+        counts["chunks_with_embedding_version_count"] = result.single()["count"]
 
         # Count Chunk nodes with embedding_version
         result = session.run(
@@ -46,9 +46,9 @@ def get_neo4j_counts():
         )
         counts["chunks_with_embedding_version"] = result.single()["count"]
 
-        # Total counts
-        result = session.run("MATCH (n:Section) RETURN count(n) as count")
-        counts["total_sections"] = result.single()["count"]
+        # Total counts (Section deprecated, all content now :Chunk)
+        result = session.run("MATCH (n:Chunk) RETURN count(n) as count")
+        counts["total_chunks_main"] = result.single()["count"]
 
         result = session.run("MATCH (n:Chunk) RETURN count(n) as count")
         counts["total_chunks"] = result.single()["count"]
@@ -56,7 +56,7 @@ def get_neo4j_counts():
         # Sample a few nodes to see field values
         result = session.run(
             """
-            MATCH (n:Section)
+            MATCH (n:Chunk)
             WHERE n.embedding_model IS NOT NULL OR n.embedding_version IS NOT NULL
             RETURN n.id as id,
                    n.embedding_model as model,
@@ -66,7 +66,7 @@ def get_neo4j_counts():
             LIMIT 5
         """
         )
-        counts["sample_sections"] = [dict(r) for r in result]
+        counts["sample_chunks"] = [dict(r) for r in result]
 
     driver.close()
     return counts
@@ -154,44 +154,44 @@ def main():
     # Create markdown report
     report = f"""# Baseline Counts for Embedding Field Migration
 
-**Generated:** {baseline['timestamp']}
+**Generated:** {baseline["timestamp"]}
 
 ## Neo4j Baseline
 
 | Metric | Count |
 |--------|-------|
-| Sections with `embedding_model` | {baseline['neo4j']['sections_with_embedding_model']} |
-| Sections with `embedding_version` | {baseline['neo4j']['sections_with_embedding_version']} |
-| Chunks with `embedding_model` | {baseline['neo4j']['chunks_with_embedding_model']} |
-| Chunks with `embedding_version` | {baseline['neo4j']['chunks_with_embedding_version']} |
-| Total Sections | {baseline['neo4j']['total_sections']} |
-| Total Chunks | {baseline['neo4j']['total_chunks']} |
+| Sections with `embedding_model` | {baseline["neo4j"]["sections_with_embedding_model"]} |
+| Sections with `embedding_version` | {baseline["neo4j"]["sections_with_embedding_version"]} |
+| Chunks with `embedding_model` | {baseline["neo4j"]["chunks_with_embedding_model"]} |
+| Chunks with `embedding_version` | {baseline["neo4j"]["chunks_with_embedding_version"]} |
+| Total Sections | {baseline["neo4j"]["total_sections"]} |
+| Total Chunks | {baseline["neo4j"]["total_chunks"]} |
 
 ### Sample Section Nodes
 ```json
-{json.dumps(baseline['neo4j']['sample_sections'], indent=2)}
+{json.dumps(baseline["neo4j"]["sample_sections"], indent=2)}
 ```
 
 ## Qdrant Baseline
 
 | Metric | Value |
 |--------|-------|
-| Collection exists | {baseline['qdrant']['collection_exists']} |
-| Points count | {baseline['qdrant'].get('points_count', 'N/A')} |
-| Vector size | {baseline['qdrant'].get('vector_size', 'N/A')} |
-| Distance metric | {baseline['qdrant'].get('distance', 'N/A')} |
-| Sample with `embedding_model` | {baseline['qdrant'].get('sample_with_embedding_model', 0)}/{baseline['qdrant'].get('total_checked', 100)} |
-| Sample with `embedding_version` | {baseline['qdrant'].get('sample_with_embedding_version', 0)}/{baseline['qdrant'].get('total_checked', 100)} |
+| Collection exists | {baseline["qdrant"]["collection_exists"]} |
+| Points count | {baseline["qdrant"].get("points_count", "N/A")} |
+| Vector size | {baseline["qdrant"].get("vector_size", "N/A")} |
+| Distance metric | {baseline["qdrant"].get("distance", "N/A")} |
+| Sample with `embedding_model` | {baseline["qdrant"].get("sample_with_embedding_model", 0)}/{baseline["qdrant"].get("total_checked", 100)} |
+| Sample with `embedding_version` | {baseline["qdrant"].get("sample_with_embedding_version", 0)}/{baseline["qdrant"].get("total_checked", 100)} |
 
 ### Sample Payloads
 ```json
-{json.dumps(baseline['qdrant'].get('sample_payloads', []), indent=2)}
+{json.dumps(baseline["qdrant"].get("sample_payloads", []), indent=2)}
 ```
 
 ## Summary
 
-- **Neo4j**: {baseline['neo4j']['sections_with_embedding_model'] + baseline['neo4j']['chunks_with_embedding_model']} nodes need field migration
-- **Qdrant**: {baseline['qdrant'].get('sample_with_embedding_model', 0)}% of sampled points have legacy field
+- **Neo4j**: {baseline["neo4j"]["sections_with_embedding_model"] + baseline["neo4j"]["chunks_with_embedding_model"]} nodes need field migration
+- **Qdrant**: {baseline["qdrant"].get("sample_with_embedding_model", 0)}% of sampled points have legacy field
 - **Target**: Migrate all `embedding_model` → `embedding_version`
 """
 

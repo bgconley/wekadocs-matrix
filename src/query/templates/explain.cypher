@@ -1,36 +1,23 @@
 -- explain_architecture: Explain system architecture or component relationships
 -- Parameters: $component_name, $max_depth, $limit
 -- Returns: component with its dependencies and architecture context
+-- Phase 2 Cleanup: Removed patterns using dead relationship types (DEPENDS_ON,
+-- REQUIRES, AFFECTS, RELATED_TO). These were never materialized by ingestion.
 
--- Version 1: Component dependencies
+-- Version 1: Component with structure (using active relationships)
 MATCH (c:Component {name: $component_name})
-OPTIONAL MATCH path=(c)-[:DEPENDS_ON*1..$max_depth]->(dep)
-WITH c, path, dep, length(path) AS depth
-RETURN c, collect(DISTINCT {
-  dependency: dep,
-  depth: depth,
-  labels: labels(dep)
-}) AS dependencies
-ORDER BY depth ASC
+OPTIONAL MATCH (c)-[:MENTIONS]->(entity)
+WITH c, collect(DISTINCT {
+  entity: entity,
+  labels: labels(entity)
+}) AS related_entities
+RETURN c, related_entities
 LIMIT $limit;
 
--- Version 2: Component with configurations and procedures
-MATCH (c:Component {name: $component_name})
-OPTIONAL MATCH (c)-[:REQUIRES]->(cfg:Configuration)
-OPTIONAL MATCH (c)<-[:AFFECTS]-(proc:Procedure)
-RETURN c,
-       collect(DISTINCT cfg) AS required_configs,
-       collect(DISTINCT proc) AS related_procedures
-LIMIT $limit;
-
--- Version 3: Concept explanation with examples
+-- Version 2: Concept explanation via MENTIONS (active relationship)
 MATCH (concept:Concept)
 WHERE concept.term = $concept_term OR concept.name = $concept_term
-OPTIONAL MATCH (concept)<-[:MENTIONS]-(sec:Section)
-OPTIONAL MATCH (concept)-[:RELATED_TO]->(ex:Example)
-OPTIONAL MATCH (concept)-[:RELATED_TO]->(related:Concept)
+OPTIONAL MATCH (concept)<-[:MENTIONS]-(sec:Chunk)
 RETURN concept,
-       collect(DISTINCT {section_id: sec.id, title: sec.title, document_id: sec.document_id}) AS mentioned_in,
-       collect(DISTINCT ex) AS examples,
-       collect(DISTINCT related) AS related_concepts
+       collect(DISTINCT {chunk_id: sec.id, title: sec.title, document_id: sec.document_id}) AS mentioned_in
 LIMIT $limit;

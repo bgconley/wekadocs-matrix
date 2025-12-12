@@ -17,7 +17,7 @@ import logging
 import time
 from pathlib import Path
 from threading import Event, Thread
-from typing import Dict, Optional, Set
+from typing import Dict, Optional, Set, Tuple
 
 from .queue import JobQueue, compute_checksum
 
@@ -28,7 +28,8 @@ class FileSystemWatcher:
     """
     Watches file system directory for new documents
 
-    Uses spool pattern: only processes files with .ready suffix
+    Uses spool pattern by default: only processes files with .ready suffix.
+    In direct mode (dev convenience), processes actual documents after a stability window.
     """
 
     def __init__(
@@ -38,6 +39,8 @@ class FileSystemWatcher:
         tag: str = "default",
         debounce_seconds: float = 3.0,
         poll_interval: float = 5.0,
+        recursive: bool = True,
+        mode: str = "ready",
     ):
         """
         Initialize FS watcher
@@ -48,22 +51,34 @@ class FileSystemWatcher:
             tag: Tag for documents from this watcher
             debounce_seconds: Wait time before processing (avoid rapid changes)
             poll_interval: How often to scan directory (seconds)
+            mode: 'ready' (spool marker), 'direct' (process docs), or 'auto' (prefer ready, fallback to direct)
         """
         self.watch_path = Path(watch_path)
         self.queue = queue
         self.tag = tag
         self.debounce_seconds = debounce_seconds
         self.poll_interval = poll_interval
+        self.recursive = recursive
+        self.mode = (mode or "ready").strip().lower()
 
         # Tracking
-        self.seen_files: Set[str] = set()
-        self.pending_files: Dict[str, float] = {}  # path -> first_seen_timestamp
+        # file_path -> (last_size, last_mtime) at time of last processing
+        # Used to prevent reprocessing unchanged files while still allowing
+        # re-ingest when content changes.
+        self.seen_files: Dict[str, Tuple[int, float]] = {}
+        # path -> (first_seen_ts, stable_since_ts, last_size, last_mtime)
+        self.pending_files: Dict[str, Tuple[float, float, int, float]] = {}
+
+        # Allowed file extensions for direct/auto mode
+        self.allowed_ext = {".md", ".markdown", ".html", ".htm"}
 
         # Control
         self._stop_event = Event()
         self._thread: Optional[Thread] = None
 
-        logger.info(f"FileSystemWatcher initialized: {watch_path} (tag={tag})")
+        logger.info(
+            f"FileSystemWatcher initialized: {watch_path} (tag={tag}, mode={self.mode})"
+        )
 
     def start(self):
         """Start watcher in background thread"""
@@ -109,33 +124,115 @@ class FileSystemWatcher:
                 time.sleep(1)
 
     def _scan_directory(self):
-        """Scan directory for new .ready files"""
+        """Scan directory for new files matching configured watch mode."""
         try:
-            ready_files = list(self.watch_path.glob("*.ready"))
+            ready_files = []
+            direct_files = []
 
-            for ready_file in ready_files:
-                file_path = str(ready_file)
+            if self.mode in {"ready", "auto"}:
+                if self.recursive:
+                    ready_files = list(self.watch_path.rglob("*.ready"))
+                else:
+                    ready_files = list(self.watch_path.glob("*.ready"))
 
-                # Skip if already processed
+            if self.mode in {"direct", "auto"}:
+                candidates = (
+                    list(self.watch_path.rglob("*"))
+                    if self.recursive
+                    else list(self.watch_path.glob("*"))
+                )
+                for f in candidates:
+                    if not f.is_file():
+                        continue
+                    name = f.name
+                    if (
+                        name.startswith(".")
+                        or name.endswith(".part")
+                        or name.endswith(".ready")
+                    ):
+                        continue
+                    if f.suffix.lower() in self.allowed_ext:
+                        direct_files.append(f)
+
+            # In auto mode, skip direct files that have a ready marker sibling
+            ready_bases: Set[str] = set()
+            if self.mode == "auto":
+                for rf in ready_files:
+                    base = rf.with_name(rf.name[:-6])  # strip .ready
+                    try:
+                        ready_bases.add(str(base.resolve()))
+                    except OSError:
+                        ready_bases.add(str(base.absolute()))
+
+            scan_files = []
+            scan_files.extend(ready_files)
+            if direct_files:
+                for df in direct_files:
+                    try:
+                        df_path = str(df.resolve())
+                    except OSError:
+                        df_path = str(df.absolute())
+                    if ready_bases and df_path in ready_bases:
+                        continue
+                    scan_files.append(df)
+
+            for scan_file in scan_files:
+                try:
+                    file_path = str(scan_file.resolve())
+                except OSError:
+                    # Fall back to absolute path if resolve fails
+                    file_path = str(scan_file.absolute())
+
+                now = time.time()
+                try:
+                    stat = scan_file.stat()
+                    size = int(stat.st_size)
+                    mtime = float(stat.st_mtime)
+                except Exception:
+                    size = -1
+                    mtime = 0.0
+
+                # Skip if already processed and unchanged; reprocess if changed.
                 if file_path in self.seen_files:
-                    continue
+                    last_size, last_mtime = self.seen_files[file_path]
+                    if size == last_size and mtime == last_mtime:
+                        continue
+                    # File has changed since last processing; allow re-ingest.
+                    self.seen_files.pop(file_path, None)
 
-                # Add to pending with timestamp (for debouncing)
                 if file_path not in self.pending_files:
-                    self.pending_files[file_path] = time.time()
-                    logger.debug(f"Detected new file: {ready_file.name}")
+                    # New file: stable_since starts now
+                    self.pending_files[file_path] = (now, now, size, mtime)
+                    logger.debug(f"Detected new file: {scan_file.name}")
+                else:
+                    first_seen, stable_since, last_size, last_mtime = (
+                        self.pending_files[file_path]
+                    )
+                    if size != last_size or mtime != last_mtime:
+                        # File changed; reset stability timer
+                        stable_since = now
+                        last_size = size
+                        last_mtime = mtime
+                    self.pending_files[file_path] = (
+                        first_seen,
+                        stable_since,
+                        last_size,
+                        last_mtime,
+                    )
 
         except Exception as e:
             logger.error(f"Error scanning directory: {e}")
 
     def _process_pending(self):
-        """Process files that have passed debounce period"""
+        """Process files that have been stable for debounce period."""
         now = time.time()
         to_process = []
 
         # Find files ready to process
-        for file_path, first_seen in list(self.pending_files.items()):
-            if now - first_seen >= self.debounce_seconds:
+        for file_path, (first_seen, stable_since, _, _) in list(
+            self.pending_files.items()
+        ):
+            if now - stable_since >= self.debounce_seconds:
                 to_process.append(file_path)
                 del self.pending_files[file_path]
 
@@ -143,7 +240,15 @@ class FileSystemWatcher:
         for file_path in to_process:
             try:
                 self._process_file(file_path)
-                self.seen_files.add(file_path)
+                # Record size/mtime after processing so unchanged files won't be reprocessed.
+                try:
+                    stat = Path(file_path).stat()
+                    self.seen_files[file_path] = (
+                        int(stat.st_size),
+                        float(stat.st_mtime),
+                    )
+                except Exception:
+                    self.seen_files[file_path] = (-1, 0.0)
             except Exception as e:
                 logger.error(f"Failed to process {file_path}: {e}", exc_info=True)
 
@@ -339,6 +444,7 @@ class WatcherManager:
             paths = self.config["watch"].get("paths", [])
             debounce = self.config["watch"].get("debounce_seconds", 3.0)
             poll = self.config["watch"].get("poll_interval", 5.0)
+            recursive = self.config["watch"].get("recursive", True)
 
             for path in paths:
                 watcher = FileSystemWatcher(
@@ -347,6 +453,7 @@ class WatcherManager:
                     tag=self.config.get("tag", "default"),
                     debounce_seconds=debounce,
                     poll_interval=poll,
+                    recursive=recursive,
                 )
                 watcher.start()
                 self.watchers.append(watcher)

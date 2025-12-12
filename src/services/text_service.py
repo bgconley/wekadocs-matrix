@@ -11,6 +11,9 @@ from typing import Any, Dict, List, Optional, Sequence
 from neo4j import Driver
 
 from src.services.context_budget_manager import BudgetExceeded, ContextBudgetManager
+from src.shared.observability import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -49,16 +52,28 @@ class TextService:
             )
 
         query = """
-        MATCH (s:Section)
+        MATCH (s:Chunk)
         WHERE s.id IN $section_ids
         RETURN s.id AS id,
+               'Chunk' AS label,
                coalesce(s.title, s.name, s.heading, '') AS title,
-               s.text AS text,
+               coalesce(s.text, s.content, '') AS text,
                s.doc_tag AS doc_tag,
-               s.blob_id AS blob_id
+               coalesce(s.blob_id, s.source_uri, s.document_id, NULL) AS blob_id
         """
         with self.driver.session() as session:
             rows = list(session.run(query, section_ids=list(section_ids)))
+
+        # Defensive logging for missing sections (schema mismatch detection)
+        if len(rows) < len(section_ids):
+            found_ids = {dict(row).get("id") for row in rows}
+            missing_ids = set(section_ids) - found_ids
+            logger.warning(
+                "get_section_text: some section_ids not found",
+                requested=len(section_ids),
+                found=len(rows),
+                missing_sample=list(missing_ids)[:5],
+            )
 
         max_bytes = max_bytes_per or self.default_max_bytes
         results: List[Dict[str, Any]] = []

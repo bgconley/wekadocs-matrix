@@ -125,10 +125,16 @@ qdrant_search_total = Counter(
     ["collection_name", "status"],
 )
 
+qdrant_delete_total = Counter(
+    "qdrant_delete_total",
+    "Total Qdrant delete operations (compensation phase)",
+    ["collection_name", "status"],
+)
+
 qdrant_operation_latency_ms = Histogram(
     "qdrant_operation_latency_ms",
     "Qdrant operation latency in milliseconds",
-    ["collection_name", "operation"],  # operation: upsert, search
+    ["collection_name", "operation"],  # operation: upsert, search, delete
     buckets=(1, 5, 10, 25, 50, 100, 250, 500, 1000),
 )
 
@@ -351,6 +357,19 @@ ingestion_duration_seconds = Histogram(
     buckets=(0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0),
 )
 
+# Issue #8: Entity→Entity relationship metrics
+entity_relationships_total = Counter(
+    "entity_relationships_total",
+    "Total Entity→Entity relationships created during ingestion",
+    ["relationship_type", "status"],  # status: created, rejected, missing_entities
+)
+
+entity_relationships_missing_total = Counter(
+    "entity_relationships_missing_total",
+    "Total Entity→Entity relationships skipped due to missing entity nodes",
+    ["relationship_type"],
+)
+
 # ===== Phase 7E-4: Chunk quality metrics =====
 chunk_token_distribution = Histogram(
     "chunk_token_distribution",
@@ -388,6 +407,25 @@ integrity_failures_total = Counter(
     "integrity_failures_total",
     "Total integrity check failures (ZERO tolerance SLO)",
     ["check_type", "failure_reason"],
+)
+
+# ===== Schema alignment & defensive query metrics (Phase 3/4 hardening) =====
+schema_validation_failures_total = Counter(
+    "schema_validation_failures_total",
+    "Total schema validation failures at startup",
+    ["store"],  # neo4j, qdrant
+)
+
+empty_query_results_total = Counter(
+    "empty_query_results_total",
+    "Queries that returned 0 results unexpectedly",
+    ["service", "operation"],
+)
+
+partial_query_results_total = Counter(
+    "partial_query_results_total",
+    "Queries that returned fewer results than requested",
+    ["service", "operation"],
 )
 
 # ===== Phase 7E-4: Retrieval expansion metrics =====

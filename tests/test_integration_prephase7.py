@@ -56,7 +56,8 @@ def test_h1_provider_dimension_validation():
     print("Test 2: Provider with wrong dimensions fails...")
     try:
         bad_provider = SentenceTransformersProvider(
-            model_name=config.embedding.embedding_model, expected_dims=999  # Wrong!
+            model_name=config.embedding.embedding_model,
+            expected_dims=999,  # Wrong!
         )
         print(f"  ✗ FAIL: Should have raised ValueError, got dims={bad_provider.dims}")
         return False

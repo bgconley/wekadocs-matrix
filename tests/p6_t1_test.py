@@ -374,7 +374,7 @@ class TestRedisQueue:
         dequeued_ids = []
         for i in range(3):
             result = queue.dequeue(timeout=2)
-            assert result is not None, f"Failed to dequeue job {i+1}/3"
+            assert result is not None, f"Failed to dequeue job {i + 1}/3"
 
             raw_json, job_id = result
             dequeued_ids.append(job_id)

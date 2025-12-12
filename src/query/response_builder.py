@@ -453,7 +453,7 @@ class ResponseBuilder:
         - max_entities: Limit entities per seed (default: 20)
         - max_depth: Limit traversal depth (default: 1, currently enforced)
 
-        Query: 1-hop neighbors via MENTIONS, CONTAINS_STEP, REQUIRES, AFFECTS.
+        Query: 1-hop neighbors via MENTIONS, CONTAINS_STEP.
         Filter: Only entity labels (Command, Configuration, Step, Error, Concept).
 
         Args:
@@ -480,7 +480,7 @@ class ResponseBuilder:
             # Pre-Phase 7 (E2): max_depth=1 enforced (prevents deep traversal)
             # Why bi-directional: Sections may have incoming HAS_SECTION from Documents
             query = """
-            MATCH (n {id: $node_id})-[r:MENTIONS|CONTAINS_STEP|REQUIRES|AFFECTS]-(e)
+            MATCH (n {id: $node_id})-[r:MENTIONS|CONTAINS_STEP]-(e)
             WITH e,
                  type(r) AS relationship,
                  COALESCE(r.confidence, 1.0) AS confidence,

@@ -1,178 +1,274 @@
-# Phase 7E.0 - Task 0.4: Baseline Query Set
-# Real queries for baseline retrieval metrics before chunking implementation
+# Baseline Query Set for WekaDocs GraphRAG
+# Phase 0: Establishes representative queries for quality metrics (MRR, NDCG@10)
 #
-# Format:
-#   - id: Unique query identifier
-#   - text: The actual query text
-#   - category: Type of query (config, procedure, troubleshooting, complex)
-#   - token_estimate: Approximate token count (for expansion logic)
-#   - judgments: Graded relevance (section_id -> 0/1/2) for nDCG
-#     - 2 = highly relevant (complete answer)
-#     - 1 = partially relevant (related content)
-#     - 0 = not relevant
-#   - gold_section_ids: Binary relevance for Hit@k (will map to chunk_ids post-Phase 2)
+# Query Types:
+#   - procedural: How-to instructions requiring step sequences
+#   - troubleshooting: Error resolution, debugging
+#   - reference: Facts, limits, specifications
+#   - conceptual: Architecture, design patterns
+#   - navigational: Finding specific documents/sections
+#   - command: CLI command usage and syntax
+#
+# Each query includes:
+#   - id: Unique identifier
+#   - text: Natural language query
+#   - type: Query classification
+#   - expected_topics: Keywords/entities that should appear in relevant results
+#   - difficulty: easy/medium/hard (for stratified analysis)
 
-# Configuration Queries (short, 5-7 tokens)
-- id: q01_config_mtu
-  text: "How to set MTU?"
-  category: config
-  token_estimate: 5
-  judgments: {}  # Will be populated after baseline run
-  gold_section_ids: []
+queries:
+  # === PROCEDURAL QUERIES (How-to) ===
+  - id: proc_001
+    text: "How do I create a filesystem snapshot?"
+    type: procedural
+    expected_topics: ["snapshot", "weka fs snapshot", "create"]
+    difficulty: easy
 
-- id: q02_config_network
-  text: "Configure network settings for cluster"
-  category: config
-  token_estimate: 6
-  judgments: {}
-  gold_section_ids: []
+  - id: proc_002
+    text: "How to configure tiering for a filesystem?"
+    type: procedural
+    expected_topics: ["tiering", "tier", "object store", "configure"]
+    difficulty: medium
 
-- id: q03_config_ssd
-  text: "SSD tier configuration options"
-  category: config
-  token_estimate: 5
-  judgments: {}
-  gold_section_ids: []
+  - id: proc_003
+    text: "Steps to add a new backend host to the cluster"
+    type: procedural
+    expected_topics: ["backend", "host", "add", "cluster", "join"]
+    difficulty: medium
 
-- id: q04_config_quota
-  text: "Set filesystem quota limits"
-  category: config
-  token_estimate: 5
-  judgments: {}
-  gold_section_ids: []
+  - id: proc_004
+    text: "How do I set up SMB shares for Windows clients?"
+    type: procedural
+    expected_topics: ["SMB", "share", "Windows", "CIFS"]
+    difficulty: medium
 
-- id: q05_config_snapshot
-  text: "Configure snapshot scheduling"
-  category: config
-  token_estimate: 4
-  judgments: {}
-  gold_section_ids: []
+  - id: proc_005
+    text: "How to configure NFS exports?"
+    type: procedural
+    expected_topics: ["NFS", "export", "configure"]
+    difficulty: easy
 
-# Procedure Queries (medium, 7-10 tokens)
-- id: q06_proc_add_node
-  text: "Steps to add node to cluster"
-  category: procedure
-  token_estimate: 7
-  judgments: {}
-  gold_section_ids: []
+  - id: proc_006
+    text: "How to enable encryption at rest?"
+    type: procedural
+    expected_topics: ["encryption", "KMS", "at rest"]
+    difficulty: hard
 
-- id: q07_proc_replace_drive
-  text: "How to replace failed drive in storage"
-  category: procedure
-  token_estimate: 8
-  judgments: {}
-  gold_section_ids: []
+  - id: proc_007
+    text: "How to upgrade WEKA software version?"
+    type: procedural
+    expected_topics: ["upgrade", "version", "software"]
+    difficulty: hard
 
-- id: q08_proc_upgrade
-  text: "Upgrade Weka cluster to new version"
-  category: procedure
-  token_estimate: 7
-  judgments: {}
-  gold_section_ids: []
+  - id: proc_008
+    text: "How to create a filesystem with quota?"
+    type: procedural
+    expected_topics: ["filesystem", "quota", "create"]
+    difficulty: easy
 
-- id: q09_proc_create_fs
-  text: "Create new filesystem with tiering enabled"
-  category: procedure
-  token_estimate: 7
-  judgments: {}
-  gold_section_ids: []
+  # === TROUBLESHOOTING QUERIES ===
+  - id: trouble_001
+    text: "weka cluster container failure error"
+    type: troubleshooting
+    expected_topics: ["container", "failure", "error", "cluster"]
+    difficulty: hard
 
-- id: q10_proc_backup
-  text: "Setup automated backup for filesystem"
-  category: procedure
-  token_estimate: 6
-  judgments: {}
-  gold_section_ids: []
+  - id: trouble_002
+    text: "Tiering not moving data to object store"
+    type: troubleshooting
+    expected_topics: ["tiering", "object store", "move", "data"]
+    difficulty: hard
 
-# Troubleshooting Queries (short, 5-8 tokens)
-- id: q11_trouble_timeout
-  text: "Fix connection timeout error"
-  category: troubleshooting
-  token_estimate: 5
-  judgments: {}
-  gold_section_ids: []
+  - id: trouble_003
+    text: "SMB connection timeout issues"
+    type: troubleshooting
+    expected_topics: ["SMB", "timeout", "connection"]
+    difficulty: medium
 
-- id: q12_trouble_performance
-  text: "Diagnose slow filesystem performance"
-  category: troubleshooting
-  token_estimate: 5
-  judgments: {}
-  gold_section_ids: []
+  - id: trouble_004
+    text: "Snapshot creation failed insufficient space"
+    type: troubleshooting
+    expected_topics: ["snapshot", "failed", "space", "capacity"]
+    difficulty: medium
 
-- id: q13_trouble_capacity
-  text: "Resolve capacity warning alerts"
-  category: troubleshooting
-  token_estimate: 5
-  judgments: {}
-  gold_section_ids: []
+  - id: trouble_005
+    text: "NFS mount hangs on client"
+    type: troubleshooting
+    expected_topics: ["NFS", "mount", "hang", "client"]
+    difficulty: medium
 
-- id: q14_trouble_licensing
-  text: "License validation failed"
-  category: troubleshooting
-  token_estimate: 4
-  judgments: {}
-  gold_section_ids: []
+  - id: trouble_006
+    text: "Backend host not joining cluster"
+    type: troubleshooting
+    expected_topics: ["backend", "join", "cluster", "host"]
+    difficulty: hard
 
-# Complex Queries (long, 11-15 tokens)
-- id: q15_complex_multisite
-  text: "Configure network settings for multi-site deployment with custom routing"
-  category: complex
-  token_estimate: 11
-  judgments: {}
-  gold_section_ids: []
+  - id: trouble_007
+    text: "High latency on filesystem operations"
+    type: troubleshooting
+    expected_topics: ["latency", "performance", "slow"]
+    difficulty: hard
 
-- id: q16_complex_tiering
-  text: "Best practices for configuring SSD and object storage tiering with automatic data lifecycle policies"
-  category: complex
-  token_estimate: 15
-  judgments: {}
-  gold_section_ids: []
+  # === REFERENCE QUERIES (Facts/Limits) ===
+  - id: ref_001
+    text: "What is the maximum number of filesystems supported?"
+    type: reference
+    expected_topics: ["maximum", "filesystem", "limit"]
+    difficulty: easy
 
-- id: q17_complex_ha
-  text: "Setup high availability cluster with hot standby nodes and failover automation"
-  category: complex
-  token_estimate: 13
-  judgments: {}
-  gold_section_ids: []
+  - id: ref_002
+    text: "Maximum snapshot count per filesystem"
+    type: reference
+    expected_topics: ["snapshot", "maximum", "limit"]
+    difficulty: easy
 
-- id: q18_complex_monitoring
-  text: "Integrate Weka monitoring with Prometheus Grafana for alerting and performance tracking"
-  category: complex
-  token_estimate: 13
-  judgments: {}
-  gold_section_ids: []
+  - id: ref_003
+    text: "Supported object store backends for tiering"
+    type: reference
+    expected_topics: ["object store", "S3", "Azure", "tiering", "supported"]
+    difficulty: easy
 
-- id: q19_complex_migration
-  text: "Plan and execute migration from existing storage to Weka with minimal downtime"
-  category: complex
-  token_estimate: 14
-  judgments: {}
-  gold_section_ids: []
+  - id: ref_004
+    text: "Minimum hardware requirements for WEKA cluster"
+    type: reference
+    expected_topics: ["hardware", "requirements", "minimum", "CPU", "memory"]
+    difficulty: medium
 
-- id: q20_complex_security
-  text: "Configure LDAP authentication encryption and role-based access control for filesystem security"
-  category: complex
-  token_estimate: 13
-  judgments: {}
-  gold_section_ids: []
+  - id: ref_005
+    text: "Network bandwidth requirements between backends"
+    type: reference
+    expected_topics: ["network", "bandwidth", "backend"]
+    difficulty: medium
 
-# Edge Cases
-- id: q21_edge_acronym
-  text: "NFS"
-  category: edge
-  token_estimate: 1
-  judgments: {}
-  gold_section_ids: []
+  - id: ref_006
+    text: "Supported Linux distributions for WEKA"
+    type: reference
+    expected_topics: ["Linux", "distribution", "supported", "OS"]
+    difficulty: easy
 
-- id: q22_edge_version
-  text: "What's new in version 4.2?"
-  category: edge
-  token_estimate: 6
-  judgments: {}
-  gold_section_ids: []
+  # === CONCEPTUAL QUERIES (Architecture/Design) ===
+  - id: concept_001
+    text: "How does WEKA tiering work?"
+    type: conceptual
+    expected_topics: ["tiering", "architecture", "hot", "cold", "object store"]
+    difficulty: medium
 
-# Notes:
-# - judgments and gold_section_ids will be populated during baseline run
-# - After Phase 2, gold_section_ids will map to gold_chunk_ids
-# - Token estimates guide expansion logic (>12 tokens triggers expansion)
-# - Categories help analyze performance by query type
+  - id: concept_002
+    text: "What is the WEKA data protection model?"
+    type: conceptual
+    expected_topics: ["protection", "redundancy", "stripe", "parity"]
+    difficulty: hard
+
+  - id: concept_003
+    text: "Explain WEKA cluster architecture"
+    type: conceptual
+    expected_topics: ["cluster", "architecture", "backend", "frontend", "client"]
+    difficulty: hard
+
+  - id: concept_004
+    text: "How does WEKA handle data distribution?"
+    type: conceptual
+    expected_topics: ["distribution", "stripe", "chunk"]
+    difficulty: hard
+
+  - id: concept_005
+    text: "What is a WEKA container?"
+    type: conceptual
+    expected_topics: ["container", "process", "backend"]
+    difficulty: medium
+
+  # === NAVIGATIONAL QUERIES ===
+  - id: nav_001
+    text: "WEKA CLI command reference"
+    type: navigational
+    expected_topics: ["CLI", "command", "reference"]
+    difficulty: easy
+
+  - id: nav_002
+    text: "API documentation for WEKA"
+    type: navigational
+    expected_topics: ["API", "REST", "documentation"]
+    difficulty: easy
+
+  - id: nav_003
+    text: "Release notes for latest version"
+    type: navigational
+    expected_topics: ["release", "notes", "version"]
+    difficulty: easy
+
+  # === COMMAND QUERIES (CLI Usage) ===
+  - id: cmd_001
+    text: "weka fs tier status command"
+    type: command
+    expected_topics: ["weka fs tier", "status"]
+    difficulty: easy
+
+  - id: cmd_002
+    text: "How to use weka cluster status"
+    type: command
+    expected_topics: ["weka cluster", "status"]
+    difficulty: easy
+
+  - id: cmd_003
+    text: "weka fs snapshot list options"
+    type: command
+    expected_topics: ["weka fs snapshot", "list", "options"]
+    difficulty: easy
+
+  - id: cmd_004
+    text: "weka events show command parameters"
+    type: command
+    expected_topics: ["weka events", "show", "parameters"]
+    difficulty: medium
+
+  - id: cmd_005
+    text: "weka alerts mute syntax"
+    type: command
+    expected_topics: ["weka alerts", "mute"]
+    difficulty: medium
+
+  # === MULTI-TOPIC QUERIES (Cross-document) ===
+  - id: multi_001
+    text: "Snapshot policies and tiering interaction"
+    type: conceptual
+    expected_topics: ["snapshot", "policy", "tiering", "interaction"]
+    difficulty: hard
+
+  - id: multi_002
+    text: "SMB and NFS concurrent access to same filesystem"
+    type: reference
+    expected_topics: ["SMB", "NFS", "concurrent", "access"]
+    difficulty: hard
+
+  - id: multi_003
+    text: "Encryption with object store tiering"
+    type: conceptual
+    expected_topics: ["encryption", "object store", "tiering", "KMS"]
+    difficulty: hard
+
+  - id: multi_004
+    text: "Cluster expansion impact on existing snapshots"
+    type: conceptual
+    expected_topics: ["cluster", "expansion", "snapshot"]
+    difficulty: hard
+
+  - id: multi_005
+    text: "Backup strategy combining snapshots and tiering"
+    type: procedural
+    expected_topics: ["backup", "snapshot", "tiering", "strategy"]
+    difficulty: hard
+
+# Summary statistics for test planning:
+# Total queries: 39
+# By type:
+#   - procedural: 8
+#   - troubleshooting: 7
+#   - reference: 6
+#   - conceptual: 5
+#   - navigational: 3
+#   - command: 5
+#   - multi-topic: 5 (subset of above types, tagged for cross-doc evaluation)
+# By difficulty:
+#   - easy: 14
+#   - medium: 13
+#   - hard: 13

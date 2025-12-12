@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
-from qdrant_client.models import FieldCondition, Filter, MatchValue, NamedVector
+from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 from src.providers.rerank.base import RerankProvider
 from src.providers.settings import EmbeddingSettings
@@ -163,36 +163,46 @@ class QdrantVectorStore(VectorStore):
         status = "success"
 
         try:
-            # Search
-            query_vector_payload: Any
-            if isinstance(vector, dict):
-                if self.use_named_vectors:
-                    items = list(vector.items())
-                    if len(items) == 1:
-                        name, vec = items[0]
-                        query_vector_payload = NamedVector(name=name, vector=vec)
-                    else:
-                        query_vector_payload = [
-                            NamedVector(name=name, vector=vec) for name, vec in items
-                        ]
-                else:
-                    # fall back to first entry if unnamed
-                    _, vec = next(iter(vector.items()))
-                    query_vector_payload = vec
-            elif self.use_named_vectors:
-                query_vector_payload = NamedVector(
-                    name=self.query_vector_name, vector=vector
-                )
-            else:
-                query_vector_payload = vector
+            # Search - extract vector and optional name for query_points API
+            query_vec: Any
+            using_name: Optional[str] = None
 
-            results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector_payload,
-                limit=k,
-                query_filter=qdrant_filter,
-                with_payload=True,
-            )
+            if isinstance(vector, dict):
+                items = list(vector.items())
+                if len(items) == 1:
+                    name, vec = items[0]
+                    query_vec = vec
+                    if self.use_named_vectors:
+                        using_name = name
+                else:
+                    # Multi-vector queries not supported in query_points API
+                    # Use first vector and log warning
+                    logger.warning(
+                        "Multi-vector query not supported, using first vector only",
+                        num_vectors=len(items),
+                    )
+                    name, vec = items[0]
+                    query_vec = vec
+                    if self.use_named_vectors:
+                        using_name = name
+            else:
+                query_vec = vector
+                if self.use_named_vectors:
+                    using_name = self.query_vector_name
+
+            # Build query_points call with optional using parameter
+            query_kwargs: Dict[str, Any] = {
+                "collection_name": self.collection_name,
+                "query": query_vec,
+                "limit": k,
+                "query_filter": qdrant_filter,
+                "with_payload": True,
+            }
+            if using_name:
+                query_kwargs["using"] = using_name
+
+            response = self.client.query_points(**query_kwargs)
+            results = response.points
 
             # Record success metrics
             latency_ms = (time.time() - start_time) * 1000
@@ -576,7 +586,7 @@ class HybridSearchEngine:
         expansion_query = f"""
         UNWIND $seed_ids AS seed_id
         MATCH (seed {{id: seed_id}})
-        OPTIONAL MATCH path=(seed)-[r:MENTIONS|CONTAINS_STEP|HAS_PARAMETER|REQUIRES|AFFECTS*1..{self.max_hops}]->(target)
+        OPTIONAL MATCH path=(seed)-[r:MENTIONS|CONTAINS_STEP|HAS_PARAMETER*1..{self.max_hops}]->(target)
         WHERE target.id <> seed.id
         WITH DISTINCT target, min(length(path)) AS dist, seed.id AS seed_id
         WHERE dist <= {self.max_hops}
@@ -696,12 +706,12 @@ class HybridSearchEngine:
         # Batched Cypher to compute coverage signals
         coverage_query = """
         UNWIND $ids AS sid
-        MATCH (s:Section {id: sid})
-        OPTIONAL MATCH (s)-[r]->()
-        WITH s, count(DISTINCT r) AS conn_count
-        OPTIONAL MATCH (s)-[:MENTIONS]->(e:Entity)
-        WITH s, conn_count, count(DISTINCT e) AS mention_count
-        RETURN s.id AS id,
+        MATCH (c:Chunk {id: sid})
+        OPTIONAL MATCH (c)-[r]->()
+        WITH c, count(DISTINCT r) AS conn_count
+        OPTIONAL MATCH (c)-[:MENTIONS]->(e:Entity)
+        WITH c, conn_count, count(DISTINCT e) AS mention_count
+        RETURN c.id AS id,
                conn_count AS connection_count,
                mention_count AS mention_count
         """
@@ -838,13 +848,13 @@ class HybridSearchEngine:
         # Extract section IDs for batch query
         section_ids = [r.node_id for r in results]
 
-        # Query graph to count focused entity mentions per section
-        # Uses MENTIONS relationship from Section to entities
+        # Query graph to count focused entity mentions per chunk
+        # Uses MENTIONS relationship from Chunk to entities
         focus_query = """
         UNWIND $section_ids AS section_id
-        MATCH (s:Section {id: section_id})-[:MENTIONS]->(e)
+        MATCH (c:Chunk {id: section_id})-[:MENTIONS]->(e)
         WHERE e.id IN $focused_entity_ids
-        RETURN s.id AS section_id, count(DISTINCT e) AS focus_hits, collect(DISTINCT e.id) AS matched_entities
+        RETURN c.id AS section_id, count(DISTINCT e) AS focus_hits, collect(DISTINCT e.id) AS matched_entities
         """
 
         focus_counts = {}

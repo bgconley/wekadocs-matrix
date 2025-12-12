@@ -23,7 +23,8 @@ DEPENDENCY_CHAIN = TemplateSchema(
         max_depth=5,
         max_results=100,
         timeout_ms=30000,
-        allowed_rel_types=["DEPENDS_ON", "CRITICAL_FOR"],
+        # Phase 2 Cleanup: Removed DEPENDS_ON, CRITICAL_FOR (never materialized)
+        allowed_rel_types=["MENTIONS", "CONTAINS_STEP", "HAS_PARAMETER"],
         estimated_row_limit=1000,
     ),
     file_path=str(TEMPLATE_DIR / "dependency_chain.cypher"),
@@ -45,7 +46,8 @@ IMPACT_ASSESSMENT = TemplateSchema(
         max_depth=3,
         max_results=100,
         timeout_ms=30000,
-        allowed_rel_types=["AFFECTS", "CRITICAL_FOR"],
+        # Phase 2 Cleanup: Removed AFFECTS, CRITICAL_FOR (never materialized)
+        allowed_rel_types=["MENTIONS", "CONTAINS_STEP"],
         estimated_row_limit=2000,
     ),
     file_path=str(TEMPLATE_DIR / "impact_assessment.cypher"),
@@ -110,11 +112,11 @@ TROUBLESHOOTING_PATH = TemplateSchema(
         max_depth=3,
         max_results=10,
         timeout_ms=30000,
+        # Phase 2 Cleanup: Removed RELATED_TO (never materialized)
         allowed_rel_types=[
             "RESOLVES",
             "CONTAINS_STEP",
             "EXECUTES",
-            "RELATED_TO",
             "HAS_PARAMETER",
         ],
         estimated_row_limit=500,
