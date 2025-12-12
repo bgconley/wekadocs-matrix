@@ -42,9 +42,8 @@ def get_parser_engine() -> str:
         from src.shared.config import get_config
 
         config = get_config()
-        engine = (
-            config.get("ingestion", {}).get("parser", {}).get("engine", DEFAULT_ENGINE)
-        )
+        # Use attribute access for Pydantic Config model
+        engine = config.ingestion.parser.engine
         return engine
     except Exception as e:
         logger.warning(
@@ -66,7 +65,8 @@ def get_shadow_mode() -> bool:
         from src.shared.config import get_config
 
         config = get_config()
-        return config.get("ingestion", {}).get("parser", {}).get("shadow_mode", False)
+        # Use attribute access for Pydantic Config model
+        return config.ingestion.parser.shadow_mode
     except Exception:
         return False
 
@@ -89,9 +89,8 @@ def get_fail_on_mismatch() -> bool:
         from src.shared.config import get_config
 
         config = get_config()
-        return (
-            config.get("ingestion", {}).get("parser", {}).get("fail_on_mismatch", False)
-        )
+        # Use attribute access for Pydantic Config model
+        return config.ingestion.parser.fail_on_mismatch
     except Exception:
         return False
 

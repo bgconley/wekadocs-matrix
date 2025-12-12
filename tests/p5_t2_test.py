@@ -140,17 +140,7 @@ class TestOpenTelemetryTracing:
         # Verify trace context propagated
         assert "X-Correlation-ID" in response.headers
 
-        # Check Jaeger for trace (if available)
-        try:
-            jaeger_response = requests.get(
-                "http://localhost:16686/api/traces/4bf92f3577b34da6a3ce929d0e0e4736",
-                timeout=2,
-            )
-            if jaeger_response.status_code == 200:
-                trace_data = jaeger_response.json()
-                assert "data" in trace_data
-        except requests.exceptions.RequestException:
-            pytest.skip("Jaeger not available for trace verification")
+        # Traces are exported via OTLP; backend may vary by environment.
 
     def test_trace_mcp_tool_context_manager(self):
         """Verify trace_mcp_tool context manager works correctly"""
@@ -462,17 +452,7 @@ class TestMonitoringIntegration:
         assert metrics_response.status_code == 200
         assert "http_requests_total" in metrics_response.text
 
-        # 3. Verify traces available (if Jaeger is up)
-        try:
-            jaeger_response = requests.get(
-                "http://localhost:16686/api/services",
-                timeout=2,
-            )
-            if jaeger_response.status_code == 200:
-                services = jaeger_response.json()
-                assert "data" in services
-        except requests.exceptions.RequestException:
-            pytest.skip("Jaeger not available")
+        # 3. Traces are exported via OTLP; backend may vary by environment.
 
         # 4. Verify service health
         ready_response = requests.get("http://localhost:8000/ready")

@@ -617,11 +617,29 @@ class CrossDocLinkingConfig(BaseModel):
     )
 
 
+class ParserConfig(BaseModel):
+    """Parser configuration for document ingestion."""
+
+    engine: str = Field(
+        default="markdown-it-py",
+        description="Parser engine: 'legacy' or 'markdown-it-py'",
+    )
+    shadow_mode: bool = Field(
+        default=False,
+        description="Run both parsers and log differences for comparison",
+    )
+    fail_on_mismatch: bool = Field(
+        default=False,
+        description="Fail ingestion if parsers produce different results (only in shadow mode)",
+    )
+
+
 class IngestionConfig(BaseModel):
     batch_size: int = 500
     max_section_tokens: int = 1000
     timeout_seconds: int = 300
     workers: int = 2
+    parser: ParserConfig = Field(default_factory=ParserConfig)
     chunk_assembly: ChunkAssemblyConfig = Field(default_factory=ChunkAssemblyConfig)
     queue_recovery: QueueRecoveryConfig = Field(default_factory=QueueRecoveryConfig)
     reconciliation: ReconciliationConfig

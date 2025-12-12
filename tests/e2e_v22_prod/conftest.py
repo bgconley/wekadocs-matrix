@@ -196,7 +196,6 @@ def capture_logs(prod_env: Dict[str, Any]):
         "weka-neo4j",
         "weka-qdrant",
         "weka-redis",
-        "weka-jaeger",
         "weka-mcp-server",
         "weka-ingestion-service",
         "weka-ingestion-worker",

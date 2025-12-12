@@ -14,7 +14,6 @@ resources:
   - mcp-server-green-deployment.yaml
   - mcp-server-canary-deployment.yaml
   - ingestion-worker-deployment.yaml
-  - jaeger-deployment.yaml
   - ingress.yaml
 
 commonLabels:

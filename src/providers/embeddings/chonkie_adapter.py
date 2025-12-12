@@ -116,6 +116,23 @@ class BgeM3ChonkieAdapter(BaseEmbeddings if CHONKIE_AVAILABLE else object):
         if self._safe_input_tokens > self._max_input_tokens:
             self._safe_input_tokens = max(1, self._max_input_tokens - 1)
 
+        # If the user hasn't explicitly set BGE_M3_SAFE_INPUT_TOKENS, align the
+        # per-input safe limit with the batching cap to avoid sending a single
+        # text that our own batching logic already treats as risky.
+        try:
+            max_batch_tokens = int(os.getenv("BGE_M3_MAX_BATCH_TOKENS", "7500"))
+        except Exception:
+            max_batch_tokens = 7500
+        if env_safe is None and self._safe_input_tokens > max_batch_tokens:
+            log.info(
+                "Clamping BGE-M3 safe input tokens to batch cap",
+                extra={
+                    "previous_safe_input_tokens": self._safe_input_tokens,
+                    "max_batch_tokens": max_batch_tokens,
+                },
+            )
+            self._safe_input_tokens = max_batch_tokens
+
         # How to handle oversize inputs that slip through.
         # - raise (recommended): fail fast and let the caller pre-split.
         # - truncate: truncate to safe limit (can hide data loss).
@@ -256,7 +273,73 @@ class BgeM3ChonkieAdapter(BaseEmbeddings if CHONKIE_AVAILABLE else object):
     # HTTP embedding calls
     # -------------------------
     def _embed_batch_http(self, texts: List[str]) -> List[np.ndarray]:
-        """Raw HTTP embedding call without any oversize checks."""
+        """
+        Raw HTTP embedding call with automatic sub-batching for total token limits.
+
+        BGE-M3 service has max_batch_tokens=8192 for the TOTAL tokens across all
+        texts in a single request. This method splits large batches into sub-batches
+        to stay under the limit.
+        """
+        if not texts:
+            return []
+
+        # BGE-M3 service has max_batch_tokens=8192 - use 7500 for safety margin
+        max_batch_tokens = int(os.getenv("BGE_M3_MAX_BATCH_TOKENS", "7500"))
+
+        # Calculate token counts for all texts
+        token_counts = [self._count_tokens_model(t) for t in texts]
+        total_tokens = sum(token_counts)
+
+        # If total is under limit, send in one batch
+        if total_tokens <= max_batch_tokens:
+            return self._embed_single_batch_http(texts)
+
+        # Split into sub-batches respecting the total token limit
+        log.info(
+            "Splitting batch for token limit",
+            extra={
+                "total_texts": len(texts),
+                "total_tokens": total_tokens,
+                "max_batch_tokens": max_batch_tokens,
+            },
+        )
+
+        all_embeddings: List[np.ndarray] = []
+        current_batch: List[str] = []
+        current_tokens = 0
+
+        for text, tc in zip(texts, token_counts):
+            # If single text exceeds limit, it goes in its own batch
+            # (individual text guards should have caught this, but be safe)
+            if tc > max_batch_tokens:
+                # Flush current batch first
+                if current_batch:
+                    all_embeddings.extend(self._embed_single_batch_http(current_batch))
+                    current_batch = []
+                    current_tokens = 0
+                # Send oversized text alone (will likely fail, but let it error cleanly)
+                all_embeddings.extend(self._embed_single_batch_http([text]))
+                continue
+
+            # Would adding this text exceed the limit?
+            if current_tokens + tc > max_batch_tokens:
+                # Flush current batch
+                if current_batch:
+                    all_embeddings.extend(self._embed_single_batch_http(current_batch))
+                current_batch = [text]
+                current_tokens = tc
+            else:
+                current_batch.append(text)
+                current_tokens += tc
+
+        # Flush final batch
+        if current_batch:
+            all_embeddings.extend(self._embed_single_batch_http(current_batch))
+
+        return all_embeddings
+
+    def _embed_single_batch_http(self, texts: List[str]) -> List[np.ndarray]:
+        """Execute a single HTTP embedding request (no batching logic)."""
         if not texts:
             return []
 

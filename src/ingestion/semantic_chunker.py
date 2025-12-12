@@ -142,10 +142,9 @@ class SemanticChunkerAssembler:
         except Exception:
             self._embed_max_input_tokens = 8192
 
+        env_safe = os.getenv("BGE_M3_SAFE_INPUT_TOKENS")
         try:
-            self._embed_safe_input_tokens = int(
-                os.getenv("BGE_M3_SAFE_INPUT_TOKENS", "8000")
-            )
+            self._embed_safe_input_tokens = int(env_safe) if env_safe else 8000
         except Exception:
             self._embed_safe_input_tokens = 8000
 
@@ -153,6 +152,22 @@ class SemanticChunkerAssembler:
             self._embed_max_input_tokens = 8192
         if self._embed_safe_input_tokens > self._embed_max_input_tokens:
             self._embed_safe_input_tokens = max(1, self._embed_max_input_tokens - 1)
+
+        # If safe limit isn't explicitly configured, keep it at or below the
+        # batching cap to avoid oversize single-input requests.
+        try:
+            max_batch_tokens = int(os.getenv("BGE_M3_MAX_BATCH_TOKENS", "7500"))
+        except Exception:
+            max_batch_tokens = 7500
+        if env_safe is None and self._embed_safe_input_tokens > max_batch_tokens:
+            log.info(
+                "Clamping embed safe input tokens to batch cap",
+                extra={
+                    "previous_safe_input_tokens": self._embed_safe_input_tokens,
+                    "max_batch_tokens": max_batch_tokens,
+                },
+            )
+            self._embed_safe_input_tokens = max_batch_tokens
 
         # Overlap when we pre-split oversized sections into guard chunks.
         try:

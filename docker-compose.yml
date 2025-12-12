@@ -132,6 +132,8 @@ services:
       - ./scripts:/app/scripts:ro
       - ./tests:/app/tests:ro
       - ./hf-cache:/opt/hf-cache
+    env_file:
+      - .env
     environment:
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
@@ -159,9 +161,10 @@ services:
       - SEGMENTER_TIMEOUT_MS=5000
       # Guard-Split Chunking Architecture (BGE-M3 model limits)
       - BGE_M3_MAX_INPUT_TOKENS=${BGE_M3_MAX_INPUT_TOKENS:-8192}
-      - BGE_M3_SAFE_INPUT_TOKENS=${BGE_M3_SAFE_INPUT_TOKENS:-8000}
+      - BGE_M3_SAFE_INPUT_TOKENS=${BGE_M3_SAFE_INPUT_TOKENS:-7500}
       - BGE_M3_GUARD_OVERLAP_TOKENS=${BGE_M3_GUARD_OVERLAP_TOKENS:-200}
       - BGE_M3_OVERSIZE_POLICY=${BGE_M3_OVERSIZE_POLICY:-raise}
+      - BGE_M3_MAX_BATCH_TOKENS=${BGE_M3_MAX_BATCH_TOKENS:-7500}
       - SEMANTIC_FALLBACK_OVERLAP_TOKENS=${SEMANTIC_FALLBACK_OVERLAP_TOKENS:-80}
       - EMBED_MAX_TOKENS=${EMBED_MAX_TOKENS:-8000}
       - EMBED_TARGET_TOKENS=${EMBED_TARGET_TOKENS:-7500}
@@ -185,8 +188,6 @@ services:
       # Auth & observability
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT}
-      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS}
       - OTEL_SERVICE_NAME=weka-mcp-server
       - OTEL_TRACES_EXPORTER=otlp
       - OTEL_METRICS_EXPORTER=none
@@ -229,6 +230,8 @@ services:
       - ./tools:/app/tools:ro
       - ./data:/app/data:ro
       - ./hf-cache:/opt/hf-cache
+    env_file:
+      - .env
     environment:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest
@@ -256,9 +259,10 @@ services:
       - SEGMENTER_TIMEOUT_MS=5000
       # Guard-Split Chunking Architecture (BGE-M3 model limits)
       - BGE_M3_MAX_INPUT_TOKENS=${BGE_M3_MAX_INPUT_TOKENS:-8192}
-      - BGE_M3_SAFE_INPUT_TOKENS=${BGE_M3_SAFE_INPUT_TOKENS:-8000}
+      - BGE_M3_SAFE_INPUT_TOKENS=${BGE_M3_SAFE_INPUT_TOKENS:-7500}
       - BGE_M3_GUARD_OVERLAP_TOKENS=${BGE_M3_GUARD_OVERLAP_TOKENS:-200}
       - BGE_M3_OVERSIZE_POLICY=${BGE_M3_OVERSIZE_POLICY:-raise}
+      - BGE_M3_MAX_BATCH_TOKENS=${BGE_M3_MAX_BATCH_TOKENS:-7500}
       - SEMANTIC_FALLBACK_OVERLAP_TOKENS=${SEMANTIC_FALLBACK_OVERLAP_TOKENS:-80}
       - EMBED_MAX_TOKENS=${EMBED_MAX_TOKENS:-8000}
       - EMBED_TARGET_TOKENS=${EMBED_TARGET_TOKENS:-7500}
@@ -298,8 +302,6 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
       # OTEL Observability (Phase LGTM)
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT}
-      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS}
       - OTEL_SERVICE_NAME=weka-ingestion-worker
       - OTEL_TRACES_EXPORTER=otlp
       - OTEL_METRICS_EXPORTER=none
@@ -338,6 +340,8 @@ services:
       - ./src:/app/src
       - ./data:/app/data
       - ./hf-cache:/opt/hf-cache
+    env_file:
+      - .env
     environment:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest
@@ -367,9 +371,10 @@ services:
       - SEGMENTER_TIMEOUT_MS=5000
       # Guard-Split Chunking Architecture (BGE-M3 model limits)
       - BGE_M3_MAX_INPUT_TOKENS=${BGE_M3_MAX_INPUT_TOKENS:-8192}
-      - BGE_M3_SAFE_INPUT_TOKENS=${BGE_M3_SAFE_INPUT_TOKENS:-8000}
+      - BGE_M3_SAFE_INPUT_TOKENS=${BGE_M3_SAFE_INPUT_TOKENS:-7500}
       - BGE_M3_GUARD_OVERLAP_TOKENS=${BGE_M3_GUARD_OVERLAP_TOKENS:-200}
       - BGE_M3_OVERSIZE_POLICY=${BGE_M3_OVERSIZE_POLICY:-raise}
+      - BGE_M3_MAX_BATCH_TOKENS=${BGE_M3_MAX_BATCH_TOKENS:-7500}
       - SEMANTIC_FALLBACK_OVERLAP_TOKENS=${SEMANTIC_FALLBACK_OVERLAP_TOKENS:-80}
       - EMBED_MAX_TOKENS=${EMBED_MAX_TOKENS:-8000}
       - EMBED_TARGET_TOKENS=${EMBED_TARGET_TOKENS:-7500}
@@ -404,8 +409,6 @@ services:
       - CACHE_NS=rag:v1
       - CACHE_REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       # OTEL Observability (Phase LGTM)
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT}
-      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS}
       - OTEL_SERVICE_NAME=weka-ingestion-service
       - OTEL_TRACES_EXPORTER=otlp
       - OTEL_METRICS_EXPORTER=none
@@ -428,34 +431,6 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
-
-  # Optional: Jaeger for OpenTelemetry tracing (legacy - being replaced by Tempo)
-  jaeger:
-    image: jaegertracing/all-in-one:1.51
-    container_name: weka-jaeger
-    networks:
-      - weka-net
-    ports:
-      - "16686:16686"  # UI
-      # Note: Ports 4317/4318 moved to Alloy when LGTM stack is active
-      - "14317:4317"   # OTLP gRPC (remapped to avoid Alloy conflict)
-      - "14318:4318"   # OTLP HTTP (remapped to avoid Alloy conflict)
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
-      - LOG_LEVEL=${JAEGER_LOG_LEVEL:-info}
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:16686/"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-    profiles:
-      - legacy  # Only start with: docker compose --profile legacy up
 
   # LGTM Observability: Grafana Alloy (unified telemetry collector)
   # Forwards logs, traces, and metrics to GCP LGTM stack via Tailscale
