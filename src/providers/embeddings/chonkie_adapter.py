@@ -284,23 +284,58 @@ class BgeM3ChonkieAdapter(BaseEmbeddings if CHONKIE_AVAILABLE else object):
             return []
 
         # BGE-M3 service has max_batch_tokens=8192 - use 7500 for safety margin
-        max_batch_tokens = int(os.getenv("BGE_M3_MAX_BATCH_TOKENS", "7500"))
+        try:
+            max_batch_tokens = int(os.getenv("BGE_M3_MAX_BATCH_TOKENS", "7500"))
+        except Exception:
+            max_batch_tokens = 7500
+
+        # Some BGE-M3 service implementations also cap batch size by item count.
+        # Keep a conservative default, overridable via env.
+        try:
+            max_batch_size = int(os.getenv("BGE_M3_MAX_BATCH_SIZE", "32"))
+        except Exception:
+            max_batch_size = 32
+        if max_batch_size < 1:
+            max_batch_size = 32
+
+        def _embed_with_split_retry(
+            batch_texts: List[str], batch_idx: str = "0"
+        ) -> List[np.ndarray]:
+            """Retry on HTTP 400 by splitting the batch to isolate bad inputs."""
+            try:
+                return self._embed_single_batch_http(batch_texts)
+            except httpx.HTTPStatusError as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status == 400 and len(batch_texts) > 1:
+                    log.warning(
+                        "Embedding batch rejected (HTTP 400); splitting batch",
+                        extra={
+                            "batch_idx": batch_idx,
+                            "size": len(batch_texts),
+                        },
+                    )
+                    mid = len(batch_texts) // 2
+                    head = _embed_with_split_retry(batch_texts[:mid], f"{batch_idx}a")
+                    tail = _embed_with_split_retry(batch_texts[mid:], f"{batch_idx}b")
+                    return head + tail
+                raise
 
         # Calculate token counts for all texts
         token_counts = [self._count_tokens_model(t) for t in texts]
         total_tokens = sum(token_counts)
 
-        # If total is under limit, send in one batch
-        if total_tokens <= max_batch_tokens:
-            return self._embed_single_batch_http(texts)
+        # If total is under limit and count is reasonable, send in one batch
+        if total_tokens <= max_batch_tokens and len(texts) <= max_batch_size:
+            return _embed_with_split_retry(texts)
 
-        # Split into sub-batches respecting the total token limit
+        # Split into sub-batches respecting the total token and size limits
         log.info(
-            "Splitting batch for token limit",
+            "Splitting batch for token/size limit",
             extra={
                 "total_texts": len(texts),
                 "total_tokens": total_tokens,
                 "max_batch_tokens": max_batch_tokens,
+                "max_batch_size": max_batch_size,
             },
         )
 
@@ -314,18 +349,29 @@ class BgeM3ChonkieAdapter(BaseEmbeddings if CHONKIE_AVAILABLE else object):
             if tc > max_batch_tokens:
                 # Flush current batch first
                 if current_batch:
-                    all_embeddings.extend(self._embed_single_batch_http(current_batch))
+                    all_embeddings.extend(
+                        _embed_with_split_retry(
+                            current_batch, f"flush{len(all_embeddings)}"
+                        )
+                    )
                     current_batch = []
                     current_tokens = 0
                 # Send oversized text alone (will likely fail, but let it error cleanly)
-                all_embeddings.extend(self._embed_single_batch_http([text]))
+                all_embeddings.extend(
+                    _embed_with_split_retry([text], f"single{len(all_embeddings)}")
+                )
                 continue
 
-            # Would adding this text exceed the limit?
-            if current_tokens + tc > max_batch_tokens:
-                # Flush current batch
+            # Would adding this text exceed the limit (tokens or count)?
+            would_exceed_tokens = current_tokens + tc > max_batch_tokens
+            would_exceed_size = len(current_batch) >= max_batch_size
+            if would_exceed_tokens or would_exceed_size:
                 if current_batch:
-                    all_embeddings.extend(self._embed_single_batch_http(current_batch))
+                    all_embeddings.extend(
+                        _embed_with_split_retry(
+                            current_batch, f"flush{len(all_embeddings)}"
+                        )
+                    )
                 current_batch = [text]
                 current_tokens = tc
             else:
@@ -334,7 +380,9 @@ class BgeM3ChonkieAdapter(BaseEmbeddings if CHONKIE_AVAILABLE else object):
 
         # Flush final batch
         if current_batch:
-            all_embeddings.extend(self._embed_single_batch_http(current_batch))
+            all_embeddings.extend(
+                _embed_with_split_retry(current_batch, f"flush{len(all_embeddings)}")
+            )
 
         return all_embeddings
 
@@ -348,7 +396,24 @@ class BgeM3ChonkieAdapter(BaseEmbeddings if CHONKIE_AVAILABLE else object):
             f"{self._service_url}/v1/embeddings",
             json={"model": self._model_name, "input": texts},
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            if response.status_code == 400:
+                # Log the service response body to help diagnose invalid requests.
+                body_preview = ""
+                try:
+                    body_preview = (response.text or "")[:1000]
+                except Exception:
+                    body_preview = ""
+                log.warning(
+                    "BGE-M3 embedding request rejected (HTTP 400)",
+                    extra={
+                        "batch_size": len(texts),
+                        "response_preview": body_preview,
+                    },
+                )
+            raise
         data = response.json()
 
         embeddings: List[np.ndarray] = []
