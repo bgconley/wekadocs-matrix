@@ -1,4 +1,17 @@
+"""
+Deprecated minimal watchdog-based watcher.
+
+This module was an early Phase 6 MVP. The production watcher is
+`FileSystemWatcher` in `src.ingestion.auto.watchers`, which supports:
+- spool `.ready` mode (production default)
+- direct mode (dev convenience)
+- polling resilience + checksum dedup + debounce
+
+`ingestion-service` no longer imports this module.
+"""
+
 import os
+import warnings
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver as Observer
@@ -23,6 +36,11 @@ class IngestHandler(FileSystemEventHandler):
 
 
 def start_watcher(base_dir: str):
+    warnings.warn(
+        "start_watcher() is deprecated; use FileSystemWatcher in watchers.py",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     observer = Observer()
     handler = IngestHandler(base_dir)
     observer.schedule(handler, base_dir, recursive=True)

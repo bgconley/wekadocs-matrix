@@ -20,6 +20,68 @@ try:
 except ImportError:
     OTEL_AVAILABLE = False
 
+# Guard against installing multiple OTEL log handlers in a single process.
+_OTEL_LOGS_INITIALIZED = False
+
+
+def _setup_otel_logs(log_level: str) -> None:
+    """
+    Configure OpenTelemetry logs export (OTLP/HTTP).
+
+    This is used for New Relic OTLP ingest. Export is enabled when an OTLP
+    endpoint is configured and OTEL_LOGS_EXPORTER is not explicitly disabled.
+    """
+    global _OTEL_LOGS_INITIALIZED
+    if _OTEL_LOGS_INITIALIZED:
+        return
+
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") or os.getenv(
+        "OTEL_EXPORTER_OTLP_ENDPOINT"
+    )
+    logs_exporter = os.getenv("OTEL_LOGS_EXPORTER", "").strip().lower()
+    if not endpoint or logs_exporter in {"none", "disabled", "false"}:
+        return
+
+    try:
+        from opentelemetry._logs import set_logger_provider
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import (
+            OTLPLogExporter,
+        )
+        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+        from opentelemetry.sdk.resources import Resource
+
+        service_name = os.getenv("OTEL_SERVICE_NAME", "weka-mcp-server")
+        environment = os.getenv("ENV", "development")
+
+        resource = Resource.create(
+            {
+                "service.name": service_name,
+                "deployment.environment": environment,
+            }
+        )
+        provider = LoggerProvider(resource=resource)
+        exporter = OTLPLogExporter()
+        provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
+        set_logger_provider(provider)
+
+        handler = LoggingHandler(
+            level=logging.NOTSET,
+            logger_provider=provider,
+        )
+        logging.getLogger().addHandler(handler)
+        _OTEL_LOGS_INITIALIZED = True
+        logging.getLogger(__name__).info(
+            "OTEL logs exporter configured",
+            extra={"endpoint": endpoint, "service": service_name},
+        )
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "Failed to setup OTEL logs exporter",
+            exc_info=True,
+        )
+
+
 # Context variable for correlation ID
 correlation_id_ctx: ContextVar[Optional[str]] = ContextVar(
     "correlation_id", default=None
@@ -123,6 +185,9 @@ def setup_logging(log_level: str = "INFO") -> None:
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
+
+    # Optionally enable OTEL log export (e.g., to New Relic) based on env vars.
+    _setup_otel_logs(log_level)
 
 
 def get_logger(name: str) -> structlog.BoundLogger:
