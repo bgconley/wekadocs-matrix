@@ -1,22 +1,23 @@
 // ============================================================================
-// WekaDocs GraphRAG Schema v3.0 - PHASE 3.5 MENTIONS BRIDGE
+// WekaDocs GraphRAG Schema v4.0 - :Section DEPRECATED
 // ============================================================================
 // Created:     2025-11-05
-// Updated:     2025-12-11 (Phase 3 + Phase 3.5)
-// Base:        v2.2 (hybrid retrieval) + Phase 3 (markdown-it-py) + Phase 3.5 (MENTIONS)
+// Updated:     2025-12-12 (Phase 4: Section→Chunk consolidation)
+// Base:        v3.0 + Phase 4 (:Section label deprecated, all content now :Chunk)
 // Edition:     Neo4j Community Edition (no property-existence constraints)
 // Purpose:     Enable Strategy 1 (smaller chunks), Strategy 3 (hybrid retrieval),
 //              and full GraphRAG MENTIONS bridge for entity-chunk traversal.
 // Canonical:   document_id (canonical) ; doc_id (legacy alias)
 // Idempotent:  Yes (IF NOT EXISTS / MERGE everywhere).
 //
-// PHASE 3 ADDITIONS:
-//   - Source line mapping (line_start, line_end) for citation correlation
-//   - Parent path hierarchy (parent_path) for contextual queries
-//   - Structural metadata (has_code, has_table, code_ratio) for query filtering
-//   - PARENT_HEADING relationship for heading hierarchy traversal
+// PHASE 4 CHANGES (2025-12-12):
+//   - DEPRECATED: :Section label - all content nodes are now :Chunk only
+//   - DEPRECATED: section_* indexes - kept temporarily for migration
+//   - REMOVED: Dual-labeling migration (no longer needed)
+//   - All queries now use :Chunk exclusively
+//   - Run scripts/migrate_section_to_chunk.py to remove :Section from existing nodes
 //
-// PHASE 3.5 ADDITIONS:
+// PHASE 3.5 FEATURES (retained):
 //   - GLiNER entity types (Parameter, Component, Protocol, etc.)
 //   - MENTIONS relationship with confidence and source properties
 //   - MENTIONED_IN inverse edge for bidirectional traversal
@@ -34,8 +35,14 @@ FOR (d:Document) REQUIRE d.id IS UNIQUE;
 CREATE CONSTRAINT document_source_uri_unique IF NOT EXISTS
 FOR (d:Document) REQUIRE d.source_uri IS UNIQUE;
 
+// DEPRECATED (Phase 4): :Section label replaced by :Chunk
+// Constraint kept for migration compatibility - will be removed in future version
 CREATE CONSTRAINT section_id_unique IF NOT EXISTS
 FOR (s:Section) REQUIRE s.id IS UNIQUE;
+
+// Primary constraint for content nodes (replaces section_id_unique)
+CREATE CONSTRAINT chunk_id_unique IF NOT EXISTS
+FOR (c:Chunk) REQUIRE c.id IS UNIQUE;
 
 CREATE CONSTRAINT command_id_unique IF NOT EXISTS
 FOR (c:Command) REQUIRE c.id IS UNIQUE;
@@ -128,7 +135,11 @@ CALL db.index.fulltext.createNodeIndex(
   {analyzer: 'standard-folding'}
 ) IF NOT EXISTS;
 
-// Section indexes (v2.1) - names match running DB with _idx suffix
+// ---------------------------------------------------------------------------
+// DEPRECATED Section indexes (Phase 4) - kept for migration compatibility
+// These will be orphaned after running migrate_section_to_chunk.py
+// Remove after migration is complete across all environments
+// ---------------------------------------------------------------------------
 CREATE INDEX section_document_id_idx IF NOT EXISTS
 FOR (s:Section) ON (s.document_id);
 
@@ -290,6 +301,7 @@ FOR (d:Document) ON (d.title);
 CREATE INDEX chunk_doc_id IF NOT EXISTS
 FOR (c:Chunk) ON (c.doc_id);
 
+// DEPRECATED (Phase 4): Kept for migration compatibility
 CREATE INDEX section_doc_id IF NOT EXISTS
 FOR (s:Section) ON (s.doc_id);
 
@@ -299,14 +311,15 @@ FOR (s:Section) ON (s.doc_id);
 // ---------------------------------------------------------------------------
 // These support enhanced metadata from markdown-it-py parser
 
-// Section source line mapping for citation correlation
+// ---------------------------------------------------------------------------
+// DEPRECATED Section structural indexes (Phase 4) - kept for migration only
+// ---------------------------------------------------------------------------
 CREATE INDEX section_line_start_idx IF NOT EXISTS
 FOR (s:Section) ON (s.line_start);
 
 CREATE INDEX section_line_end_idx IF NOT EXISTS
 FOR (s:Section) ON (s.line_end);
 
-// Section structural filtering flags
 CREATE INDEX section_has_code_idx IF NOT EXISTS
 FOR (s:Section) ON (s.has_code);
 
@@ -316,7 +329,6 @@ FOR (s:Section) ON (s.has_table);
 CREATE INDEX section_code_ratio_idx IF NOT EXISTS
 FOR (s:Section) ON (s.code_ratio);
 
-// Section parent path for hierarchy search
 CREATE INDEX section_parent_path_idx IF NOT EXISTS
 FOR (s:Section) ON (s.parent_path);
 
@@ -371,6 +383,8 @@ FOR (n:Chunk) ON EACH [n.text];
 CREATE FULLTEXT INDEX chunk_text_index_v3_bge_m3 IF NOT EXISTS
 FOR (n:Chunk|CitationUnit) ON EACH [n.text, n.heading];
 
+// Note: Includes :Section for backward compatibility during migration
+// After migration, consider recreating with :Chunk only
 CREATE FULLTEXT INDEX heading_fulltext_v1 IF NOT EXISTS
 FOR (n:Chunk|Section) ON EACH [n.heading];
 
@@ -383,7 +397,8 @@ FOR (d:Document) ON EACH [d.title];
 // ---------------------------------------------------------------------------
 // PART 3: VECTOR INDEXES
 // ---------------------------------------------------------------------------
-// Keep the original 1024-D content vectors (both labels for compatibility)
+// DEPRECATED (Phase 4): Section vector index - kept for migration compatibility
+// After migration, this index will be orphaned (no :Section nodes)
 CREATE VECTOR INDEX section_embeddings_v2_bge_m3 IF NOT EXISTS
 FOR (s:Section)
 ON s.vector_embedding
@@ -427,13 +442,17 @@ OPTIONS {
 
 
 // ---------------------------------------------------------------------------
-// PART 4: DUAL-LABELING FOR EXISTING SECTIONS (Migration-safe)
+// PART 4: DUAL-LABELING MIGRATION (DEPRECATED - Phase 4)
 // ---------------------------------------------------------------------------
-
-MATCH (s:Section)
-WHERE NOT s:Chunk
-SET s:Chunk,
-    s.is_legacy_section = true;   // BUGFIX: add label (no "= true")
+// This block was used to add :Chunk label to legacy :Section nodes.
+// After Phase 4 migration (migrate_section_to_chunk.py), this is no longer needed.
+// The migration script removes :Section label entirely.
+//
+// REMOVED: The following was the original dual-labeling migration:
+// MATCH (s:Section)
+// WHERE NOT s:Chunk
+// SET s:Chunk,
+//     s.is_legacy_section = true;
 
 
 // ---------------------------------------------------------------------------
@@ -449,6 +468,8 @@ MATCH (c:Chunk)
 WHERE c.document_id IS NULL AND c.doc_id IS NOT NULL
 SET c.document_id = c.doc_id;
 
+// DEPRECATED (Phase 4): Section doc_id backfill - kept for migration compatibility
+// After migration, no :Section nodes will exist
 MATCH (s:Section)
 WHERE s.doc_id IS NULL AND s.document_id IS NOT NULL
 SET s.doc_id = s.document_id;
@@ -479,19 +500,19 @@ MERGE (m:RelationshipTypesMarker {id: 'chunk_rel_types_v1'})
 // ---------------------------------------------------------------------------
 
 MERGE (sv:SchemaVersion {id: 'singleton'})
-SET sv.version = 'v3.0',
+SET sv.version = 'v4.0',
     sv.edition = 'community',
     sv.vector_dimensions = 1024,
     sv.embedding_provider = 'bge-m3',
     sv.embedding_model = 'BAAI/bge-m3',
     sv.updated_at = datetime(),
-    sv.description = 'Phase 3.5: Full GraphRAG MENTIONS bridge with GLiNER entity types and bidirectional entity-chunk traversal',
+    sv.description = 'Phase 4: :Section deprecated - all content nodes are now :Chunk only',
     sv.validation_note = 'Property existence constraints enforced in application layer (Community Edition)',
-    sv.backup_source = 'v2.2 hybrid-ready upgraded to v3.0 MENTIONS bridge on 2025-12-11',
-    sv.reform_note = 'MENTIONS: (Chunk)-[:MENTIONS {confidence, source}]->(Entity); MENTIONED_IN is inverse edge',
-    sv.compatibility = 'All v2.2 objects preserved; Phase 3 structural indexes and Phase 3.5 MENTIONS indexes are additive',
+    sv.backup_source = 'v3.0 upgraded to v4.0 Section deprecation on 2025-12-12',
+    sv.reform_note = 'MENTIONS: (Chunk)-[:MENTIONS {confidence, source}]->(Entity); :Section label deprecated',
+    sv.compatibility = 'Legacy :Section indexes kept for migration; run migrate_section_to_chunk.py to complete',
     sv.phase3_features = 'Source line mapping, parent_path hierarchy, structural flags (has_code, has_table, code_ratio)',
-    sv.phase35_features = 'GLiNER entity types, MENTIONS with confidence/source, bidirectional traversal';
+    sv.phase4_features = ':Section deprecated, all queries use :Chunk, migration script provided';
 
 
 // ---------------------------------------------------------------------------
@@ -668,10 +689,10 @@ SET sv.version = 'v3.0',
 //   CAPACITY_METRIC → CapacityMetric
 //
 // EXAMPLE QUERY PATTERN (GraphRAG hybrid retrieval):
-//   MATCH (s:Section)-[r:MENTIONS]->(e:Entity)
-//   WHERE s.id IN $chunk_ids_from_vector_search
+//   MATCH (c:Chunk)-[r:MENTIONS]->(e:Entity)
+//   WHERE c.id IN $chunk_ids_from_vector_search
 //     AND r.confidence >= 0.5
-//   RETURN s, e, r.confidence
+//   RETURN c, e, r.confidence
 //   ORDER BY r.confidence DESC
 //
 // ===========================================================================
