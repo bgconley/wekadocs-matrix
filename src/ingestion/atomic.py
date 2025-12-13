@@ -722,6 +722,8 @@ class AtomicIngestionCoordinator:
             if saga_result["success"]:
                 # LGTM Phase 4: Enhanced completion logging
                 stats = saga_result.get("stats", {})
+                if stats is None:
+                    stats = {}
                 logger.info(
                     "ingestion_complete",
                     doc_id=document_id,
@@ -745,11 +747,15 @@ class AtomicIngestionCoordinator:
                         span.set_attribute("ingestion.duration_ms", duration_ms)
                         span.set_attribute("ingestion.chunks_count", len(sections))
 
+                # Structural edges are now built atomically inside the saga
+                # transaction (Step 2c in _execute_atomic_saga). No post-commit
+                # best-effort building needed.
+
                 return AtomicIngestionResult(
                     success=True,
                     document_id=document_id,
                     saga_id=saga_id,
-                    stats=saga_result.get("stats", {}),
+                    stats=stats,
                     validation=validation,
                     duration_ms=duration_ms,
                     neo4j_committed=True,
@@ -2051,6 +2057,24 @@ class AtomicIngestionCoordinator:
                 embedding_metadata=embedding_meta_count,
             )
 
+            # Step 2c: Build structural edges (ATOMIC - inside transaction)
+            # This ensures NEXT_CHUNK, PARENT_HEADING, etc. are committed
+            # atomically with chunks. If this fails, transaction rolls back.
+            from src.ingestion.structural_edges import build_structural_edges_in_tx
+
+            structural_result = build_structural_edges_in_tx(
+                neo4j_tx, document_id, skip_has_chunk=True
+            )
+            stats["structural_edges"] = structural_result
+
+            logger.info(
+                "structural_edges_built",
+                doc_id=document_id,
+                saga_id=saga_id,
+                edges=structural_result.get("stats", {}),
+                warnings=structural_result.get("warnings", []),
+            )
+
             # Step 3: Execute Qdrant writes
             # If this fails, we can still rollback Neo4j
             qdrant_count = 0
@@ -2420,9 +2444,11 @@ class AtomicIngestionCoordinator:
         UNWIND $sections AS section
         MERGE (c:Chunk {id: section.id})
         SET c += section
+        SET c.chunk_id = coalesce(c.chunk_id, section.chunk_id, section.id)
         WITH c, section
         MATCH (d:Document {id: $document_id})
         MERGE (d)-[:HAS_SECTION]->(c)
+        MERGE (d)-[:HAS_CHUNK]->(c)
         """
 
         # Prepare sections for Cypher - sanitize to avoid Map{} errors
@@ -2432,6 +2458,7 @@ class AtomicIngestionCoordinator:
             data = {k: v for k, v in s.items() if k != "_citation_units"}
             # Ensure required fields
             data.setdefault("document_id", document_id)
+            data.setdefault("chunk_id", data.get("id"))
             # Sanitize for Neo4j (convert dicts to JSON strings, filter non-primitives)
             sanitized = self._sanitize_for_neo4j(data)
             section_data.append(sanitized)

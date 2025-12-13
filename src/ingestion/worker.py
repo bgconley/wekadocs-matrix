@@ -1,6 +1,7 @@
 import asyncio
 import os
 import signal
+import time
 import traceback
 from typing import Any, Coroutine
 from urllib.parse import unquote, urlparse
@@ -210,6 +211,54 @@ async def process_job(job: IngestJob):
     return stats
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    val = os.getenv(name)
+    if val is None:
+        return default
+    return val.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _run_structural_health_check_sync() -> dict[str, Any]:
+    """
+    Check graph structural integrity - emit ERROR if documents need repair.
+
+    With atomic structural edge building in the saga, documents needing repair
+    indicates a bug or migration gap, not normal operation. This function
+    alerts rather than silently repairs.
+    """
+    from src.neo.contract_checks import GraphContractChecker
+    from src.shared.connections import get_connection_manager
+
+    cm = get_connection_manager()
+    driver = cm.get_neo4j_driver()
+
+    with driver.session() as session:
+        checker = GraphContractChecker(session)
+        doc_ids = checker.find_documents_needing_repair()
+
+        if doc_ids:
+            # This is an ERROR condition - atomic ingestion should prevent this
+            log.error(
+                "structural_integrity_violation",
+                documents_needing_repair=len(doc_ids),
+                sample_doc_ids=doc_ids[:10],
+                message=(
+                    "Documents found with missing structural edges after atomic ingestion. "
+                    "This indicates a bug in ingestion or a migration gap."
+                ),
+            )
+            return {
+                "status": "unhealthy",
+                "documents_needing_repair": len(doc_ids),
+                "sample_doc_ids": doc_ids[:10],
+            }
+
+        return {
+            "status": "healthy",
+            "documents_needing_repair": 0,
+        }
+
+
 def handle_shutdown(signum, frame):
     """Signal handler for graceful shutdown."""
     global shutdown_requested
@@ -295,24 +344,79 @@ async def main():
         reaper_interval=reaper_interval,
     )
 
+    # Run stats and summary configuration
+    from src.ingestion.run_stats import IngestionRunStats
+
+    summary_idle_seconds = int(os.getenv("INGESTION_SUMMARY_IDLE_SECONDS", "180"))
+    health_check_enabled = _env_bool("NEO4J_STRUCTURAL_HEALTH_CHECK_ENABLED", True)
+    run_stats: IngestionRunStats | None = None
+    last_job_completed_at: float | None = None
+
     # Main processing loop
     while not shutdown_requested:
         try:
             item = brpoplpush(timeout=1)
             if not item:
+                # Queue is empty - check if we should emit summary
+                if (
+                    run_stats is not None
+                    and run_stats.has_data
+                    and last_job_completed_at is not None
+                    and (time.monotonic() - last_job_completed_at)
+                    >= summary_idle_seconds
+                ):
+                    # Emit consolidated run summary
+                    run_stats.emit_summary()
+
+                    # Run structural health check (alerts if issues found)
+                    if health_check_enabled:
+                        try:
+                            health = await asyncio.to_thread(
+                                _run_structural_health_check_sync
+                            )
+                            log.info(
+                                "structural_health_check_complete",
+                                status=health.get("status"),
+                                documents_needing_repair=health.get(
+                                    "documents_needing_repair", 0
+                                ),
+                            )
+                        except Exception as e:
+                            log.warning(
+                                "structural_health_check_failed",
+                                error=str(e),
+                                traceback=traceback.format_exc(),
+                            )
+
+                    # Reset for next run
+                    run_stats = None
+                    last_job_completed_at = None
+
                 await asyncio.sleep(0.05)
                 continue
+
+            # We have a job to process
             raw, job_id = item
             job = IngestJob.from_json(raw)
+
+            # Start new run if needed
+            if run_stats is None:
+                run_stats = IngestionRunStats.start_new()
+                log.info("ingestion_run_started", run_id=run_stats.run_id)
+
             try:
-                await process_job(job)
+                result = await process_job(job)
+                run_stats.record_job(job.path, result)
                 ack(raw, job_id)
                 log.info(
                     "Job done", job_id=job_id, path=job.path, status=JobStatus.DONE
                 )
+                last_job_completed_at = time.monotonic()
             except Exception as e:
                 log.error("Job failed", job_id=job_id, error=str(e))
+                run_stats.record_exception(job.path, str(e))
                 fail(raw, job_id, reason=str(e), requeue=True)
+                last_job_completed_at = time.monotonic()
         except Exception as loop_err:
             log.error(
                 "Worker loop error", error=str(loop_err), exc=traceback.format_exc()
