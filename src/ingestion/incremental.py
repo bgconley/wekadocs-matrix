@@ -312,7 +312,7 @@ class IncrementalUpdater:
                             vector=vectors,  # config-driven placeholder across fields
                             payload={
                                 "node_id": sec["id"],
-                                "node_label": "Section",
+                                "node_label": "Chunk",
                                 "document_id": document_id,
                                 "document_uri": sec.get("source_uri")
                                 or sec.get("document_uri"),

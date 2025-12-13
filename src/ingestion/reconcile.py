@@ -432,7 +432,7 @@ class Reconciler:
                 document_uri = Path(source_uri).name if source_uri else source_uri
                 payload = {
                     "node_id": sid,
-                    "node_label": "Section",
+                    "node_label": "Chunk",
                     "document_id": meta.get("document_id"),
                     "document_uri": document_uri,
                     "source_uri": source_uri,

@@ -1627,18 +1627,22 @@ class GraphBuilder:
             collection_name = self.config.search.vector.qdrant.collection_name
 
             # Delete all chunks for this document (replace-by-set)
-            filter_must = [
-                {
-                    "key": "node_label",
-                    "match": {"value": "Section"},
-                },  # Dual-labeled as Chunk
-                {"key": "document_id", "match": {"value": document_id}},
-            ]
+            # Accept both "Chunk" (current) and "Section" (legacy) for cleanup
+            filter_condition = {
+                "must": [
+                    {"key": "document_id", "match": {"value": document_id}},
+                ],
+                "should": [
+                    {"key": "node_label", "match": {"value": "Chunk"}},
+                    {"key": "node_label", "match": {"value": "Section"}},
+                ],
+                "min_should": {"min_count": 1},
+            }
 
             try:
                 self.qdrant_client.delete_compat(
                     collection_name=collection_name,
-                    points_selector={"filter": {"must": filter_must}},
+                    points_selector={"filter": filter_condition},
                     wait=True,
                 )
                 logger.info(
@@ -1971,7 +1975,7 @@ class GraphBuilder:
                         vectors,
                         section,
                         document,
-                        "Section",
+                        "Chunk",
                         sparse_vector=sparse_vector,
                         colbert_vectors=colbert_vector,
                         title_sparse_vector=title_sparse_vector,  # NEW
@@ -1998,7 +2002,7 @@ class GraphBuilder:
                     )
 
                 else:  # neo4j primary
-                    self._upsert_to_neo4j_vector(section["id"], embedding, "Section")
+                    self._upsert_to_neo4j_vector(section["id"], embedding, "Chunk")
                     stats["upserted"] += 1
 
                     # Dual write to Qdrant if enabled
@@ -2013,7 +2017,7 @@ class GraphBuilder:
                             vectors,
                             section,
                             document,
-                            "Section",
+                            "Chunk",
                             sparse_vector=sparse_vector,
                             colbert_vectors=colbert_vector,
                             title_sparse_vector=title_sparse_vector,  # NEW

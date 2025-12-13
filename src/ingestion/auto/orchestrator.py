@@ -928,7 +928,7 @@ class Orchestrator:
                 vector=vectors,
                 payload={
                     "node_id": section["id"],  # Original section ID
-                    "node_label": "Section",
+                    "node_label": "Chunk",
                     "document_id": document_id,
                     "doc_id": doc_alias,
                     "document_uri": document_uri,
