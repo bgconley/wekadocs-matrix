@@ -347,10 +347,11 @@ class Reconciler:
                 emb_fn = embedding_fn
 
             # Fetch chunk text to embed
+            # P0: HAS_SECTION deprecated - use HAS_CHUNK
             text_map: Dict[str, Dict[str, str]] = {}
             cypher = """
             UNWIND $ids AS sid
-            MATCH (d:Document)-[:HAS_SECTION]->(c:Chunk {id: sid})
+            MATCH (d:Document)-[:HAS_CHUNK]->(c:Chunk {id: sid})
             RETURN
                 c.id AS id,
                 coalesce(c.text, c.content, '') AS text,

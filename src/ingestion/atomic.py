@@ -2050,7 +2050,7 @@ class AtomicIngestionCoordinator:
                     "Entity": entity_count,
                 },
                 relationship_types={
-                    "HAS_SECTION": chunk_count,
+                    "HAS_CHUNK": chunk_count,  # P0: HAS_SECTION deprecated
                     "MENTIONS": len(mentions),
                     "REFERENCES": references_count,
                 },
@@ -2440,6 +2440,7 @@ class AtomicIngestionCoordinator:
 
     def _neo4j_upsert_sections(self, tx, document_id: str, sections: List[Dict]) -> int:
         """Upsert chunk nodes within a transaction."""
+        # P0: HAS_SECTION deprecated - use only HAS_CHUNK for document→chunk membership
         query = """
         UNWIND $sections AS section
         MERGE (c:Chunk {id: section.id})
@@ -2447,7 +2448,6 @@ class AtomicIngestionCoordinator:
         SET c.chunk_id = coalesce(c.chunk_id, section.chunk_id, section.id)
         WITH c, section
         MATCH (d:Document {id: $document_id})
-        MERGE (d)-[:HAS_SECTION]->(c)
         MERGE (d)-[:HAS_CHUNK]->(c)
         """
 

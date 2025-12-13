@@ -3,8 +3,8 @@
 This module validates the Neo4j graph schema at startup to detect
 schema drift between ingestion and query layers. Validates:
 - Required node labels exist (Document, Section/Chunk)
-- Required relationship types exist (HAS_SECTION)
-- Document->Section connectivity is established
+- Required relationship types exist (HAS_CHUNK)
+- Document->Chunk connectivity is established
 
 Enhanced per multi-model Zen analysis (2025-12-03) to include
 relationship type validation and connectivity checks.
@@ -40,7 +40,8 @@ CONTENT_LABELS = {"Section", "Chunk"}
 REQUIRED_LABELS = {"Document"}
 
 # Required relationship types - must have instances
-REQUIRED_RELATIONSHIPS = {"HAS_SECTION"}
+# P0: HAS_SECTION deprecated - use HAS_CHUNK as canonical
+REQUIRED_RELATIONSHIPS = {"HAS_CHUNK"}
 
 
 def validate_neo4j_schema(
@@ -106,25 +107,26 @@ def validate_neo4j_schema(
                     result.missing_relationships.add(rel_type)
 
             # Check Document->Chunk connectivity
+            # P0: HAS_SECTION deprecated - use HAS_CHUNK
             connectivity_check = session.run(
                 """
-                MATCH (d:Document)-[:HAS_SECTION]->(c:Chunk)
-                RETURN count(DISTINCT d) AS docs_with_sections
+                MATCH (d:Document)-[:HAS_CHUNK]->(c:Chunk)
+                RETURN count(DISTINCT d) AS docs_with_chunks
                 """
             ).single()
-            docs_with_sections = connectivity_check["docs_with_sections"]
+            docs_with_chunks = connectivity_check["docs_with_chunks"]
             total_docs = result.node_counts.get("Document", 0)
 
-            if docs_with_sections == 0 and total_docs > 0:
+            if docs_with_chunks == 0 and total_docs > 0:
                 result.warnings.append(
                     f"Found {total_docs} Document nodes but none have "
-                    "HAS_SECTION relationships - text retrieval will fail"
+                    "HAS_CHUNK relationships - text retrieval will fail"
                 )
-            elif docs_with_sections < total_docs and total_docs > 0:
-                orphan_docs = total_docs - docs_with_sections
+            elif docs_with_chunks < total_docs and total_docs > 0:
+                orphan_docs = total_docs - docs_with_chunks
                 result.warnings.append(
                     f"{orphan_docs} of {total_docs} Documents have no "
-                    "HAS_SECTION relationships"
+                    "HAS_CHUNK relationships"
                 )
 
     except Exception as e:

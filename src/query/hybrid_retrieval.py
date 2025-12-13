@@ -2492,7 +2492,7 @@ class HybridRetriever:
 
         # Phase 3: Added REFERENCES for cross-document traversal
         # Fix #4: Cross-doc REFERENCES traversal implemented via pattern:
-        # (seed:Chunk) → [:REFERENCES] → (doc:Document) → [:HAS_SECTION] → ...
+        # (seed:Chunk) → [:REFERENCES] → (doc:Document) → [:HAS_CHUNK] → ...
         #
         # Phase 3.5: MENTIONS replaces MENTIONED_IN (single canonical direction)
         # Direction-agnostic queries work with either direction
@@ -2598,7 +2598,7 @@ class HybridRetriever:
         REFERENCES edges to boost relevance scores.
 
         The traversal pattern is:
-        (seed:Chunk) → [:REFERENCES] → (doc:Document) → [:HAS_SECTION] → (related:Chunk)
+        (seed:Chunk) → [:REFERENCES] → (doc:Document) → [:HAS_CHUNK] → (related:Chunk)
 
         If a candidate chunk's document is referenced by another candidate chunk,
         the related chunk gets a boost. This captures cross-document relevance
@@ -2639,7 +2639,7 @@ class HybridRetriever:
         MATCH (seed)-[:REFERENCES]->(ref_doc:Document)
         WHERE NOT ref_doc:GhostDocument
         // Get chunks from referenced document that are also candidates
-        MATCH (ref_doc)-[:HAS_SECTION]->(related:Chunk)
+        MATCH (ref_doc)-[:HAS_CHUNK]->(related:Chunk)
         WHERE related.id IN $chunk_ids
           AND related.id <> seed_id
           AND ($doc_tag IS NULL OR related.doc_tag = $doc_tag)

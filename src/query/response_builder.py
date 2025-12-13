@@ -478,7 +478,7 @@ class ResponseBuilder:
         try:
             # Parameterized Cypher query for 1-hop neighbors (bi-directional)
             # Pre-Phase 7 (E2): max_depth=1 enforced (prevents deep traversal)
-            # Why bi-directional: Sections may have incoming HAS_SECTION from Documents
+            # Why bi-directional: Chunks may have incoming HAS_CHUNK from Documents
             query = """
             MATCH (n {id: $node_id})-[r:MENTIONS|CONTAINS_STEP]-(e)
             WITH e,

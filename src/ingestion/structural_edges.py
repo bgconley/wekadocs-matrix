@@ -150,22 +150,61 @@ def _normalize_parent_path(tx, document_id: str) -> int:
     """
     Normalize parent_path into parent_path_norm.
 
-    Pattern: split by '>' or ' > ', trim each part, rejoin with ' > '.
+    Steps:
+    1. Strip HTML tags (e.g., <a href="...">...</a>) that contaminate paths
+    2. Split by ' > ' separator
+    3. Trim each part and rejoin with ' > '
+
+    This two-phase approach handles HTML anchor tags in heading titles
+    that would otherwise be mistaken for path separators.
     """
-    query = """
+    import re
+
+    # Phase 1: Fetch chunks with parent_path, strip HTML in Python
+    fetch_query = """
     MATCH (c:Chunk {document_id: $document_id})
     WHERE c.parent_path IS NOT NULL AND c.parent_path <> ''
-    WITH c,
-         [p IN split(replace(c.parent_path, ' > ', '>'), '>') | trim(p)] AS parts
-    WITH c,
-         reduce(path = '', p IN parts |
-           path + CASE WHEN path = '' THEN '' ELSE ' > ' END + p
-         ) AS norm
-    WHERE c.parent_path_norm IS NULL OR c.parent_path_norm <> norm
-    SET c.parent_path_norm = norm
+    RETURN c.chunk_id AS chunk_id, c.parent_path AS parent_path, c.parent_path_norm AS current_norm
+    """
+    result = tx.run(fetch_query, document_id=document_id)
+    records = list(result)
+
+    if not records:
+        return 0
+
+    # HTML tag pattern - matches <tag ...> and </tag>
+    html_pattern = re.compile(r"<[^>]+>")
+
+    updates = []
+    for record in records:
+        chunk_id = record["chunk_id"]
+        parent_path = record["parent_path"]
+        current_norm = record["current_norm"]
+
+        # Strip HTML tags
+        cleaned = html_pattern.sub("", parent_path)
+
+        # Normalize: split by ' > ' or '>', trim parts, rejoin with ' > '
+        # Handle both ' > ' and bare '>' separators
+        parts = re.split(r"\s*>\s*", cleaned)
+        parts = [p.strip() for p in parts if p.strip()]
+        norm = " > ".join(parts)
+
+        # Only update if changed
+        if current_norm != norm:
+            updates.append({"chunk_id": chunk_id, "norm": norm})
+
+    if not updates:
+        return 0
+
+    # Phase 2: Batch update normalized paths
+    update_query = """
+    UNWIND $updates AS upd
+    MATCH (c:Chunk {chunk_id: upd.chunk_id})
+    SET c.parent_path_norm = upd.norm
     RETURN count(c) AS updated
     """
-    result = tx.run(query, document_id=document_id)
+    result = tx.run(update_query, updates=updates)
     record = result.single()
     return record["updated"] if record else 0
 
@@ -175,26 +214,43 @@ def _compute_parent_chunk_id(tx, document_id: str) -> int:
     Compute parent_chunk_id from parent_path_norm.
 
     The parent's path is the breadcrumb without the last segment.
-    Find the nearest earlier chunk with matching parent breadcrumb.
+
+    P2: Relaxed order constraint - prefers parent.order < child.order (normal case)
+    but falls back to any matching parent if none found (handles edge cases where
+    heading chunks are created after their content chunks).
+
+    Priority:
+    1. Matching parent with order < child.order (nearest previous)
+    2. Matching parent with order > child.order (fallback - nearest following)
     """
     query = """
     MATCH (child:Chunk {document_id: $document_id})
     WHERE child.parent_path_norm IS NOT NULL
       AND child.parent_path_norm CONTAINS ' > '
+      AND child.parent_chunk_id IS NULL
     WITH child, split(child.parent_path_norm, ' > ') AS parts
     WITH child, parts[0..size(parts)-1] AS parentParts
     WITH child,
          reduce(path = '', p IN parentParts |
            path + CASE WHEN path = '' THEN '' ELSE ' > ' END + p
          ) AS parentPathNorm
+
+    // Find all matching parent candidates
     MATCH (parent:Chunk {document_id: $document_id, parent_path_norm: parentPathNorm})
-    WHERE parent.order < child.order
-      AND (child.level IS NULL OR parent.level IS NULL OR parent.level < child.level)
-    WITH child, parent
-    ORDER BY parent.order DESC
+    WHERE child.level IS NULL OR parent.level IS NULL OR parent.level < child.level
+
+    // Categorize and rank candidates: prefer order < child.order, fallback to order > child.order
+    WITH child, parent,
+         CASE WHEN parent.order < child.order THEN 0 ELSE 1 END AS priority,
+         CASE WHEN parent.order < child.order
+              THEN child.order - parent.order
+              ELSE parent.order - child.order
+         END AS distance
+    ORDER BY priority ASC, distance ASC
+
+    // Take the best candidate per child
     WITH child, head(collect(parent)) AS parent
     WHERE parent IS NOT NULL
-      AND (child.parent_chunk_id IS NULL OR child.parent_chunk_id <> parent.chunk_id)
     SET child.parent_chunk_id = parent.chunk_id,
         child.parent_section_id = parent.chunk_id
     RETURN count(child) AS updated
@@ -232,7 +288,8 @@ def _create_next_chunk_edges(tx, document_id: str) -> int:
     query = """
     MATCH (c:Chunk {document_id: $document_id})
     WHERE c.order IS NOT NULL
-    WITH collect(c ORDER BY c.order) AS chunks
+    WITH c ORDER BY c.order
+    WITH collect(c) AS chunks
     UNWIND range(0, size(chunks)-2) AS i
     WITH chunks[i] AS c1, chunks[i+1] AS c2
     MERGE (c1)-[r:NEXT_CHUNK]->(c2)
@@ -286,8 +343,9 @@ def _create_next_sibling_edges(tx, document_id: str) -> int:
     query = """
     MATCH (c:Chunk {document_id: $document_id})
     WHERE c.order IS NOT NULL
+    WITH c ORDER BY c.order
     WITH c.parent_chunk_id AS pid, c.level AS lvl, c
-    WITH pid, lvl, collect(c ORDER BY c.order) AS chunks
+    WITH pid, lvl, collect(c) AS chunks
     UNWIND range(0, size(chunks)-2) AS i
     WITH chunks[i] AS c1, chunks[i+1] AS c2
     MERGE (c1)-[r:NEXT]->(c2)

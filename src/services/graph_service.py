@@ -442,7 +442,7 @@ class GraphService:
 
         query = """
         MATCH (parent {id: $parent_id})
-        OPTIONAL MATCH (parent)-[:PARENT_OF|HAS_SECTION|CONTAINS_STEP]->(child)
+        OPTIONAL MATCH (parent)-[:PARENT_OF|HAS_CHUNK|CONTAINS_STEP]->(child)
         WITH child
         WHERE child IS NOT NULL
         ORDER BY child.order ASC, child.title ASC
@@ -499,7 +499,7 @@ class GraphService:
         query = """
         UNWIND $section_ids AS sid
         MATCH (child {id: sid})
-        OPTIONAL MATCH (parent)-[:PARENT_OF|HAS_SECTION|CONTAINS_STEP]->(child)
+        OPTIONAL MATCH (parent)-[:PARENT_OF|HAS_CHUNK|CONTAINS_STEP]->(child)
         WITH child, parent
         WHERE parent IS NOT NULL
         RETURN child.id AS section_id,

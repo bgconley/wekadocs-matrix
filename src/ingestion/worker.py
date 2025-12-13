@@ -10,7 +10,7 @@ import redis
 
 # Atomic ingestion pipeline with saga-coordinated Neo4j + Qdrant writes
 # Guarantees: Neo4j commits only if Qdrant succeeds; compensates on failure
-from src.ingestion.atomic import ingest_document_atomic
+from src.ingestion.atomic import AtomicIngestionCoordinator
 from src.ingestion.auto.queue import IngestJob, JobStatus, ack, brpoplpush, fail
 from src.ingestion.auto.reaper import JobReaper
 from src.shared.config import load_config
@@ -203,12 +203,39 @@ async def process_job(job: IngestJob):
         format = "markdown"  # default
 
     # Call atomic ingestion pipeline (saga-coordinated Neo4j + Qdrant writes)
-    # Uses original job.path as source_uri for provenance tracking
+    # Uses original job.path as source_uri for provenance tracking.
+    #
+    # Return the full AtomicIngestionResult so run_stats can correctly
+    # attribute success, document_id, saga_id, and aggregate counts.
     source_uri = job.path if job.path.startswith("file://") else f"file://{job.path}"
-    stats = ingest_document_atomic(source_uri, content, format=format)
+    from src.shared.config import get_config
+    from src.shared.connections import get_connection_manager
 
-    log.info("Ingestion completed", job_id=job.job_id, stats=stats)
-    return stats
+    config = get_config()
+    manager = get_connection_manager()
+    neo4j_driver = manager.get_neo4j_driver()
+
+    qdrant_client = None
+    if config.search.vector.primary == "qdrant" or config.search.vector.dual_write:
+        qdrant_client = manager.get_qdrant_client()
+
+    coordinator = AtomicIngestionCoordinator(
+        neo4j_driver,
+        qdrant_client,
+        config,
+    )
+    result = coordinator.ingest_document_atomic(source_uri, content, format=format)
+    if not result.success:
+        raise RuntimeError(result.error or "Atomic ingestion failed")
+
+    log.info(
+        "Ingestion completed",
+        job_id=job.job_id,
+        document_id=result.document_id,
+        saga_id=result.saga_id,
+        stats=result.stats,
+    )
+    return result
 
 
 def _env_bool(name: str, default: bool) -> bool:

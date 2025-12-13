@@ -38,8 +38,8 @@ LIMIT 1;
 
 -- Version 3: Document-level component relationships
 MATCH (c:Component {name: $component_name})
-OPTIONAL MATCH (c)<-[:MENTIONS]-(sec:Chunk)<-[:HAS_SECTION]-(doc:Document)
-OPTIONAL MATCH (doc)-[:HAS_SECTION]->(other_sec:Chunk)-[:MENTIONS]->(other:Component)
+OPTIONAL MATCH (c)<-[:MENTIONS]-(sec:Chunk)<-[:HAS_CHUNK]-(doc:Document)
+OPTIONAL MATCH (doc)-[:HAS_CHUNK]->(other_sec:Chunk)-[:MENTIONS]->(other:Component)
 WHERE c.id <> other.id
 WITH c, doc,
   collect(DISTINCT {component: other, chunk: other_sec.id}) AS doc_components

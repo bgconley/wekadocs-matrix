@@ -65,7 +65,7 @@ class ExplainGuard:
             max_estimated_rows: Maximum estimated rows (default: 10000)
             max_db_hits: Maximum db hits (default: 100000)
             allowed_labels: Whitelist of node labels (default: Section, Entity, Chunk, Document, Topic)
-            allowed_relationships: Whitelist of relationship types (default: MENTIONS, HAS_SECTION)
+            allowed_relationships: Whitelist of relationship types (default: MENTIONS, HAS_CHUNK)
         """
         self.driver = driver
         self.max_estimated_rows = max_estimated_rows or self.MAX_ESTIMATED_ROWS

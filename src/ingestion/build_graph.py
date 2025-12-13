@@ -619,7 +619,7 @@ class GraphBuilder:
 
     def _upsert_sections(self, session, document_id: str, sections: List[Dict]) -> int:
         """
-        Upsert Chunk nodes with HAS_SECTION relationships in batches.
+        Upsert Chunk nodes with HAS_CHUNK relationships in batches.
 
         Phase 7E-1: Creates :Chunk nodes with full canonical chunk schema.
         Each section becomes a single chunk with deterministic ID generation.
@@ -704,7 +704,8 @@ class GraphBuilder:
             MATCH (d:Document {id: $document_id})
             SET c.doc_tag = d.doc_tag,
                 c.snapshot_scope = d.snapshot_scope
-            MERGE (d)-[r:HAS_SECTION]->(c)
+            // P0: HAS_SECTION deprecated - use only HAS_CHUNK
+            MERGE (d)-[r:HAS_CHUNK]->(c)
             SET r.order = chunk.order,
                 r.updated_at = datetime()
             RETURN count(c) as count
@@ -939,8 +940,9 @@ class GraphBuilder:
         current_citation_ids = list(dict.fromkeys(current_citation_ids))
 
         # Delete chunks not in current set
+        # P0: HAS_SECTION deprecated - use HAS_CHUNK
         delete_query = """
-        MATCH (d:Document {id: $document_id})-[:HAS_SECTION]->(c:Chunk)
+        MATCH (d:Document {id: $document_id})-[:HAS_CHUNK]->(c:Chunk)
         WHERE NOT c.id IN $current_chunk_ids
         DETACH DELETE c
         RETURN count(c) as deleted
@@ -988,8 +990,9 @@ class GraphBuilder:
         """
         # Use Cypher to link chunks by order within document
         # This handles combined chunks correctly since they have proper IDs
+        # P0: HAS_SECTION deprecated - use HAS_CHUNK
         cypher = """
-        MATCH (d:Document {id:$doc_id})-[:HAS_SECTION]->(c:Chunk)
+        MATCH (d:Document {id:$doc_id})-[:HAS_CHUNK]->(c:Chunk)
         WITH c ORDER BY c.order, c.id
         WITH collect(c) AS cs
         UNWIND range(0, size(cs)-2) AS i
@@ -1059,6 +1062,7 @@ class GraphBuilder:
             # Phase 3 (markdown-it-py): PARENT_HEADING based on parent_path hierarchy
             # Creates heading-based parent-child edges distinct from PARENT_OF
             # Direction: child→parent (Neo4j hierarchy convention)
+            # P2: Relaxed order constraint - prefers order < child.order, fallback to order > child.order
             "parent_heading": """
             MATCH (child:Chunk)
             WHERE child.document_id = $doc_id
@@ -1080,9 +1084,14 @@ class GraphBuilder:
             WHERE parent.document_id = $doc_id
               AND parent.title = immediate_parent_title
               AND parent.level < child_level
-              AND parent.order < child_order
-            WITH child, parent
-            ORDER BY parent.order DESC
+            // P2: Prefer order < child.order, fallback to order > child.order
+            WITH child, parent,
+                 CASE WHEN parent.order < child.order THEN 0 ELSE 1 END AS priority,
+                 CASE WHEN parent.order < child.order
+                      THEN child.order - parent.order
+                      ELSE parent.order - child.order
+                 END AS distance
+            ORDER BY priority ASC, distance ASC
             WITH child, collect(parent)[0] AS parent
             WHERE parent IS NOT NULL
             MERGE (child)-[r:PARENT_HEADING]->(parent)
@@ -1256,8 +1265,9 @@ class GraphBuilder:
         from earlier ingestion bugs while scoping the fix to the current document.
         """
 
+        # P0: HAS_SECTION deprecated - use HAS_CHUNK
         query = """
-        MATCH (d:Document {id: $document_id})-[:HAS_SECTION]->(c:Chunk)
+        MATCH (d:Document {id: $document_id})-[:HAS_CHUNK]->(c:Chunk)
         WHERE c.is_combined = true AND (c.original_section_ids IS NULL OR size(c.original_section_ids) <= 1)
         SET c.is_combined = false
         RETURN count(c) as repaired
@@ -1284,8 +1294,9 @@ class GraphBuilder:
             Count of chunks removed (deleted + marked stale)
         """
         # Step 1: Find orphaned chunks (not in current document version)
+        # P0: HAS_SECTION deprecated - use HAS_CHUNK
         find_orphans_query = """
-        MATCH (d:Document {id: $document_id})-[r:HAS_SECTION]->(c:Chunk)
+        MATCH (d:Document {id: $document_id})-[r:HAS_CHUNK]->(c:Chunk)
         WHERE NOT c.id IN $section_ids
 
         // Check for provenance: RETRIEVED or SUPPORTED_BY relationships

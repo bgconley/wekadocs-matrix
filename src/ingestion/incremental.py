@@ -102,8 +102,9 @@ class IncrementalUpdater:
 
     def _existing_sections(self, document_id: str) -> Dict[str, Dict]:
         """Get existing chunks from the database (synchronous)."""
+        # P0: HAS_SECTION deprecated - use HAS_CHUNK
         cypher = """
-        MATCH (:Document {id: $doc})-[:HAS_SECTION]->(c:Chunk)
+        MATCH (:Document {id: $doc})-[:HAS_CHUNK]->(c:Chunk)
         RETURN c.id AS id, coalesce(c.checksum, '') AS checksum, c.title AS title
         """
         out: Dict[str, Dict] = {}
@@ -235,7 +236,7 @@ class IncrementalUpdater:
                 sess.run(
                     """
                     UNWIND $ids AS sid
-                    MATCH (d:Document {id: $doc})-[:HAS_SECTION]->(c:Chunk {id: sid})
+                    MATCH (d:Document {id: $doc})-[:HAS_CHUNK]->(c:Chunk {id: sid})
                     DETACH DELETE c
                     """,
                     {"ids": internal_diff.deletes, "doc": document_id},
@@ -268,7 +269,8 @@ class IncrementalUpdater:
                     MERGE (d:Document {id: $doc})
                     SET c.doc_tag = d.doc_tag,
                         c.snapshot_scope = d.snapshot_scope
-                    MERGE (d)-[:HAS_SECTION]->(c)
+                    // P0: HAS_SECTION deprecated - use only HAS_CHUNK
+                    MERGE (d)-[:HAS_CHUNK]->(c)
                     """,
                     {"rows": to_upsert, "doc": document_id, "v": self.version},
                 )

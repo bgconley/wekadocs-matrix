@@ -12,7 +12,8 @@ ORDER BY c.document_id, c.order
 LIMIT $limit;
 
 -- Version 2: Search with document context
-MATCH (d:Document)-[:HAS_SECTION]->(c:Chunk)
+-- P0: HAS_SECTION deprecated, use HAS_CHUNK
+MATCH (d:Document)-[:HAS_CHUNK]->(c:Chunk)
 WHERE $section_ids IS NULL OR size($section_ids) = 0 OR c.id IN $section_ids
 OPTIONAL MATCH (c)-[r:MENTIONS]->(e)
 WHERE r.confidence >= 0.5
@@ -42,7 +43,7 @@ LIMIT $limit;
 -- M2: Parameterized confidence threshold for query-time tuning
 MATCH (c:Chunk)
 WHERE $chunk_ids IS NULL OR size($chunk_ids) = 0 OR c.id IN $chunk_ids
-OPTIONAL MATCH (c)-[ref:REFERENCES]->(d:Document)-[:HAS_SECTION]->(target:Chunk)
+OPTIONAL MATCH (c)-[ref:REFERENCES]->(d:Document)-[:HAS_CHUNK]->(target:Chunk)
 WHERE ref.confidence >= coalesce($min_ref_confidence, 0.5)
 WITH c, d, collect(DISTINCT {
   chunk: target,

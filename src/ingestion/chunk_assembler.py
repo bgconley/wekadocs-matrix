@@ -538,6 +538,8 @@ class GreedyCombinerV2:
                         version=seed_version,
                         text_hash=_text_hash(combined),
                         shingle_hash=_shingle_hash(combined),
+                        # P1: Propagate heading-only flag from parser
+                        is_heading_only=group[0].get("is_heading_only", False),
                     )
                     meta["anchor"] = group[0].get("anchor", "")
                     meta["tokens"] = c_tokens
@@ -591,6 +593,8 @@ class GreedyCombinerV2:
                             version=seed_version,
                             text_hash=_text_hash(part["text"]),
                             shingle_hash=_shingle_hash(part["text"]),
+                            # P1: Split chunks inherit heading-only from source
+                            is_heading_only=group[0].get("is_heading_only", False),
                         )
                         meta["id"] = sub_id
                         meta["original_section_ids"] = sub_original_ids
