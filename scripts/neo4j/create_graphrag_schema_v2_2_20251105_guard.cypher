@@ -35,12 +35,7 @@ FOR (d:Document) REQUIRE d.id IS UNIQUE;
 CREATE CONSTRAINT document_source_uri_unique IF NOT EXISTS
 FOR (d:Document) REQUIRE d.source_uri IS UNIQUE;
 
-// DEPRECATED (Phase 4): :Section label replaced by :Chunk
-// Constraint kept for migration compatibility - will be removed in future version
-CREATE CONSTRAINT section_id_unique IF NOT EXISTS
-FOR (s:Section) REQUIRE s.id IS UNIQUE;
-
-// Primary constraint for content nodes (replaces section_id_unique)
+// Primary constraint for content nodes (:Section deprecated in Phase 4)
 CREATE CONSTRAINT chunk_id_unique IF NOT EXISTS
 FOR (c:Chunk) REQUIRE c.id IS UNIQUE;
 
@@ -135,24 +130,7 @@ CALL db.index.fulltext.createNodeIndex(
   {analyzer: 'standard-folding'}
 ) IF NOT EXISTS;
 
-// ---------------------------------------------------------------------------
-// DEPRECATED Section indexes (Phase 4) - kept for migration compatibility
-// These will be orphaned after running migrate_section_to_chunk.py
-// Remove after migration is complete across all environments
-// ---------------------------------------------------------------------------
-CREATE INDEX section_document_id_idx IF NOT EXISTS
-FOR (s:Section) ON (s.document_id);
-
-CREATE INDEX section_level_idx IF NOT EXISTS
-FOR (s:Section) ON (s.level);
-
-CREATE INDEX section_order_idx IF NOT EXISTS
-FOR (s:Section) ON (s.order);
-
-CREATE INDEX section_parent_section_id IF NOT EXISTS
-FOR (s:Section) ON (s.parent_section_id);
-
-// Chunk indexes (v2.1)
+// Chunk indexes (primary content nodes - :Section removed in Phase 4)
 CREATE INDEX chunk_document_id IF NOT EXISTS
 FOR (c:Chunk) ON (c.document_id);
 
@@ -301,38 +279,11 @@ FOR (d:Document) ON (d.title);
 CREATE INDEX chunk_doc_id IF NOT EXISTS
 FOR (c:Chunk) ON (c.doc_id);
 
-// DEPRECATED (Phase 4): Kept for migration compatibility
-CREATE INDEX section_doc_id IF NOT EXISTS
-FOR (s:Section) ON (s.doc_id);
-
 
 // ---------------------------------------------------------------------------
 // PART 1B: PHASE 3 STRUCTURAL METADATA INDEXES (markdown-it-py)
 // ---------------------------------------------------------------------------
-// These support enhanced metadata from markdown-it-py parser
-
-// ---------------------------------------------------------------------------
-// DEPRECATED Section structural indexes (Phase 4) - kept for migration only
-// ---------------------------------------------------------------------------
-CREATE INDEX section_line_start_idx IF NOT EXISTS
-FOR (s:Section) ON (s.line_start);
-
-CREATE INDEX section_line_end_idx IF NOT EXISTS
-FOR (s:Section) ON (s.line_end);
-
-CREATE INDEX section_has_code_idx IF NOT EXISTS
-FOR (s:Section) ON (s.has_code);
-
-CREATE INDEX section_has_table_idx IF NOT EXISTS
-FOR (s:Section) ON (s.has_table);
-
-CREATE INDEX section_code_ratio_idx IF NOT EXISTS
-FOR (s:Section) ON (s.code_ratio);
-
-CREATE INDEX section_parent_path_idx IF NOT EXISTS
-FOR (s:Section) ON (s.parent_path);
-
-// Chunk structural filtering (mirrors Section indexes)
+// Chunk structural filtering (Phase 4: :Section indexes removed)
 CREATE INDEX chunk_has_code_idx IF NOT EXISTS
 FOR (c:Chunk) ON (c.has_code);
 
@@ -383,10 +334,9 @@ FOR (n:Chunk) ON EACH [n.text];
 CREATE FULLTEXT INDEX chunk_text_index_v3_bge_m3 IF NOT EXISTS
 FOR (n:Chunk|CitationUnit) ON EACH [n.text, n.heading];
 
-// Note: Includes :Section for backward compatibility during migration
-// After migration, consider recreating with :Chunk only
+// Heading fulltext index (Phase 4: :Section removed)
 CREATE FULLTEXT INDEX heading_fulltext_v1 IF NOT EXISTS
-FOR (n:Chunk|Section) ON EACH [n.heading];
+FOR (n:Chunk) ON EACH [n.heading];
 
 // Phase 3: Document title fulltext index for efficient REFERENCES resolution
 // Supports fuzzy CONTAINS queries on Document.title without O(N) scan
@@ -397,18 +347,7 @@ FOR (d:Document) ON EACH [d.title];
 // ---------------------------------------------------------------------------
 // PART 3: VECTOR INDEXES
 // ---------------------------------------------------------------------------
-// DEPRECATED (Phase 4): Section vector index - kept for migration compatibility
-// After migration, this index will be orphaned (no :Section nodes)
-CREATE VECTOR INDEX section_embeddings_v2_bge_m3 IF NOT EXISTS
-FOR (s:Section)
-ON s.vector_embedding
-OPTIONS {
-  indexConfig: {
-    `vector.dimensions`: 1024,
-    `vector.similarity_function`: 'cosine'
-  }
-};
-
+// Primary content vector index (Phase 4: Section vector index removed)
 CREATE VECTOR INDEX chunk_embeddings_v2 IF NOT EXISTS
 FOR (c:Chunk)
 ON c.vector_embedding
@@ -442,23 +381,10 @@ OPTIONS {
 
 
 // ---------------------------------------------------------------------------
-// PART 4: DUAL-LABELING MIGRATION (DEPRECATED - Phase 4)
-// ---------------------------------------------------------------------------
-// This block was used to add :Chunk label to legacy :Section nodes.
-// After Phase 4 migration (migrate_section_to_chunk.py), this is no longer needed.
-// The migration script removes :Section label entirely.
-//
-// REMOVED: The following was the original dual-labeling migration:
-// MATCH (s:Section)
-// WHERE NOT s:Chunk
-// SET s:Chunk,
-//     s.is_legacy_section = true;
-
-
-// ---------------------------------------------------------------------------
-// PART 5: DOC ID ALIAS BACKFILL (Idempotent)
+// PART 4: DOC ID ALIAS BACKFILL (Idempotent)
 // ---------------------------------------------------------------------------
 // Ensures canonical document_id exists; doc_id is maintained as a legacy alias.
+// Phase 4: Section backfill removed - all content now uses :Chunk only
 
 MATCH (c:Chunk)
 WHERE c.doc_id IS NULL AND c.document_id IS NOT NULL
@@ -467,16 +393,6 @@ SET c.doc_id = c.document_id;
 MATCH (c:Chunk)
 WHERE c.document_id IS NULL AND c.doc_id IS NOT NULL
 SET c.document_id = c.doc_id;
-
-// DEPRECATED (Phase 4): Section doc_id backfill - kept for migration compatibility
-// After migration, no :Section nodes will exist
-MATCH (s:Section)
-WHERE s.doc_id IS NULL AND s.document_id IS NOT NULL
-SET s.doc_id = s.document_id;
-
-MATCH (s:Section)
-WHERE s.document_id IS NULL AND s.doc_id IS NOT NULL
-SET s.document_id = s.doc_id;
 
 
 // ---------------------------------------------------------------------------
