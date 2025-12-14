@@ -27,8 +27,8 @@ LIMIT 1;
 -- Version 2: Configuration comparison via MENTIONS (Phase 2 Cleanup: removed AFFECTS)
 MATCH (a:Configuration {name: $entity_name_a})
 MATCH (b:Configuration {name: $entity_name_b})
-OPTIONAL MATCH (a)<-[:MENTIONS]-(sec_a:Section)
-OPTIONAL MATCH (b)<-[:MENTIONS]-(sec_b:Section)
+OPTIONAL MATCH (a)<-[:MENTIONS]-(sec_a:Chunk)
+OPTIONAL MATCH (b)<-[:MENTIONS]-(sec_b:Chunk)
 OPTIONAL MATCH (a)<-[:HAS_PARAMETER]-(cmd_a:Command)
 OPTIONAL MATCH (b)<-[:HAS_PARAMETER]-(cmd_b:Command)
 WITH a, b,

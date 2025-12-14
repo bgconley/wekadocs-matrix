@@ -236,7 +236,7 @@ def generate_markdown_report(results: dict) -> str:
         lines.append(
             "   - Implement deterministic ID generation (`sha256(document_id|original_section_ids)` - full 64-char hex)"
         )
-        lines.append("   - Write nodes as `:Section:Chunk` with canonical fields")
+        lines.append("   - Write nodes as `:Chunk` with canonical fields")
         lines.append("   - Implement replace-by-set GC in both Neo4j and Qdrant")
         lines.append("   - Enforce app-layer validation (1024-D, required fields)")
         lines.append("")

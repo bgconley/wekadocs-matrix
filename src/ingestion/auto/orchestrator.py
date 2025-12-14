@@ -928,7 +928,7 @@ class Orchestrator:
                 vector=vectors,
                 payload={
                     "node_id": section["id"],  # Original section ID
-                    "node_label": "Section",
+                    "node_label": "Chunk",
                     "document_id": document_id,
                     "doc_id": doc_alias,
                     "document_uri": document_uri,
@@ -982,7 +982,7 @@ class Orchestrator:
         return len(points)
 
     def _upsert_to_neo4j(self, sections: List[Dict]) -> int:
-        """Upsert section embeddings to Neo4j."""
+        """Upsert chunk embeddings to Neo4j."""
         with self.neo4j.session() as session:
             for section in sections:
                 embedding = section.get("vector_embedding")
@@ -990,9 +990,9 @@ class Orchestrator:
                     continue
 
                 query = """
-                MATCH (s:Section {id: $section_id})
-                SET s.vector_embedding = $embedding,
-                    s.embedding_version = $version
+                MATCH (c:Chunk {id: $section_id})
+                SET c.vector_embedding = $embedding,
+                    c.embedding_version = $version
                 """
                 session.run(
                     query,
@@ -1008,8 +1008,8 @@ class Orchestrator:
         with self.neo4j.session() as session:
             for section in sections:
                 query = """
-                MATCH (s:Section {id: $section_id})
-                SET s.embedding_version = $version
+                MATCH (c:Chunk {id: $section_id})
+                SET c.embedding_version = $version
                 """
                 session.run(
                     query,

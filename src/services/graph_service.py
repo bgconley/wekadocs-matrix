@@ -146,7 +146,7 @@ class GraphService:
 
         projection = self._project_clause("n", fields)
         query = f"""
-        MATCH (n) WHERE (n:Section OR n:Chunk OR n:Document OR n:Entity) AND n.id IN $node_ids
+        MATCH (n) WHERE (n:Chunk OR n:Document OR n:Entity) AND n.id IN $node_ids
         RETURN {projection}
         """
         logger.debug("describe_nodes query=%s", query)
@@ -238,7 +238,6 @@ class GraphService:
         RETURN
             target.id AS id,
             CASE
-                WHEN 'Section' IN labels(target) THEN 'Section'
                 WHEN 'Chunk' IN labels(target) THEN 'Chunk'
                 WHEN 'Document' IN labels(target) THEN 'Document'
                 WHEN 'Procedure' IN labels(target) THEN 'Procedure'
@@ -443,7 +442,7 @@ class GraphService:
 
         query = """
         MATCH (parent {id: $parent_id})
-        OPTIONAL MATCH (parent)-[:PARENT_OF|HAS_SECTION|CONTAINS_STEP]->(child)
+        OPTIONAL MATCH (parent)-[:PARENT_OF|HAS_CHUNK|CONTAINS_STEP]->(child)
         WITH child
         WHERE child IS NOT NULL
         ORDER BY child.order ASC, child.title ASC
@@ -500,7 +499,7 @@ class GraphService:
         query = """
         UNWIND $section_ids AS sid
         MATCH (child {id: sid})
-        OPTIONAL MATCH (parent)-[:PARENT_OF|HAS_SECTION|CONTAINS_STEP]->(child)
+        OPTIONAL MATCH (parent)-[:PARENT_OF|HAS_CHUNK|CONTAINS_STEP]->(child)
         WITH child, parent
         WHERE parent IS NOT NULL
         RETURN child.id AS section_id,

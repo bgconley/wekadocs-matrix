@@ -1,0 +1,87 @@
+// Auto-generated Neo4j schema DDL
+// Snapshot: neo4j
+// Generated at: 2025-12-13T20:53:42.592372+00:00
+
+// Constraints
+CREATE CONSTRAINT `answer_id_unique` FOR (n:`Answer`) REQUIRE (n.`answer_id`) IS UNIQUE;
+CREATE CONSTRAINT `command_id_unique` FOR (n:`Command`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `component_id_unique` FOR (n:`Component`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `concept_id_unique` FOR (n:`Concept`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `configuration_id_unique` FOR (n:`Configuration`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `document_id_unique` FOR (n:`Document`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `document_source_uri_unique` FOR (n:`Document`) REQUIRE (n.`source_uri`) IS UNIQUE;
+CREATE CONSTRAINT `error_id_unique` FOR (n:`Error`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `example_id_unique` FOR (n:`Example`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `ghost_document_id_unique` FOR (n:`GhostDocument`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `parameter_id_unique` FOR (n:`Parameter`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `pending_reference_hint_unique` FOR (n:`PendingReference`) REQUIRE (n.`hint`) IS UNIQUE;
+CREATE CONSTRAINT `procedure_id_unique` FOR (n:`Procedure`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `query_feedback_id` FOR (n:`QueryFeedback`) REQUIRE (n.`query_id`) IS UNIQUE;
+CREATE CONSTRAINT `query_id_unique` FOR (n:`Query`) REQUIRE (n.`query_id`) IS UNIQUE;
+CREATE CONSTRAINT `schema_version_singleton` FOR (n:`SchemaVersion`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `session_id_unique` FOR (n:`Session`) REQUIRE (n.`session_id`) IS UNIQUE;
+CREATE CONSTRAINT `step_id_unique` FOR (n:`Step`) REQUIRE (n.`id`) IS UNIQUE;
+
+// Indexes
+CREATE RANGE INDEX `answer_created_at` FOR (n:`Answer`) ON (n.`created_at`);
+CREATE RANGE INDEX `answer_user_feedback` FOR (n:`Answer`) ON (n.`user_feedback`);
+CREATE RANGE INDEX `chunk_doc_id` FOR (n:`Chunk`) ON (n.`doc_id`);
+CREATE RANGE INDEX `chunk_doc_tag` FOR (n:`Chunk`) ON (n.`doc_tag`);
+CREATE RANGE INDEX `chunk_document_id` FOR (n:`Chunk`) ON (n.`document_id`);
+CREATE RANGE INDEX `chunk_embedding_dimensions` FOR (n:`Chunk`) ON (n.`embedding_dimensions`);
+CREATE RANGE INDEX `chunk_embedding_provider` FOR (n:`Chunk`) ON (n.`embedding_provider`);
+CREATE RANGE INDEX `chunk_embedding_version` FOR (n:`Chunk`) ON (n.`embedding_version`);
+CREATE VECTOR INDEX `chunk_embeddings_v2` FOR (n:`Chunk`) ON (n.`vector_embedding`) OPTIONS {indexConfig: {`vector.dimensions`: 1024,`vector.hnsw.ef_construction`: 100,`vector.hnsw.m`: 16,`vector.quantization.enabled`: true,`vector.similarity_function`: 'COSINE'}};
+CREATE VECTOR INDEX `chunk_entity_embeddings_v1` FOR (n:`Chunk`) ON (n.`entity_vector_embedding`) OPTIONS {indexConfig: {`vector.dimensions`: 1024,`vector.hnsw.ef_construction`: 100,`vector.hnsw.m`: 16,`vector.quantization.enabled`: true,`vector.similarity_function`: 'COSINE'}};
+CREATE RANGE INDEX `chunk_has_code_idx` FOR (n:`Chunk`) ON (n.`has_code`);
+CREATE RANGE INDEX `chunk_has_table_idx` FOR (n:`Chunk`) ON (n.`has_table`);
+CREATE RANGE INDEX `chunk_heading` FOR (n:`Chunk`) ON (n.`heading`);
+CREATE RANGE INDEX `chunk_is_microdoc` FOR (n:`Chunk`) ON (n.`is_microdoc`);
+CREATE RANGE INDEX `chunk_lang` FOR (n:`Chunk`) ON (n.`lang`);
+CREATE RANGE INDEX `chunk_level` FOR (n:`Chunk`) ON (n.`level`);
+CREATE RANGE INDEX `chunk_line_start_idx` FOR (n:`Chunk`) ON (n.`line_start`);
+CREATE RANGE INDEX `chunk_order` FOR (n:`Chunk`) ON (n.`order`);
+CREATE RANGE INDEX `chunk_parent_path_idx` FOR (n:`Chunk`) ON (n.`parent_path`);
+CREATE RANGE INDEX `chunk_shingle_hash` FOR (n:`Chunk`) ON (n.`shingle_hash`);
+CREATE RANGE INDEX `chunk_source_path` FOR (n:`Chunk`) ON (n.`source_path`);
+CREATE RANGE INDEX `chunk_tenant` FOR (n:`Chunk`) ON (n.`tenant`);
+CREATE FULLTEXT INDEX `chunk_text_fulltext` FOR (n:`Chunk`) ON EACH [n.`text`] OPTIONS {indexConfig: {`fulltext.analyzer`: 'standard-no-stop-words',`fulltext.eventually_consistent`: false}};
+CREATE RANGE INDEX `chunk_text_hash` FOR (n:`Chunk`) ON (n.`text_hash`);
+CREATE FULLTEXT INDEX `chunk_text_index_v3_bge_m3` FOR (n:`Chunk`|`CitationUnit`) ON EACH [n.`text`, n.`heading`] OPTIONS {indexConfig: {`fulltext.analyzer`: 'standard-no-stop-words',`fulltext.eventually_consistent`: false}};
+CREATE VECTOR INDEX `chunk_title_embeddings_v1` FOR (n:`Chunk`) ON (n.`title_vector_embedding`) OPTIONS {indexConfig: {`vector.dimensions`: 1024,`vector.hnsw.ef_construction`: 100,`vector.hnsw.m`: 16,`vector.quantization.enabled`: true,`vector.similarity_function`: 'COSINE'}};
+CREATE RANGE INDEX `chunk_token_count` FOR (n:`Chunk`) ON (n.`token_count`);
+CREATE RANGE INDEX `chunk_updated_at` FOR (n:`Chunk`) ON (n.`updated_at`);
+CREATE RANGE INDEX `chunk_version` FOR (n:`Chunk`) ON (n.`version`);
+CREATE RANGE INDEX `citation_unit_document_id` FOR (n:`CitationUnit`) ON (n.`document_id`);
+CREATE RANGE INDEX `citation_unit_order` FOR (n:`CitationUnit`) ON (n.`order`);
+CREATE RANGE INDEX `citation_unit_parent_chunk_id` FOR (n:`CitationUnit`) ON (n.`parent_chunk_id`);
+CREATE RANGE INDEX `component_name` FOR (n:`Component`) ON (n.`name`);
+CREATE RANGE INDEX `concept_term` FOR (n:`Concept`) ON (n.`term`);
+CREATE RANGE INDEX `document_doc_tag` FOR (n:`Document`) ON (n.`doc_tag`);
+CREATE RANGE INDEX `document_last_edited` FOR (n:`Document`) ON (n.`last_edited`);
+CREATE RANGE INDEX `document_source_type` FOR (n:`Document`) ON (n.`source_type`);
+CREATE RANGE INDEX `document_title` FOR (n:`Document`) ON (n.`title`);
+CREATE FULLTEXT INDEX `document_title_ft` FOR (n:`Document`) ON EACH [n.`title`] OPTIONS {indexConfig: {`fulltext.analyzer`: 'standard-no-stop-words',`fulltext.eventually_consistent`: false}};
+CREATE RANGE INDEX `document_version` FOR (n:`Document`) ON (n.`version`);
+CREATE RANGE INDEX `entity_canonical_name` FOR (n:`Entity`) ON (n.`canonical_name`);
+CREATE RANGE INDEX `entity_document_id` FOR (n:`Entity`) ON (n.`document_id`);
+CREATE RANGE INDEX `entity_document_name_idx` FOR (n:`Entity`) ON (n.`document_id`, n.`name`);
+CREATE RANGE INDEX `entity_name` FOR (n:`Entity`) ON (n.`name`);
+CREATE RANGE INDEX `entity_source_section_idx` FOR (n:`Entity`) ON (n.`source_section_id`);
+CREATE RANGE INDEX `entity_type` FOR (n:`Entity`) ON (n.`entity_type`);
+CREATE RANGE INDEX `error_code` FOR (n:`Error`) ON (n.`code`);
+CREATE RANGE INDEX `index_293dec54` FOR (n:`Configuration`) ON (n.`name`);
+CREATE RANGE INDEX `index_8323cd1d` FOR (n:`Command`) ON (n.`name`);
+CREATE RANGE INDEX `mentioned_in_confidence_idx` FOR ()-[r:`MENTIONED_IN`]-() ON (r.`confidence`);
+CREATE RANGE INDEX `mentions_confidence_idx` FOR ()-[r:`MENTIONS`]-() ON (r.`confidence`);
+CREATE RANGE INDEX `mentions_source_section_idx` FOR ()-[r:`MENTIONS`]-() ON (r.`source_section_id`);
+CREATE RANGE INDEX `parent_heading_level_delta_idx` FOR ()-[r:`PARENT_HEADING`]-() ON (r.`level_delta`);
+CREATE RANGE INDEX `procedure_title` FOR (n:`Procedure`) ON (n.`title`);
+CREATE RANGE INDEX `query_asked_at` FOR (n:`Query`) ON (n.`asked_at`);
+CREATE RANGE INDEX `query_feedback_intent` FOR (n:`QueryFeedback`) ON (n.`intent`);
+CREATE RANGE INDEX `query_feedback_timestamp` FOR (n:`QueryFeedback`) ON (n.`timestamp`);
+CREATE RANGE INDEX `query_turn` FOR (n:`Query`) ON (n.`turn`);
+CREATE RANGE INDEX `session_active` FOR (n:`Session`) ON (n.`active`);
+CREATE RANGE INDEX `session_expires_at` FOR (n:`Session`) ON (n.`expires_at`);
+CREATE RANGE INDEX `session_started_at` FOR (n:`Session`) ON (n.`started_at`);
+CREATE RANGE INDEX `session_user_id` FOR (n:`Session`) ON (n.`user_id`);

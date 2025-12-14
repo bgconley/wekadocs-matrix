@@ -62,9 +62,10 @@ class TraversalService:
 
     # Whitelist of allowed relationship types
     # Includes all relationship types created by ingestion
+    # P0: HAS_SECTION deprecated, use HAS_CHUNK
     ALLOWED_REL_TYPES = [
         "MENTIONS",  # Section → Entity (Command, Configuration, Step, Procedure)
-        "HAS_SECTION",  # Document → Section
+        "HAS_CHUNK",  # Document → Chunk (canonical membership edge)
         "CONTAINS_STEP",  # Procedure → Step
     ]
 
@@ -158,12 +159,12 @@ class TraversalService:
 
         Follows relationships in both directions to discover:
         - Outgoing: MENTIONS, CONTAINS_STEP (Section → Entities)
-        - Incoming: HAS_SECTION (Document → Section)
+        - Incoming: HAS_CHUNK (Document → Chunk)
         - Siblings: via Document at depth=2
 
         Args:
             start_ids: Starting node IDs
-            rel_types: Relationship types to follow (default: MENTIONS, HAS_SECTION, CONTAINS_STEP)
+            rel_types: Relationship types to follow (default: MENTIONS, HAS_CHUNK, CONTAINS_STEP)
             max_depth: Maximum traversal depth (1-3)
             include_text: Include full text in node properties
 
@@ -203,7 +204,7 @@ class TraversalService:
             # Build Cypher query using UNION ALL (bi-directional)
             # Part 1: Start nodes at distance 0 (always returned)
             # Part 2: Reachable nodes at distance 1..max_depth (both directions)
-            # Why bi-directional: HAS_SECTION is incoming to Sections (Document → Section)
+            # Why bi-directional: HAS_CHUNK is incoming to Chunks (Document → Chunk)
             rel_pattern = "|".join(rel_types)
 
             query = f"""

@@ -1,3 +1,10 @@
+// ============================================================================
+// DEPRECATED - SUPERSEDED BY create_graphrag_schema_v2_2_20251105_guard.cypher
+// ============================================================================
+// As of Phase 4 (2025-12-12), the :Section label is deprecated.
+// Use create_graphrag_schema_v2_2_20251105_guard.cypher as the canonical schema.
+// Run scripts/migrate_section_to_chunk.py to remove :Section from existing data.
+// ============================================================================
 
 // ============================================================================
 // WekaDocs GraphRAG Schema v2.2 — COMPLETE Standalone DDL (Phase‑7E Ready)

@@ -52,10 +52,10 @@ class TextService:
             )
 
         query = """
-        MATCH (s)
-        WHERE (s:Section OR s:Chunk) AND s.id IN $section_ids
+        MATCH (s:Chunk)
+        WHERE s.id IN $section_ids
         RETURN s.id AS id,
-               CASE WHEN s:Chunk THEN 'Chunk' WHEN s:Section THEN 'Section' ELSE head(labels(s)) END AS label,
+               'Chunk' AS label,
                coalesce(s.title, s.name, s.heading, '') AS title,
                coalesce(s.text, s.content, '') AS text,
                s.doc_tag AS doc_tag,

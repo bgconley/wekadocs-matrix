@@ -135,7 +135,10 @@ class HealthChecker:
             result = check_fn()
             checks.append(result)
 
-            if fail_fast and not result.is_ok():
+            # Fail-fast should stop only on hard failures. Degraded indicates a
+            # non-blocking issue (e.g., optional constraints missing) that should
+            # not prevent the service from starting.
+            if fail_fast and result.status == HealthStatus.UNHEALTHY:
                 logger.error(f"Health check failed (fail_fast): {result.name}")
                 break
 
@@ -219,43 +222,62 @@ class HealthChecker:
 
     def _check_neo4j_constraints(self) -> HealthCheckResult:
         """Verify required constraints exist."""
-        required_constraints = {
-            "document_id_unique": {"label": "Document", "properties": ["id"]},
-            "section_id_unique": {"label": "Section", "properties": ["id"]},
-        }
+        # Constraints are important for correctness, but the project has gone
+        # through a Section -> Chunk transition. In newer schemas, Section may
+        # not exist, and Chunk constraints may be added later.
+        required_specs = [
+            {"label": "Document", "properties": ["id"]},
+        ]
+        # At least one of these should exist once the chunk model is fully
+        # stabilized. Treat absence as DEGRADED (warning), not UNHEALTHY.
+        optional_any_specs = [
+            {"label": "Section", "properties": ["id"]},
+            {"label": "Chunk", "properties": ["id"]},
+            {"label": "Chunk", "properties": ["chunk_id"]},
+        ]
 
         try:
             with self.neo4j_driver.session() as session:
                 result = session.run("SHOW CONSTRAINTS")
-                existing_constraints = {}
+                existing_specs = set()
 
                 for record in result:
-                    name = record.get("name")
-                    if name:
-                        existing_constraints[name] = {
-                            "label": record.get("labelsOrTypes", [None])[0],
-                            "properties": record.get("properties", []),
-                        }
+                    label = (record.get("labelsOrTypes") or [None])[0]
+                    props = tuple(sorted(record.get("properties") or []))
+                    if label and props:
+                        existing_specs.add((label, props))
 
-                missing = []
-                for name, spec in required_constraints.items():
-                    if name not in existing_constraints:
-                        missing.append(name)
+                def _has_spec(spec: dict) -> bool:
+                    label = spec["label"]
+                    props = tuple(sorted(spec["properties"]))
+                    return (label, props) in existing_specs
 
-                if not missing:
+                missing_required = [s for s in required_specs if not _has_spec(s)]
+                has_any_optional = any(_has_spec(s) for s in optional_any_specs)
+
+                if not missing_required and has_any_optional:
                     return HealthCheckResult(
                         name="neo4j_constraints",
                         status=HealthStatus.HEALTHY,
-                        message=f"All {len(required_constraints)} required constraints exist",
-                        details={"constraints": list(required_constraints.keys())},
+                        message="Required constraints exist (including chunk/section constraint)",
+                        details={
+                            "required": required_specs,
+                            "optional_any": optional_any_specs,
+                        },
                     )
-                else:
+                if missing_required:
                     return HealthCheckResult(
                         name="neo4j_constraints",
                         status=HealthStatus.UNHEALTHY,
-                        message=f"Missing constraints: {', '.join(missing)}",
-                        details={"missing": missing},
+                        message="Missing required constraints",
+                        details={"missing_required": missing_required},
                     )
+                return HealthCheckResult(
+                    name="neo4j_constraints",
+                    status=HealthStatus.DEGRADED,
+                    message="Missing chunk/section uniqueness constraint (non-blocking)",
+                    details={"optional_any": optional_any_specs},
+                )
         except Exception as e:
             logger.exception("Constraint check failed")
             return HealthCheckResult(
@@ -266,10 +288,13 @@ class HealthChecker:
 
     def _check_neo4j_indexes(self) -> HealthCheckResult:
         """Verify required property indexes exist."""
+        # The project has transitioned from Section -> Chunk; prefer chunk-focused
+        # indexes that support structural building and graph features.
         required_indexes = [
-            "section_document_id_idx",
-            "section_level_idx",
-            "section_order_idx",
+            "chunk_doc_order",
+            "chunk_doc_parent_path_norm",
+            "chunk_parent_chunk_id",
+            "entity_type_normalized_name",
         ]
 
         try:
@@ -307,6 +332,19 @@ class HealthChecker:
 
     def _check_neo4j_vector_indexes(self) -> HealthCheckResult:
         """Verify vector indexes are 1024-D with cosine distance."""
+        vector_cfg = get_config().search.vector
+        neo4j_vectors_required = vector_cfg.primary == "neo4j" or vector_cfg.dual_write
+        if not neo4j_vectors_required:
+            return HealthCheckResult(
+                name="neo4j_vector_indexes",
+                status=HealthStatus.HEALTHY,
+                message="Neo4j vector indexes not required (vector primary is qdrant)",
+                details={
+                    "primary": vector_cfg.primary,
+                    "dual_write": vector_cfg.dual_write,
+                },
+            )
+
         # Allow namespacing: section index name is derived from config.search.vector.neo4j.index_name
         # while chunk index remains legacy/non-namespaced for now.
         required_vector_indexes = {
@@ -595,13 +633,17 @@ def run_startup_health_checks(
         logger.info("✅ All health checks passed")
     else:
         failures = health.get_failures()
-        logger.error(f"❌ {len(failures)} health check(s) failed:")
-        for check in failures:
-            logger.error(f"  - {check.name}: {check.message}")
-
-        if fail_fast:
-            raise RuntimeError(
-                f"Health checks failed: {len(failures)} check(s) unhealthy/degraded"
-            )
+        if health.status == HealthStatus.UNHEALTHY:
+            logger.error(f"❌ {len(failures)} health check(s) failed:")
+            for check in failures:
+                logger.error(f"  - {check.name}: {check.message}")
+            if fail_fast:
+                raise RuntimeError(
+                    f"Health checks failed: {len(failures)} check(s) unhealthy/degraded"
+                )
+        else:
+            logger.warning(f"⚠️ {len(failures)} health check(s) degraded:")
+            for check in failures:
+                logger.warning(f"  - {check.name}: {check.message}")
 
     return health

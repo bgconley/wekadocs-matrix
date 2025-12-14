@@ -94,13 +94,13 @@ class PostIngestVerifier:
             Dict with drift stats
         """
         try:
-            # Count sections in graph with current embedding version
+            # Count chunks in graph with current embedding version
             with self.driver.session() as session:
                 result = session.run(
                     """
-                    MATCH (s:Section)
-                    WHERE s.embedding_version = $version
-                    RETURN count(s) AS graph_count
+                    MATCH (c:Chunk)
+                    WHERE c.embedding_version = $version
+                    RETURN count(c) AS graph_count
                     """,
                     version=self.embedding_version,
                 )
@@ -120,10 +120,10 @@ class PostIngestVerifier:
                 with self.driver.session() as session:
                     result = session.run(
                         """
-                        MATCH (s:Section)
-                        WHERE s.vector_embedding IS NOT NULL
-                          AND s.embedding_version = $version
-                        RETURN count(s) AS vector_count
+                        MATCH (c:Chunk)
+                        WHERE c.vector_embedding IS NOT NULL
+                          AND c.embedding_version = $version
+                        RETURN count(c) AS vector_count
                         """,
                         version=self.embedding_version,
                     )

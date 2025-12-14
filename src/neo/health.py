@@ -44,25 +44,19 @@ def check_neo4j_health(driver: Driver, *, detailed: bool = False) -> Neo4jHealth
     start = time.time()
     try:
         with driver.session() as session:
-            # Fast content check - Section or Chunk
-            result = session.run(
-                "MATCH (n) WHERE n:Section OR n:Chunk RETURN count(n) AS content_count"
-            )
+            # Fast content check - Chunk nodes
+            result = session.run("MATCH (c:Chunk) RETURN count(c) AS content_count")
             record = result.single()
             content_count = record["content_count"] if record else 0
             latency_ms = (time.time() - start) * 1000
 
             # Optional: detailed counts
             doc_count = None
-            section_count = None
             chunk_count = None
 
             if detailed:
                 doc_result = session.run("MATCH (d:Document) RETURN count(d) AS cnt")
                 doc_count = doc_result.single()["cnt"]
-
-                section_result = session.run("MATCH (s:Section) RETURN count(s) AS cnt")
-                section_count = section_result.single()["cnt"]
 
                 chunk_result = session.run("MATCH (c:Chunk) RETURN count(c) AS cnt")
                 chunk_count = chunk_result.single()["cnt"]
@@ -83,7 +77,6 @@ def check_neo4j_health(driver: Driver, *, detailed: bool = False) -> Neo4jHealth
                 has_content=content_count > 0,
                 message=message,
                 document_count=doc_count,
-                section_count=section_count,
                 chunk_count=chunk_count,
             )
 

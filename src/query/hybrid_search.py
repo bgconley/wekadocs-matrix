@@ -706,12 +706,12 @@ class HybridSearchEngine:
         # Batched Cypher to compute coverage signals
         coverage_query = """
         UNWIND $ids AS sid
-        MATCH (s:Section {id: sid})
-        OPTIONAL MATCH (s)-[r]->()
-        WITH s, count(DISTINCT r) AS conn_count
-        OPTIONAL MATCH (s)-[:MENTIONS]->(e:Entity)
-        WITH s, conn_count, count(DISTINCT e) AS mention_count
-        RETURN s.id AS id,
+        MATCH (c:Chunk {id: sid})
+        OPTIONAL MATCH (c)-[r]->()
+        WITH c, count(DISTINCT r) AS conn_count
+        OPTIONAL MATCH (c)-[:MENTIONS]->(e:Entity)
+        WITH c, conn_count, count(DISTINCT e) AS mention_count
+        RETURN c.id AS id,
                conn_count AS connection_count,
                mention_count AS mention_count
         """
@@ -848,13 +848,13 @@ class HybridSearchEngine:
         # Extract section IDs for batch query
         section_ids = [r.node_id for r in results]
 
-        # Query graph to count focused entity mentions per section
-        # Uses MENTIONS relationship from Section to entities
+        # Query graph to count focused entity mentions per chunk
+        # Uses MENTIONS relationship from Chunk to entities
         focus_query = """
         UNWIND $section_ids AS section_id
-        MATCH (s:Section {id: section_id})-[:MENTIONS]->(e)
+        MATCH (c:Chunk {id: section_id})-[:MENTIONS]->(e)
         WHERE e.id IN $focused_entity_ids
-        RETURN s.id AS section_id, count(DISTINCT e) AS focus_hits, collect(DISTINCT e.id) AS matched_entities
+        RETURN c.id AS section_id, count(DISTINCT e) AS focus_hits, collect(DISTINCT e.id) AS matched_entities
         """
 
         focus_counts = {}

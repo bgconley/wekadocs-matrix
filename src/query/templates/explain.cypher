@@ -17,7 +17,7 @@ LIMIT $limit;
 -- Version 2: Concept explanation via MENTIONS (active relationship)
 MATCH (concept:Concept)
 WHERE concept.term = $concept_term OR concept.name = $concept_term
-OPTIONAL MATCH (concept)<-[:MENTIONS]-(sec:Section)
+OPTIONAL MATCH (concept)<-[:MENTIONS]-(sec:Chunk)
 RETURN concept,
-       collect(DISTINCT {section_id: sec.id, title: sec.title, document_id: sec.document_id}) AS mentioned_in
+       collect(DISTINCT {chunk_id: sec.id, title: sec.title, document_id: sec.document_id}) AS mentioned_in
 LIMIT $limit;

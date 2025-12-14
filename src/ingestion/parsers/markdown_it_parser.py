@@ -628,13 +628,26 @@ def _finalize_section(
     # Normalize for consistency
     content_norm = _normalize_text(text)
 
-    # Skip empty sections
+    # P1: Handle heading-only sections (headings with no body content)
+    # Instead of skipping empty sections, emit minimal "heading-only" sections
+    # when the heading has children (parent_path will be used by child sections).
+    # This ensures hierarchy edges can be created for all levels.
+    is_heading_only = False
     if (
         not content_norm
         and not section_data["code_blocks"]
         and not section_data["tables"]
     ):
-        return None
+        title = section_data.get("title", "").strip()
+        level = section_data.get("level", 1)
+        # Only emit heading-only sections for non-empty titles at level > 1
+        # (level 1 is document title, handled separately)
+        if title and level > 1:
+            # Use title as minimal text for embedding
+            text = title
+            is_heading_only = True
+        else:
+            return None
 
     # Compute checksum from normalized content
     checksum = _section_checksum(text)
@@ -680,6 +693,8 @@ def _finalize_section(
         "code_ratio": round(code_ratio, 3),
         "has_table": len(section_data.get("tables", [])) > 0,
         "has_code": len(section_data.get("code_blocks", [])) > 0,
+        # P1: Flag for heading-only sections (no body content)
+        "is_heading_only": is_heading_only,
     }
 
 

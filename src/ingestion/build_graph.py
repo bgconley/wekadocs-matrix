@@ -279,9 +279,9 @@ class GraphBuilder:
             return
         mismatched_ids: List[str] = []
         query = """
-        MATCH (s:Section)
-        WHERE s.embedding_version IS NOT NULL AND s.embedding_version <> $version
-        RETURN s.id AS id
+        MATCH (c:Chunk)
+        WHERE c.embedding_version IS NOT NULL AND c.embedding_version <> $version
+        RETURN c.id AS id
         LIMIT 5
         """
         with self.driver.session() as session:
@@ -619,10 +619,10 @@ class GraphBuilder:
 
     def _upsert_sections(self, session, document_id: str, sections: List[Dict]) -> int:
         """
-        Upsert Section nodes with dual-labeling and HAS_SECTION relationships in batches.
+        Upsert Chunk nodes with HAS_CHUNK relationships in batches.
 
-        Phase 7E-1: Creates :Section:Chunk nodes with full canonical chunk schema.
-        Each section becomes a single-section chunk with deterministic ID generation.
+        Phase 7E-1: Creates :Chunk nodes with full canonical chunk schema.
+        Each section becomes a single chunk with deterministic ID generation.
         Embedding metadata will be set later in _process_embeddings after vectors are generated.
         """
         batch_size = self.config.ingestion.batch_size
@@ -667,47 +667,48 @@ class GraphBuilder:
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i : i + batch_size]
 
-            # Phase 7E-1: MERGE with dual-label :Section:Chunk + canonical chunk fields
+            # Phase 7E-1: MERGE with :Chunk label (deprecated :Section dual-label)
             # Phase 3 (markdown-it-py): Added enhanced metadata fields for structural queries
             query = """
             UNWIND $chunks as chunk
-            MERGE (s:Section:Chunk {id: chunk.id})
-            SET s.document_id = chunk.document_id,
-                s.level = chunk.level,
-                s.title = chunk.heading,
-                s.anchor = chunk.anchor,
-                s.order = chunk.order,
-                s.heading = chunk.heading,
-                s.parent_section_id = chunk.parent_section_id,
-                s.parent_section_original_id = chunk.parent_section_original_id,
-                s.text = chunk.text,
-                s.tokens = chunk.tokens,
-                s.token_count = chunk.token_count,
-                s.checksum = chunk.checksum,
-                s.original_section_ids = chunk.original_section_ids,
-                s.is_combined = chunk.is_combined,
-                s.is_split = chunk.is_split,
-                s.boundaries_json = chunk.boundaries_json,
-                s.document_total_tokens = chunk.document_total_tokens,
-                s.is_microdoc = chunk.is_microdoc,
-                s.doc_is_microdoc = coalesce(chunk.doc_is_microdoc, chunk.is_microdoc),
+            MERGE (c:Chunk {id: chunk.id})
+            SET c.document_id = chunk.document_id,
+                c.level = chunk.level,
+                c.title = chunk.heading,
+                c.anchor = chunk.anchor,
+                c.order = chunk.order,
+                c.heading = chunk.heading,
+                c.parent_section_id = chunk.parent_section_id,
+                c.parent_section_original_id = chunk.parent_section_original_id,
+                c.text = chunk.text,
+                c.tokens = chunk.tokens,
+                c.token_count = chunk.token_count,
+                c.checksum = chunk.checksum,
+                c.original_section_ids = chunk.original_section_ids,
+                c.is_combined = chunk.is_combined,
+                c.is_split = chunk.is_split,
+                c.boundaries_json = chunk.boundaries_json,
+                c.document_total_tokens = chunk.document_total_tokens,
+                c.is_microdoc = chunk.is_microdoc,
+                c.doc_is_microdoc = coalesce(chunk.doc_is_microdoc, chunk.is_microdoc),
                 // Phase 3: Enhanced structural metadata from markdown-it-py
-                s.line_start = chunk.line_start,
-                s.line_end = chunk.line_end,
-                s.parent_path = coalesce(chunk.parent_path, ''),
-                s.block_types = coalesce(chunk.block_types, []),
-                s.code_ratio = coalesce(chunk.code_ratio, 0.0),
-                s.has_code = coalesce(chunk.has_code, false),
-                s.has_table = coalesce(chunk.has_table, false),
-                s.updated_at = datetime()
-            WITH s, chunk
+                c.line_start = chunk.line_start,
+                c.line_end = chunk.line_end,
+                c.parent_path = coalesce(chunk.parent_path, ''),
+                c.block_types = coalesce(chunk.block_types, []),
+                c.code_ratio = coalesce(chunk.code_ratio, 0.0),
+                c.has_code = coalesce(chunk.has_code, false),
+                c.has_table = coalesce(chunk.has_table, false),
+                c.updated_at = datetime()
+            WITH c, chunk
             MATCH (d:Document {id: $document_id})
-            SET s.doc_tag = d.doc_tag,
-                s.snapshot_scope = d.snapshot_scope
-            MERGE (d)-[r:HAS_SECTION]->(s)
+            SET c.doc_tag = d.doc_tag,
+                c.snapshot_scope = d.snapshot_scope
+            // P0: HAS_SECTION deprecated - use only HAS_CHUNK
+            MERGE (d)-[r:HAS_CHUNK]->(c)
             SET r.order = chunk.order,
                 r.updated_at = datetime()
-            RETURN count(s) as count
+            RETURN count(c) as count
             """
 
             result = session.run(query, chunks=batch, document_id=document_id)
@@ -939,8 +940,9 @@ class GraphBuilder:
         current_citation_ids = list(dict.fromkeys(current_citation_ids))
 
         # Delete chunks not in current set
+        # P0: HAS_SECTION deprecated - use HAS_CHUNK
         delete_query = """
-        MATCH (d:Document {id: $document_id})-[:HAS_SECTION]->(c:Chunk)
+        MATCH (d:Document {id: $document_id})-[:HAS_CHUNK]->(c:Chunk)
         WHERE NOT c.id IN $current_chunk_ids
         DETACH DELETE c
         RETURN count(c) as deleted
@@ -988,8 +990,9 @@ class GraphBuilder:
         """
         # Use Cypher to link chunks by order within document
         # This handles combined chunks correctly since they have proper IDs
+        # P0: HAS_SECTION deprecated - use HAS_CHUNK
         cypher = """
-        MATCH (d:Document {id:$doc_id})-[:HAS_SECTION]->(c:Chunk)
+        MATCH (d:Document {id:$doc_id})-[:HAS_CHUNK]->(c:Chunk)
         WITH c ORDER BY c.order, c.id
         WITH collect(c) AS cs
         UNWIND range(0, size(cs)-2) AS i
@@ -1028,15 +1031,15 @@ class GraphBuilder:
             WHERE c.text IS NOT NULL
               AND coalesce(c.document_id, c.doc_id) = $doc_id
               AND c.parent_section_id IS NOT NULL
-            MATCH (s:Section {id: c.parent_section_id})
-            MERGE (c)-[:CHILD_OF]->(s)
+            MATCH (parent:Chunk {id: c.parent_section_id})
+            MERGE (c)-[:CHILD_OF]->(parent)
             RETURN count(c) AS count
             """,
             "parent_of": """
-            MATCH (child:Section)
+            MATCH (child:Chunk)
             WHERE child.parent_section_id IS NOT NULL
               AND coalesce(child.document_id, child.doc_id) = $doc_id
-            MATCH (parent:Section {id: child.parent_section_id})
+            MATCH (parent:Chunk {id: child.parent_section_id})
             MERGE (parent)-[:PARENT_OF]->(child)
             RETURN count(child) AS count
             """,
@@ -1059,13 +1062,14 @@ class GraphBuilder:
             # Phase 3 (markdown-it-py): PARENT_HEADING based on parent_path hierarchy
             # Creates heading-based parent-child edges distinct from PARENT_OF
             # Direction: child→parent (Neo4j hierarchy convention)
+            # P2: Relaxed order constraint - prefers order < child.order, fallback to order > child.order
             "parent_heading": """
-            MATCH (child:Section)
+            MATCH (child:Chunk)
             WHERE child.document_id = $doc_id
               AND child.parent_path IS NOT NULL
               AND child.parent_path <> ''
               AND NOT EXISTS {
-                MATCH (child)-[:PARENT_HEADING]->(:Section)
+                MATCH (child)-[:PARENT_HEADING]->(:Chunk)
               }
             WITH child,
                  split(child.parent_path, ' > ') AS path_parts,
@@ -1076,13 +1080,18 @@ class GraphBuilder:
                  path_parts[size(path_parts) - 1] AS immediate_parent_title,
                  child_level,
                  child_order
-            MATCH (parent:Section)
+            MATCH (parent:Chunk)
             WHERE parent.document_id = $doc_id
               AND parent.title = immediate_parent_title
               AND parent.level < child_level
-              AND parent.order < child_order
-            WITH child, parent
-            ORDER BY parent.order DESC
+            // P2: Prefer order < child.order, fallback to order > child.order
+            WITH child, parent,
+                 CASE WHEN parent.order < child.order THEN 0 ELSE 1 END AS priority,
+                 CASE WHEN parent.order < child.order
+                      THEN child.order - parent.order
+                      ELSE parent.order - child.order
+                 END AS distance
+            ORDER BY priority ASC, distance ASC
             WITH child, collect(parent)[0] AS parent
             WHERE parent IS NOT NULL
             MERGE (child)-[r:PARENT_HEADING]->(parent)
@@ -1090,23 +1099,23 @@ class GraphBuilder:
                 r.created_at = datetime()
             RETURN count(r) AS count
             """,
-            # Phase 3 (markdown-it-py): Apply :CodeSection label for structural filtering
-            "code_section_label": """
-            MATCH (s:Section)
-            WHERE s.document_id = $doc_id
-              AND s.has_code = true
-              AND NOT s:CodeSection
-            SET s:CodeSection
-            RETURN count(s) AS count
+            # Phase 3 (markdown-it-py): Apply :CodeChunk label for structural filtering
+            "code_chunk_label": """
+            MATCH (c:Chunk)
+            WHERE c.document_id = $doc_id
+              AND c.has_code = true
+              AND NOT c:CodeChunk
+            SET c:CodeChunk
+            RETURN count(c) AS count
             """,
-            # Phase 3 (markdown-it-py): Apply :TableSection label for structural filtering
-            "table_section_label": """
-            MATCH (s:Section)
-            WHERE s.document_id = $doc_id
-              AND s.has_table = true
-              AND NOT s:TableSection
-            SET s:TableSection
-            RETURN count(s) AS count
+            # Phase 3 (markdown-it-py): Apply :TableChunk label for structural filtering
+            "table_chunk_label": """
+            MATCH (c:Chunk)
+            WHERE c.document_id = $doc_id
+              AND c.has_table = true
+              AND NOT c:TableChunk
+            SET c:TableChunk
+            RETURN count(c) AS count
             """,
         }
 
@@ -1204,13 +1213,13 @@ class GraphBuilder:
     ) -> int:
         if builder == "child_of":
             query = """
-            MATCH (c:Chunk)-[:CHILD_OF]->(:Section)
+            MATCH (c:Chunk)-[:CHILD_OF]->(:Chunk)
             WHERE coalesce(c.document_id, c.doc_id) = $doc_id
             RETURN count(*) AS count
             """
         elif builder == "parent_of":
             query = """
-            MATCH (:Section)-[:PARENT_OF]->(child:Section)
+            MATCH (:Chunk)-[:PARENT_OF]->(child:Chunk)
             WHERE coalesce(child.document_id, child.doc_id) = $doc_id
             RETURN count(*) AS count
             """
@@ -1225,23 +1234,23 @@ class GraphBuilder:
         # Phase 3 (markdown-it-py): PARENT_HEADING relationship verification
         elif builder == "parent_heading":
             query = """
-            MATCH (child:Section)-[:PARENT_HEADING]->(:Section)
+            MATCH (child:Chunk)-[:PARENT_HEADING]->(:Chunk)
             WHERE child.document_id = $doc_id
             RETURN count(*) AS count
             """
-        # Phase 3 (markdown-it-py): CodeSection label verification
-        elif builder == "code_section_label":
+        # Phase 3 (markdown-it-py): CodeChunk label verification
+        elif builder == "code_chunk_label":
             query = """
-            MATCH (s:Section:CodeSection)
-            WHERE s.document_id = $doc_id
-            RETURN count(s) AS count
+            MATCH (c:Chunk:CodeChunk)
+            WHERE c.document_id = $doc_id
+            RETURN count(c) AS count
             """
-        # Phase 3 (markdown-it-py): TableSection label verification
-        elif builder == "table_section_label":
+        # Phase 3 (markdown-it-py): TableChunk label verification
+        elif builder == "table_chunk_label":
             query = """
-            MATCH (s:Section:TableSection)
-            WHERE s.document_id = $doc_id
-            RETURN count(s) AS count
+            MATCH (c:Chunk:TableChunk)
+            WHERE c.document_id = $doc_id
+            RETURN count(c) AS count
             """
         else:
             return 0
@@ -1256,8 +1265,9 @@ class GraphBuilder:
         from earlier ingestion bugs while scoping the fix to the current document.
         """
 
+        # P0: HAS_SECTION deprecated - use HAS_CHUNK
         query = """
-        MATCH (d:Document {id: $document_id})-[:HAS_SECTION]->(c:Chunk)
+        MATCH (d:Document {id: $document_id})-[:HAS_CHUNK]->(c:Chunk)
         WHERE c.is_combined = true AND (c.original_section_ids IS NULL OR size(c.original_section_ids) <= 1)
         SET c.is_combined = false
         RETURN count(c) as repaired
@@ -1278,24 +1288,25 @@ class GraphBuilder:
         2. MARK sections with provenance as stale (preserve citation chains)
 
         This prevents breaking historical query/answer references while
-        cleaning up sections that are genuinely no longer needed.
+        cleaning up chunks that are genuinely no longer needed.
 
         Returns:
-            Count of sections removed (deleted + marked stale)
+            Count of chunks removed (deleted + marked stale)
         """
-        # Step 1: Find orphaned sections (not in current document version)
+        # Step 1: Find orphaned chunks (not in current document version)
+        # P0: HAS_SECTION deprecated - use HAS_CHUNK
         find_orphans_query = """
-        MATCH (d:Document {id: $document_id})-[r:HAS_SECTION]->(s:Section)
-        WHERE NOT s.id IN $section_ids
+        MATCH (d:Document {id: $document_id})-[r:HAS_CHUNK]->(c:Chunk)
+        WHERE NOT c.id IN $section_ids
 
         // Check for provenance: RETRIEVED or SUPPORTED_BY relationships
-        OPTIONAL MATCH (s)<-[:RETRIEVED]-(q:Query)
-        OPTIONAL MATCH (s)<-[:SUPPORTED_BY]-(a:Answer)
+        OPTIONAL MATCH (c)<-[:RETRIEVED]-(q:Query)
+        OPTIONAL MATCH (c)<-[:SUPPORTED_BY]-(a:Answer)
 
-        WITH s,
+        WITH c,
              count(DISTINCT q) + count(DISTINCT a) as provenance_count
 
-        RETURN s.id as section_id,
+        RETURN c.id as section_id,
                provenance_count,
                CASE
                    WHEN provenance_count = 0 THEN 'delete'
@@ -1326,16 +1337,16 @@ class GraphBuilder:
         # Step 3: DELETE orphans with no provenance
         if to_delete:
             delete_query = """
-            MATCH (s:Section)
-            WHERE s.id IN $section_ids
-            DETACH DELETE s
-            RETURN count(s) as deleted
+            MATCH (c:Chunk)
+            WHERE c.id IN $section_ids
+            DETACH DELETE c
+            RETURN count(c) as deleted
             """
             delete_result = session.run(delete_query, section_ids=to_delete)
             deleted_count = delete_result.single()["deleted"] or 0
 
             logger.debug(
-                "Deleted orphaned sections with no provenance",
+                "Deleted orphaned chunks with no provenance",
                 document_id=document_id,
                 deleted_count=deleted_count,
             )
@@ -1343,12 +1354,12 @@ class GraphBuilder:
         # Step 4: MARK orphans with provenance as stale
         if to_mark_stale:
             mark_stale_query = """
-            MATCH (s:Section)
-            WHERE s.id IN $section_ids
-            SET s.is_stale = true,
-                s.stale_since = datetime(),
-                s.stale_reason = 'Section removed from document but has query/answer provenance'
-            RETURN count(s) as marked
+            MATCH (c:Chunk)
+            WHERE c.id IN $section_ids
+            SET c.is_stale = true,
+                c.stale_since = datetime(),
+                c.stale_reason = 'Chunk removed from document but has query/answer provenance'
+            RETURN count(c) as marked
             """
             mark_result = session.run(mark_stale_query, section_ids=to_mark_stale)
             marked_stale_count = mark_result.single()["marked"] or 0
@@ -1509,9 +1520,9 @@ class GraphBuilder:
             # No bidirectional edges - use direction-agnostic queries instead
             query = """
             UNWIND $mentions as m
-            MATCH (s:Section {id: m.section_id})
+            MATCH (c:Chunk {id: m.section_id})
             MATCH (e {id: m.entity_id})
-            MERGE (s)-[r:MENTIONS {entity_id: m.entity_id}]->(e)
+            MERGE (c)-[r:MENTIONS {entity_id: m.entity_id}]->(e)
             SET r.confidence = m.confidence,
                 r.start = m.start,
                 r.end = m.end,
@@ -1525,7 +1536,7 @@ class GraphBuilder:
             total_mentions += count
 
             logger.debug(
-                "Section→Entity MENTIONS batch created",
+                "Chunk→Entity MENTIONS batch created",
                 batch_num=i // batch_size + 1,
                 count=count,
             )
@@ -1627,18 +1638,22 @@ class GraphBuilder:
             collection_name = self.config.search.vector.qdrant.collection_name
 
             # Delete all chunks for this document (replace-by-set)
-            filter_must = [
-                {
-                    "key": "node_label",
-                    "match": {"value": "Section"},
-                },  # Dual-labeled as Chunk
-                {"key": "document_id", "match": {"value": document_id}},
-            ]
+            # Accept both "Chunk" (current) and "Section" (legacy) for cleanup
+            filter_condition = {
+                "must": [
+                    {"key": "document_id", "match": {"value": document_id}},
+                ],
+                "should": [
+                    {"key": "node_label", "match": {"value": "Chunk"}},
+                    {"key": "node_label", "match": {"value": "Section"}},
+                ],
+                "min_should": {"min_count": 1},
+            }
 
             try:
                 self.qdrant_client.delete_compat(
                     collection_name=collection_name,
-                    points_selector={"filter": {"must": filter_must}},
+                    points_selector={"filter": filter_condition},
                     wait=True,
                 )
                 logger.info(
@@ -1971,7 +1986,7 @@ class GraphBuilder:
                         vectors,
                         section,
                         document,
-                        "Section",
+                        "Chunk",
                         sparse_vector=sparse_vector,
                         colbert_vectors=colbert_vector,
                         title_sparse_vector=title_sparse_vector,  # NEW
@@ -1998,7 +2013,7 @@ class GraphBuilder:
                     )
 
                 else:  # neo4j primary
-                    self._upsert_to_neo4j_vector(section["id"], embedding, "Section")
+                    self._upsert_to_neo4j_vector(section["id"], embedding, "Chunk")
                     stats["upserted"] += 1
 
                     # Dual write to Qdrant if enabled
@@ -2013,7 +2028,7 @@ class GraphBuilder:
                             vectors,
                             section,
                             document,
-                            "Section",
+                            "Chunk",
                             sparse_vector=sparse_vector,
                             colbert_vectors=colbert_vector,
                             title_sparse_vector=title_sparse_vector,  # NEW
@@ -2213,7 +2228,7 @@ class GraphBuilder:
 
                 create_query = f"""
                 CREATE VECTOR INDEX `{index_name}` IF NOT EXISTS
-                FOR (s:Section) ON (s.vector_embedding)
+                FOR (c:Chunk) ON (c.vector_embedding)
                 OPTIONS {{
                   indexConfig: {{
                     `vector.dimensions`: {dims},
@@ -2804,14 +2819,14 @@ class GraphBuilder:
         metadata = ensure_no_embedding_model_in_payload(metadata)
 
         query = """
-        MATCH (s:Section {id: $node_id})
-        SET s.vector_embedding = $vector_embedding,
-            s.embedding_version = $embedding_version,
-            s.embedding_provider = $embedding_provider,
-            s.embedding_dimensions = $embedding_dimensions,
-            s.embedding_timestamp = $embedding_timestamp,
-            s.embedding_task = $embedding_task
-        RETURN s.id as id
+        MATCH (c:Chunk {id: $node_id})
+        SET c.vector_embedding = $vector_embedding,
+            c.embedding_version = $embedding_version,
+            c.embedding_provider = $embedding_provider,
+            c.embedding_dimensions = $embedding_dimensions,
+            c.embedding_timestamp = $embedding_timestamp,
+            c.embedding_task = $embedding_task
+        RETURN c.id as id
         """
 
         with self.driver.session() as session:

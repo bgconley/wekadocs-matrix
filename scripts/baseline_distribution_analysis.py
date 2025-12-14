@@ -47,7 +47,7 @@ class BaselineDistributionAnalyzer:
     def get_all_sections(self) -> List[Dict]:
         """Fetch all sections with metadata"""
         query = """
-        MATCH (d:Document)-[:HAS_SECTION]->(s:Section)
+        MATCH (d:Document)-[:HAS_CHUNK]->(s:Chunk)
         RETURN d.id as doc_id,
                s.id as section_id,
                s.title as heading,

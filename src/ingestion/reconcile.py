@@ -189,11 +189,11 @@ class Reconciler:
         return vectors
 
     def _graph_section_ids(self) -> Set[str]:
-        """Get all Section IDs from Neo4j with matching embedding_version."""
+        """Get all Chunk IDs from Neo4j with matching embedding_version."""
         cypher = """
-        MATCH (s:Section)
-        WHERE s.embedding_version = $v
-        RETURN s.id AS id
+        MATCH (c:Chunk)
+        WHERE c.embedding_version = $v
+        RETURN c.id AS id
         """
         ids: Set[str] = set()
         with self.neo4j.session() as sess:
@@ -205,12 +205,17 @@ class Reconciler:
     def _qdrant_section_ids(self) -> Set[str]:
         # Scroll all points for the version; small datasets in tests
         # Returns original node_ids (not UUIDs) from payload
+        # Note: node_label may be "Chunk" (new) or "Section" (legacy) during migration
 
         filt = {
             "must": [
-                {"key": "node_label", "match": {"value": "Section"}},
                 {"key": "embedding_version", "match": {"value": self.version}},
-            ]
+            ],
+            "should": [
+                {"key": "node_label", "match": {"value": "Chunk"}},
+                {"key": "node_label", "match": {"value": "Section"}},
+            ],
+            "min_should": {"min_count": 1},
         }
 
         out: Set[str] = set()
@@ -341,16 +346,17 @@ class Reconciler:
             else:
                 emb_fn = embedding_fn
 
-            # Fetch section text to embed
+            # Fetch chunk text to embed
+            # P0: HAS_SECTION deprecated - use HAS_CHUNK
             text_map: Dict[str, Dict[str, str]] = {}
             cypher = """
             UNWIND $ids AS sid
-            MATCH (d:Document)-[:HAS_SECTION]->(s:Section {id: sid})
+            MATCH (d:Document)-[:HAS_CHUNK]->(c:Chunk {id: sid})
             RETURN
-                s.id AS id,
-                coalesce(s.text, s.content, '') AS text,
-                s.title AS title,
-                coalesce(s.document_id, d.id) AS document_id,
+                c.id AS id,
+                coalesce(c.text, c.content, '') AS text,
+                c.title AS title,
+                coalesce(c.document_id, d.id) AS document_id,
                 d.source_uri AS source_uri,
                 d.doc_tag AS doc_tag,
                 d.snapshot_scope AS snapshot_scope
@@ -427,7 +433,7 @@ class Reconciler:
                 document_uri = Path(source_uri).name if source_uri else source_uri
                 payload = {
                     "node_id": sid,
-                    "node_label": "Section",
+                    "node_label": "Chunk",
                     "document_id": meta.get("document_id"),
                     "document_uri": document_uri,
                     "source_uri": source_uri,

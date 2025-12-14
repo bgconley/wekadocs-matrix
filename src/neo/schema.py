@@ -44,7 +44,7 @@ RELATIONSHIP_TYPES = {
     "HAS_CITATION",
     "HAS_PARAMETER",
     "HAS_QUERY",
-    "HAS_SECTION",
+    "HAS_CHUNK",  # P0: HAS_SECTION deprecated, HAS_CHUNK is canonical
     "IN_CHUNK",
     "IN_SECTION",  # Structure expansion: chunk → section
     "MENTIONED_IN",  # DEPRECATED: Legacy inverse edge (Entity → Chunk), use direction-agnostic MENTIONS queries

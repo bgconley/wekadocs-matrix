@@ -136,7 +136,7 @@ class TestSlowQueryRecording:
     """Test slow query recording."""
 
     def test_records_slow_queries_above_threshold(self, optimizer):
-        query = "MATCH (n:Section) RETURN n LIMIT 10"
+        query = "MATCH (n:Chunk) RETURN n LIMIT 10"
         params = {"limit": 10}
 
         # Record slow query (above threshold)
@@ -146,7 +146,7 @@ class TestSlowQueryRecording:
         assert optimizer.slow_queries[0].duration_ms == 150
 
     def test_ignores_fast_queries_below_threshold(self, optimizer):
-        query = "MATCH (n:Section) RETURN n LIMIT 10"
+        query = "MATCH (n:Chunk) RETURN n LIMIT 10"
         params = {"limit": 10}
 
         # Record fast query (below threshold)
@@ -184,7 +184,7 @@ class TestExplainAnalysis:
         self, optimizer, neo4j_driver, seed_test_data
     ):
         """Test operator extraction from EXPLAIN plan."""
-        query = "MATCH (s:Section) RETURN s LIMIT 5"
+        query = "MATCH (s:Chunk) RETURN s LIMIT 5"
         params = {}
 
         plan = optimizer._explain_query(query, params)
@@ -253,7 +253,7 @@ class TestIndexRecommendations:
         cypher = optimizer.export_recommendations_as_cypher(recommendations)
 
         assert "CREATE INDEX" in cypher
-        assert "FOR (n:Section)" in cypher
+        assert "FOR (n:Chunk)" in cypher
         assert "FOR (n:Command)" in cypher
 
 
@@ -279,7 +279,7 @@ class TestQueryRewrites:
 
     def test_suggests_limit_when_missing(self, optimizer):
         """Test suggesting LIMIT when query has none."""
-        query = "MATCH (n:Section) RETURN n"
+        query = "MATCH (n:Chunk) RETURN n"
         plan = ExplainPlan(
             query=query,
             operator_types=["NodeByLabelScan"],
@@ -304,7 +304,7 @@ class TestOptimizationReport:
         """Test full analysis pipeline."""
         # Record some slow queries
         queries = [
-            ("MATCH (s:Section) RETURN s LIMIT 100", {}, 120),
+            ("MATCH (s:Chunk) RETURN s LIMIT 100", {}, 120),
             ("MATCH (c:Command {name: $name}) RETURN c", {"name": "test"}, 250),
             ("MATCH (n)-[*1..5]-(m) RETURN n, m LIMIT 10", {}, 180),
         ]
@@ -355,7 +355,7 @@ class TestPlanCacheIntegration:
         template_name = "search_sections"
         param_names = ["section_ids", "limit", "max_hops"]
         plan = {
-            "query": "MATCH (s:Section) WHERE s.id IN $section_ids RETURN s LIMIT $limit",
+            "query": "MATCH (s:Chunk) WHERE s.id IN $section_ids RETURN s LIMIT $limit",
             "params": param_names,
         }
 

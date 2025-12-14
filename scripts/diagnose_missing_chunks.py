@@ -22,16 +22,15 @@ def get_neo4j_chunks(driver):
     """Get all chunk IDs and metadata from Neo4j."""
     query = """
     MATCH (c:Chunk)
-    OPTIONAL MATCH (c)<-[:HAS_CHUNK]-(s:Section)
-    OPTIONAL MATCH (s)<-[:HAS_SECTION]-(d:Document)
+    OPTIONAL MATCH (c)<-[:HAS_CHUNK]-(d:Document)
     RETURN c.id AS chunk_id,
            c.heading AS heading,
            c.text AS text,
            c.token_count AS token_count,
            c.is_microdoc AS is_microdoc,
            c.microdoc_type AS microdoc_type,
-           s.id AS section_id,
-           s.title AS section_title,
+           c.id AS section_id,
+           c.title AS section_title,
            d.doc_id AS doc_id,
            d.title AS doc_title
     """

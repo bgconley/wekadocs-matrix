@@ -62,7 +62,7 @@ class TokenAccountingValidator:
 
         query = """
         MATCH (d:Document)
-        OPTIONAL MATCH (d)-[:HAS_SECTION]->(s:Section)
+        OPTIONAL MATCH (d)-[:HAS_CHUNK]->(s:Chunk)
         WITH d.id AS doc_id,
              d.token_count AS doc_tokens,
              sum(s.tokens) AS section_tokens_sum,
@@ -181,7 +181,7 @@ class TokenAccountingValidator:
         query = """
         MATCH (d:Document)
         WHERE d.token_count IS NULL OR d.token_count = 0
-        OPTIONAL MATCH (d)-[:HAS_SECTION]->(s:Section)
+        OPTIONAL MATCH (d)-[:HAS_CHUNK]->(s:Chunk)
         RETURN d.id as doc_id,
                d.token_count as token_count,
                count(s) as section_count

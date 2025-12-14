@@ -1,0 +1,91 @@
+{
+  "_schema_version": "1.0",
+  "_generated_at": "2025-12-11T08:28:02.000483+00:00",
+  "_source": "live_qdrant_collection",
+  "_collection_name": "chunks_multi_bge_m3",
+  "vectors_config": {
+    "content": {
+      "size": 1024,
+      "distance": "Cosine"
+    },
+    "doc_title": {
+      "size": 1024,
+      "distance": "Cosine"
+    },
+    "late-interaction": {
+      "size": 1024,
+      "distance": "Cosine",
+      "multivector_config": {
+        "comparator": "max_sim"
+      }
+    },
+    "title": {
+      "size": 1024,
+      "distance": "Cosine"
+    }
+  },
+  "sparse_vectors_config": {
+    "doc_title-sparse": {
+      "index": {
+        "on_disk": true
+      }
+    },
+    "entity-sparse": {
+      "index": {
+        "on_disk": true
+      }
+    },
+    "text-sparse": {
+      "index": {
+        "on_disk": true
+      }
+    },
+    "title-sparse": {
+      "index": {
+        "on_disk": true
+      }
+    }
+  },
+  "hnsw_config": {
+    "m": 48,
+    "ef_construct": 256,
+    "full_scan_threshold": 10000,
+    "on_disk": false
+  },
+  "on_disk_payload": true,
+  "payload_indexes": [
+    "code_ratio",
+    "doc_id",
+    "doc_tag",
+    "doc_title",
+    "document_id",
+    "embedding_dimensions",
+    "embedding_provider",
+    "embedding_version",
+    "entity_metadata.entity_count",
+    "entity_metadata.entity_types",
+    "entity_metadata.entity_values",
+    "entity_metadata.entity_values_normalized",
+    "has_code",
+    "has_table",
+    "heading",
+    "id",
+    "is_microdoc",
+    "kg_id",
+    "lang",
+    "line_start",
+    "node_id",
+    "order",
+    "parent_path",
+    "parent_section_id",
+    "parent_section_original_id",
+    "shingle_hash",
+    "snapshot_scope",
+    "source_path",
+    "tenant",
+    "text_hash",
+    "token_count",
+    "updated_at",
+    "version"
+  ]
+}

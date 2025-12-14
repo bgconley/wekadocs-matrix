@@ -29,10 +29,10 @@ class Diff:
 class IncrementalUpdater:
     """
     Incremental update with stage→swap:
-    - Detect adds/updates/deletes by Section.id and checksum
-    - Stage new/modified sections as :StagedSection
-    - Delete removed sections
-    - Promote staged to :Section (atomic swap)
+    - Detect adds/updates/deletes by Chunk.id and checksum
+    - Stage new/modified chunks as :StagedChunk
+    - Delete removed chunks
+    - Promote staged to :Chunk (atomic swap)
     - Keeps counts stable for 'minimal delta' scenarios
     """
 
@@ -101,10 +101,11 @@ class IncrementalUpdater:
             ]
 
     def _existing_sections(self, document_id: str) -> Dict[str, Dict]:
-        """Get existing sections from the database (synchronous)."""
+        """Get existing chunks from the database (synchronous)."""
+        # P0: HAS_SECTION deprecated - use HAS_CHUNK
         cypher = """
-        MATCH (:Document {id: $doc})-[:HAS_SECTION]->(s:Section)
-        RETURN s.id AS id, coalesce(s.checksum, '') AS checksum, s.title AS title
+        MATCH (:Document {id: $doc})-[:HAS_CHUNK]->(c:Chunk)
+        RETURN c.id AS id, coalesce(c.checksum, '') AS checksum, c.title AS title
         """
         out: Dict[str, Dict] = {}
         with self.neo4j.session() as sess:
@@ -229,14 +230,14 @@ class IncrementalUpdater:
         deleted_count = 0
         upserted_count = 0
 
-        # 1) Delete removed sections
+        # 1) Delete removed chunks
         if internal_diff.deletes:
             with self.neo4j.session() as sess:
                 sess.run(
                     """
                     UNWIND $ids AS sid
-                    MATCH (d:Document {id: $doc})-[:HAS_SECTION]->(s:Section {id: sid})
-                    DETACH DELETE s
+                    MATCH (d:Document {id: $doc})-[:HAS_CHUNK]->(c:Chunk {id: sid})
+                    DETACH DELETE c
                     """,
                     {"ids": internal_diff.deletes, "doc": document_id},
                 )
@@ -250,7 +251,7 @@ class IncrementalUpdater:
                     wait=True,
                 )
 
-        # 2) Upsert added/modified sections
+        # 2) Upsert added/modified chunks
         to_upsert = internal_diff.adds + internal_diff.updates
         doc_tag_value = None
         if to_upsert:
@@ -258,17 +259,18 @@ class IncrementalUpdater:
                 sess.run(
                     """
                     UNWIND $rows AS row
-                    MERGE (s:Section {id: row.id})
-                    SET s.title = row.title,
-                        s.content = coalesce(row.content, row.text),
-                        s.checksum = row.checksum,
-                        s.document_id = $doc,
-                        s.embedding_version = $v,
-                        s.updated_at = datetime()
+                    MERGE (c:Chunk {id: row.id})
+                    SET c.title = row.title,
+                        c.content = coalesce(row.content, row.text),
+                        c.checksum = row.checksum,
+                        c.document_id = $doc,
+                        c.embedding_version = $v,
+                        c.updated_at = datetime()
                     MERGE (d:Document {id: $doc})
-                    SET s.doc_tag = d.doc_tag,
-                        s.snapshot_scope = d.snapshot_scope
-                    MERGE (d)-[:HAS_SECTION]->(s)
+                    SET c.doc_tag = d.doc_tag,
+                        c.snapshot_scope = d.snapshot_scope
+                    // P0: HAS_SECTION deprecated - use only HAS_CHUNK
+                    MERGE (d)-[:HAS_CHUNK]->(c)
                     """,
                     {"rows": to_upsert, "doc": document_id, "v": self.version},
                 )
@@ -312,7 +314,7 @@ class IncrementalUpdater:
                             vector=vectors,  # config-driven placeholder across fields
                             payload={
                                 "node_id": sec["id"],
-                                "node_label": "Section",
+                                "node_label": "Chunk",
                                 "document_id": document_id,
                                 "document_uri": sec.get("source_uri")
                                 or sec.get("document_uri"),

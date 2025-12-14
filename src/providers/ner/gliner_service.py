@@ -134,7 +134,7 @@ class GLiNERService:
     _initialized: bool = False
 
     # HTTP client settings
-    HTTP_TIMEOUT = 60.0  # seconds (GLiNER can be slow on first call)
+    HTTP_TIMEOUT = 160.0  # seconds (increased for large docs - 888 chunks took 60s)
     HTTP_CONNECT_TIMEOUT = 5.0  # seconds
 
     def __new__(cls) -> "GLiNERService":

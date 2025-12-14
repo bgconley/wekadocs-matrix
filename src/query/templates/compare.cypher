@@ -6,8 +6,8 @@
 -- Version 1: Compare two configurations via MENTIONS
 MATCH (a:Configuration {name: $item_a})
 MATCH (b:Configuration {name: $item_b})
-OPTIONAL MATCH (a)<-[:MENTIONS]-(sec_a:Section)
-OPTIONAL MATCH (b)<-[:MENTIONS]-(sec_b:Section)
+OPTIONAL MATCH (a)<-[:MENTIONS]-(sec_a:Chunk)
+OPTIONAL MATCH (b)<-[:MENTIONS]-(sec_b:Chunk)
 RETURN a, b,
        collect(DISTINCT sec_a.id) AS mentioned_in_a,
        collect(DISTINCT sec_b.id) AS mentioned_in_b

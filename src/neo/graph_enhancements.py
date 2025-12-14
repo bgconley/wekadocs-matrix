@@ -90,7 +90,7 @@ def create_parent_heading_relationships(
     PARENT_OF (which uses parent_section_id). PARENT_HEADING captures the
     markdown heading hierarchy explicitly.
 
-    Relationship direction: (child:Section)-[:PARENT_HEADING]->(parent:Section)
+    Relationship direction: (child:Chunk)-[:PARENT_HEADING]->(parent:Chunk)
     This follows the Neo4j best practice of child→parent direction for hierarchies.
 
     Args:
@@ -105,20 +105,20 @@ def create_parent_heading_relationships(
     """
     stats = {"matched": 0, "created": 0, "errors": 0, "skipped_no_parent": 0}
 
-    # Strategy: For each section with a parent_path, find the immediate parent
-    # by matching the last element of parent_path to a section title at level-1
+    # Strategy: For each chunk with a parent_path, find the immediate parent
+    # by matching the last element of parent_path to a chunk title at level-1
 
     query = """
-    // Find sections with parent_path that don't already have PARENT_HEADING
-    MATCH (child:Section)
+    // Find chunks with parent_path that don't already have PARENT_HEADING
+    MATCH (child:Chunk)
     WHERE child.document_id = $document_id
       AND child.parent_path IS NOT NULL
       AND child.parent_path <> ''
       AND NOT EXISTS {
-        MATCH (child)-[:PARENT_HEADING]->(:Section)
+        MATCH (child)-[:PARENT_HEADING]->(:Chunk)
       }
 
-    // Find the parent section by matching:
+    // Find the parent chunk by matching:
     // 1. Same document
     // 2. Parent's title matches last element of child's parent_path
     // 3. Parent's level is less than child's level
@@ -134,7 +134,7 @@ def create_parent_heading_relationships(
          child_level,
          child_order
 
-    MATCH (parent:Section)
+    MATCH (parent:Chunk)
     WHERE parent.document_id = $document_id
       AND parent.title = immediate_parent_title
       AND parent.level < child_level
@@ -183,11 +183,11 @@ def apply_structural_labels(
     document_id: str,
 ) -> Dict[str, int]:
     """
-    Apply structural labels (CodeSection, TableSection) based on content flags.
+    Apply structural labels (CodeChunk, TableChunk) based on content flags.
 
-    Adds secondary labels to Section nodes based on:
-    - :CodeSection for sections with has_code = true
-    - :TableSection for sections with has_table = true
+    Adds secondary labels to Chunk nodes based on:
+    - :CodeChunk for chunks with has_code = true
+    - :TableChunk for chunks with has_table = true
 
     These labels enable fast filtering in Cypher queries without property checks.
 
@@ -196,48 +196,48 @@ def apply_structural_labels(
         document_id: Document identifier
 
     Returns:
-        Dict with stats: {"code_sections": n, "table_sections": n}
+        Dict with stats: {"code_chunks": n, "table_chunks": n}
     """
-    stats = {"code_sections": 0, "table_sections": 0, "errors": 0}
+    stats = {"code_chunks": 0, "table_chunks": 0, "errors": 0}
 
-    # Add :CodeSection label
+    # Add :CodeChunk label
     code_query = """
-    MATCH (s:Section)
-    WHERE s.document_id = $document_id
-      AND s.has_code = true
-      AND NOT s:CodeSection
-    SET s:CodeSection
-    RETURN count(s) AS labeled
+    MATCH (c:Chunk)
+    WHERE c.document_id = $document_id
+      AND c.has_code = true
+      AND NOT c:CodeChunk
+    SET c:CodeChunk
+    RETURN count(c) AS labeled
     """
 
-    # Add :TableSection label
+    # Add :TableChunk label
     table_query = """
-    MATCH (s:Section)
-    WHERE s.document_id = $document_id
-      AND s.has_table = true
-      AND NOT s:TableSection
-    SET s:TableSection
-    RETURN count(s) AS labeled
+    MATCH (c:Chunk)
+    WHERE c.document_id = $document_id
+      AND c.has_table = true
+      AND NOT c:TableChunk
+    SET c:TableChunk
+    RETURN count(c) AS labeled
     """
 
     try:
-        # Apply CodeSection labels
+        # Apply CodeChunk labels
         code_result = session.run(code_query, document_id=document_id)
         code_record = code_result.single()
         if code_record:
-            stats["code_sections"] = code_record.get("labeled", 0)
+            stats["code_chunks"] = code_record.get("labeled", 0)
 
-        # Apply TableSection labels
+        # Apply TableChunk labels
         table_result = session.run(table_query, document_id=document_id)
         table_record = table_result.single()
         if table_record:
-            stats["table_sections"] = table_record.get("labeled", 0)
+            stats["table_chunks"] = table_record.get("labeled", 0)
 
         logger.info(
             "Structural labels applied",
             document_id=document_id,
-            code_sections=stats["code_sections"],
-            table_sections=stats["table_sections"],
+            code_chunks=stats["code_chunks"],
+            table_chunks=stats["table_chunks"],
         )
     except Exception as exc:
         stats["errors"] = 1
@@ -257,22 +257,22 @@ def update_section_enhanced_metadata(
     batch_size: int = 100,
 ) -> Dict[str, int]:
     """
-    Update Section nodes with enhanced metadata from markdown-it-py parser.
+    Update Chunk nodes with enhanced metadata from markdown-it-py parser.
 
-    Adds Phase 2 metadata fields to existing Section nodes:
+    Adds Phase 2 metadata fields to existing Chunk nodes:
     - line_start, line_end: Source line numbers
     - parent_path: Heading hierarchy string
-    - block_types: List of block types in section
+    - block_types: List of block types in chunk
     - code_ratio: Fraction of code content
     - has_code, has_table: Structural flags
 
-    This is designed to be called after sections are initially upserted,
+    This is designed to be called after chunks are initially upserted,
     allowing the core _upsert_sections to remain backward compatible.
 
     Args:
         session: Neo4j session
         document_id: Document identifier
-        sections: List of section dicts with enhanced metadata
+        sections: List of chunk dicts with enhanced metadata
         batch_size: Batch size for updates
 
     Returns:
@@ -280,10 +280,10 @@ def update_section_enhanced_metadata(
     """
     stats = {"updated": 0, "skipped": 0, "errors": 0}
 
-    # Filter sections that have enhanced metadata
+    # Filter chunks that have enhanced metadata
     sections_with_metadata = []
     for section in sections:
-        # Check if section has any enhanced metadata fields
+        # Check if chunk has any enhanced metadata fields
         has_enhanced = any(
             section.get(field) is not None
             for field in ["line_start", "parent_path", "block_types", "has_code"]
@@ -295,7 +295,7 @@ def update_section_enhanced_metadata(
 
     if not sections_with_metadata:
         logger.debug(
-            "No sections with enhanced metadata to update",
+            "No chunks with enhanced metadata to update",
             document_id=document_id,
             skipped=stats["skipped"],
         )
@@ -304,16 +304,16 @@ def update_section_enhanced_metadata(
     # Batch update query
     query = """
     UNWIND $sections AS sec
-    MATCH (s:Section {id: sec.id})
-    WHERE s.document_id = $document_id
-    SET s.line_start = sec.line_start,
-        s.line_end = sec.line_end,
-        s.parent_path = sec.parent_path,
-        s.block_types = sec.block_types,
-        s.code_ratio = sec.code_ratio,
-        s.has_code = sec.has_code,
-        s.has_table = sec.has_table
-    RETURN count(s) AS updated
+    MATCH (c:Chunk {id: sec.id})
+    WHERE c.document_id = $document_id
+    SET c.line_start = sec.line_start,
+        c.line_end = sec.line_end,
+        c.parent_path = sec.parent_path,
+        c.block_types = sec.block_types,
+        c.code_ratio = sec.code_ratio,
+        c.has_code = sec.has_code,
+        c.has_table = sec.has_table
+    RETURN count(c) AS updated
     """
 
     # Process in batches

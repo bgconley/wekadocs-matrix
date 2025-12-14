@@ -23,9 +23,9 @@ LIMIT 100;
 MATCH (cfg:Configuration)
 WHERE (cfg.introduced_in IS NULL OR cfg.introduced_in <= $version)
   AND (cfg.deprecated_in IS NULL OR cfg.deprecated_in > $version)
-OPTIONAL MATCH (cfg)<-[r:MENTIONS]-(sec:Section)
+OPTIONAL MATCH (cfg)<-[r:MENTIONS]-(sec:Chunk)
 RETURN cfg, collect(DISTINCT {
-  section: sec,
+  chunk: sec,
   relationship: type(r)
 }) AS mentioned_by
 ORDER BY cfg.name

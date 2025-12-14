@@ -307,11 +307,11 @@ class QueryPlanner:
         """Generate a safe fallback query when no template matches."""
         # Use basic search template as fallback
         fallback_cypher = """
-        MATCH (s:Section)
-        WITH s, coalesce($section_ids, []) AS allowed_ids
-        WHERE size(allowed_ids) = 0 OR s.id IN allowed_ids
-        RETURN s
-        ORDER BY s.document_id, s.order
+        MATCH (c:Chunk)
+        WITH c, coalesce($section_ids, []) AS allowed_ids
+        WHERE size(allowed_ids) = 0 OR c.id IN allowed_ids
+        RETURN c
+        ORDER BY c.document_id, c.order
         LIMIT $limit
         """
 

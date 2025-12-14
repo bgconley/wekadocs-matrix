@@ -9,28 +9,28 @@
 -- Input: {component_name: str, max_depth?: int}
 -- Output: [{path: Path, related: [Node], depth: int}]
 
--- Version 1: Component mentions chain (entities mentioned in same sections)
+-- Version 1: Component mentions chain (entities mentioned in same chunks)
 MATCH (c:Component {name: $component_name})
-OPTIONAL MATCH (c)<-[:MENTIONS]-(sec:Section)-[:MENTIONS]->(related)
+OPTIONAL MATCH (c)<-[:MENTIONS]-(sec:Chunk)-[:MENTIONS]->(related)
 WHERE c.id <> related.id
 WITH c, sec, related
 RETURN c.name AS component,
        collect(DISTINCT {
-         section: sec.id,
+         chunk: sec.id,
          related: related,
          labels: labels(related)
        }) AS related_entities
 LIMIT $limit;
 
--- Version 2: Multi-hop section traversal for related components
+-- Version 2: Multi-hop chunk traversal for related components
 MATCH (c:Component {name: $component_name})
-OPTIONAL MATCH (c)<-[:MENTIONS]-(sec1:Section)
-OPTIONAL MATCH (sec1)-[:NEXT*1..3]-(sec2:Section)-[:MENTIONS]->(related:Component)
+OPTIONAL MATCH (c)<-[:MENTIONS]-(sec1:Chunk)
+OPTIONAL MATCH (sec1)-[:NEXT*1..3]-(sec2:Chunk)-[:MENTIONS]->(related:Component)
 WHERE c.id <> related.id
 WITH c, collect(DISTINCT {
   component: related,
-  via_section: sec1.id,
-  related_section: sec2.id
+  via_chunk: sec1.id,
+  related_chunk: sec2.id
 }) AS related_components
 RETURN c, related_components,
   size(related_components) AS related_count
@@ -38,11 +38,11 @@ LIMIT 1;
 
 -- Version 3: Document-level component relationships
 MATCH (c:Component {name: $component_name})
-OPTIONAL MATCH (c)<-[:MENTIONS]-(sec:Section)<-[:HAS_SECTION]-(doc:Document)
-OPTIONAL MATCH (doc)-[:HAS_SECTION]->(other_sec:Section)-[:MENTIONS]->(other:Component)
+OPTIONAL MATCH (c)<-[:MENTIONS]-(sec:Chunk)<-[:HAS_CHUNK]-(doc:Document)
+OPTIONAL MATCH (doc)-[:HAS_CHUNK]->(other_sec:Chunk)-[:MENTIONS]->(other:Component)
 WHERE c.id <> other.id
 WITH c, doc,
-  collect(DISTINCT {component: other, section: other_sec.id}) AS doc_components
+  collect(DISTINCT {component: other, chunk: other_sec.id}) AS doc_components
 RETURN c, doc.id AS document_id,
   doc_components,
   size(doc_components) AS component_count

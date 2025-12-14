@@ -18,12 +18,12 @@ def main():
             # First, ensure we have some data
             session.run(
                 """
-                MERGE (s:Section {id: 'debug-sec-1', text: 'test'})
+                MERGE (s:Chunk {id: 'debug-sec-1', text: 'test'})
             """
             ).consume()
 
             # Run EXPLAIN
-            result = session.run("EXPLAIN MATCH (s:Section) RETURN s LIMIT 5")
+            result = session.run("EXPLAIN MATCH (s:Chunk) RETURN s LIMIT 5")
             summary = result.consume()
             plan = summary.plan
 
