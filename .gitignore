@@ -41,6 +41,9 @@ build/
 # Node (if any)
 node_modules/
 
+# Codex / MCP caches (local-only)
+.codex-cache/
+
 # Docker
 *.log
 docker/*.log

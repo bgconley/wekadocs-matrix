@@ -139,10 +139,10 @@ search:
     reranker:
       enabled: true  # Cross-encoder enabled - eliminates length bias in final ranking
       provider: "bge-reranker-service"  # Must match factory: bge-reranker-service or bge-reranker
-      model: "BAAI/bge-reranker-v2-m3"
+      model: "Qwen/Qwen3-Reranker-4B"  # Qwen3 reranker with 4096+ token support
       top_n: 20           # Final results after reranking
       max_pairs: 50       # Candidates to send to reranker (from RRF fusion)
-      max_tokens_per_pair: 2048  # Max tokens per query-doc pair (BGE-reranker-v2-m3 supports 8192)
+      max_tokens_per_pair: 4096  # Max tokens per query-doc pair (Qwen3-Reranker supports 4096+)
 
     top_k: 20  # Number of candidates to retrieve
 

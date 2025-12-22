@@ -24,8 +24,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_BATCH_SIZE = (
     16  # Documents per batch (balance between latency and payload size)
 )
-MAX_TOKENS_PER_DOC = 800  # Token budget per document
-MAX_TOKENS_TOTAL = 1024  # Max tokens per request (query + doc)
+# Token budgets updated for Qwen3-Reranker-4B (supports 4096+ tokens)
+# Previous BGE values (800/1024) were too restrictive and filtered many valid candidates
+MAX_TOKENS_PER_DOC = 2048  # Token budget per document (Qwen3 supports 4096)
+MAX_TOKENS_TOTAL = 4096  # Max tokens per request (query + doc)
 
 
 def batch_documents(
@@ -81,7 +83,7 @@ class BGERerankerServiceProvider(RerankProvider):
     def __init__(
         self,
         model: str = "BAAI/bge-reranker-v2-m3",
-        base_url: str = "http://127.0.0.1:9001",
+        base_url: str = "http://qwen3-reranker-lambda:9003",
         timeout: float = 60.0,
         batch_size: int = DEFAULT_BATCH_SIZE,
     ) -> None:

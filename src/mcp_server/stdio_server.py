@@ -475,8 +475,10 @@ async def search_sections(
     effective_session = _resolve_session_id(ctx, session_id)
     offset = _decode_cursor(cursor)
     page = max(1, min(page_size or DEFAULT_PAGE_SIZE, 100))
+    # top_k is the hard limit on results; page_size controls pagination within that limit
+    effective_limit = min(page, top_k) if top_k and top_k > 0 else page
     total_cap = max(page, top_k or page)
-    fetch_k = min(total_cap, offset + page + 1)
+    fetch_k = min(total_cap, offset + effective_limit + 1)
     if fetch_k <= 0:
         rows = []
         metrics = {}
@@ -484,7 +486,8 @@ async def search_sections(
         rows, metrics = query_service.search_sections_light(
             query=query, fetch_k=fetch_k, filters=filters
         )
-    sliced = rows[offset : offset + page]
+    # Enforce top_k as hard ceiling on returned results
+    sliced = rows[offset : offset + effective_limit]
     more = len(rows) > offset + len(sliced)
     next_cursor = _encode_cursor(offset + len(sliced)) if more else None
     results = []

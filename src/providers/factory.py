@@ -258,7 +258,7 @@ class ProviderFactory:
             )
 
             base_url = kwargs.get("base_url") or os.getenv(
-                "RERANKER_BASE_URL", "http://127.0.0.1:9001"
+                "RERANKER_BASE_URL", "http://qwen3-reranker-lambda:9003"
             )
             timeout = kwargs.get("timeout") or float(
                 os.getenv("RERANKER_TIMEOUT_SECONDS", "60")
