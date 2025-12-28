@@ -1,3 +1,10 @@
+plan:
+  dense: "bge_m3"
+  sparse: "bge_m3"
+  colbert: "bge_m3"
+  enable_sparse: true
+  enable_colbert: true
+
 profiles:
   jina_v3:
     description: "Jina Embeddings v3 (1024-D, multilingual, normalized)."
