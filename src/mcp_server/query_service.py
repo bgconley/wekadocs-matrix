@@ -282,6 +282,7 @@ class QueryService:
         *,
         fetch_k: int,
         filters: Optional[Dict[str, Any]] = None,
+        expand: bool = True,
     ) -> Tuple[List[ChunkResult], Dict[str, Any]]:
         """
         Lightweight helper that returns raw ChunkResult objects for section-level tools.
@@ -289,12 +290,13 @@ class QueryService:
         Note: Applies the same query rewriting as search() for consistency.
         MCP clients often generate keyword-heavy queries that need reformulation.
         """
+        original_query = query
         # Apply query rewriting for better cross-encoder performance
         query, was_rewritten = self._rewrite_keyword_query(query)
         if was_rewritten:
             logger.info(
                 "search_sections_light: query rewritten",
-                original=query[:100],
+                original=original_query[:100],
             )
 
         retriever = self._get_7e_retriever()
@@ -302,8 +304,12 @@ class QueryService:
             query=query,
             top_k=fetch_k,
             filters=filters or {},
-            expand=True,
+            expand=expand,
         )
+        metrics["query_rewrite_applied"] = was_rewritten
+        metrics["query_rewrite_original"] = original_query
+        metrics["query_rewrite_result"] = query
+        metrics["query_rewrite_reason"] = "keyword_stuffed" if was_rewritten else None
 
         # Enforce fetch_k as hard limit (same as search())
         if len(chunks) > fetch_k:

@@ -110,6 +110,44 @@ def search_qdrant(
     return output
 
 
+def search_stdio(
+    query_text: str, top_k: int = 10, _cache: dict = {}
+) -> List[Tuple[str, str, float]]:
+    """
+    Search via QueryService.search_sections_light (STDIO-equivalent path).
+
+    Returns results with document title resolved from Neo4j.
+    """
+    import asyncio
+
+    from src.mcp_server.query_service import get_query_service
+    from src.shared.connections import initialize_connections
+
+    if not _cache.get("stdio_ready"):
+        asyncio.run(initialize_connections())
+        _cache["doc_titles"] = get_neo4j_doc_titles()
+        _cache["stdio_ready"] = True
+
+    query_service = get_query_service()
+    doc_titles = _cache["doc_titles"]
+
+    chunks, _ = query_service.search_sections_light(
+        query=query_text, fetch_k=top_k, filters=None
+    )
+
+    output = []
+    for chunk in chunks[:top_k]:
+        doc_title = doc_titles.get(chunk.document_id, chunk.heading or "Unknown")
+        score = (
+            chunk.rerank_score
+            if chunk.rerank_score is not None
+            else (chunk.fused_score or chunk.vector_score or chunk.bm25_score or 0.0)
+        )
+        output.append((chunk.chunk_id, doc_title, float(score)))
+
+    return output
+
+
 def evaluate_query(
     query: Dict, results: List[Tuple[str, str, float]], verbose: bool = False
 ) -> Dict:
@@ -143,6 +181,7 @@ def evaluate_query(
 def run_smoke_test(
     queries: List[Dict],
     top_k: int = 10,
+    mode: str = "qdrant",
     verbose: bool = False,
 ) -> Dict:
     """
@@ -152,6 +191,7 @@ def run_smoke_test(
     """
     results = {
         "timestamp": datetime.utcnow().isoformat(),
+        "mode": mode,
         "top_k": top_k,
         "total_queries": len(queries),
         "queries": [],
@@ -164,7 +204,7 @@ def run_smoke_test(
     by_difficulty = {}
 
     print(f"\n{'=' * 70}")
-    print(f"Golden Query Smoke Test - top_k={top_k}")
+    print(f"Golden Query Smoke Test - mode={mode} - top_k={top_k}")
     print(f"{'=' * 70}\n")
 
     for i, query in enumerate(queries, start=1):
@@ -175,7 +215,10 @@ def run_smoke_test(
 
         # Search
         try:
-            search_results = search_qdrant(query_text, top_k=top_k)
+            if mode == "stdio":
+                search_results = search_stdio(query_text, top_k=top_k)
+            else:
+                search_results = search_qdrant(query_text, top_k=top_k)
         except Exception as e:
             print(f"[{query_id}] ERROR: {e}")
             continue
@@ -289,6 +332,12 @@ def main():
         help="Number of results to retrieve per query (default: 10)",
     )
     parser.add_argument(
+        "--mode",
+        choices=["qdrant", "stdio"],
+        default="qdrant",
+        help="Retrieval path to test (default: qdrant)",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Show details for all queries, not just failures",
@@ -309,7 +358,9 @@ def main():
     print(f"Loaded {len(queries)} queries from {query_path}")
 
     # Run smoke test
-    results = run_smoke_test(queries, top_k=args.top_k, verbose=args.verbose)
+    results = run_smoke_test(
+        queries, top_k=args.top_k, mode=args.mode, verbose=args.verbose
+    )
 
     # Save report if requested
     if args.report:

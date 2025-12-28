@@ -274,6 +274,12 @@ tool_response_bytes = Histogram(
     ),
 )
 
+excerpt_truncations_total = Counter(
+    "mcp_excerpt_truncations_total",
+    "Total truncated excerpt responses returned by MCP tools.",
+    ["tool_name"],
+)
+
 response_builder_evidence_count = Histogram(
     "response_builder_evidence_count",
     "Number of evidence items in response",

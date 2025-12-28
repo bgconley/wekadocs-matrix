@@ -526,6 +526,25 @@ OPTIONS {indexConfig: {`vector.dimensions`: 384, `vector.similarity_function`: '
 
 ---
 
+## MCP Streamable HTTP (Addendum)
+
+- Streamable HTTP MCP is mounted at `/_mcp` and exposes the same tool surface as STDIO.
+- Migration: point MCP clients at `http://<host>:8000/_mcp`. JSON-only clients should enable `MCP_HTTP_STREAMABLE_JSON_RESPONSE=true` or send `Accept: application/json`.
+- Primary tools are `kb.*` and `graph.*`; legacy `/mcp/*` REST endpoints remain behind `MCP_HTTP_LEGACY_REST_ENABLED`.
+- Legacy `/mcp/*` responses include `Deprecation` + `Warning` headers to prompt migration.
+- Tool results return a short text summary plus structured content; large text is accessed via scratch resources.
+- `kb.search` and `kb.retrieve_evidence` include optional `diagnostic_id` pointers (no debug payload bloat).
+- Diagnostics summaries are available via `wekadocs://diagnostics/{date}/{diagnostic_id}` when `MCP_DIAGNOSTICS_RESOURCES_ENABLED=true` (Markdown only). CLI fallback: `python scripts/retrieval_diagnostics/show.py --id <diagnostic_id>`.
+- `search_documentation` remains disabled by default; enable only behind the legacy flag.
+
+Example migration snippet:
+```bash
+export MCP_BASE_URL=http://localhost:8000/_mcp
+export MCP_HTTP_STREAMABLE_JSON_RESPONSE=true
+```
+
+---
+
 ## Change Management
 
 ### Frozen Elements (No Changes Allowed)

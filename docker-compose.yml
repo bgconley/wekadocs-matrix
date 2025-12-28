@@ -199,9 +199,10 @@ services:
       - ./src:/app/src:ro
       - ./scripts:/app/scripts:ro
       - ./tests:/app/tests:ro
+      - ./reports:/app/reports
       - ./hf-cache:/opt/hf-cache
     env_file:
-      - .env
+      - .env.docker
     environment:
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
@@ -302,7 +303,7 @@ services:
       - ./data:/app/data:ro
       - ./hf-cache:/opt/hf-cache
     env_file:
-      - .env
+      - .env.docker
     environment:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest
@@ -415,7 +416,7 @@ services:
       - ./data:/app/data
       - ./hf-cache:/opt/hf-cache
     env_file:
-      - .env
+      - .env.docker
     environment:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest

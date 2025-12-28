@@ -119,6 +119,32 @@ class EmbeddingProfileTokenizer(BaseModel):
         return value.strip()
 
 
+class EmbeddingProfileTokenCounting(BaseModel):
+    backend: str = Field(default="hf")
+    model_id: Optional[str] = None
+
+    @validator("backend")
+    def _backend_not_empty(cls, value: str):
+        if not value or not value.strip():
+            raise ValueError(
+                "token counting backend must be provided for embedding profiles"
+            )
+        return value.strip()
+
+
+class EmbeddingContextualLimits(BaseModel):
+    max_inputs: int = 1000
+    max_total_tokens: int = 120000
+    max_total_chunks: int = 16000
+    context_window_tokens: Optional[int] = None
+
+    @validator("max_inputs", "max_total_tokens", "max_total_chunks")
+    def _positive_limits(cls, value: int):
+        if value <= 0:
+            raise ValueError("contextual limits must be greater than zero")
+        return value
+
+
 class EmbeddingProfileCapabilities(BaseModel):
     supports_dense: bool = True
     supports_sparse: bool = False
@@ -136,9 +162,16 @@ class EmbeddingProfileDefinition(BaseModel):
     dims: int
     similarity: str = "cosine"
     task: str = "retrieval.passage"
+    query_task: Optional[str] = None
+    document_task: Optional[str] = None
+    output_dimension: Optional[int] = None
+    output_dtype: Optional[str] = None
     tokenizer: EmbeddingProfileTokenizer = Field(
         default_factory=EmbeddingProfileTokenizer
     )
+    token_counting: Optional[EmbeddingProfileTokenCounting] = None
+    supports_contextualized_chunks: bool = False
+    contextual_limits: Optional[EmbeddingContextualLimits] = None
     capabilities: EmbeddingProfileCapabilities = Field(
         default_factory=EmbeddingProfileCapabilities
     )
@@ -186,6 +219,49 @@ class EmbeddingProfileDefinition(BaseModel):
                 "requirements entries must be non-empty environment variable names"
             )
         return value.strip()
+
+
+class EmbeddingPlanDefinition(BaseModel):
+    dense: str
+    sparse: Optional[str] = None
+    colbert: Optional[str] = None
+    enable_sparse: bool = False
+    enable_colbert: bool = False
+
+    @validator("dense")
+    def _dense_required(cls, value: str):
+        if not value or not value.strip():
+            raise ValueError("embedding plan requires a dense profile id")
+        return value.strip()
+
+    @validator("sparse", "colbert")
+    def _role_not_empty(cls, value: Optional[str]):
+        if value is None:
+            return value
+        if not value.strip():
+            raise ValueError("embedding role profile ids must be non-empty")
+        return value.strip()
+
+
+class EmbeddingProfileManifest(BaseModel):
+    profiles: Dict[str, EmbeddingProfileDefinition] = Field(default_factory=dict)
+    plan: Optional[EmbeddingPlanDefinition] = None
+
+    class Config:
+        extra = "ignore"
+
+
+class EmbeddingRolePlan(BaseModel):
+    role: str
+    profile_name: str
+    profile: EmbeddingProfileDefinition
+    enabled: bool = True
+
+
+class EmbeddingPlan(BaseModel):
+    dense: EmbeddingRolePlan
+    sparse: Optional[EmbeddingRolePlan] = None
+    colbert: Optional[EmbeddingRolePlan] = None
 
 
 class QdrantQueryStrategy(str, Enum):
@@ -1003,26 +1079,24 @@ def _resolve_profiles_path(config_path: Path, settings: Settings) -> Path:
 
 
 @lru_cache(maxsize=4)
-def _load_embedding_profiles(
-    manifest_path: str,
-) -> Dict[str, EmbeddingProfileDefinition]:
+def _load_embedding_manifest(manifest_path: str) -> EmbeddingProfileManifest:
     path = Path(manifest_path)
     if not path.exists():
         raise FileNotFoundError(f"Embedding profile manifest not found: {path}")
     with path.open("r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
-    profiles_data = data.get("profiles", {})
-    profiles: Dict[str, EmbeddingProfileDefinition] = {}
-    for name, payload in profiles_data.items():
-        try:
-            profiles[name] = EmbeddingProfileDefinition(**payload)
-        except (
-            ValidationError
-        ) as exc:  # pragma: no cover - exercised via dedicated tests
-            raise ValueError(
-                f"Embedding profile '{name}' in {path} is invalid: {exc}"
-            ) from exc
-    return profiles
+    try:
+        return EmbeddingProfileManifest(**data)
+    except ValidationError as exc:  # pragma: no cover - exercised via dedicated tests
+        raise ValueError(
+            f"Embedding profile manifest in {path} is invalid: {exc}"
+        ) from exc
+
+
+def _load_embedding_profiles(
+    manifest_path: str,
+) -> Dict[str, EmbeddingProfileDefinition]:
+    return _load_embedding_manifest(manifest_path).profiles
 
 
 def _ensure_embedding_resolved(embedding: EmbeddingConfig) -> None:
@@ -1043,10 +1117,47 @@ def _ensure_embedding_resolved(embedding: EmbeddingConfig) -> None:
 
 def apply_embedding_profile(config: Config, settings: Settings, config_path: Path):
     profiles_path = _resolve_profiles_path(config_path, settings)
-    profiles = _load_embedding_profiles(str(profiles_path))
+    manifest = _load_embedding_manifest(str(profiles_path))
+    profiles = manifest.profiles
+    plan = manifest.plan
 
     configured_profile = config.embedding.profile
     runtime_profile = settings.embedding_profile
+
+    if plan:
+        if plan.dense not in profiles:
+            raise ValueError(
+                f"Embedding plan dense profile '{plan.dense}' not defined in {profiles_path}"
+            )
+        if plan.sparse and plan.sparse not in profiles:
+            raise ValueError(
+                f"Embedding plan sparse profile '{plan.sparse}' not defined in {profiles_path}"
+            )
+        if plan.colbert and plan.colbert not in profiles:
+            raise ValueError(
+                f"Embedding plan colbert profile '{plan.colbert}' not defined in {profiles_path}"
+            )
+        if plan.enable_sparse and not plan.sparse:
+            raise ValueError(
+                "Embedding plan enable_sparse is true but no sparse profile is set."
+            )
+        if plan.enable_colbert and not plan.colbert:
+            raise ValueError(
+                "Embedding plan enable_colbert is true but no colbert profile is set."
+            )
+        if runtime_profile:
+            logger.warning(
+                "Embedding plan present; ignoring EMBEDDINGS_PROFILE override (%s).",
+                runtime_profile,
+            )
+            runtime_profile = None
+        if configured_profile and configured_profile != plan.dense:
+            logger.info(
+                "Embedding plan overrides embedding.profile from %s to %s",
+                configured_profile,
+                plan.dense,
+            )
+        configured_profile = plan.dense
 
     # Compute the baseline profile from config or manifest defaults
     if not configured_profile:
@@ -1254,6 +1365,10 @@ def load_config() -> tuple[Config, Settings]:
         config_dict = yaml.safe_load(f)
 
     config = Config(**config_dict)
+    gliner_service_url = os.getenv("GLINER_SERVICE_URL")
+    if gliner_service_url:
+        logger.warning("GLINER_SERVICE_URL override applied: %s", gliner_service_url)
+        config.ner.service_url = gliner_service_url
     apply_embedding_profile(config, settings, config_path)
 
     # Pre-Phase 7: Perform startup validation
@@ -1363,6 +1478,84 @@ def get_embedding_settings(
         capabilities=capabilities,
         extra=env_overrides,
     )
+
+
+def get_embedding_plan(config_override: Optional[Config] = None) -> EmbeddingPlan:
+    config = config_override or get_config()
+    settings = get_settings()
+
+    if settings.config_path:
+        config_path = Path(settings.config_path)
+    else:
+        config_path = (
+            Path(__file__).parent.parent.parent / "config" / f"{settings.env}.yaml"
+        )
+
+    profiles_path = _resolve_profiles_path(config_path, settings)
+    manifest = _load_embedding_manifest(str(profiles_path))
+    profiles = manifest.profiles
+    plan_def = manifest.plan
+
+    if not profiles:
+        raise ValueError(
+            f"Embedding plan requires profiles in {profiles_path}; none found."
+        )
+
+    if plan_def:
+        dense_name = plan_def.dense
+        sparse_name = plan_def.sparse if plan_def.enable_sparse else None
+        colbert_name = plan_def.colbert if plan_def.enable_colbert else None
+    else:
+        dense_name = config.embedding.profile or DEFAULT_EMBEDDING_PROFILE
+        if dense_name not in profiles and profiles:
+            dense_name = next(iter(profiles.keys()))
+        qdrant_cfg = getattr(config.search.vector, "qdrant", None)
+        enable_sparse = bool(getattr(qdrant_cfg, "enable_sparse", False))
+        enable_colbert = bool(getattr(qdrant_cfg, "enable_colbert", False))
+        sparse_name = dense_name if enable_sparse else None
+        colbert_name = dense_name if enable_colbert else None
+
+    if dense_name not in profiles:
+        raise ValueError(
+            f"Embedding plan dense profile '{dense_name}' not defined in {profiles_path}"
+        )
+    if sparse_name and sparse_name not in profiles:
+        raise ValueError(
+            f"Embedding plan sparse profile '{sparse_name}' not defined in {profiles_path}"
+        )
+    if colbert_name and colbert_name not in profiles:
+        raise ValueError(
+            f"Embedding plan colbert profile '{colbert_name}' not defined in {profiles_path}"
+        )
+
+    dense_role = EmbeddingRolePlan(
+        role="dense",
+        profile_name=dense_name,
+        profile=profiles[dense_name],
+        enabled=True,
+    )
+    sparse_role = (
+        EmbeddingRolePlan(
+            role="sparse",
+            profile_name=sparse_name,
+            profile=profiles[sparse_name],
+            enabled=True,
+        )
+        if sparse_name
+        else None
+    )
+    colbert_role = (
+        EmbeddingRolePlan(
+            role="colbert",
+            profile_name=colbert_name,
+            profile=profiles[colbert_name],
+            enabled=True,
+        )
+        if colbert_name
+        else None
+    )
+
+    return EmbeddingPlan(dense=dense_role, sparse=sparse_role, colbert=colbert_role)
 
 
 def validate_config_at_startup(config: Config, settings: Settings) -> None:

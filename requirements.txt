@@ -76,7 +76,7 @@ mdit-py-plugins>=0.4.0
 linkify-it-py>=2.0.0
 
 lxml==4.9.3
-mcp[cli]>=1.8.0  # MCP SDK with CLI tools for STDIO transport (requires FastMCP)
+mcp[cli]==1.16.0  # MCP SDK pinned for low-level server + Streamable HTTP
 
 # Phase 7C: Additional provider dependencies
 # Note: Jina AI and bge-m3-service integrations use REST (httpx already included above)
