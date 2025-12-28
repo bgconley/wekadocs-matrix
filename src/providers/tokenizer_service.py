@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from src.providers.settings import build_embedding_telemetry
-from src.shared.config import get_config, get_embedding_settings
+from src.shared.config import get_config, get_embedding_plan, get_embedding_settings
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class HuggingFaceTokenizerBackend(TokenizerBackend):
     Fast (<5ms per section), deterministic, works offline.
     """
 
-    def __init__(self):
+    def __init__(self, *, model_id: Optional[str] = None):
         """
         Initialize HuggingFace tokenizer.
 
@@ -105,7 +105,9 @@ class HuggingFaceTokenizerBackend(TokenizerBackend):
 
             embedding_settings = get_embedding_settings()
             default_model_id = (
-                embedding_settings.tokenizer_model_id or embedding_settings.model_id
+                model_id
+                or embedding_settings.tokenizer_model_id
+                or embedding_settings.model_id
             )
             model_id = os.getenv(
                 "HF_TOKENIZER_ID", default_model_id or "jinaai/jina-embeddings-v3"
@@ -133,17 +135,11 @@ class HuggingFaceTokenizerBackend(TokenizerBackend):
                 )
             except Exception as first_err:
                 if offline:
-                    logger.warning(
-                        "Tokenizer cache miss in offline mode; retrying with network",
-                        extra=log_extra,
-                    )
-                    self.tokenizer = AutoTokenizer.from_pretrained(
-                        model_id,
-                        cache_dir=cache_dir,
-                        local_files_only=False,
-                    )
-                else:
-                    raise first_err
+                    raise RuntimeError(
+                        f"HuggingFace tokenizer cache miss for {model_id!r} in offline mode. "
+                        "Prefetch the tokenizer into HF_CACHE, or set TRANSFORMERS_OFFLINE=false."
+                    ) from first_err
+                raise
 
             # Test tokenizer works
             test_tokens = self.tokenizer.encode("test", add_special_tokens=False)
@@ -193,7 +189,7 @@ class JinaSegmenterBackend(TokenizerBackend):
     Slower (~300ms + network) but useful for validation and fallback.
     """
 
-    def __init__(self):
+    def __init__(self, *, tokenizer_name: Optional[str] = None):
         """
         Initialize Jina Segmenter API client.
 
@@ -215,7 +211,9 @@ class JinaSegmenterBackend(TokenizerBackend):
         # Determine tokenizer name from profile/env (no remapping here)
         embedding_settings = get_embedding_settings()
         default_model_id = (
-            embedding_settings.tokenizer_model_id or embedding_settings.model_id
+            tokenizer_name
+            or embedding_settings.tokenizer_model_id
+            or embedding_settings.model_id
         )
         self.tokenizer_name = os.getenv(
             "SEGMENTER_TOKENIZER_NAME", default_model_id or "xlm-roberta-base"
@@ -316,6 +314,31 @@ class JinaSegmenterBackend(TokenizerBackend):
             self.client.close()
 
 
+class VoyageTokenCounterBackend:
+    """
+    Voyage exact token counting backend (count-only).
+
+    Uses voyageai.Client.count_tokens for model-specific counts.
+    """
+
+    def __init__(self, *, model_id: str, api_key: Optional[str] = None) -> None:
+        try:
+            import voyageai
+        except Exception as exc:  # pragma: no cover - dependency optional
+            raise RuntimeError(
+                "voyageai package is required for Voyage token counting."
+            ) from exc
+
+        self._model_id = model_id
+        self._client = voyageai.Client(api_key=api_key)
+
+    def count_tokens(self, text: str) -> int:
+        return int(self._client.count_tokens([text], model=self._model_id))
+
+    def count_tokens_batch(self, texts: List[str]) -> int:
+        return int(self._client.count_tokens(texts, model=self._model_id))
+
+
 class TokenizerService:
     """
     Tokenizer service with dual-backend support.
@@ -344,18 +367,35 @@ class TokenizerService:
         """
         embedding_settings = get_embedding_settings()
         embedding_profile = (getattr(embedding_settings, "profile", "") or "").lower()
+        dense_profile_name = embedding_profile
+        dense_model_id = embedding_settings.model_id
+        tokenizer_model_id = embedding_settings.tokenizer_model_id
+        token_counting = None
+
+        try:
+            embedding_plan = get_embedding_plan()
+            dense_profile_name = embedding_plan.dense.profile_name.lower()
+            dense_model_id = embedding_plan.dense.profile.model_id
+            tokenizer_model_id = embedding_plan.dense.profile.tokenizer.model_id
+            token_counting = embedding_plan.dense.profile.token_counting
+        except Exception:
+            embedding_plan = None
 
         backend_name = os.getenv("TOKENIZER_BACKEND")
         backend_source = "env" if backend_name else None
 
         if not backend_name:
             # Profile-driven routing
-            if embedding_profile in {"bge_m3", "bge-m3", "bge-m3-unpad"}:
+            if dense_profile_name in {"bge_m3", "bge-m3", "bge-m3-unpad"}:
                 backend_name = "hf"
-            elif "jina" in embedding_profile:
+            elif "jina" in dense_profile_name:
                 backend_name = "segmenter"
             else:
-                backend_name = embedding_settings.tokenizer_backend
+                backend_name = (
+                    embedding_settings.tokenizer_backend
+                    if embedding_settings.tokenizer_backend
+                    else "hf"
+                )
             backend_source = "profile"
 
         if not backend_name:
@@ -377,7 +417,7 @@ class TokenizerService:
         # Fallback allowance: disallow segmenter fallback for BGE profiles unless explicitly enabled
         allow_segmenter_fallback = (
             os.getenv("TOKENIZER_ALLOW_SEGMENTER_FALLBACK", "").lower() == "true"
-        ) or embedding_profile not in {
+        ) or dense_profile_name not in {
             "bge_m3",
             "bge-m3",
             "bge-m3-service",
@@ -386,7 +426,7 @@ class TokenizerService:
 
         if backend_name == "hf":
             try:
-                self.backend = HuggingFaceTokenizerBackend()
+                self.backend = HuggingFaceTokenizerBackend(model_id=tokenizer_model_id)
                 self.backend_name = "huggingface"
             except Exception as exc:
                 if allow_segmenter_fallback:
@@ -394,21 +434,81 @@ class TokenizerService:
                         "HuggingFace tokenizer initialization failed; falling back to Jina Segmenter",
                         exc_info=exc,
                     )
-                    self.backend = JinaSegmenterBackend()
+                    self.backend = JinaSegmenterBackend(
+                        tokenizer_name=tokenizer_model_id
+                    )
                     self.backend_name = "jina-segmenter"
                 else:
                     raise RuntimeError(
                         "HuggingFace tokenizer initialization failed and segmenter fallback is disabled "
-                        f"for profile '{embedding_profile}'"
+                        f"for profile '{dense_profile_name}'"
                     ) from exc
         elif backend_name == "segmenter":
-            self.backend = JinaSegmenterBackend()
+            self.backend = JinaSegmenterBackend(tokenizer_name=tokenizer_model_id)
             self.backend_name = "jina-segmenter"
         else:
             raise ValueError(
                 f"Invalid tokenizer backend: {backend_name}. "
                 f"Must be 'hf' or 'segmenter'."
             )
+
+        count_backend_name = os.getenv("TOKENIZER_COUNT_BACKEND")
+        count_backend_source = "env" if count_backend_name else None
+        if not count_backend_name:
+            if token_counting and token_counting.backend:
+                count_backend_name = token_counting.backend
+            else:
+                count_backend_name = backend_name
+            count_backend_source = "profile"
+        count_backend_name = count_backend_name.lower() if count_backend_name else None
+
+        self.count_backend = None
+        self.count_backend_name = None
+        if count_backend_name == "voyage":
+            allow_voyage_fallback = (
+                os.getenv("TOKENIZER_ALLOW_VOYAGE_FALLBACK", "").lower() == "true"
+            )
+            try:
+                count_model_id = (
+                    token_counting.model_id
+                    if token_counting and token_counting.model_id
+                    else dense_model_id
+                )
+                api_key = os.getenv("VOYAGE_API_KEY")
+                self.count_backend = VoyageTokenCounterBackend(
+                    model_id=count_model_id, api_key=api_key
+                )
+                self.count_backend_name = "voyage"
+            except Exception as exc:
+                if allow_voyage_fallback:
+                    logger.warning(
+                        "Voyage token counter initialization failed; falling back to HuggingFace",
+                        exc_info=exc,
+                    )
+                else:
+                    raise RuntimeError(
+                        "Voyage token counting initialization failed and fallback is disabled."
+                    ) from exc
+        elif count_backend_name == "hf":
+            if backend_name == "hf":
+                self.count_backend = self.backend
+            else:
+                self.count_backend = HuggingFaceTokenizerBackend(
+                    model_id=tokenizer_model_id
+                )
+            self.count_backend_name = "huggingface"
+        elif count_backend_name == "segmenter":
+            if backend_name == "segmenter":
+                self.count_backend = self.backend
+            else:
+                self.count_backend = JinaSegmenterBackend(
+                    tokenizer_name=tokenizer_model_id
+                )
+            self.count_backend_name = "jina-segmenter"
+
+        if self.count_backend is None:
+            self.count_backend = self.backend
+            self.count_backend_name = self.backend_name
 
         # Token limits (from Jina API specifications)
         self.max_tokens = int(os.getenv("EMBED_MAX_TOKENS", "8192"))
@@ -425,9 +525,16 @@ class TokenizerService:
         )
 
         logger.info(
-            f"TokenizerService initialized: backend={self.backend_name} "
-            f"(source={backend_source}), max_tokens={self.max_tokens}, "
-            f"target={self.target_tokens}, overlap={self.overlap_tokens}"
+            "TokenizerService initialized",
+            extra={
+                "backend": self.backend_name,
+                "backend_source": backend_source,
+                "count_backend": self.count_backend_name,
+                "count_backend_source": count_backend_source,
+                "max_tokens": self.max_tokens,
+                "target_tokens": self.target_tokens,
+                "overlap_tokens": self.overlap_tokens,
+            },
         )
 
     def count_tokens(self, text: str) -> int:
@@ -443,7 +550,16 @@ class TokenizerService:
         Raises:
             RuntimeError: If token counting fails
         """
+        if self.count_backend:
+            return self.count_backend.count_tokens(text)
         return self.backend.count_tokens(text)
+
+    def count_tokens_batch(self, texts: List[str]) -> int:
+        if not texts:
+            return 0
+        if self.count_backend and hasattr(self.count_backend, "count_tokens_batch"):
+            return self.count_backend.count_tokens_batch(texts)
+        return sum(self.count_tokens(text) for text in texts)
 
     @property
     def supports_decode(self) -> bool:

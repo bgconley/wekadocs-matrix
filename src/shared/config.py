@@ -3,13 +3,15 @@
 # Configuration loader with environment variable support
 # Enhanced for Pre-Phase 7: Added validation for embedding configuration
 
+import hashlib
+import json
 import logging
 import os
 import re
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError, validator
@@ -262,6 +264,59 @@ class EmbeddingPlan(BaseModel):
     dense: EmbeddingRolePlan
     sparse: Optional[EmbeddingRolePlan] = None
     colbert: Optional[EmbeddingRolePlan] = None
+
+
+def _embedding_plan_fingerprint(plan: EmbeddingPlan) -> str:
+    def role_payload(role: Optional[EmbeddingRolePlan]) -> Optional[Dict[str, Any]]:
+        if role is None:
+            return None
+        profile = role.profile
+        return {
+            "role": role.role,
+            "profile_name": role.profile_name,
+            "provider": profile.provider,
+            "model_id": profile.model_id,
+            "version": profile.version or profile.model_id,
+            "dims": profile.dims,
+            "similarity": profile.similarity,
+            "task": profile.task,
+            "query_task": profile.query_task,
+            "document_task": profile.document_task,
+            "output_dimension": profile.output_dimension,
+            "output_dtype": profile.output_dtype,
+            "tokenizer": {
+                "backend": profile.tokenizer.backend,
+                "model_id": profile.tokenizer.model_id,
+            },
+            "token_counting": (
+                profile.token_counting.model_dump() if profile.token_counting else None
+            ),
+            "supports_contextualized_chunks": profile.supports_contextualized_chunks,
+            "contextual_limits": (
+                profile.contextual_limits.model_dump()
+                if profile.contextual_limits
+                else None
+            ),
+            "capabilities": {
+                "supports_dense": profile.capabilities.supports_dense,
+                "supports_sparse": profile.capabilities.supports_sparse,
+                "supports_colbert": profile.capabilities.supports_colbert,
+                "supports_long_sequences": profile.capabilities.supports_long_sequences,
+                "normalized_output": profile.capabilities.normalized_output,
+                "multilingual": profile.capabilities.multilingual,
+            },
+        }
+
+    payload = {
+        "dense": role_payload(plan.dense),
+        "sparse": role_payload(plan.sparse),
+        "colbert": role_payload(plan.colbert),
+    }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    digest = hashlib.sha256(encoded).hexdigest()
+    return f"plan-{digest}"
 
 
 class QdrantQueryStrategy(str, Enum):
@@ -1231,12 +1286,46 @@ def apply_embedding_profile(config: Config, settings: Settings, config_path: Pat
 
     profile = profiles[profile_name]
     strict_env = env not in ("development", "dev", "test")
+    plan_fingerprint = None
+    if plan:
+        dense_name = plan.dense
+        sparse_name = plan.sparse if plan.enable_sparse else None
+        colbert_name = plan.colbert if plan.enable_colbert else None
+        dense_role = EmbeddingRolePlan(
+            role="dense",
+            profile_name=dense_name,
+            profile=profiles[dense_name],
+            enabled=True,
+        )
+        sparse_role = (
+            EmbeddingRolePlan(
+                role="sparse",
+                profile_name=sparse_name,
+                profile=profiles[sparse_name],
+                enabled=True,
+            )
+            if sparse_name
+            else None
+        )
+        colbert_role = (
+            EmbeddingRolePlan(
+                role="colbert",
+                profile_name=colbert_name,
+                profile=profiles[colbert_name],
+                enabled=True,
+            )
+            if colbert_name
+            else None
+        )
+        plan_fingerprint = _embedding_plan_fingerprint(
+            EmbeddingPlan(dense=dense_role, sparse=sparse_role, colbert=colbert_role)
+        )
     overrides = {
         "profile": profile_name,
         "embedding_model": profile.model_id,
         "dims": profile.dims,
         "similarity": profile.similarity,
-        "version": profile.version or profile.model_id,
+        "version": plan_fingerprint or profile.version or profile.model_id,
         "provider": profile.provider,
         "task": profile.task,
         "tokenizer_backend": profile.tokenizer.backend,
@@ -1251,11 +1340,29 @@ def apply_embedding_profile(config: Config, settings: Settings, config_path: Pat
     config.embedding = config.embedding.copy(update=overrides)
 
     suffix_source = _resolve_namespace_suffix(
-        profile_name, profile, settings.embedding_namespace_mode
+        profile_name,
+        profile,
+        settings.embedding_namespace_mode,
+        embedding_version=plan_fingerprint,
     )
     qdrant_cfg = getattr(config.search.vector, "qdrant", None)
     neo4j_cfg = getattr(config.search.vector, "neo4j", None)
     bm25_cfg = getattr(config.search, "bm25", None)
+    if plan and qdrant_cfg:
+        if qdrant_cfg.enable_sparse != plan.enable_sparse:
+            logger.info(
+                "Embedding plan overrides qdrant enable_sparse from %s to %s",
+                qdrant_cfg.enable_sparse,
+                plan.enable_sparse,
+            )
+        if qdrant_cfg.enable_colbert != plan.enable_colbert:
+            logger.info(
+                "Embedding plan overrides qdrant enable_colbert from %s to %s",
+                qdrant_cfg.enable_colbert,
+                plan.enable_colbert,
+            )
+        qdrant_cfg.enable_sparse = plan.enable_sparse
+        qdrant_cfg.enable_colbert = plan.enable_colbert
     if suffix_source:
         if qdrant_cfg and hasattr(qdrant_cfg, "collection_name"):
             qdrant_cfg.collection_name = namespace_identifier(
@@ -1271,28 +1378,36 @@ def apply_embedding_profile(config: Config, settings: Settings, config_path: Pat
             )
 
     if qdrant_cfg:
-        if getattr(qdrant_cfg, "enable_sparse", False) and not getattr(
-            profile.capabilities, "supports_sparse", False
-        ):
-            message = (
-                f"Profile '{profile_name}' does not support sparse embeddings but "
-                "enable_sparse is True."
+        if plan and not getattr(profile.capabilities, "supports_dense", True):
+            raise ValueError(
+                f"Embedding plan dense profile '{profile_name}' does not support dense embeddings."
             )
-            if strict_env:
-                raise ValueError(message)
-            logger.warning("%s Disabling sparse for this run.", message)
-            qdrant_cfg.enable_sparse = False
-        if getattr(qdrant_cfg, "enable_colbert", False) and not getattr(
-            profile.capabilities, "supports_colbert", False
-        ):
-            message = (
-                f"Profile '{profile_name}' does not support ColBERT but "
-                "enable_colbert is True."
+        if getattr(qdrant_cfg, "enable_sparse", False):
+            sparse_profile = (
+                profiles.get(plan.sparse) if plan and plan.sparse else profile
             )
-            if strict_env:
-                raise ValueError(message)
-            logger.warning("%s Disabling ColBERT for this run.", message)
-            qdrant_cfg.enable_colbert = False
+            if not getattr(sparse_profile.capabilities, "supports_sparse", False):
+                message = (
+                    f"Profile '{sparse_profile.model_id}' does not support sparse "
+                    "embeddings but enable_sparse is True."
+                )
+                if strict_env:
+                    raise ValueError(message)
+                logger.warning("%s Disabling sparse for this run.", message)
+                qdrant_cfg.enable_sparse = False
+        if getattr(qdrant_cfg, "enable_colbert", False):
+            colbert_profile = (
+                profiles.get(plan.colbert) if plan and plan.colbert else profile
+            )
+            if not getattr(colbert_profile.capabilities, "supports_colbert", False):
+                message = (
+                    f"Profile '{colbert_profile.model_id}' does not support ColBERT "
+                    "but enable_colbert is True."
+                )
+                if strict_env:
+                    raise ValueError(message)
+                logger.warning("%s Disabling ColBERT for this run.", message)
+                qdrant_cfg.enable_colbert = False
         if getattr(qdrant_cfg, "enable_colbert", False) and not getattr(
             qdrant_cfg, "use_query_api", False
         ):
@@ -1707,14 +1822,19 @@ def _resolve_namespace_suffix(
     profile_name: Optional[str],
     profile: Optional[EmbeddingProfileDefinition],
     mode: str,
+    *,
+    embedding_version: Optional[str] = None,
 ) -> Optional[str]:
     normalized = (mode or "profile").lower()
     if normalized in {"", "none", "disabled"}:
         return None
     if normalized == "profile":
         return profile_name
-    if normalized == "version" and profile:
-        return profile.version or profile.model_id
+    if normalized == "version":
+        if embedding_version:
+            return embedding_version
+        if profile:
+            return profile.version or profile.model_id
     if normalized == "model" and profile:
         return profile.model_id
     return None

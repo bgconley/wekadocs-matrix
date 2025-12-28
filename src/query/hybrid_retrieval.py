@@ -54,6 +54,7 @@ from src.query.structural_retrieval import (
 )
 from src.shared.config import (
     get_config,
+    get_embedding_plan,
     get_embedding_settings,
     get_expected_namespace_suffix,
     get_settings,
@@ -695,6 +696,7 @@ class QdrantMultiVectorRetriever:
         rrf_k: int = 60,
         payload_keys: Optional[List[str]] = None,
         embedding_settings: Optional[EmbeddingSettings] = None,
+        embedding_plan: Optional[Any] = None,
         *,
         use_query_api: bool = False,
         query_api_weighted_fusion: bool = False,
@@ -720,6 +722,36 @@ class QdrantMultiVectorRetriever:
         strict_env = env not in ("development", "dev", "test")
         self.client = qdrant_client
         self.embedder = embedder
+        self.embedding_plan = embedding_plan
+        self.sparse_embedder = embedder
+        self.colbert_embedder = embedder
+        if embedding_plan:
+            if (
+                embedding_plan.sparse
+                and embedding_plan.sparse.profile_name
+                != embedding_plan.dense.profile_name
+            ):
+                self.sparse_embedder = (
+                    ProviderFactory.create_embedding_provider_for_role(
+                        embedding_plan.sparse
+                    )
+                )
+            if embedding_plan.colbert:
+                if (
+                    embedding_plan.sparse
+                    and embedding_plan.colbert.profile_name
+                    == embedding_plan.sparse.profile_name
+                ):
+                    self.colbert_embedder = self.sparse_embedder
+                elif (
+                    embedding_plan.colbert.profile_name
+                    != embedding_plan.dense.profile_name
+                ):
+                    self.colbert_embedder = (
+                        ProviderFactory.create_embedding_provider_for_role(
+                            embedding_plan.colbert
+                        )
+                    )
         self.collection = collection_name
         self.rrf_k = rrf_k
         self.embedding_settings = embedding_settings
@@ -735,12 +767,20 @@ class QdrantMultiVectorRetriever:
         self.primary_vector_name = primary_vector_name or "content"
         # Prefer explicit flags; otherwise infer from embedding capabilities
         caps = getattr(embedding_settings, "capabilities", None)
-        self.schema_supports_sparse = schema_supports_sparse or bool(
-            getattr(caps, "supports_sparse", False)
-        )
-        self.schema_supports_colbert = schema_supports_colbert or bool(
-            getattr(caps, "supports_colbert", False)
-        )
+        if self.embedding_plan:
+            caps_sparse = bool(
+                self.embedding_plan.sparse
+                and self.embedding_plan.sparse.profile.capabilities.supports_sparse
+            )
+            caps_colbert = bool(
+                self.embedding_plan.colbert
+                and self.embedding_plan.colbert.profile.capabilities.supports_colbert
+            )
+        else:
+            caps_sparse = bool(getattr(caps, "supports_sparse", False))
+            caps_colbert = bool(getattr(caps, "supports_colbert", False))
+        self.schema_supports_sparse = bool(schema_supports_sparse and caps_sparse)
+        self.schema_supports_colbert = bool(schema_supports_colbert and caps_colbert)
         # doc_title-sparse: only enable if general sparse support is also enabled
         self.schema_supports_doc_title_sparse = (
             schema_supports_doc_title_sparse and self.schema_supports_sparse
@@ -766,7 +806,10 @@ class QdrantMultiVectorRetriever:
             logger.warning("%s Auto-enabling Query API in non-strict env.", message)
             self.use_query_api = True
         # Capability guardrails
-        if self.schema_supports_sparse and not hasattr(self.embedder, "embed_sparse"):
+        if self.schema_supports_sparse and not (
+            hasattr(self.sparse_embedder, "embed_sparse")
+            or hasattr(self.sparse_embedder, "embed_query_all")
+        ):
             message = (
                 "Configuration error: Sparse vectors enabled but embedder "
                 "does not support embed_sparse."
@@ -777,7 +820,7 @@ class QdrantMultiVectorRetriever:
             self.schema_supports_sparse = False
             self.schema_supports_doc_title_sparse = False
         if self.schema_supports_colbert and not hasattr(
-            self.embedder, "embed_query_all"
+            self.colbert_embedder, "embed_query_all"
         ):
             message = (
                 "Configuration error: ColBERT enabled but embedder "
@@ -1189,15 +1232,30 @@ class QdrantMultiVectorRetriever:
         )
 
     def _build_query_bundle(self, query: str) -> QueryEmbeddingBundle:
-        if hasattr(self.embedder, "embed_query_all"):
-            bundle = self.embedder.embed_query_all(query)
-        else:
-            dense = self.embedder.embed_query(query)
-            return QueryEmbeddingBundle(dense=list(dense))
+        dense = self.embedder.embed_query(query)
+        sparse = None
+        multivector = None
+        if self.schema_supports_sparse or self.schema_supports_colbert:
+            bundle_provider = (
+                self.colbert_embedder
+                if self.schema_supports_colbert
+                else self.sparse_embedder
+            )
+            if hasattr(bundle_provider, "embed_query_all"):
+                bundle = bundle_provider.embed_query_all(query)
+                if self.schema_supports_sparse:
+                    sparse = bundle.sparse
+                if self.schema_supports_colbert:
+                    multivector = bundle.multivector
+            elif self.schema_supports_sparse and hasattr(
+                self.sparse_embedder, "embed_sparse"
+            ):
+                sparse_list = self.sparse_embedder.embed_sparse([query])
+                sparse = sparse_list[0] if sparse_list else None
         return QueryEmbeddingBundle(
-            dense=list(bundle.dense),
-            sparse=bundle.sparse,
-            multivector=bundle.multivector,
+            dense=list(dense),
+            sparse=sparse,
+            multivector=multivector,
         )
 
     def _search_via_query_api(
@@ -1896,12 +1954,14 @@ class VectorRetriever(QdrantMultiVectorRetriever):
         embedding_settings: Optional[EmbeddingSettings] = None,
     ):
         settings = embedding_settings or get_embedding_settings()
+        plan = get_embedding_plan()
         super().__init__(
             qdrant_client,
             embedder,
             collection_name=collection_name,
             field_weights={"content": 1.0},
             embedding_settings=settings,
+            embedding_plan=plan,
         )
         self.collection_name = collection_name
 
@@ -1933,6 +1993,7 @@ class HybridRetriever:
         settings = get_settings()
         self.config = config
         self.embedding_settings = embedding_settings or get_embedding_settings()
+        self.embedding_plan = get_embedding_plan()
 
         self.expected_schema_version = getattr(config.graph_schema, "version", None)
         if self.expected_schema_version:
@@ -2094,6 +2155,7 @@ class HybridRetriever:
                 qdrant_client,
                 qdrant_collection,
                 self.embedding_settings,
+                embedding_plan=self.embedding_plan,
                 require_sparse=getattr(qdrant_vector_cfg, "enable_sparse", False),
                 require_colbert=getattr(qdrant_vector_cfg, "enable_colbert", False),
                 include_entity=include_entity_vector,
@@ -2132,6 +2194,7 @@ class HybridRetriever:
             field_weights=self.vector_field_weights,
             rrf_k=getattr(hybrid_config, "rrf_k", 60),
             embedding_settings=self.embedding_settings,
+            embedding_plan=self.embedding_plan,
             use_query_api=getattr(qdrant_vector_cfg, "use_query_api", False),
             query_api_weighted_fusion=bool(
                 getattr(

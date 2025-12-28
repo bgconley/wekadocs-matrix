@@ -12,7 +12,7 @@ from neo4j import Driver
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import PointStruct
 
-from src.shared.config import get_embedding_settings
+from src.shared.config import get_embedding_plan, get_embedding_settings
 from src.shared.qdrant_schema import build_qdrant_schema
 from src.shared.vector_utils import vector_expected_dim
 
@@ -50,6 +50,7 @@ class IncrementalUpdater:
         self.collection = collection_name
         self.version = embedding_version
         self.embedding_settings = get_embedding_settings(config) if config else None
+        self.embedding_plan = get_embedding_plan(config) if config else None
         if config and hasattr(config, "search") and hasattr(config.search, "vector"):
             if hasattr(config.search.vector, "qdrant"):
                 self.collection = config.search.vector.qdrant.collection_name
@@ -87,6 +88,7 @@ class IncrementalUpdater:
             # NOTE: include_entity deprecated (dense entity vector removed)
             self._schema_plan = build_qdrant_schema(
                 self.embedding_settings,
+                embedding_plan=self.embedding_plan,
                 include_entity=False,  # Deprecated - always False
                 enable_sparse=enable_sparse,
                 enable_colbert=enable_colbert,

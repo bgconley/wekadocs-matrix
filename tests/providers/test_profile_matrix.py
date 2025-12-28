@@ -1,8 +1,10 @@
 import os
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from src.providers.factory import ProviderFactory
 from src.shared import config as config_module
@@ -15,11 +17,25 @@ PROFILE_CASES = [  # pragma: allowlist secret
 ]
 
 
+def _write_manifest_without_plan(tmp_path: Path) -> Path:
+    manifest_path = (
+        Path(__file__).resolve().parents[2] / "config" / "embedding_profiles.yaml"
+    )
+    data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    data.pop("plan", None)
+    out_path = tmp_path / "embedding_profiles_no_plan.yaml"
+    out_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return out_path
+
+
 @pytest.mark.parametrize("profile,provider,dims", PROFILE_CASES)
-def test_get_embedding_settings_resolves_profiles(monkeypatch, profile, provider, dims):
+def test_get_embedding_settings_resolves_profiles(
+    monkeypatch, tmp_path, profile, provider, dims
+):
     env = {
         "NEO4J_PASSWORD": "placeholder",  # pragma: allowlist secret
         "EMBEDDINGS_PROFILE": profile,  # pragma: allowlist secret
+        "EMBEDDING_PROFILES_PATH": str(_write_manifest_without_plan(tmp_path)),
     }
     if profile == "bge_m3":
         env.update(

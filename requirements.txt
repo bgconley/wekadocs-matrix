@@ -80,6 +80,7 @@ mcp[cli]==1.16.0  # MCP SDK pinned for low-level server + Streamable HTTP
 
 # Phase 7C: Additional provider dependencies
 # Note: Jina AI and bge-m3-service integrations use REST (httpx already included above)
+voyageai>=0.3.1  # Voyage SDK for exact token counting
 
 # Phase 7C Hotfix: Tokenizer service for accurate token counting
 # CRITICAL: Use jina-embeddings-v3 tokenizer (XLM-RoBERTa), NOT tiktoken (OpenAI)

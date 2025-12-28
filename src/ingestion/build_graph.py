@@ -34,6 +34,7 @@ from src.shared.chunk_utils import (
 )
 from src.shared.config import (
     Config,
+    get_embedding_plan,
     get_embedding_settings,
     get_expected_namespace_suffix,
     get_settings,
@@ -182,6 +183,9 @@ class GraphBuilder:
             self.qdrant_client = None
 
         self.embedder = None
+        self.sparse_embedder = None
+        self.colbert_embedder = None
+        self.embedding_plan = get_embedding_plan(config)
         self.embedding_settings = get_embedding_settings(config)
         self.embedding_version = self.embedding_settings.version
         self.embedding_dims = self.embedding_settings.dims or 0
@@ -330,9 +334,34 @@ class GraphBuilder:
             profile=self.embedding_settings.profile,
         )
 
-        self.embedder = ProviderFactory.create_embedding_provider(
-            settings=self.embedding_settings
+        self.embedder = ProviderFactory.create_embedding_provider_for_role(
+            self.embedding_plan.dense
         )
+        self.sparse_embedder = self.embedder
+        self.colbert_embedder = self.embedder
+        if self.embedding_plan.sparse and (
+            self.embedding_plan.sparse.profile_name
+            != self.embedding_plan.dense.profile_name
+        ):
+            self.sparse_embedder = ProviderFactory.create_embedding_provider_for_role(
+                self.embedding_plan.sparse
+            )
+        if self.embedding_plan.colbert:
+            if (
+                self.embedding_plan.sparse
+                and self.embedding_plan.colbert.profile_name
+                == self.embedding_plan.sparse.profile_name
+            ):
+                self.colbert_embedder = self.sparse_embedder
+            elif (
+                self.embedding_plan.colbert.profile_name
+                != self.embedding_plan.dense.profile_name
+            ):
+                self.colbert_embedder = (
+                    ProviderFactory.create_embedding_provider_for_role(
+                        self.embedding_plan.colbert
+                    )
+                )
 
         if self.embedder.dims != self.embedding_dims:
             logger.warning(
@@ -1716,53 +1745,96 @@ class GraphBuilder:
 
             content_embeddings: List[List[float]] = []
             title_embeddings: List[List[float]] = []
-            sparse_embeddings: Optional[List[dict]] = (
-                []
-                if getattr(
-                    self.embedding_settings.capabilities, "supports_sparse", False
+            qdrant_cfg = getattr(self.config.search.vector, "qdrant", None)
+            enable_sparse = bool(getattr(qdrant_cfg, "enable_sparse", False))
+            enable_colbert = bool(getattr(qdrant_cfg, "enable_colbert", False))
+            if self.embedding_plan:
+                supports_sparse = bool(
+                    enable_sparse
+                    and self.embedding_plan.sparse
+                    and self.embedding_plan.sparse.profile.capabilities.supports_sparse
                 )
-                else None
+                supports_colbert = bool(
+                    enable_colbert
+                    and self.embedding_plan.colbert
+                    and self.embedding_plan.colbert.profile.capabilities.supports_colbert
+                )
+            else:
+                supports_sparse = bool(
+                    enable_sparse
+                    and getattr(
+                        self.embedding_settings.capabilities, "supports_sparse", False
+                    )
+                )
+                supports_colbert = bool(
+                    enable_colbert
+                    and getattr(
+                        self.embedding_settings.capabilities, "supports_colbert", False
+                    )
+                )
+
+            dense_embedder = self.embedder
+            sparse_embedder = self.sparse_embedder or self.embedder
+            colbert_embedder = self.colbert_embedder or self.embedder
+            use_contextual = bool(
+                self.embedding_plan
+                and self.embedding_plan.dense.profile.supports_contextualized_chunks
             )
+            if use_contextual and not hasattr(
+                dense_embedder, "embed_contextualized_documents"
+            ):
+                raise RuntimeError(
+                    "Dense profile requires contextualized chunks but embedder "
+                    "does not implement embed_contextualized_documents."
+                )
+            sparse_embeddings: Optional[List[dict]] = [] if supports_sparse else None
             # NEW: Title sparse embeddings for lexical heading matching
             title_sparse_embeddings: Optional[List[dict]] = (
-                []
-                if getattr(
-                    self.embedding_settings.capabilities, "supports_sparse", False
-                )
-                else None
+                [] if supports_sparse else None
             )
             # NEW: Entity sparse embeddings for lexical entity name matching
             entity_sparse_embeddings: Optional[List[dict]] = (
-                []
-                if getattr(
-                    self.embedding_settings.capabilities, "supports_sparse", False
-                )
-                else None
+                [] if supports_sparse else None
             )
             colbert_embeddings: Optional[List[List[List[float]]]] = (
-                []
-                if getattr(
-                    self.embedding_settings.capabilities, "supports_colbert", False
-                )
-                else None
+                [] if supports_colbert else None
             )
+
+            if use_contextual:
+                contextual = dense_embedder.embed_contextualized_documents(
+                    [content_texts],
+                    input_type=self.embedding_plan.dense.profile.document_task,
+                )
+                if not contextual or len(contextual) != 1:
+                    raise RuntimeError(
+                        "Contextual embedding response missing document payload."
+                    )
+                content_embeddings = contextual[0]
+                if len(content_embeddings) != len(content_texts):
+                    raise RuntimeError(
+                        "Contextual embedding count mismatch: "
+                        f"expected {len(content_texts)}, got {len(content_embeddings)}."
+                    )
 
             for batch in batches:
                 batch_content = [content_texts[i] for i in batch]
                 batch_title = [title_texts[i] for i in batch]
-                content_embeddings.extend(self.embedder.embed_documents(batch_content))
-                title_embeddings.extend(self.embedder.embed_documents(batch_title))
+                if not use_contextual:
+                    content_embeddings.extend(
+                        dense_embedder.embed_documents(batch_content)
+                    )
+                title_embeddings.extend(dense_embedder.embed_documents(batch_title))
 
                 # B.2: Per-batch error isolation for sparse embeddings
                 # On failure, insert None placeholders to maintain index alignment
                 # This prevents one failed batch from disabling sparse for ALL chunks
                 # Graph Channel Rehabilitation: Added strict mode and failure tracking
                 if sparse_embeddings is not None and hasattr(
-                    self.embedder, "embed_sparse"
+                    sparse_embedder, "embed_sparse"
                 ):
                     try:
                         sparse_embeddings.extend(
-                            self.embedder.embed_sparse(batch_content)
+                            sparse_embedder.embed_sparse(batch_content)
                         )
                     except Exception as exc:
                         stats["sparse_failures"] += 1
@@ -1797,11 +1869,11 @@ class GraphBuilder:
 
                 # NEW: Title sparse embeddings for lexical heading matching
                 if title_sparse_embeddings is not None and hasattr(
-                    self.embedder, "embed_sparse"
+                    sparse_embedder, "embed_sparse"
                 ):
                     try:
                         title_sparse_embeddings.extend(
-                            self.embedder.embed_sparse(batch_title)
+                            sparse_embedder.embed_sparse(batch_title)
                         )
                     except Exception as exc:
                         logger.warning(
@@ -1815,7 +1887,7 @@ class GraphBuilder:
 
                 # NEW: Entity sparse embeddings for lexical entity name matching
                 if entity_sparse_embeddings is not None and hasattr(
-                    self.embedder, "embed_sparse"
+                    sparse_embedder, "embed_sparse"
                 ):
                     batch_entity = [entity_texts[i] for i in batch]
                     # Only embed non-empty entity texts; use None for empty
@@ -1828,7 +1900,7 @@ class GraphBuilder:
                             non_empty_texts = [
                                 batch_entity[i] for i in non_empty_indices
                             ]
-                            non_empty_results = self.embedder.embed_sparse(
+                            non_empty_results = sparse_embedder.embed_sparse(
                                 non_empty_texts
                             )
                             # Build full result list with None for empty texts
@@ -1852,11 +1924,11 @@ class GraphBuilder:
 
                 # B.2: Per-batch error isolation for ColBERT embeddings
                 if colbert_embeddings is not None and hasattr(
-                    self.embedder, "embed_colbert"
+                    colbert_embedder, "embed_colbert"
                 ):
                     try:
                         colbert_embeddings.extend(
-                            self.embedder.embed_colbert(batch_content)
+                            colbert_embedder.embed_colbert(batch_content)
                         )
                     except Exception as exc:
                         logger.warning(
@@ -2143,6 +2215,7 @@ class GraphBuilder:
         try:
             schema_plan = build_qdrant_schema(
                 self.embedding_settings,
+                embedding_plan=self.embedding_plan,
                 include_entity=self.include_entity_vector,
                 enable_sparse=getattr(
                     self.config.search.vector.qdrant, "enable_sparse", False

@@ -185,6 +185,27 @@ class SemanticChunkerAssembler:
         except Exception:
             self._fallback_overlap_tokens = 80
 
+        # Contextual dense embeddings require non-overlapping chunks.
+        try:
+            from src.shared.config import get_embedding_plan
+
+            embedding_plan = get_embedding_plan()
+            if (
+                embedding_plan
+                and embedding_plan.dense.profile.supports_contextualized_chunks
+            ):
+                self._guard_overlap_tokens = 0
+                self._fallback_overlap_tokens = 0
+                log.info(
+                    "Contextual dense profile detected; disabling chunk overlap.",
+                    extra={
+                        "guard_overlap_tokens": self._guard_overlap_tokens,
+                        "fallback_overlap_tokens": self._fallback_overlap_tokens,
+                    },
+                )
+        except Exception:
+            pass
+
         # Allow environment variable override
         force_semantic = os.getenv("FORCE_SEMANTIC_CHUNKING", "").lower()
         if force_semantic == "true":

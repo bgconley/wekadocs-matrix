@@ -27,7 +27,7 @@ class EmbeddingSettings:
     tokenizer_model_id: Optional[str]
     service_url: Optional[str]
     capabilities: EmbeddingCapabilities
-    extra: Dict[str, str] = field(default_factory=dict)
+    extra: Dict[str, object] = field(default_factory=dict)
 
 
 def build_embedding_telemetry(settings: "EmbeddingSettings") -> Dict[str, str]:

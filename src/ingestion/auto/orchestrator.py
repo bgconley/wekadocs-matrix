@@ -34,6 +34,7 @@ from src.providers.factory import ProviderFactory
 from src.shared.config import (
     Config,
     _slugify_identifier,
+    get_embedding_plan,
     get_embedding_settings,
 )
 from src.shared.embedding_fields import (
@@ -138,6 +139,7 @@ class Orchestrator:
         self.qdrant = qdrant_client
 
         # Initialize embedder lazily
+        self.embedding_plan = get_embedding_plan(self.config)
         self.embedding_settings = get_embedding_settings(self.config)
         self.embedder = None
 
@@ -470,36 +472,80 @@ class Orchestrator:
                 model=self.embedding_settings.model_id,
                 profile=self.embedding_settings.profile,
             )
-            self.embedder = ProviderFactory.create_embedding_provider(
-                settings=self.embedding_settings
+            self.embedder = ProviderFactory.create_embedding_provider_for_role(
+                self.embedding_plan.dense
             )
 
         # Compute embeddings for sections
         embeddings_computed = 0
-        for section in state.sections:
-            # Build text for embedding (title + content)
-            title = section.get("title", "")
-            text = section.get("text", "")
-            text_to_embed = f"{title}\n\n{text}" if title else text
-
-            # Compute embedding
-            vectors = self.embedder.embed_documents([text_to_embed])
-            if not vectors:
-                raise RuntimeError("Embedding provider returned no vectors")
-            embedding = vectors[0]
-
-            # Store in section (not yet persisted to vector store)
-            section["vector_embedding"] = embedding
-            section["title_vector_embedding"] = embedding
-            section.setdefault(
-                "doc_id", state.document.get("doc_id") or state.document_id
+        use_contextual = bool(
+            self.embedding_plan.dense.profile.supports_contextualized_chunks
+        )
+        if use_contextual and not hasattr(
+            self.embedder, "embed_contextualized_documents"
+        ):
+            raise RuntimeError(
+                "Dense profile requires contextualized chunks but embedder "
+                "does not implement embed_contextualized_documents."
             )
-            section.setdefault("tenant", state.document.get("tenant"))
-            section.setdefault("lang", state.document.get("lang"))
-            section.setdefault("version", state.document.get("version"))
-            section.setdefault("semantic_metadata", {"entities": [], "topics": []})
-            section["embedding_version"] = self.embedding_settings.version
-            embeddings_computed += 1
+
+        if use_contextual:
+            texts = []
+            for section in state.sections:
+                title = section.get("title", "")
+                text = section.get("text", "")
+                texts.append(f"{title}\n\n{text}" if title else text)
+            contextual = self.embedder.embed_contextualized_documents(
+                [texts],
+                input_type=self.embedding_plan.dense.profile.document_task,
+            )
+            if not contextual or len(contextual) != 1:
+                raise RuntimeError(
+                    "Contextual embedding response missing document payload."
+                )
+            vectors = contextual[0]
+            if len(vectors) != len(state.sections):
+                raise RuntimeError(
+                    "Contextual embedding count mismatch: "
+                    f"expected {len(state.sections)}, got {len(vectors)}."
+                )
+            for section, embedding in zip(state.sections, vectors):
+                section["vector_embedding"] = embedding
+                section["title_vector_embedding"] = embedding
+                section.setdefault(
+                    "doc_id", state.document.get("doc_id") or state.document_id
+                )
+                section.setdefault("tenant", state.document.get("tenant"))
+                section.setdefault("lang", state.document.get("lang"))
+                section.setdefault("version", state.document.get("version"))
+                section.setdefault("semantic_metadata", {"entities": [], "topics": []})
+                section["embedding_version"] = self.embedding_settings.version
+                embeddings_computed += 1
+        else:
+            for section in state.sections:
+                # Build text for embedding (title + content)
+                title = section.get("title", "")
+                text = section.get("text", "")
+                text_to_embed = f"{title}\n\n{text}" if title else text
+
+                # Compute embedding
+                vectors = self.embedder.embed_documents([text_to_embed])
+                if not vectors:
+                    raise RuntimeError("Embedding provider returned no vectors")
+                embedding = vectors[0]
+
+                # Store in section (not yet persisted to vector store)
+                section["vector_embedding"] = embedding
+                section["title_vector_embedding"] = embedding
+                section.setdefault(
+                    "doc_id", state.document.get("doc_id") or state.document_id
+                )
+                section.setdefault("tenant", state.document.get("tenant"))
+                section.setdefault("lang", state.document.get("lang"))
+                section.setdefault("version", state.document.get("version"))
+                section.setdefault("semantic_metadata", {"entities": [], "topics": []})
+                section["embedding_version"] = self.embedding_settings.version
+                embeddings_computed += 1
 
         # Save to state
         state.status = JobStage.EMBEDDING.value

@@ -24,6 +24,9 @@ from typing import Callable, Dict, Optional
 
 from src.providers.embeddings.base import EmbeddingProvider
 from src.providers.rerank.base import RerankProvider
+from src.providers.settings import (
+    EmbeddingCapabilities as ProviderEmbeddingCapabilities,
+)
 from src.providers.settings import EmbeddingSettings as ProviderEmbeddingSettings
 from src.providers.settings import (
     build_embedding_telemetry,
@@ -93,6 +96,19 @@ class ProviderFactory:
         return creator(settings, **kwargs)
 
     @classmethod
+    def create_embedding_provider_for_role(cls, role_plan) -> EmbeddingProvider:
+        from src.shared.config import EmbeddingRolePlan
+
+        if not isinstance(role_plan, EmbeddingRolePlan):
+            raise TypeError(
+                "create_embedding_provider_for_role expects an EmbeddingRolePlan"
+            )
+        settings = cls._build_settings_from_profile(
+            role_plan.profile_name, role_plan.profile
+        )
+        return cls.create_embedding_provider(settings=settings)
+
+    @classmethod
     def _normalize_provider(cls, provider: Optional[str]) -> str:
         base = (provider or "").strip().lower()
         return cls._EMBEDDING_PROVIDER_ALIASES.get(base, base)
@@ -135,6 +151,55 @@ class ProviderFactory:
         return replace(settings, **overrides)
 
     @staticmethod
+    def _build_settings_from_profile(
+        profile_name: str, profile
+    ) -> ProviderEmbeddingSettings:
+        service_url = None
+        if profile.provider == "bge-m3-service":
+            service_url = os.getenv("BGE_M3_API_URL")
+            if not service_url:
+                logger.warning(
+                    "BGE_M3_API_URL is not set but provider bge-m3-service is active."
+                )
+        capabilities = ProviderEmbeddingCapabilities(
+            supports_dense=profile.capabilities.supports_dense,
+            supports_sparse=profile.capabilities.supports_sparse,
+            supports_colbert=profile.capabilities.supports_colbert,
+            supports_long_sequences=profile.capabilities.supports_long_sequences,
+            normalized_output=profile.capabilities.normalized_output,
+            multilingual=profile.capabilities.multilingual,
+        )
+        contextual_limits = None
+        if getattr(profile, "contextual_limits", None):
+            contextual_limits = profile.contextual_limits.model_dump()
+        token_counting = None
+        if getattr(profile, "token_counting", None):
+            token_counting = profile.token_counting.model_dump()
+        extra = {
+            "query_task": profile.query_task,
+            "document_task": profile.document_task,
+            "output_dimension": profile.output_dimension,
+            "output_dtype": profile.output_dtype,
+            "supports_contextualized_chunks": profile.supports_contextualized_chunks,
+            "contextual_limits": contextual_limits,
+            "token_counting": token_counting,
+        }
+        return ProviderEmbeddingSettings(
+            profile=profile_name,
+            provider=profile.provider,
+            model_id=profile.model_id,
+            version=profile.version or profile.model_id,
+            dims=profile.dims,
+            similarity=profile.similarity,
+            task=profile.task,
+            tokenizer_backend=profile.tokenizer.backend,
+            tokenizer_model_id=profile.tokenizer.model_id,
+            service_url=service_url,
+            capabilities=capabilities,
+            extra=extra,
+        )
+
+    @staticmethod
     def _create_jina_embedding_provider(
         settings: ProviderEmbeddingSettings, **kwargs
     ) -> EmbeddingProvider:
@@ -170,6 +235,14 @@ class ProviderFactory:
         from src.providers.embeddings.bge_m3_service import BGEM3ServiceProvider
 
         return BGEM3ServiceProvider(settings=settings, **kwargs)
+
+    @staticmethod
+    def _create_voyage_provider(
+        settings: ProviderEmbeddingSettings, **kwargs
+    ) -> EmbeddingProvider:
+        from src.providers.embeddings.voyage import VoyageEmbeddingProvider
+
+        return VoyageEmbeddingProvider(settings=settings, **kwargs)
 
     @staticmethod
     def create_rerank_provider(
@@ -371,7 +444,12 @@ def create_default_providers() -> tuple[EmbeddingProvider, RerankProvider]:
     factory.log_provider_config()
 
     # Create providers
-    embedding_provider = factory.create_embedding_provider()
+    from src.shared.config import get_embedding_plan
+
+    embedding_plan = get_embedding_plan()
+    embedding_provider = factory.create_embedding_provider_for_role(
+        embedding_plan.dense
+    )
     rerank_provider = factory.create_rerank_provider()
 
     logger.info(
@@ -401,6 +479,7 @@ ProviderFactory._EMBEDDING_PROVIDER_CREATORS = {
     "jina-ai": ProviderFactory._create_jina_embedding_provider,
     "sentence-transformers": ProviderFactory._create_sentence_transformers_provider,
     "bge-m3-service": ProviderFactory._create_bge_m3_service_provider,
+    "voyage-ai": ProviderFactory._create_voyage_provider,
 }
 
 # Mapping is appended later for rerank providers.

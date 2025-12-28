@@ -11,6 +11,8 @@ import pytest
 from neo4j import GraphDatabase
 from qdrant_client import QdrantClient
 
+from src.shared.config import get_config
+
 # Skip if not in CI or integration test environment
 pytestmark = pytest.mark.integration
 
@@ -116,9 +118,10 @@ def test_canonical_embedding_values():
 
     driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
 
-    CANONICAL_VERSION = "jina-embeddings-v3"
-    CANONICAL_PROVIDER = "jina-ai"
-    CANONICAL_DIMENSIONS = 1024
+    config = get_config()
+    canonical_version = config.embedding.version
+    canonical_provider = config.embedding.provider
+    canonical_dimensions = config.embedding.dims
 
     try:
         with driver.session() as session:
@@ -131,16 +134,16 @@ def test_canonical_embedding_values():
                    OR n.embedding_dimensions <> $dims
                 RETURN count(n) as count
                 """,
-                version=CANONICAL_VERSION,
-                provider=CANONICAL_PROVIDER,
-                dims=CANONICAL_DIMENSIONS,
+                version=canonical_version,
+                provider=canonical_provider,
+                dims=canonical_dimensions,
             )
             non_canonical = result.single()["count"]
 
             assert non_canonical == 0, (
                 f"Found {non_canonical} nodes with non-canonical embedding values. "
-                f"Expected: version={CANONICAL_VERSION}, provider={CANONICAL_PROVIDER}, "
-                f"dimensions={CANONICAL_DIMENSIONS}"
+                f"Expected: version={canonical_version}, provider={canonical_provider}, "
+                f"dimensions={canonical_dimensions}"
             )
     finally:
         driver.close()

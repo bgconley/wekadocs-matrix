@@ -7,7 +7,11 @@ from qdrant_client.http.models import PointStruct, SparseVector
 
 from src.providers.embeddings.contracts import DocumentEmbeddingBundle
 from src.providers.factory import ProviderFactory
-from src.shared.config import get_embedding_settings, namespace_identifier
+from src.shared.config import (
+    get_embedding_plan,
+    get_embedding_settings,
+    namespace_identifier,
+)
 from src.shared.qdrant_schema import build_qdrant_schema
 from src.shared.vector_utils import vector_expected_dim
 
@@ -45,6 +49,7 @@ class Reconciler:
             self.qdrant = config_or_qdrant
             self.config = None
             self.collection = collection_name
+            self.embedding_plan = get_embedding_plan()
             self.embedding_settings = get_embedding_settings()
             self.collection = namespace_identifier(
                 self.collection, self.embedding_settings.profile
@@ -54,6 +59,7 @@ class Reconciler:
             # New signature: Reconciler(neo4j, config, qdrant)
             self.config = config_or_qdrant
             self.qdrant = qdrant_client
+            self.embedding_plan = get_embedding_plan(self.config)
             # Use collection from config or default
             if hasattr(config_or_qdrant.search.vector, "qdrant") and hasattr(
                 config_or_qdrant.search.vector.qdrant, "collection_name"
@@ -101,6 +107,7 @@ class Reconciler:
 
         self._schema_plan = build_qdrant_schema(
             self.embedding_settings,
+            embedding_plan=self.embedding_plan,
             include_entity=False,  # Deprecated - always False
             enable_sparse=enable_sparse,
             enable_colbert=enable_colbert,
@@ -163,8 +170,15 @@ class Reconciler:
                     "provide embedding_fn explicitly."
                 )
             factory = ProviderFactory()
-            settings = self.embedding_settings or get_embedding_settings(self.config)
-            self._embedder = factory.create_embedding_provider(settings=settings)
+            if self.embedding_plan:
+                self._embedder = factory.create_embedding_provider_for_role(
+                    self.embedding_plan.dense
+                )
+            else:
+                settings = self.embedding_settings or get_embedding_settings(
+                    self.config
+                )
+                self._embedder = factory.create_embedding_provider(settings=settings)
         return self._embedder
 
     def _build_vectors_from_bundle(

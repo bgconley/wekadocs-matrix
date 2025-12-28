@@ -30,7 +30,7 @@ from src.query.response_builder import (
     build_response,
 )
 from src.query.session_tracker import SessionTracker
-from src.shared.config import get_config, get_embedding_settings
+from src.shared.config import get_config, get_embedding_plan, get_embedding_settings
 from src.shared.connections import get_connection_manager
 from src.shared.observability import get_logger
 from src.shared.observability.metrics import (
@@ -67,6 +67,7 @@ class QueryService:
 
     def __init__(self):
         self.config = get_config()
+        self.embedding_plan = get_embedding_plan()
         self.embedding_settings = get_embedding_settings()
         self._embedder: Optional[EmbeddingProvider] = None
         self._reranker: Optional[RerankProvider] = None  # Phase 7C: Reranker cache
@@ -123,7 +124,9 @@ class QueryService:
 
             # Phase 7C: Use provider factory for ENV-based selection / profile overrides
             factory = ProviderFactory()
-            self._embedder = factory.create_embedding_provider(settings=settings)
+            self._embedder = factory.create_embedding_provider_for_role(
+                self.embedding_plan.dense
+            )
 
             # Validate dimensions match configuration
             if self._embedder.dims != expected_dims:

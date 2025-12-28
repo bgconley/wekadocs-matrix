@@ -93,8 +93,12 @@ class BGEM3ServiceProvider(EmbeddingProvider):
             resolved_url = (
                 base_url or settings.service_url or os.getenv("BGE_M3_API_URL")
             )
-            if resolved_url:
-                client_kwargs["base_url"] = resolved_url
+            if not resolved_url:
+                raise RuntimeError(
+                    "BGE_M3_API_URL is required to use provider 'bge-m3-service'. "
+                    "Set BGE_M3_API_URL (or configure settings.service_url) to the BGEM3 HTTP service."
+                )
+            client_kwargs["base_url"] = resolved_url
             if self._model_id:
                 client_kwargs["model"] = self._model_id
             if timeout is not None:

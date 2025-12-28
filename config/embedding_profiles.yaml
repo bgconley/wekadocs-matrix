@@ -1,5 +1,5 @@
 plan:
-  dense: "bge_m3"
+  dense: "voyage_context_3"
   sparse: "bge_m3"
   colbert: "bge_m3"
   enable_sparse: true
@@ -47,6 +47,87 @@ profiles:
       multilingual: true
     requirements:
       - "BGE_M3_API_URL"
+
+  voyage_context_3:
+    description: "Voyage contextualized chunk embeddings (dense only, contextual)."
+    provider: "voyage-ai"
+    model_id: "voyage-context-3"
+    version: "voyage-context-3"
+    dims: 1024
+    similarity: "cosine"
+    task: "retrieval.passage"
+    query_task: "query"
+    document_task: "document"
+    output_dimension: 1024
+    output_dtype: "float"
+    tokenizer:
+      backend: "hf"
+      model_id: "voyageai/voyage-context-3"
+    token_counting:
+      backend: "voyage"
+      model_id: "voyage-context-3"
+    supports_contextualized_chunks: true
+    contextual_limits:
+      max_inputs: 1000
+      max_total_tokens: 120000
+      max_total_chunks: 16000
+      context_window_tokens: 32000
+    capabilities:
+      supports_dense: true
+      supports_sparse: false
+      supports_colbert: false
+      supports_long_sequences: true
+      normalized_output: true
+      multilingual: true
+    requirements:
+      - "VOYAGE_API_KEY"
+
+  voyage_3_large:
+    description: "Voyage 3 Large (dense only). Placeholder - verify dims/model id."
+    provider: "voyage-ai"
+    model_id: "voyage-3-large"
+    version: "voyage-3-large"
+    dims: 1024
+    similarity: "cosine"
+    task: "retrieval.passage"
+    tokenizer:
+      backend: "hf"
+      model_id: "voyageai/voyage-3-large"
+    token_counting:
+      backend: "voyage"
+      model_id: "voyage-3-large"
+    capabilities:
+      supports_dense: true
+      supports_sparse: false
+      supports_colbert: false
+      supports_long_sequences: true
+      normalized_output: true
+      multilingual: true
+    requirements:
+      - "VOYAGE_API_KEY"
+
+  snowflake_arctic_l_v2_0:
+    description: "Snowflake Arctic L v2.0 (dense only). Placeholder - verify dims/model id."
+    provider: "sentence-transformers"
+    model_id: "snowflake-arctic-l-v2.0"
+    version: "snowflake-arctic-l-v2.0"
+    dims: 1024
+    similarity: "cosine"
+    task: "retrieval.passage"
+    tokenizer:
+      backend: "hf"
+      model_id: "snowflake-arctic-l-v2.0"
+    token_counting:
+      backend: "hf"
+      model_id: "snowflake-arctic-l-v2.0"
+    capabilities:
+      supports_dense: true
+      supports_sparse: false
+      supports_colbert: false
+      supports_long_sequences: true
+      normalized_output: true
+      multilingual: true
+    requirements: []
 
   st_minilm:
     description: "SentenceTransformers MiniLM (384-D, fast baseline)."

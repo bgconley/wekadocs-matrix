@@ -146,6 +146,7 @@ from src.ingestion.saga import (  # noqa: E402
     SagaContext,
     ValidationResult,
 )
+from src.providers.factory import ProviderFactory  # noqa: E402
 from src.providers.tokenizer_service import TokenizerService  # noqa: E402
 from src.services.cross_doc_linking import (  # noqa: E402
     CrossDocLinker,
@@ -1156,6 +1157,36 @@ class AtomicIngestionCoordinator:
                     "Embedding provider is not initialized; aborting ingestion."
                 )
 
+        embedding_plan = getattr(builder, "embedding_plan", None)
+        dense_embedder = builder.embedder
+        sparse_embedder = dense_embedder
+        colbert_embedder = dense_embedder
+        if embedding_plan:
+            if (
+                embedding_plan.sparse
+                and embedding_plan.sparse.profile_name
+                != embedding_plan.dense.profile_name
+            ):
+                sparse_embedder = ProviderFactory.create_embedding_provider_for_role(
+                    embedding_plan.sparse
+                )
+            if embedding_plan.colbert:
+                if (
+                    embedding_plan.sparse
+                    and embedding_plan.colbert.profile_name
+                    == embedding_plan.sparse.profile_name
+                ):
+                    colbert_embedder = sparse_embedder
+                elif (
+                    embedding_plan.colbert.profile_name
+                    != embedding_plan.dense.profile_name
+                ):
+                    colbert_embedder = (
+                        ProviderFactory.create_embedding_provider_for_role(
+                            embedding_plan.colbert
+                        )
+                    )
+
         try:
             tokenizer = TokenizerService()
         except Exception as e:
@@ -1177,27 +1208,41 @@ class AtomicIngestionCoordinator:
             embedding_dims = 1024  # Default fallback
 
         # Check embedding capabilities
-        supports_sparse = getattr(
-            getattr(builder, "embedding_settings", None),
-            "capabilities",
-            None,
-        )
-        supports_sparse = (
-            getattr(supports_sparse, "supports_sparse", False)
-            if supports_sparse
-            else False
-        )
-
-        supports_colbert = getattr(
-            getattr(builder, "embedding_settings", None),
-            "capabilities",
-            None,
-        )
-        supports_colbert = (
-            getattr(supports_colbert, "supports_colbert", False)
-            if supports_colbert
-            else False
-        )
+        qdrant_cfg = getattr(self.config.search.vector, "qdrant", None)
+        enable_sparse = bool(getattr(qdrant_cfg, "enable_sparse", False))
+        enable_colbert = bool(getattr(qdrant_cfg, "enable_colbert", False))
+        if embedding_plan:
+            supports_sparse = bool(
+                enable_sparse
+                and embedding_plan.sparse
+                and embedding_plan.sparse.profile.capabilities.supports_sparse
+            )
+            supports_colbert = bool(
+                enable_colbert
+                and embedding_plan.colbert
+                and embedding_plan.colbert.profile.capabilities.supports_colbert
+            )
+        else:
+            supports_sparse = getattr(
+                getattr(builder, "embedding_settings", None),
+                "capabilities",
+                None,
+            )
+            supports_sparse = (
+                getattr(supports_sparse, "supports_sparse", False)
+                if supports_sparse
+                else False
+            )
+            supports_colbert = getattr(
+                getattr(builder, "embedding_settings", None),
+                "capabilities",
+                None,
+            )
+            supports_colbert = (
+                getattr(supports_colbert, "supports_colbert", False)
+                if supports_colbert
+                else False
+            )
 
         # Check strict mode config for sparse embeddings
         sparse_strict_mode = getattr(
@@ -1444,8 +1489,8 @@ class AtomicIngestionCoordinator:
         # Guard capability flags with runtime method detection to prevent
         # confusing "count mismatch" errors when config advertises capability
         # but embedder lacks the method (consensus-identified bug fix)
-        has_sparse_method = hasattr(builder.embedder, "embed_sparse")
-        has_colbert_method = hasattr(builder.embedder, "embed_colbert")
+        has_sparse_method = hasattr(sparse_embedder, "embed_sparse")
+        has_colbert_method = hasattr(colbert_embedder, "embed_colbert")
 
         if supports_sparse and not has_sparse_method:
             logger.warning(
@@ -1485,6 +1530,34 @@ class AtomicIngestionCoordinator:
             [] if supports_colbert else None
         )
 
+        use_contextual = bool(
+            builder.embedding_plan
+            and builder.embedding_plan.dense.profile.supports_contextualized_chunks
+        )
+        if use_contextual and not hasattr(
+            dense_embedder, "embed_contextualized_documents"
+        ):
+            raise RuntimeError(
+                "Dense profile requires contextualized chunks but embedder "
+                "does not implement embed_contextualized_documents."
+            )
+
+        if use_contextual:
+            contextual = dense_embedder.embed_contextualized_documents(
+                [content_texts],
+                input_type=builder.embedding_plan.dense.profile.document_task,
+            )
+            if not contextual or len(contextual) != 1:
+                raise RuntimeError(
+                    "Contextual embedding response missing document payload."
+                )
+            content_embeddings = contextual[0]
+            if len(content_embeddings) != len(content_texts):
+                raise RuntimeError(
+                    "Contextual embedding count mismatch: "
+                    f"expected {len(content_texts)}, got {len(content_embeddings)}."
+                )
+
         # =====================================================================
         # PHASE 1+2: Process batches with error isolation
         # =====================================================================
@@ -1505,12 +1578,13 @@ class AtomicIngestionCoordinator:
 
             # Dense embeddings - required, fail-all on error
             try:
-                content_embeddings.extend(
-                    builder.embedder.embed_documents(batch_content)
-                )
-                title_embeddings.extend(builder.embedder.embed_documents(batch_title))
+                if not use_contextual:
+                    content_embeddings.extend(
+                        dense_embedder.embed_documents(batch_content)
+                    )
+                title_embeddings.extend(dense_embedder.embed_documents(batch_title))
                 doc_title_embeddings.extend(
-                    builder.embedder.embed_documents(batch_doc_title)
+                    dense_embedder.embed_documents(batch_doc_title)
                 )
             except Exception as e:
                 logger.error(
@@ -1529,11 +1603,11 @@ class AtomicIngestionCoordinator:
             # On failure, insert None placeholders to maintain index alignment
             # =====================================================================
             if sparse_embeddings is not None and hasattr(
-                builder.embedder, "embed_sparse"
+                sparse_embedder, "embed_sparse"
             ):
                 try:
                     sparse_embeddings.extend(
-                        builder.embedder.embed_sparse(batch_content)
+                        sparse_embedder.embed_sparse(batch_content)
                     )
                 except Exception as exc:
                     stats["sparse_failures"] += 1
@@ -1561,11 +1635,11 @@ class AtomicIngestionCoordinator:
 
             # doc_title-sparse: BM25-style lexical matching for document titles
             if doc_title_sparse_embeddings is not None and hasattr(
-                builder.embedder, "embed_sparse"
+                sparse_embedder, "embed_sparse"
             ):
                 try:
                     doc_title_sparse_embeddings.extend(
-                        builder.embedder.embed_sparse(batch_doc_title)
+                        sparse_embedder.embed_sparse(batch_doc_title)
                     )
                 except Exception as exc:
                     logger.warning(
@@ -1579,11 +1653,11 @@ class AtomicIngestionCoordinator:
 
             # title-sparse: BM25-style lexical matching for section headings
             if title_sparse_embeddings is not None and hasattr(
-                builder.embedder, "embed_sparse"
+                sparse_embedder, "embed_sparse"
             ):
                 try:
                     title_sparse_embeddings.extend(
-                        builder.embedder.embed_sparse(batch_title)
+                        sparse_embedder.embed_sparse(batch_title)
                     )
                 except Exception as exc:
                     logger.warning(
@@ -1598,7 +1672,7 @@ class AtomicIngestionCoordinator:
             # entity-sparse: BM25-style lexical matching for entity names
             # Build entity text from section mentions for each chunk in this batch
             if entity_sparse_embeddings is not None and hasattr(
-                builder.embedder, "embed_sparse"
+                sparse_embedder, "embed_sparse"
             ):
                 try:
                     # Build entity texts for this batch
@@ -1637,7 +1711,7 @@ class AtomicIngestionCoordinator:
                                 non_empty_indices.append(idx)
 
                         if non_empty_texts:
-                            sparse_results = builder.embedder.embed_sparse(
+                            sparse_results = sparse_embedder.embed_sparse(
                                 non_empty_texts
                             )
                             result_iter = iter(sparse_results)
@@ -1668,11 +1742,11 @@ class AtomicIngestionCoordinator:
 
             # Phase 2: Per-Batch Error Isolation for ColBERT Embeddings
             if colbert_embeddings is not None and hasattr(
-                builder.embedder, "embed_colbert"
+                colbert_embedder, "embed_colbert"
             ):
                 try:
                     colbert_embeddings.extend(
-                        builder.embedder.embed_colbert(batch_content)
+                        colbert_embedder.embed_colbert(batch_content)
                     )
                 except Exception as exc:
                     logger.warning(

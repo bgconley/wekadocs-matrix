@@ -445,9 +445,15 @@ async def readiness():
     )
 
 
-@app.get("/metrics")
+@app.get("/metrics", response_model=MetricsResponse)
 async def metrics():
-    """Prometheus metrics endpoint"""
+    """JSON metrics endpoint."""
+    return await metrics_json()
+
+
+@app.get("/metrics/prometheus")
+async def metrics_prometheus():
+    """Prometheus metrics endpoint."""
     from starlette.responses import Response
 
     return Response(content=get_metrics(), media_type="text/plain; version=0.0.4")

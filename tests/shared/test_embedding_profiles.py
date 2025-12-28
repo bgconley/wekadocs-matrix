@@ -34,21 +34,23 @@ def test_apply_embedding_profile_defaults_when_missing_profile(monkeypatch):
 
     apply_embedding_profile(config, settings, DEV_CONFIG_PATH)
 
-    assert config.embedding.profile == "jina_v3"
-    assert config.embedding.embedding_model == "jina-embeddings-v3"
-    assert config.embedding.provider == "jina-ai"
+    assert config.embedding.profile == "bge_m3"
+    assert config.embedding.embedding_model == "BAAI/bge-m3"
+    assert config.embedding.provider == "bge-m3-service"
+    assert config.embedding.version.startswith("plan-")
 
 
 def test_apply_embedding_profile_honors_env_override(monkeypatch):
     config = _load_dev_config()
-    settings = Settings(NEO4J_PASSWORD="placeholder", EMBEDDINGS_PROFILE="bge_m3")
+    settings = Settings(NEO4J_PASSWORD="placeholder", EMBEDDINGS_PROFILE="jina_v3")
 
     apply_embedding_profile(config, settings, DEV_CONFIG_PATH)
 
     assert config.embedding.profile == "bge_m3"
-    assert config.embedding.embedding_model == "bge-m3"
+    assert config.embedding.embedding_model == "BAAI/bge-m3"
     assert config.embedding.provider == "bge-m3-service"
     assert config.embedding.dims == 1024
+    assert config.embedding.version.startswith("plan-")
 
 
 def test_load_embedding_profiles_raises_on_invalid_manifest(tmp_path: Path):

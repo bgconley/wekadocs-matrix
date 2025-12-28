@@ -9,10 +9,10 @@ def test_reload_config_respects_env_overrides(monkeypatch):
     reload_config()
     assert get_config().embedding.profile == "bge_m3"
 
-    # Change profile env and ensure reload picks it up
+    # Plan overrides EMBEDDINGS_PROFILE when present
     monkeypatch.setenv("EMBEDDINGS_PROFILE", "jina_v3")
     reload_config()
-    assert get_config().embedding.profile == "jina_v3"
+    assert get_config().embedding.profile == "bge_m3"
 
     # Clean up env for downstream tests
     monkeypatch.delenv("EMBEDDINGS_PROFILE", raising=False)

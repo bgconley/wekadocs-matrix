@@ -16,6 +16,7 @@ from qdrant_client.models import (
 )
 
 from src.providers.settings import EmbeddingSettings
+from src.shared.config import EmbeddingPlan
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class QdrantSchemaPlan:
 def build_qdrant_schema(
     settings: EmbeddingSettings,
     *,
+    embedding_plan: Optional[EmbeddingPlan] = None,
     include_entity: bool = False,  # DEPRECATED: Dense entity vector removed (was broken)
     enable_sparse: Optional[bool] = None,
     enable_colbert: Optional[bool] = None,
@@ -43,6 +45,9 @@ def build_qdrant_schema(
     """Return the desired Qdrant schema for the embedding profile."""
 
     dims = settings.dims or 0
+    colbert_dims = dims
+    if embedding_plan and embedding_plan.colbert:
+        colbert_dims = embedding_plan.colbert.profile.dims
     vectors_config: Dict[str, VectorParams] = {
         "content": VectorParams(size=dims, distance=Distance.COSINE),
         "title": VectorParams(size=dims, distance=Distance.COSINE),
@@ -119,7 +124,7 @@ def build_qdrant_schema(
 
     if use_colbert:
         vectors_config["late-interaction"] = VectorParams(
-            size=dims,
+            size=colbert_dims,
             distance=Distance.COSINE,
             multivector_config=MultiVectorConfig(
                 comparator=MultiVectorComparator.MAX_SIM
@@ -221,6 +226,7 @@ def validate_qdrant_schema(
     collection_name: str,
     settings: EmbeddingSettings,
     *,
+    embedding_plan: Optional[EmbeddingPlan] = None,
     require_sparse: Optional[bool] = None,
     require_colbert: Optional[bool] = None,
     include_entity: Optional[bool] = None,  # DEPRECATED: No longer validated
@@ -254,6 +260,7 @@ def validate_qdrant_schema(
     )
     expected_plan = build_qdrant_schema(
         settings,
+        embedding_plan=embedding_plan,
         include_entity=include_entity,  # Deprecated, passed for compatibility
         enable_sparse=require_sparse,
         enable_colbert=require_colbert,
@@ -365,10 +372,16 @@ def validate_qdrant_schema(
     if require_colbert:
         if isinstance(vectors, dict):
             colbert_vec = vectors.get("late-interaction")
-            if not colbert_vec or getattr(colbert_vec, "size", None) != settings.dims:
+            expected_colbert_dims = getattr(
+                expected_plan.vectors_config.get("late-interaction"), "size", None
+            )
+            if (
+                not colbert_vec
+                or getattr(colbert_vec, "size", None) != expected_colbert_dims
+            ):
                 raise RuntimeError(
                     f"Qdrant collection '{collection_name}' missing ColBERT multivector "
-                    f"or size mismatch (expected {settings.dims})"
+                    f"or size mismatch (expected {expected_colbert_dims})"
                 )
         else:
             raise RuntimeError(
