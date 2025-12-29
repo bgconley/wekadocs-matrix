@@ -10,16 +10,16 @@ restore it idempotently. It's designed for:
 
 Usage:
     # Capture current schema to a snapshot file
-    python scripts/qdrant_schema_snapshot.py snapshot --collection chunks_multi_bge_m3
+    python scripts/qdrant_schema_snapshot.py snapshot --collection chunks_multi_<dense_profile>
 
     # Restore schema from snapshot (idempotent - safe to run multiple times)
-    python scripts/qdrant_schema_snapshot.py restore --collection chunks_multi_bge_m3
+    python scripts/qdrant_schema_snapshot.py restore --collection chunks_multi_<dense_profile>
 
     # Validate current schema matches snapshot
-    python scripts/qdrant_schema_snapshot.py validate --collection chunks_multi_bge_m3
+    python scripts/qdrant_schema_snapshot.py validate --collection chunks_multi_<dense_profile>
 
     # Show diff between current schema and snapshot
-    python scripts/qdrant_schema_snapshot.py diff --collection chunks_multi_bge_m3
+    python scripts/qdrant_schema_snapshot.py diff --collection chunks_multi_<dense_profile>
 
 Options:
     --host          Qdrant host (default: localhost, env: QDRANT_HOST)

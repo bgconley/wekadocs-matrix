@@ -75,7 +75,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--gold-file", required=True)
     ap.add_argument("--qdrant-url", default="http://127.0.0.1:6333")
-    ap.add_argument("--collection", default="chunks_multi_bge_m3")
+    ap.add_argument("--collection", default="chunks_multi")
     ap.add_argument("--top-k", type=int, default=10)
     args = ap.parse_args()
     asyncio.run(run_eval(args))

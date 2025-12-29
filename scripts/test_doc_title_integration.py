@@ -62,7 +62,7 @@ def test_sec_001_query():
     retriever = QdrantMultiVectorRetriever(
         qdrant_client=qdrant,
         embedder=embedder,
-        collection_name="chunks_multi_bge_m3",
+        collection_name="chunks_multi",
         field_weights=field_weights,
         schema_supports_sparse=True,
         schema_supports_doc_title_sparse=True,

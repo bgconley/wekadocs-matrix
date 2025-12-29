@@ -15,7 +15,7 @@ from typing import Dict, List
 from neo4j import Driver
 from qdrant_client import QdrantClient
 
-from src.shared.config import get_config
+from src.shared.config import get_config, get_embedding_plan
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ class HealthChecker:
         embed_dim: int,
         embed_model: str,
         embed_provider: str,
-        qdrant_collection: str = "chunks_multi_bge_m3",
+        qdrant_collection: str = "chunks_multi",
     ):
         """
         Initialize health checker.
@@ -553,21 +553,41 @@ class HealthChecker:
 
     def _check_embedding_config(self) -> HealthCheckResult:
         """Verify embedding configuration matches canonical spec."""
+        expected_dim = self.REQUIRED_EMBED_DIM
+        expected_model = self.REQUIRED_EMBED_MODEL
+        expected_provider = self.REQUIRED_EMBED_PROVIDER
+
+        try:
+            plan = get_embedding_plan()
+        except Exception as exc:
+            logger.warning(
+                "Embedding plan unavailable; falling back to legacy embedding expectations.",
+                exc_info=exc,
+            )
+            plan = None
+
+        if plan and plan.dense:
+            dense_profile = plan.dense.profile
+            if getattr(dense_profile, "dims", None):
+                expected_dim = dense_profile.dims
+            if getattr(dense_profile, "model_id", None):
+                expected_model = dense_profile.model_id
+            if getattr(dense_profile, "provider", None):
+                expected_provider = dense_profile.provider
+
         issues = []
 
-        if self.embed_dim != self.REQUIRED_EMBED_DIM:
+        if self.embed_dim != expected_dim:
+            issues.append(f"EMBED_DIM is {self.embed_dim} (expected {expected_dim})")
+
+        if self.embed_model != expected_model:
             issues.append(
-                f"EMBED_DIM is {self.embed_dim} (expected {self.REQUIRED_EMBED_DIM})"
+                f"EMBED_MODEL is '{self.embed_model}' (expected '{expected_model}')"
             )
 
-        if self.embed_model != self.REQUIRED_EMBED_MODEL:
+        if self.embed_provider != expected_provider:
             issues.append(
-                f"EMBED_MODEL is '{self.embed_model}' (expected '{self.REQUIRED_EMBED_MODEL}')"
-            )
-
-        if self.embed_provider != self.REQUIRED_EMBED_PROVIDER:
-            issues.append(
-                f"EMBED_PROVIDER is '{self.embed_provider}' (expected '{self.REQUIRED_EMBED_PROVIDER}')"
+                f"EMBED_PROVIDER is '{self.embed_provider}' (expected '{expected_provider}')"
             )
 
         if not issues:

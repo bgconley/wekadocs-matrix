@@ -15,19 +15,19 @@ Schema Snapshot System Explained
 
   # Capture current schema (creates/updates the JSON snapshot)
   python scripts/qdrant_schema_snapshot.py snapshot \
-    --collection chunks_multi_bge_m3 --host 127.0.0.1
+    --collection chunks_multi_<dense_profile> --host 127.0.0.1
 
   # Restore schema (idempotent - safe to run multiple times)
   python scripts/qdrant_schema_snapshot.py restore \
-    --collection chunks_multi_bge_m3 --host 127.0.0.1
+    --collection chunks_multi_<dense_profile> --host 127.0.0.1
 
   # Validate current schema matches snapshot
   python scripts/qdrant_schema_snapshot.py validate \
-    --collection chunks_multi_bge_m3 --host 127.0.0.1
+    --collection chunks_multi_<dense_profile> --host 127.0.0.1
 
   # Show what's different
   python scripts/qdrant_schema_snapshot.py diff \
-    --collection chunks_multi_bge_m3 --host 127.0.0.1
+    --collection chunks_multi_<dense_profile> --host 127.0.0.1
 
   ★ Insight ─────────────────────────────────────
   Idempotency is key: The restore command checks if the collection exists with the correct schema first. If it matches, it does nothing. If it differs, it warns you and requires --force to recreate. This
@@ -35,7 +35,7 @@ Schema Snapshot System Explained
   ─────────────────────────────────────────────────
 
   ---
-  2. scripts/qdrant_snapshots/chunks_multi_bge_m3_schema.json - The Snapshot
+  2. scripts/qdrant_snapshots_20251206_canonical/qdrant_snapshots/chunks_multi_bge_m3_schema.json - The Snapshot
 
   This is a point-in-time capture of the Qdrant collection schema in JSON format. It contains:
 

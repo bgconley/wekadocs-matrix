@@ -68,7 +68,7 @@ from src.services.cross_doc_linking import (
 # Configuration
 # ---------------------------------------------------------------------------
 
-COLLECTION_NAME = "chunks_multi_bge_m3"
+COLLECTION_NAME = "chunks_multi"
 DENSE_VECTOR_NAME = "doc_title"
 SPARSE_VECTOR_NAME = "doc_title-sparse"
 

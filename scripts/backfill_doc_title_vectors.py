@@ -51,7 +51,7 @@ def get_qdrant_points_by_doc():
         host=os.getenv("QDRANT_HOST", "localhost"),
         port=int(os.getenv("QDRANT_PORT", 6333)),
     )
-    collection = os.getenv("QDRANT_COLLECTION", "chunks_multi_bge_m3")
+    collection = os.getenv("QDRANT_COLLECTION", "chunks_multi")
 
     # Scroll through all points
     points_by_doc = defaultdict(list)

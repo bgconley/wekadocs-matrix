@@ -42,7 +42,7 @@ search:
     primary: "qdrant"
     dual_write: false  # Phase 7C: Set to true during migration
     qdrant:
-      collection_name: "chunks_multi_bge_m3"  # Phase 7E+: Multi-vector collection (BGE-M3)
+      collection_name: "chunks_multi"  # Phase 7E+: Multi-vector collection (dense-scoped suffix)
       use_grpc: false
       timeout: 30
       allow_recreate: false  # Set true to auto-rebuild collections during schema upgrades
@@ -139,7 +139,7 @@ search:
     reranker:
       enabled: true  # Cross-encoder enabled - eliminates length bias in final ranking
       provider: "bge-reranker-service"  # Must match factory: bge-reranker-service or bge-reranker
-      model: "Qwen/Qwen3-Reranker-4B"  # Qwen3 reranker with 4096+ token support
+      model: "Qwen/Qwen3-Reranker-0.6B"  # Qwen3 reranker with 4096+ token support
       top_n: 20           # Final results after reranking
       max_pairs: 50       # Candidates to send to reranker (from RRF fusion)
       max_tokens_per_pair: 4096  # Max tokens per query-doc pair (Qwen3-Reranker supports 4096+)

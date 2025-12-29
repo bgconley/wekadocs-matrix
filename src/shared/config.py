@@ -725,7 +725,7 @@ class CrossDocLinkingConfig(BaseModel):
         description="Minimum documents required before linking is attempted",
     )
     collection_name: str = Field(
-        default="chunks_multi_bge_m3",
+        default="chunks_multi",
         description="Qdrant collection name for vector searches",
     )
 

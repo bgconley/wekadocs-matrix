@@ -691,7 +691,7 @@ class QdrantMultiVectorRetriever:
         self,
         qdrant_client: QdrantClient,
         embedder,
-        collection_name: str = "chunks_multi_bge_m3",
+        collection_name: str = "chunks_multi",
         field_weights: Optional[Dict[str, float]] = None,
         rrf_k: int = 60,
         payload_keys: Optional[List[str]] = None,
@@ -1949,7 +1949,7 @@ class VectorRetriever(QdrantMultiVectorRetriever):
         self,
         qdrant_client: QdrantClient,
         embedder,
-        collection_name: str = "chunks_multi_bge_m3",
+        collection_name: str = "chunks_multi",
         similarity: str = "cosine",  # Kept for signature compatibility
         embedding_settings: Optional[EmbeddingSettings] = None,
     ):

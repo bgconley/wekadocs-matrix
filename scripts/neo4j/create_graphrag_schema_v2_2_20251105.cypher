@@ -417,7 +417,7 @@ SET sv.version = 'v2.2',
 // ---------------------------------------------------------------------------
 // COLLECTIONS
 // ---------------------------------------------------------------------------
-// Primary collection: chunks_multi_bge_m3 (Phase 7E+ BGE-M3 embeddings)
+// Primary collection: chunks_multi_<dense_profile> (Phase 7E+ dense-scoped collections)
 // Legacy collection:  chunks_multi (kept for backward compatibility)
 //
 // DENSE VECTORS (per collection):

@@ -1,9 +1,12 @@
 // Auto-generated Neo4j schema DDL
 // Snapshot: neo4j
-// Generated at: 2025-12-13T20:53:42.592372+00:00
+// Generated at: 2025-12-29T03:55:46.288503+00:00
 
 // Constraints
 CREATE CONSTRAINT `answer_id_unique` FOR (n:`Answer`) REQUIRE (n.`answer_id`) IS UNIQUE;
+CREATE CONSTRAINT `capacitymetric_id_unique` FOR (n:`CapacityMetric`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `chunk_id_unique` FOR (n:`Chunk`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `cloudprovider_id_unique` FOR (n:`CloudProvider`) REQUIRE (n.`id`) IS UNIQUE;
 CREATE CONSTRAINT `command_id_unique` FOR (n:`Command`) REQUIRE (n.`id`) IS UNIQUE;
 CREATE CONSTRAINT `component_id_unique` FOR (n:`Component`) REQUIRE (n.`id`) IS UNIQUE;
 CREATE CONSTRAINT `concept_id_unique` FOR (n:`Concept`) REQUIRE (n.`id`) IS UNIQUE;
@@ -16,11 +19,15 @@ CREATE CONSTRAINT `ghost_document_id_unique` FOR (n:`GhostDocument`) REQUIRE (n.
 CREATE CONSTRAINT `parameter_id_unique` FOR (n:`Parameter`) REQUIRE (n.`id`) IS UNIQUE;
 CREATE CONSTRAINT `pending_reference_hint_unique` FOR (n:`PendingReference`) REQUIRE (n.`hint`) IS UNIQUE;
 CREATE CONSTRAINT `procedure_id_unique` FOR (n:`Procedure`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `procedurestep_id_unique` FOR (n:`ProcedureStep`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `protocol_id_unique` FOR (n:`Protocol`) REQUIRE (n.`id`) IS UNIQUE;
 CREATE CONSTRAINT `query_feedback_id` FOR (n:`QueryFeedback`) REQUIRE (n.`query_id`) IS UNIQUE;
 CREATE CONSTRAINT `query_id_unique` FOR (n:`Query`) REQUIRE (n.`query_id`) IS UNIQUE;
 CREATE CONSTRAINT `schema_version_singleton` FOR (n:`SchemaVersion`) REQUIRE (n.`id`) IS UNIQUE;
 CREATE CONSTRAINT `session_id_unique` FOR (n:`Session`) REQUIRE (n.`session_id`) IS UNIQUE;
 CREATE CONSTRAINT `step_id_unique` FOR (n:`Step`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `storageconcept_id_unique` FOR (n:`StorageConcept`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `version_id_unique` FOR (n:`Version`) REQUIRE (n.`id`) IS UNIQUE;
 
 // Indexes
 CREATE RANGE INDEX `answer_created_at` FOR (n:`Answer`) ON (n.`created_at`);
@@ -67,13 +74,16 @@ CREATE RANGE INDEX `entity_canonical_name` FOR (n:`Entity`) ON (n.`canonical_nam
 CREATE RANGE INDEX `entity_document_id` FOR (n:`Entity`) ON (n.`document_id`);
 CREATE RANGE INDEX `entity_document_name_idx` FOR (n:`Entity`) ON (n.`document_id`, n.`name`);
 CREATE RANGE INDEX `entity_name` FOR (n:`Entity`) ON (n.`name`);
+CREATE RANGE INDEX `entity_source` FOR (n:`Entity`) ON (n.`source`);
 CREATE RANGE INDEX `entity_source_section_idx` FOR (n:`Entity`) ON (n.`source_section_id`);
 CREATE RANGE INDEX `entity_type` FOR (n:`Entity`) ON (n.`entity_type`);
 CREATE RANGE INDEX `error_code` FOR (n:`Error`) ON (n.`code`);
 CREATE RANGE INDEX `index_293dec54` FOR (n:`Configuration`) ON (n.`name`);
 CREATE RANGE INDEX `index_8323cd1d` FOR (n:`Command`) ON (n.`name`);
 CREATE RANGE INDEX `mentioned_in_confidence_idx` FOR ()-[r:`MENTIONED_IN`]-() ON (r.`confidence`);
+CREATE RANGE INDEX `mentioned_in_source_idx` FOR ()-[r:`MENTIONED_IN`]-() ON (r.`source`);
 CREATE RANGE INDEX `mentions_confidence_idx` FOR ()-[r:`MENTIONS`]-() ON (r.`confidence`);
+CREATE RANGE INDEX `mentions_source_idx` FOR ()-[r:`MENTIONS`]-() ON (r.`source`);
 CREATE RANGE INDEX `mentions_source_section_idx` FOR ()-[r:`MENTIONS`]-() ON (r.`source_section_id`);
 CREATE RANGE INDEX `parent_heading_level_delta_idx` FOR ()-[r:`PARENT_HEADING`]-() ON (r.`level_delta`);
 CREATE RANGE INDEX `procedure_title` FOR (n:`Procedure`) ON (n.`title`);

@@ -88,7 +88,7 @@ def search_qdrant(
         port=int(os.getenv("QDRANT_PORT", 6333)),
     )
 
-    collection = os.getenv("QDRANT_COLLECTION", "chunks_multi_bge_m3")
+    collection = os.getenv("QDRANT_COLLECTION", "chunks_multi")
 
     results = qdrant.search(
         collection_name=collection,

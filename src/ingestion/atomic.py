@@ -2161,7 +2161,7 @@ class AtomicIngestionCoordinator:
 
                 # LGTM Phase 4: Verbose log event 6 - qdrant_upsert_complete
                 collection_name = getattr(builder, "collection_name", None) or getattr(
-                    self.config.search.vector, "collection", "chunks_multi_bge_m3"
+                    self.config.search.vector, "collection", "chunks_multi"
                 )
                 logger.info(
                     "qdrant_upsert_complete",
