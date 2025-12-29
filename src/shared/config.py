@@ -1425,6 +1425,18 @@ def apply_embedding_profile(config: Config, settings: Settings, config_path: Pat
                 qdrant_cfg.collection_name, suffix_source
             )
 
+    cross_doc_cfg = getattr(config.ingestion, "cross_doc_linking", None)
+    if cross_doc_cfg and qdrant_cfg and hasattr(qdrant_cfg, "collection_name"):
+        if cross_doc_cfg.collection_name != qdrant_cfg.collection_name:
+            logger.info(
+                "Aligning cross-doc collection name with Qdrant collection",
+                extra={
+                    "cross_doc_collection": cross_doc_cfg.collection_name,
+                    "qdrant_collection": qdrant_cfg.collection_name,
+                },
+            )
+            cross_doc_cfg.collection_name = qdrant_cfg.collection_name
+
     missing_req = [req for req in profile.requirements if not os.getenv(req)]
     if missing_req:
         logger.warning(

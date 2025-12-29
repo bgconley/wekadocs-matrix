@@ -91,6 +91,9 @@ class BGERerankerServiceProvider(RerankProvider):
         self._provider_name = "bge-reranker-service"
         self._client = httpx.Client(base_url=base_url, timeout=timeout)
         self._batch_size = batch_size
+        self._tokenizer = None
+        self._tokenizer_loaded = False
+        self._tokenizer_model_id = os.getenv("RERANKER_TOKENIZER_ID", self._model_id)
 
         # Issue #15 Fix: Support both old (DISABLE) and new (ENABLED) flag naming
         # New positive flag takes precedence, fall back to old negative flag
@@ -156,10 +159,59 @@ class BGERerankerServiceProvider(RerankProvider):
 
     def _truncate_text(self, text: str) -> str:
         """Truncate text to fit within token budget."""
-        tokens = text.split()
-        if len(tokens) > MAX_TOKENS_PER_DOC:
-            return " ".join(tokens[:MAX_TOKENS_PER_DOC])
+        tokenizer = self._get_tokenizer()
+        if tokenizer is None:
+            tokens = text.split()
+            if len(tokens) > MAX_TOKENS_PER_DOC:
+                return " ".join(tokens[:MAX_TOKENS_PER_DOC])
+            return text
+
+        token_ids = tokenizer.encode(text, add_special_tokens=False)
+        if len(token_ids) > MAX_TOKENS_PER_DOC:
+            token_ids = token_ids[:MAX_TOKENS_PER_DOC]
+            return tokenizer.decode(token_ids, skip_special_tokens=True)
         return text
+
+    def _get_tokenizer(self):
+        if self._tokenizer_loaded:
+            return self._tokenizer
+
+        self._tokenizer_loaded = True
+        try:
+            from transformers import AutoTokenizer
+
+            cache_dir = os.getenv("HF_CACHE", "/opt/hf-cache")
+            offline = os.getenv("TRANSFORMERS_OFFLINE", "true").lower() == "true"
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                self._tokenizer_model_id,
+                cache_dir=cache_dir,
+                local_files_only=offline,
+            )
+            logger.info(
+                "Reranker tokenizer loaded",
+                extra={
+                    "tokenizer_model_id": self._tokenizer_model_id,
+                    "hf_cache": cache_dir,
+                    "hf_offline": offline,
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "Reranker tokenizer initialization failed; falling back to whitespace counts",
+                extra={
+                    "tokenizer_model_id": self._tokenizer_model_id,
+                    "error": str(exc),
+                },
+            )
+            self._tokenizer = None
+
+        return self._tokenizer
+
+    def _count_tokens(self, text: str) -> int:
+        tokenizer = self._get_tokenizer()
+        if tokenizer is None:
+            return len(text.split())
+        return len(tokenizer.encode(text, add_special_tokens=False))
 
     def _rerank_batch(
         self,
@@ -300,7 +352,7 @@ class BGERerankerServiceProvider(RerankProvider):
                 for cand in candidates[:top_k]
             ]
 
-        query_tokens = len(query.split())
+        query_tokens = self._count_tokens(query)
 
         # Prepare and truncate documents, filtering those that exceed budget
         valid_candidates: List[Tuple[int, str, Dict]] = []
@@ -310,7 +362,7 @@ class BGERerankerServiceProvider(RerankProvider):
                 raise ValueError(f"Candidate {i} missing required 'text' field")
 
             text = self._truncate_text(cand["text"])
-            doc_tokens = len(text.split())
+            doc_tokens = self._count_tokens(text)
 
             if query_tokens + doc_tokens > MAX_TOKENS_TOTAL:
                 # Skip if even truncated doc exceeds budget with query

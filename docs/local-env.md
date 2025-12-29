@@ -15,7 +15,7 @@ This repo uses separate env files to avoid mixing host-only and container-only v
    - `REDIS_HOST=localhost`
    - `BGE_M3_API_URL=http://127.0.0.1:9000`
    - `GLINER_SERVICE_URL=http://127.0.0.1:9002`
-   - `RERANKER_BASE_URL=http://127.0.0.1:9001`
+   - `RERANKER_BASE_URL=http://127.0.0.1:9005`
 3) Use the helper to load `.env.local`:
    - `scripts/run_local.sh <command>`
 

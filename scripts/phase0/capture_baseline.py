@@ -460,15 +460,15 @@ def check_connectivity() -> Dict[str, bool]:
     try:
         import httpx
 
-        url = os.environ.get("RERANKER_BASE_URL", "http://qwen3-reranker-lambda:9003")
+        url = os.environ.get("RERANKER_BASE_URL", "http://127.0.0.1:9005")
         resp = httpx.post(
             f"{url}/v1/rerank",
             json={
                 "query": "test",
                 "documents": ["test doc"],
-                "model": "Qwen/Qwen3-Reranker-4B",
+                "model": "Qwen/Qwen3-Reranker-0.6B",
             },
-            timeout=30,  # Qwen3-4B needs longer timeout
+            timeout=30,  # Qwen3 reranker timeout
         )
         status["reranker"] = resp.status_code == 200 and "results" in resp.json()
     except Exception as e:

@@ -16,12 +16,23 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Prefetch jina-embeddings-v3 tokenizer during build (Phase 7C hotfix)
+# Prefetch tokenizers during build (Phase 7C hotfix)
 # This eliminates runtime downloads and enables offline operation
 ENV HF_HOME=/opt/hf-cache
 RUN mkdir -p /opt/hf-cache && \
-    python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('jinaai/jina-embeddings-v3', cache_dir='/opt/hf-cache')" && \
-    echo "Tokenizer prefetched successfully"
+    python - <<'PY' && \
+    echo "Tokenizers prefetched successfully"
+from transformers import AutoTokenizer
+
+models = [
+    "jinaai/jina-embeddings-v3",
+    "voyageai/voyage-context-3",
+    "BAAI/bge-m3",
+    "Qwen/Qwen3-Reranker-0.6B",
+]
+for model_id in models:
+    AutoTokenizer.from_pretrained(model_id, cache_dir="/opt/hf-cache")
+PY
 
 # Copy application code
 COPY src/ /app/src/
