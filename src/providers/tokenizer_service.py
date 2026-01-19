@@ -30,6 +30,28 @@ from src.shared.config import get_config, get_embedding_plan, get_embedding_sett
 logger = logging.getLogger(__name__)
 
 
+def _resolve_local_snapshot_path(
+    model_id: Optional[str], hub_cache: str
+) -> Optional[str]:
+    if not model_id or "/" not in model_id:
+        return None
+    model_dir = os.path.join(hub_cache, f"models--{model_id.replace('/', '--')}")
+    ref_path = os.path.join(model_dir, "refs", "main")
+    if not os.path.exists(ref_path):
+        return None
+    try:
+        with open(ref_path, "r", encoding="utf-8") as handle:
+            ref = handle.read().strip()
+    except OSError:
+        return None
+    if not ref:
+        return None
+    snapshot_dir = os.path.join(model_dir, "snapshots", ref)
+    if os.path.isdir(snapshot_dir):
+        return snapshot_dir
+    return None
+
+
 class TokenizerBackend(ABC):
     """Abstract base class for tokenizer backends."""
 
@@ -112,8 +134,14 @@ class HuggingFaceTokenizerBackend(TokenizerBackend):
             model_id = os.getenv(
                 "HF_TOKENIZER_ID", default_model_id or "jinaai/jina-embeddings-v3"
             )
-            cache_dir = os.getenv("HF_CACHE", "/opt/hf-cache")
-            offline = os.getenv("TRANSFORMERS_OFFLINE", "true").lower() == "true"
+            # Use standard HF cache location, with Docker fallback
+            default_cache = os.path.expanduser("~/.cache/huggingface")
+            if os.path.exists("/opt/hf-cache"):
+                default_cache = "/opt/hf-cache"  # Docker environment
+            cache_dir = os.getenv("HF_CACHE", default_cache)
+            hub_cache = os.getenv("HF_HUB_CACHE", os.path.join(cache_dir, "hub"))
+            # Default to online mode (allow downloads if not cached)
+            offline = os.getenv("TRANSFORMERS_OFFLINE", "false").lower() == "true"
 
             telemetry = build_embedding_telemetry(embedding_settings)
             log_extra = {
@@ -127,9 +155,16 @@ class HuggingFaceTokenizerBackend(TokenizerBackend):
                 extra=log_extra,
             )
 
+            model_source = model_id
+            if offline:
+                local_snapshot = _resolve_local_snapshot_path(model_id, hub_cache)
+                if local_snapshot:
+                    model_source = local_snapshot
+                    log_extra["hf_local_snapshot"] = local_snapshot
+
             try:
                 self.tokenizer = AutoTokenizer.from_pretrained(
-                    model_id,
+                    model_source,
                     cache_dir=cache_dir,
                     local_files_only=offline,
                 )
@@ -414,7 +449,8 @@ class TokenizerService:
 
         backend_name = backend_name.lower()
 
-        # Fallback allowance: disallow segmenter fallback for BGE profiles unless explicitly enabled
+        # Fallback allowance: disallow segmenter fallback for profiles requiring exact tokenization
+        # BGE-M3 and Arctic share the same XLM-RoBERTa tokenizer - use HF for accuracy
         allow_segmenter_fallback = (
             os.getenv("TOKENIZER_ALLOW_SEGMENTER_FALLBACK", "").lower() == "true"
         ) or dense_profile_name not in {
@@ -422,6 +458,11 @@ class TokenizerService:
             "bge-m3",
             "bge-m3-service",
             "bge-m3-unpad",
+            # Arctic profiles - also use XLM-RoBERTa tokenizer (built on bge-m3-retromae)
+            "snowflake_arctic_v2l",
+            "snowflake-arctic-v2l",
+            "snowflake_arctic",
+            "snowflake-arctic-service",
         }
 
         if backend_name == "hf":

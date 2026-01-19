@@ -228,21 +228,54 @@ class SemanticChunkerAssembler:
         self._initialize_chunker()
 
     def _initialize_chunker(self):
-        """Initialize Chonkie with BGE-M3 adapter."""
-        from src.providers.embeddings.chonkie_adapter import BgeM3ChonkieAdapter
+        """Initialize Chonkie with the configured embedding adapter."""
+        adapter_name = (self.config.embedding_adapter or "bge_m3").lower()
 
-        # Check if BGE-M3 service is available
-        if not BgeM3ChonkieAdapter.is_available():
+        adapter = None
+        if adapter_name in {"bge_m3", "bge-m3", "bge_m3_service", "bge-m3-service"}:
+            from src.providers.embeddings.chonkie_adapter import BgeM3ChonkieAdapter
+
+            if not BgeM3ChonkieAdapter.is_available():
+                log.warning(
+                    "BGE-M3 service unavailable; semantic chunking disabled",
+                    extra={
+                        "service_url": os.getenv(
+                            "BGE_M3_API_URL", "http://127.0.0.1:9000"
+                        )
+                    },
+                )
+                return
+            adapter = BgeM3ChonkieAdapter()
+        elif adapter_name in {
+            "snowflake_arctic_v2l",
+            "snowflake-arctic-v2l",
+            "snowflake_arctic",
+        }:
+            from src.providers.embeddings.arctic_chonkie_adapter import (
+                ArcticChonkieAdapter,
+            )
+
+            if not ArcticChonkieAdapter.is_available():
+                log.warning(
+                    "Snowflake Arctic service unavailable; semantic chunking disabled",
+                    extra={
+                        "service_url": os.getenv(
+                            "CHONKIE_EMBEDDINGS_BASE_URL",
+                            "http://127.0.0.1:9010/v1",
+                        )
+                    },
+                )
+                return
+            adapter = ArcticChonkieAdapter()
+        else:
             log.warning(
-                "BGE-M3 service unavailable; semantic chunking disabled",
-                extra={
-                    "service_url": os.getenv("BGE_M3_API_URL", "http://127.0.0.1:9000")
-                },
+                "Unknown semantic chunking adapter; semantic chunking disabled",
+                extra={"adapter": adapter_name},
             )
             return
 
         try:
-            self._adapter = BgeM3ChonkieAdapter()
+            self._adapter = adapter
             self._chunker = SemanticChunker(
                 embedding_model=self._adapter,
                 threshold=self.config.similarity_threshold,
@@ -251,6 +284,7 @@ class SemanticChunkerAssembler:
             log.info(
                 "SemanticChunkerAssembler initialized",
                 extra={
+                    "embedding_adapter": adapter_name,
                     "similarity_threshold": self.config.similarity_threshold,
                     "target_tokens": self.config.target_tokens,
                     "min_tokens": self.config.min_tokens,
@@ -261,7 +295,7 @@ class SemanticChunkerAssembler:
         except Exception as e:
             log.error(
                 "Failed to initialize Chonkie SemanticChunker",
-                extra={"error": str(e)},
+                extra={"error": str(e), "adapter": adapter_name},
                 exc_info=True,
             )
             self._chunker = None

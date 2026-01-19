@@ -154,7 +154,7 @@ search:
 
     # Bounded adjacency expansion (Phase 7E)
     expansion:
-      enabled: false  # DISABLED: Phase 1 vector-only hardening
+      enabled: true  # ENABLED: structure-aware expansion
       max_neighbors: 1
       query_min_tokens: 8
       score_delta_max: 0.05
@@ -246,7 +246,8 @@ ingestion:
     # See: docs/plans/chonkie_semantic_chunking_integration_plan.md
     semantic_chunking:
       enabled: true
-      similarity_threshold: 0.5   # Balanced: split when similarity < 50%
+      similarity_threshold: 0.35   # Tuned: split when similarity < 35%
+      embedding_adapter: "snowflake_arctic_v2l"
       target_tokens: 400          # Research optimal (Chroma/Firecrawl)
       min_tokens: 100             # Allow naturally small chunks
       max_tokens: 512             # NVIDIA recommendation ceiling
@@ -414,7 +415,7 @@ feature_flags:
   graph_score_normalized: true     # ENABLED: Normalize graph scores for fusion
   graph_as_reranker: true          # ENABLED: Graph-based candidate reordering
   entity_embedding_fallback: false
-  structure_aware_expansion: false # DISABLED: Phase 1 vector-only hardening
+  structure_aware_expansion: true # ENABLED: structure-aware expansion
 
 # Phase 7E-4: Monitoring and observability configuration
 # Reference: Canonical Spec L4916-4976, L3513-3528

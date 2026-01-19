@@ -5,13 +5,21 @@ Runs the shared low-level MCP server over STDIO transport.
 
 from __future__ import annotations
 
-import builtins
-import logging
-
-# --- STDIO-SAFE BOOTSTRAP: Must be at the very top ---
+# --- STDIO-SAFE BOOTSTRAP: Must be at the VERY TOP before any imports ---
 import os
 import sys
 import warnings
+
+# Suppress ALL warnings before any other imports to prevent noise on stderr
+# that could confuse the stdio protocol parser
+warnings.filterwarnings("ignore")
+os.environ["PYTHONWARNINGS"] = "ignore"
+
+# Also suppress Pydantic V1 deprecation warnings specifically
+os.environ["PYDANTIC_V2_DEPRECATION_WARNINGS"] = "0"
+
+import builtins  # noqa: E402
+import logging  # noqa: E402
 
 # Unbuffered, UTF-8 (avoids partial writes / encoding surprises)
 os.environ.setdefault("PYTHONUNBUFFERED", "1")
@@ -64,8 +72,7 @@ try:
 except Exception:
     pass
 
-# Optional: demote Deprecation/Runtime warnings to STDERR (default)
-warnings.simplefilter("default")
+# Warnings already suppressed at top of file to prevent stdio noise
 
 # 4) Configure structlog to use STDERR (our app uses structlog via get_logger)
 try:

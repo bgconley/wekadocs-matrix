@@ -209,11 +209,6 @@ services:
       # Phase 7C: Embedding Provider Configuration
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
-      # Legacy vars cleared to avoid override; set blank to prefer profile-driven config
-      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-bge-m3-service}
-      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
-      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
-      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-symmetric}
       - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
       - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://host.docker.internal:9002}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
@@ -225,9 +220,13 @@ services:
       - ANSWER_MODEL=${ANSWER_MODEL:-search-result-formatting}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
+      - TOKENIZER_ALLOW_SEGMENTER_FALLBACK=false
       - HF_CACHE=/opt/hf-cache
       - HF_HOME=/opt/hf-cache
-      - TRANSFORMERS_OFFLINE=false
+      - HF_HUB_CACHE=/opt/hf-cache/hub
+      - HF_HUB_OFFLINE=1
+      - HF_HUB_DISABLE_TELEMETRY=1
+      - TRANSFORMERS_OFFLINE=true
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000
@@ -314,10 +313,6 @@ services:
       # Phase 7C: Embedding Provider Configuration
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
-      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-bge-m3-service}
-      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
-      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
-      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-symmetric}
       - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
       - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://host.docker.internal:9002}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
@@ -328,9 +323,13 @@ services:
       - JINA_API_KEY=${JINA_API_KEY}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
+      - TOKENIZER_ALLOW_SEGMENTER_FALLBACK=false
       - HF_CACHE=/opt/hf-cache
       - HF_HOME=/opt/hf-cache
-      - TRANSFORMERS_OFFLINE=false
+      - HF_HUB_CACHE=/opt/hf-cache/hub
+      - HF_HUB_OFFLINE=1
+      - HF_HUB_DISABLE_TELEMETRY=1
+      - TRANSFORMERS_OFFLINE=true
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000
@@ -431,10 +430,6 @@ services:
       # Phase 7C: Embedding Provider Configuration
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
-      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-bge-m3-service}
-      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
-      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
-      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-symmetric}
       - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
       - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://host.docker.internal:9002}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
@@ -445,9 +440,13 @@ services:
       - JINA_API_KEY=${JINA_API_KEY}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
+      - TOKENIZER_ALLOW_SEGMENTER_FALLBACK=false
       - HF_CACHE=/opt/hf-cache
       - HF_HOME=/opt/hf-cache
-      - TRANSFORMERS_OFFLINE=false
+      - HF_HUB_CACHE=/opt/hf-cache/hub
+      - HF_HUB_OFFLINE=1
+      - HF_HUB_DISABLE_TELEMETRY=1
+      - TRANSFORMERS_OFFLINE=true
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000

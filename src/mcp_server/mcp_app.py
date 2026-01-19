@@ -843,12 +843,19 @@ def _get_deps(ctx: Any | None) -> Deps:
     request_context = _get_request_context(ctx)
     if request_context is None:
         raise RuntimeError("MCP request context is required")
-    return request_context.lifespan_context
+    deps = request_context.lifespan_context
+    # Lazy initialization on first tool call
+    deps.ensure_initialized()
+    return deps
 
 
 @dataclass
 class Deps:
-    """Dependencies shared across MCP tool calls via lifespan context."""
+    """Dependencies shared across MCP tool calls via lifespan context.
+
+    Uses lazy initialization to ensure fast MCP handshake response.
+    Heavy initialization (Neo4j, QueryService) is deferred until first tool call.
+    """
 
     query: Optional[QueryService] = None
     graph: Optional[GraphService] = None
@@ -856,26 +863,27 @@ class Deps:
     summarizer: Optional[SummarizationService] = None
     assembler: Optional[ContextAssemblerService] = None
     scratch: Optional[ScratchStore] = None
+    _initialized: bool = False
 
+    def ensure_initialized(self) -> None:
+        """Lazy initialization of heavy dependencies.
 
-@asynccontextmanager
-async def lifespan(server: Server) -> AsyncIterator[Deps]:
-    """
-    Lifespan context manager for dependency injection.
-    Initializes QueryService once and shares across all tool calls.
-    Prevents embedder cold-start penalty (2.5s) on every request.
-    """
-    deps = Deps()
-    logger.info("STDIO server lifespan: initializing dependencies")
-    _DIAGNOSTIC_EMITTER.cleanup()
+        Called on first tool invocation to avoid blocking MCP handshake.
+        This allows Claude Desktop to complete the initialize/tools/list
+        sequence quickly, then do heavy work on first actual tool call.
+        """
+        if self._initialized:
+            return
 
-    try:
+        logger.info("Deps: lazy-initializing dependencies on first tool call")
+        _DIAGNOSTIC_EMITTER.cleanup()
+
         # Initialize QueryService (embedder loaded on first search)
-        deps.query = get_query_service()
+        self.query = get_query_service()
         manager = get_connection_manager()
         neo4j_driver = manager.get_neo4j_driver()
 
-        # Validate Neo4j schema at startup (Phase 3 hardening)
+        # Validate Neo4j schema (Phase 3 hardening)
         from src.neo.schema_validator import validate_neo4j_schema
 
         schema_result = validate_neo4j_schema(neo4j_driver, strict=False)
@@ -891,16 +899,32 @@ async def lifespan(server: Server) -> AsyncIterator[Deps]:
                 warnings=schema_result.warnings,
             )
 
-        deps.graph = GraphService(neo4j_driver)
-        deps.text = TextService(neo4j_driver)
-        deps.summarizer = SummarizationService(deps.graph)
-        deps.assembler = ContextAssemblerService(deps.graph, deps.text)
-        deps.scratch = ScratchStore(
+        self.graph = GraphService(neo4j_driver)
+        self.text = TextService(neo4j_driver)
+        self.summarizer = SummarizationService(self.graph)
+        self.assembler = ContextAssemblerService(self.graph, self.text)
+        self.scratch = ScratchStore(
             max_bytes=SCRATCH_MAX_BYTES,
             ttl_seconds=SCRATCH_TTL_SECONDS,
             logger=logger,
         )
-        logger.info("STDIO server lifespan: QueryService ready")
+        self._initialized = True
+        logger.info("Deps: lazy initialization complete, QueryService ready")
+
+
+@asynccontextmanager
+async def lifespan(server: Server) -> AsyncIterator[Deps]:
+    """
+    Lifespan context manager for dependency injection.
+
+    Returns immediately with empty Deps to ensure fast MCP handshake.
+    Actual initialization is deferred to first tool call via ensure_initialized().
+    This prevents Claude Desktop from timing out during the initialize sequence.
+    """
+    deps = Deps()
+    logger.info("STDIO server lifespan: returning immediately (lazy init enabled)")
+
+    try:
         yield deps
     finally:
         # Cleanup connections if needed

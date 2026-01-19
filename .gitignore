@@ -46,6 +46,12 @@ node_modules/
 # Codex / MCP caches (local-only)
 .codex-cache/
 
+# AI Session Context Files (regeneratable, session-specific)
+AGENT_CONTEXT.md
+TASK_BACKLOG.md
+EMBEDDER_CORRECTIONS.md
+SESSION_CONTEXT_*.md
+
 # Docker
 *.log
 docker/*.log

@@ -1,5 +1,5 @@
 plan:
-  dense: "voyage_context_3"
+  dense: "snowflake_arctic_v2l"
   sparse: "bge_m3"
   colbert: "bge_m3"
   enable_sparse: true
@@ -81,6 +81,31 @@ profiles:
       multilingual: true
     requirements:
       - "VOYAGE_API_KEY"
+
+  snowflake_arctic_v2l:
+    description: "Snowflake Arctic Embed L v2.0 (dense only; used for Chonkie boundaries)."
+    provider: "snowflake-arctic-service"
+    model_id: "Snowflake/snowflake-arctic-embed-l-v2.0"
+    version: "snowflake-arctic-embed-l-v2.0"
+    dims: 1024
+    similarity: "cosine"
+    task: "retrieval.passage"
+    query_task: "query"
+    document_task: "document"
+    output_dimension: 1024
+    output_dtype: "float"
+    tokenizer:
+      backend: "hf"
+      model_id: "Snowflake/snowflake-arctic-embed-l-v2.0"
+    capabilities:
+      supports_dense: true
+      supports_sparse: false
+      supports_colbert: false
+      supports_long_sequences: true
+      normalized_output: true
+      multilingual: true
+    requirements:
+      - "CHONKIE_EMBEDDINGS_BASE_URL"
 
   voyage_3_large:
     description: "Voyage 3 Large (dense only). Placeholder - verify dims/model id."

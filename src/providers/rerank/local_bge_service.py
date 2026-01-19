@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Tuple
 import httpx
 
 from src.providers.rerank.base import RerankProvider
+from src.providers.tokenizer_service import _resolve_local_snapshot_path
 from src.shared.resilience import CircuitBreaker
 
 logger = logging.getLogger(__name__)
@@ -181,19 +182,37 @@ class BGERerankerServiceProvider(RerankProvider):
             from transformers import AutoTokenizer
 
             cache_dir = os.getenv("HF_CACHE", "/opt/hf-cache")
+            hub_cache = os.getenv("HF_HUB_CACHE", os.path.join(cache_dir, "hub"))
             offline = os.getenv("TRANSFORMERS_OFFLINE", "true").lower() == "true"
+            model_source = self._tokenizer_model_id
+            log_extra = {
+                "tokenizer_model_id": self._tokenizer_model_id,
+                "hf_cache": cache_dir,
+                "hf_offline": offline,
+            }
+
+            if offline:
+                local_snapshot = _resolve_local_snapshot_path(
+                    self._tokenizer_model_id, hub_cache
+                )
+                if local_snapshot:
+                    model_source = local_snapshot
+                    log_extra["hf_local_snapshot"] = local_snapshot
+                else:
+                    raise RuntimeError(
+                        f"HuggingFace tokenizer cache miss for {self._tokenizer_model_id!r} "
+                        "in offline mode. Prefetch the tokenizer into HF_CACHE, or set "
+                        "TRANSFORMERS_OFFLINE=false."
+                    )
+
             self._tokenizer = AutoTokenizer.from_pretrained(
-                self._tokenizer_model_id,
+                model_source,
                 cache_dir=cache_dir,
                 local_files_only=offline,
             )
             logger.info(
                 "Reranker tokenizer loaded",
-                extra={
-                    "tokenizer_model_id": self._tokenizer_model_id,
-                    "hf_cache": cache_dir,
-                    "hf_offline": offline,
-                },
+                extra=log_extra,
             )
         except Exception as exc:
             logger.warning(

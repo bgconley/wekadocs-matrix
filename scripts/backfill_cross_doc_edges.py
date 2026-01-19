@@ -63,12 +63,25 @@ from src.services.cross_doc_linking import (
     compute_maxsim,
     get_document_colbert_vectors,
 )
+from src.shared.config import get_config
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-COLLECTION_NAME = "chunks_multi"
+
+def _resolve_collection_name() -> str:
+    env_override = os.getenv("QDRANT_COLLECTION") or os.getenv("QDRANT_COLLECTION_NAME")
+    if env_override:
+        return env_override
+    try:
+        config = get_config()
+        return config.search.vector.qdrant.collection_name
+    except Exception:
+        return "chunks_multi"
+
+
+COLLECTION_NAME = _resolve_collection_name()
 DENSE_VECTOR_NAME = "doc_title"
 SPARSE_VECTOR_NAME = "doc_title-sparse"
 

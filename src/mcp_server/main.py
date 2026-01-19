@@ -78,6 +78,21 @@ MCP_HTTP_STREAMABLE_STATELESS = os.getenv(
 ).lower() in {"1", "true", "yes", "on"}
 
 
+def _ensure_streamable_accept_headers(scope: dict) -> dict:
+    if not MCP_HTTP_STREAMABLE_JSON_RESPONSE:
+        return scope
+    headers = list(scope.get("headers") or [])
+    accept_values = [v for k, v in headers if k == b"accept"]
+    if accept_values and any(b"text/event-stream" in v for v in accept_values):
+        return scope
+    updated = [(k, v) for k, v in headers if k != b"accept"]
+    updated.append((b"accept", b"application/json, text/event-stream"))
+    patched = dict(scope)
+    patched["headers"] = updated
+    logger.debug("Patched MCP accept header for JSON-only client")
+    return patched
+
+
 def _apply_legacy_mcp_deprecation_headers(response: Response) -> None:
     response.headers["Deprecation"] = "true"
     response.headers["Warning"] = (
@@ -125,7 +140,8 @@ async def _mcp_streamable_http_app(scope, receive, send) -> None:
         response = Response(status_code=404)
         await response(scope, receive, send)
         return
-    await app.state.mcp_session_manager.handle_request(scope, receive, send)
+    patched_scope = _ensure_streamable_accept_headers(scope)
+    await app.state.mcp_session_manager.handle_request(patched_scope, receive, send)
 
 
 app.mount("/_mcp", _mcp_streamable_http_app)

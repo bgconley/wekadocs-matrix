@@ -2160,9 +2160,15 @@ class AtomicIngestionCoordinator:
                 written_qdrant_points = [s["id"] for s in sections if "id" in s]
 
                 # LGTM Phase 4: Verbose log event 6 - qdrant_upsert_complete
-                collection_name = getattr(builder, "collection_name", None) or getattr(
-                    self.config.search.vector, "collection", "chunks_multi"
-                )
+                collection_name = getattr(builder, "collection_name", None)
+                if not collection_name:
+                    collection_name = getattr(
+                        self.config.search.vector.qdrant, "collection_name", None
+                    )
+                if not collection_name:
+                    collection_name = getattr(
+                        self.config.search.vector, "collection", "chunks_multi"
+                    )
                 logger.info(
                     "qdrant_upsert_complete",
                     doc_id=document_id,

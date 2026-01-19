@@ -55,6 +55,10 @@ class ProviderFactory:
         "sentence_transformers": "sentence-transformers",
         "huggingface": "sentence-transformers",
         "hf": "sentence-transformers",
+        # Snowflake Arctic aliases
+        "snowflake-arctic": "snowflake-arctic-service",
+        "snowflake_arctic": "snowflake-arctic-service",
+        "arctic": "snowflake-arctic-service",
     }
 
     @classmethod
@@ -161,6 +165,13 @@ class ProviderFactory:
                 logger.warning(
                     "BGE_M3_API_URL is not set but provider bge-m3-service is active."
                 )
+        elif profile.provider == "snowflake-arctic-service":
+            service_url = os.getenv("CHONKIE_EMBEDDINGS_BASE_URL")
+            if not service_url:
+                logger.warning(
+                    "CHONKIE_EMBEDDINGS_BASE_URL is not set but provider "
+                    "snowflake-arctic-service is active."
+                )
         capabilities = ProviderEmbeddingCapabilities(
             supports_dense=profile.capabilities.supports_dense,
             supports_sparse=profile.capabilities.supports_sparse,
@@ -243,6 +254,15 @@ class ProviderFactory:
         from src.providers.embeddings.voyage import VoyageEmbeddingProvider
 
         return VoyageEmbeddingProvider(settings=settings, **kwargs)
+
+    @staticmethod
+    def _create_snowflake_arctic_provider(
+        settings: ProviderEmbeddingSettings, **kwargs
+    ) -> EmbeddingProvider:
+        """Create Snowflake Arctic embedding provider for dense embeddings."""
+        from src.providers.embeddings.snowflake_arctic import SnowflakeArcticProvider
+
+        return SnowflakeArcticProvider(settings=settings, **kwargs)
 
     @staticmethod
     def create_rerank_provider(
@@ -480,6 +500,7 @@ ProviderFactory._EMBEDDING_PROVIDER_CREATORS = {
     "sentence-transformers": ProviderFactory._create_sentence_transformers_provider,
     "bge-m3-service": ProviderFactory._create_bge_m3_service_provider,
     "voyage-ai": ProviderFactory._create_voyage_provider,
+    "snowflake-arctic-service": ProviderFactory._create_snowflake_arctic_provider,
 }
 
 # Mapping is appended later for rerank providers.
