@@ -76,3 +76,4 @@ infra/terraform/environments/dev/terraform.tfvars
 **/terraform.tfstate.backup
 **/tfplan
 **/tfplan.binary
+*.bak
