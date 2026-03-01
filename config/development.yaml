@@ -247,7 +247,7 @@ ingestion:
     semantic_chunking:
       enabled: true
       similarity_threshold: 0.35   # Tuned: split when similarity < 35%
-      embedding_adapter: "snowflake_arctic_v2l"
+      embedding_adapter: "qwen3_4b"
       target_tokens: 400          # Research optimal (Chroma/Firecrawl)
       min_tokens: 100             # Allow naturally small chunks
       max_tokens: 512             # NVIDIA recommendation ceiling

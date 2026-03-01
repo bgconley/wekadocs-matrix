@@ -267,6 +267,28 @@ class SemanticChunkerAssembler:
                 )
                 return
             adapter = ArcticChonkieAdapter()
+        elif adapter_name in {
+            "qwen3_4b",
+            "qwen3-4b",
+            "qwen3_triton",
+            "qwen3-triton",
+        }:
+            from src.providers.embeddings.qwen3_chonkie_adapter import (
+                Qwen3ChonkieAdapter,
+            )
+
+            if not Qwen3ChonkieAdapter.is_available():
+                log.warning(
+                    "Qwen3 embed gateway unavailable; semantic chunking disabled",
+                    extra={
+                        "service_url": os.getenv(
+                            "QWEN3_EMBED_URL",
+                            "http://10.25.0.50:8101",
+                        )
+                    },
+                )
+                return
+            adapter = Qwen3ChonkieAdapter()
         else:
             log.warning(
                 "Unknown semantic chunking adapter; semantic chunking disabled",

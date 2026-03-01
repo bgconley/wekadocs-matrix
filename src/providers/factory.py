@@ -59,6 +59,11 @@ class ProviderFactory:
         "snowflake-arctic": "snowflake-arctic-service",
         "snowflake_arctic": "snowflake-arctic-service",
         "arctic": "snowflake-arctic-service",
+        # Qwen3 Triton gateway aliases
+        "qwen3-triton": "qwen3-triton-service",
+        "qwen3_triton": "qwen3-triton-service",
+        "qwen3_4b": "qwen3-triton-service",
+        "qwen3-4b": "qwen3-triton-service",
     }
 
     @classmethod
@@ -263,6 +268,15 @@ class ProviderFactory:
         from src.providers.embeddings.snowflake_arctic import SnowflakeArcticProvider
 
         return SnowflakeArcticProvider(settings=settings, **kwargs)
+
+    @staticmethod
+    def _create_qwen3_triton_provider(
+        settings: ProviderEmbeddingSettings, **kwargs
+    ) -> EmbeddingProvider:
+        """Create Qwen3-Embedding-4B provider via Triton gateway."""
+        from src.providers.embeddings.qwen3_triton import Qwen3TritonProvider
+
+        return Qwen3TritonProvider(settings=settings, **kwargs)
 
     @staticmethod
     def create_rerank_provider(
@@ -501,6 +515,7 @@ ProviderFactory._EMBEDDING_PROVIDER_CREATORS = {
     "bge-m3-service": ProviderFactory._create_bge_m3_service_provider,
     "voyage-ai": ProviderFactory._create_voyage_provider,
     "snowflake-arctic-service": ProviderFactory._create_snowflake_arctic_provider,
+    "qwen3-triton-service": ProviderFactory._create_qwen3_triton_provider,
 }
 
 # Mapping is appended later for rerank providers.

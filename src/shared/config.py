@@ -661,7 +661,7 @@ class SemanticChunkingConfig(BaseModel):
     min_tokens: int = 100  # KEY: Allow small coherent chunks (research-aligned)
     max_tokens: int = 512
     respect_sentence_boundaries: bool = True
-    embedding_adapter: str = "bge_m3"
+    embedding_adapter: str = "qwen3_4b"
 
     # Structural boundary handling
     preserve_heading_boundaries: bool = True  # Never merge across headings
