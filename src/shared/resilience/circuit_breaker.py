@@ -168,7 +168,7 @@ class CircuitBreaker:
         logger.debug(
             "circuit_breaker_initialized",
             extra={
-                "name": name,
+                "circuit_name": name,
                 "failure_threshold": failure_threshold,
                 "recovery_timeout": recovery_timeout,
             },
@@ -214,7 +214,7 @@ class CircuitBreaker:
                         logger.info(
                             "circuit_breaker_half_open",
                             extra={
-                                "name": self.name,
+                                "circuit_name": self.name,
                                 "elapsed_seconds": elapsed,
                                 "reason": "recovery_timeout_reached",
                             },
@@ -242,7 +242,7 @@ class CircuitBreaker:
                 logger.info(
                     "circuit_breaker_closed",
                     extra={
-                        "name": self.name,
+                        "circuit_name": self.name,
                         "reason": "recovery_success",
                     },
                 )
@@ -270,7 +270,7 @@ class CircuitBreaker:
                 logger.warning(
                     "circuit_breaker_reopened",
                     extra={
-                        "name": self.name,
+                        "circuit_name": self.name,
                         "reason": "recovery_failed",
                     },
                 )
@@ -280,7 +280,7 @@ class CircuitBreaker:
                 logger.warning(
                     "circuit_breaker_opened",
                     extra={
-                        "name": self.name,
+                        "circuit_name": self.name,
                         "failure_count": self._failure_count,
                         "threshold": self.failure_threshold,
                     },
@@ -303,7 +303,7 @@ class CircuitBreaker:
             logger.info(
                 "circuit_breaker_reset",
                 extra={
-                    "name": self.name,
+                    "circuit_name": self.name,
                     "previous_state": previous_state.value,
                 },
             )
