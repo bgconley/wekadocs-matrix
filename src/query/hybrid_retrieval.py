@@ -867,10 +867,12 @@ class QdrantMultiVectorRetriever:
             "entity_metadata",
         ]
         self.supports_sparse = (
-            hasattr(self.embedder, "embed_sparse") and self.schema_supports_sparse
+            hasattr(self.sparse_embedder, "embed_sparse")
+            and self.schema_supports_sparse
         )
         self.supports_colbert = (
-            hasattr(self.embedder, "embed_colbert") and self.schema_supports_colbert
+            hasattr(self.colbert_embedder, "embed_colbert")
+            and self.schema_supports_colbert
         )
         self.sparse_query_name = "text-sparse"
         self.sparse_field_name = None
@@ -1055,10 +1057,12 @@ class QdrantMultiVectorRetriever:
         return vectors
 
     def _build_sparse_query(self, query: str) -> Optional[Dict[str, List[float]]]:
-        if not self.supports_sparse or not hasattr(self.embedder, "embed_sparse"):
+        if not self.supports_sparse or not hasattr(
+            self.sparse_embedder, "embed_sparse"
+        ):
             return None
         try:
-            sparse_vectors = self.embedder.embed_sparse([query])
+            sparse_vectors = self.sparse_embedder.embed_sparse([query])
             if sparse_vectors:
                 sparse_vector = sparse_vectors[0]
                 indices = (
