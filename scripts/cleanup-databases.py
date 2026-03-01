@@ -3,9 +3,9 @@
 Database Cleanup Script - Surgical Data Deletion with Metadata Preservation
 
 This script performs intelligent cleanup of test/development data while preserving
-critical system metadata nodes that are required for system operation. It is aware
-of the new Neo4j v2.2 schema objects and the Qdrant multi-vector `chunks_multi`
-collection, deleting only vector data while keeping collection/schema definitions.
+critical system metadata nodes that are required for system operation. It supports
+multi-embedder reset by pattern-matching ALL chunks_multi_* collections (bge_m3,
+voyage_context_3, snowflake_arctic_v2l, etc.) while keeping collection schemas.
 
 IMPORTANT: This script now preserves:
 - SchemaVersion nodes (required for health checks)
@@ -116,6 +116,13 @@ class DatabaseCleaner:
         "GhostDocument",  # Placeholder for missing referenced docs
         "Error",  # Error tracking nodes
         "QueryFeedback",  # User feedback on queries
+        # Domain-specific entity types discovered in WEKA docs
+        "CapacityMetric",  # Storage capacity metrics
+        "CloudProvider",  # AWS, Azure, GCP references
+        "ProcedureStep",  # Sub-steps within Procedure nodes
+        "Protocol",  # Network/storage protocols (NFS, SMB, etc.)
+        "StorageConcept",  # WEKA-specific storage concepts
+        "Version",  # Software version references
     }
 
     def __init__(self, args: argparse.Namespace):
@@ -141,26 +148,11 @@ class DatabaseCleaner:
             self._log_error(f"Failed to load config: {e}")
             sys.exit(1)
 
-        # Track allowed Qdrant collections for cleanup (ingestion data only)
-        primary_collection = None
-        if self.config and hasattr(self.config.search.vector, "qdrant"):
-            primary_collection = (
-                self.config.search.vector.qdrant.collection_name or None
-            )
-
-        allowed_bases = {"chunks", "chunks_multi"}
-        self.qdrant_allowed_collections = set()
-
-        if primary_collection:
-            self.qdrant_allowed_collections.add(primary_collection)
-            # If the configured collection is namespaced and starts with a known base,
-            # also allow the base (non-namespaced) for legacy cleanup.
-            for base in allowed_bases:
-                if primary_collection.startswith(base):
-                    self.qdrant_allowed_collections.add(base)
-
-        # Always include legacy bases explicitly
-        self.qdrant_allowed_collections.update(allowed_bases)
+        # Qdrant collection patterns for multi-embedder cleanup
+        # Pattern-based: matches chunks, chunks_multi, and all chunks_multi_* variants
+        self.qdrant_collection_prefixes = ["chunks_multi", "chunks"]
+        # Explicitly skip test collections
+        self.qdrant_skip_prefixes = ["test_"]
 
     def _log(self, message: str, level: str = "info"):
         """Log message to console and report."""
@@ -190,6 +182,25 @@ class DatabaseCleaner:
                 "details": details,
             }
         )
+
+    def _should_clean_collection(self, collection_name: str) -> bool:
+        """
+        Determine if a Qdrant collection should be cleaned based on pattern matching.
+
+        Returns True for ingestion collections (chunks, chunks_multi, chunks_multi_*).
+        Returns False for test collections and unknown collections.
+        """
+        # Skip test collections
+        for skip_prefix in self.qdrant_skip_prefixes:
+            if collection_name.startswith(skip_prefix):
+                return False
+
+        # Include collections matching our ingestion patterns
+        for prefix in self.qdrant_collection_prefixes:
+            if collection_name == prefix or collection_name.startswith(f"{prefix}_"):
+                return True
+
+        return False
 
     @staticmethod
     def _describe_vector_config(vector_config: Any) -> str:
@@ -524,14 +535,16 @@ class DatabaseCleaner:
             return True
 
         self._log("", "header")
-        self._log("Qdrant Vector Cleanup", "header")
+        self._log("Qdrant Vector Cleanup (Multi-Embedder)", "header")
         self._log("-" * 60, "header")
-        if self.qdrant_allowed_collections:
-            self._log(
-                "Target collections: "
-                + ", ".join(sorted(self.qdrant_allowed_collections)),
-                "info",
-            )
+        self._log(
+            f"Target patterns: {', '.join(self.qdrant_collection_prefixes)}[_*]",
+            "info",
+        )
+        self._log(
+            f"Skip patterns: {', '.join(self.qdrant_skip_prefixes)}*",
+            "info",
+        )
 
         try:
             qdrant = QdrantClient(
@@ -542,10 +555,25 @@ class DatabaseCleaner:
             qdrant_before = {}
             qdrant_after = {}
 
+            # Discover which collections match our patterns
+            target_collections = [
+                c.name for c in collections if self._should_clean_collection(c.name)
+            ]
+            skipped_collections = [
+                c.name for c in collections if not self._should_clean_collection(c.name)
+            ]
+
+            self._log(
+                f"Found {len(target_collections)} target collection(s): {', '.join(sorted(target_collections))}"
+            )
+            if skipped_collections:
+                self._log(
+                    f"Skipping {len(skipped_collections)} collection(s): {', '.join(sorted(skipped_collections))}",
+                    "info",
+                )
+
             for coll in collections:
-                if coll.name not in self.qdrant_allowed_collections:
-                    # Skip non-ingestion collections to avoid damaging shared/metadata state
-                    self._log(f"Skipping non-target collection: {coll.name}", "info")
+                if not self._should_clean_collection(coll.name):
                     continue
                 try:
                     coll_info = qdrant.get_collection(coll.name)
@@ -796,9 +824,10 @@ class DatabaseCleaner:
             summary["databases_cleaned"].append(
                 {
                     "database": "qdrant",
-                    "collections_preserved": len(qdrant_before),
+                    "collections_cleaned": len(qdrant_before),
                     "total_vectors_deleted": total_vectors,
-                    "target_collections": sorted(self.qdrant_allowed_collections),
+                    "target_patterns": self.qdrant_collection_prefixes,
+                    "cleaned_collections": sorted(qdrant_before.keys()),
                 }
             )
 
