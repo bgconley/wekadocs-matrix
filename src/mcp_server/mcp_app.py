@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
 from uuid import uuid4
-from weakref import WeakKeyDictionary
 
 import mcp.types as types
 from mcp.server.lowlevel.server import Server, request_ctx
@@ -68,7 +67,7 @@ KB_SEARCH_DEFAULT_SNIPPET_CHARS = 280
 KB_SEARCH_MAX_SNIPPET_CHARS = 500
 SCRATCH_TTL_SECONDS = int(os.getenv("MCP_SCRATCH_TTL_SECONDS", "1800"))
 SCRATCH_MAX_BYTES = int(os.getenv("MCP_SCRATCH_MAX_BYTES", str(256 * 1024 * 1024)))
-_SESSION_IDS: "WeakKeyDictionary[Any, str]" = WeakKeyDictionary()
+# _SESSION_IDS removed - now using single _GLOBAL_SESSION_ID for stable scratch storage
 LEGACY_SEARCH_DOCUMENTATION_ENABLED = os.getenv(
     "ENABLE_LEGACY_SEARCH_DOCUMENTATION", "false"
 ).lower() in {"1", "true", "yes", "on"}
@@ -138,18 +137,26 @@ def _detect_transport(ctx: Any | None) -> str:
     return "stdio"
 
 
+# Single global session ID - MCP SDK doesn't provide stable session identifiers,
+# so we use one session ID for all operations to ensure scratch storage works
+_GLOBAL_SESSION_ID: Optional[str] = None
+
+
 def _resolve_session_id(ctx: Any | None, provided: Optional[str]) -> str:
+    """
+    Resolve session ID for scratch storage operations.
+
+    IMPORTANT: The MCP SDK's request_context.session object changes between calls,
+    making it unreliable as a dict key. We use a single global session ID to ensure
+    passage_ids stored by kb_search can be retrieved by kb_read_excerpt.
+    """
+    global _GLOBAL_SESSION_ID
     if provided:
         return provided
-    request_context = _get_request_context(ctx)
-    if not request_context:
-        return f"server-{uuid4()}"
-    session = request_context.session
-    existing = _SESSION_IDS.get(session)
-    if not existing:
-        existing = f"server-{uuid4()}"
-        _SESSION_IDS[session] = existing
-    return existing
+    # Use single global session ID for all operations
+    if _GLOBAL_SESSION_ID is None:
+        _GLOBAL_SESSION_ID = f"server-{uuid4()}"
+    return _GLOBAL_SESSION_ID
 
 
 def _finalize_payload(
@@ -942,14 +949,20 @@ GRAPH_FIRST_INSTRUCTIONS = (
     "then explore the neighborhood with expand_neighbors, get_paths_between, describe_nodes, "
     "list_children, list_parents, get_entities_for_sections, get_sections_for_entities, and compute_context_bundle. "
     "Only after mapping the graph should you call get_section_text for a small number of high-value sections, "
-    "using conservative max_bytes_per (4–8KB) and multiple small calls. Avoid unbounded text dumps and prefer cursors."
+    "using conservative max_bytes_per (4–8KB) and multiple small calls. Avoid unbounded text dumps and prefer cursors. "
+    "CRITICAL: Only state that a feature, API, or capability is supported if it is EXPLICITLY listed in the documentation. "
+    "Do NOT infer or assume support based on related concepts or similar terminology. "
+    "If something is not explicitly documented as supported, clearly state that you could not find documentation for it rather than guessing or fabricating details."
 )
 
 VECTOR_ONLY_INSTRUCTIONS = (
     "You are connected to the Weka docs via MCP vector search tools. "
     "Graph traversal is DISABLED - do NOT use expand_neighbors, get_paths_between, list_children, list_parents, or traverse_relationships. "
     "Use kb.search (or search_sections for legacy callers) to find relevant documentation, then get_section_text to retrieve content. "
-    "Complete your response in 2-3 tool calls maximum. Do not loop or retry failed graph operations."
+    "Complete your response in 2-3 tool calls maximum. Do not loop or retry failed graph operations. "
+    "CRITICAL: Only state that a feature, API, or capability is supported if it is EXPLICITLY listed in the documentation. "
+    "Do NOT infer or assume support based on related concepts or similar terminology. "
+    "If something is not explicitly documented as supported, clearly state that you could not find documentation for it rather than guessing or fabricating details."
 )
 
 # Select instructions based on neo4j_disabled config
@@ -973,18 +986,21 @@ KB_SEARCH_DESCRIPTION = (
     "Max: top_k=20, page_size=20, max_snippet_chars=500."
 )
 KB_READ_EXCERPT_DESCRIPTION = (
-    "Use when you already have a passage_id and need a bounded excerpt. "
-    "Do not use for discovery; use kb.search. "
+    "Use when you already have a passage_id from kb_search and need a bounded excerpt. "
+    "IMPORTANT: You MUST use the exact passage_id UUID returned by kb_search (e.g., '022160622467452ba0ccf501cbf771c1'), "
+    "NOT a constructed document path. Do not use for discovery; use kb.search first. "
     "Returns a capped excerpt (default 300 tokens, max 800, 32KB per call). "
     "If you need more context, call kb.expand_excerpt."
 )
 KB_EXPAND_EXCERPT_DESCRIPTION = (
-    "Use to expand around the last excerpt for a passage_id. "
+    "Use to expand around the last excerpt for a passage_id from kb_search. "
+    "IMPORTANT: You MUST use the exact passage_id UUID returned by kb_search. "
     "Do not use for discovery; use kb.search first. "
     "Returns a bounded expansion before/after the last excerpt window."
 )
 KB_EXTRACT_EVIDENCE_DESCRIPTION = (
     "Use to extract minimal quotes that answer a question from known passage_ids. "
+    "IMPORTANT: You MUST use the exact passage_id UUIDs returned by kb_search. "
     "Do not use for discovery; use kb.search to get passage_ids first. "
     "Returns at most max_quotes short quotes with citations."
 )
@@ -1000,7 +1016,7 @@ DIAGNOSTICS_RESOURCE_TEMPLATE = "wekadocs://diagnostics/{date}/{diagnostic_id}"
 
 PROMPT_DEFINITIONS = [
     {
-        "name": "graph.neighborhood_summary",
+        "name": "graph_neighborhood_summary",
         "description": "Explore local graph neighborhood and fetch small excerpts only as needed.",
         "content": (
             "Use search_sections to seed, expand with expand_neighbors (1–2 hops), "
@@ -1009,7 +1025,7 @@ PROMPT_DEFINITIONS = [
         ),
     },
     {
-        "name": "graph.connect_concepts",
+        "name": "graph_connect_concepts",
         "description": "Explain how two concepts/sections are related using graph paths.",
         "content": (
             "Find seeds for A and B via search_sections, call get_paths_between, "
@@ -1017,7 +1033,7 @@ PROMPT_DEFINITIONS = [
         ),
     },
     {
-        "name": "graph.task_context_bundle",
+        "name": "graph_task_context_bundle",
         "description": "Assemble a budgeted context bundle for a downstream task.",
         "content": (
             "Identify candidate sections via search + graph tools, then call "
@@ -1625,7 +1641,7 @@ async def kb_search(
         limit_reason = budget_reason
     partial = bool(payload.get("partial")) or budget_partial
     finalized = _finalize_payload(
-        "kb.search",
+        "kb_search",
         payload,
         tokens=tokens_estimate,
         bytes_=bytes_estimate,
@@ -1635,7 +1651,7 @@ async def kb_search(
         duplicates=payload.get("duplicates", 0),
     )
     diagnostic = await _emit_diagnostics(
-        tool_name="kb.search",
+        tool_name="kb_search",
         ctx=ctx,
         session_id=effective_session,
         diagnostic_context=diagnostic_context,
@@ -1667,7 +1683,11 @@ async def kb_read_excerpt(
     session_id: Optional[str] = None,
     ctx: Any | None = None,
 ) -> dict:
-    """Read a bounded excerpt from scratch storage."""
+    """Read a bounded excerpt from scratch storage.
+
+    Note: passage_id should be the UUID returned by kb_search, but if the AI
+    passes a section_id or constructed path instead, we'll try to find it.
+    """
 
     deps = _get_deps(ctx)
     if not deps.scratch:
@@ -1680,10 +1700,42 @@ async def kb_read_excerpt(
 
     effective_session = _resolve_session_id(ctx, session_id)
     entry = await deps.scratch.get(effective_session, passage_id)
+
+    # Fallback 1: if passage_id not found, search by section_id in all session entries
+    if not entry:
+        entry = await deps.scratch.find_by_section_id(effective_session, passage_id)
+
+    # Fallback 2: if still not found, try fetching directly from Neo4j via TextService
+    # This handles the search_sections → kb_read_excerpt path where scratch isn't populated
+    if not entry and deps.text:
+        try:
+            budget = _new_budget()
+            text_result = deps.text.get_section_text(
+                section_ids=[passage_id],
+                max_bytes_per=MAX_TEXT_BYTES_PER_CALL,
+                budget=budget,
+            )
+            if text_result.results and len(text_result.results) > 0:
+                neo4j_entry = text_result.results[0]
+                if neo4j_entry.get("text"):
+                    # Create a synthetic entry matching scratch format
+                    entry = {
+                        "text": neo4j_entry.get("text", ""),
+                        "section_id": passage_id,
+                        "doc_tag": neo4j_entry.get("doc_tag", ""),
+                        "heading": neo4j_entry.get("heading", ""),
+                    }
+                    logger.info(
+                        f"kb_read_excerpt: fetched section '{passage_id}' directly from Neo4j"
+                    )
+        except Exception as e:
+            logger.warning(f"kb_read_excerpt: Neo4j fallback failed: {e}")
+
     if not entry:
         return _error_payload(
             "INVALID_ARGUMENT",
-            f"Unknown passage_id '{passage_id}' for this session.",
+            f"Unknown passage_id '{passage_id}' for this session. "
+            f"Use passage_id from kb_search, or section_id from search_sections.",
         )
 
     max_tokens = max(1, min(int(max_tokens or 300), 800))
@@ -1695,7 +1747,7 @@ async def kb_read_excerpt(
     truncated = start_char + len(excerpt) < len(text)
     next_start_char = start_char + len(excerpt)
     if truncated:
-        excerpt_truncations_total.labels("kb.read_excerpt").inc()
+        excerpt_truncations_total.labels("kb_read_excerpt").inc()
 
     options = options or {}
     if str(options.get("format", "text")).lower() == "bullets":
@@ -1726,11 +1778,11 @@ async def kb_read_excerpt(
     }
     budget = _new_budget()
     tokens_estimate, bytes_estimate, budget_partial, budget_reason = _apply_budget(
-        payload, budget, "excerpt"
+        payload, budget, "snippets"  # excerpts use snippets budget phase
     )
     limit_reason = budget_reason if budget_partial else "none"
     finalized = _finalize_payload(
-        "kb.read_excerpt",
+        "kb_read_excerpt",
         payload,
         tokens=tokens_estimate,
         bytes_=bytes_estimate,
@@ -1763,10 +1815,42 @@ async def kb_expand_excerpt(
 
     effective_session = _resolve_session_id(ctx, session_id)
     entry = await deps.scratch.get(effective_session, passage_id)
+
+    # Fallback 1: if passage_id not found, search by section_id in scratch
+    if not entry:
+        entry = await deps.scratch.find_by_section_id(effective_session, passage_id)
+
+    # Fallback 2: if still not found, try fetching directly from Neo4j via TextService
+    if not entry and deps.text:
+        try:
+            budget = _new_budget()
+            text_result = deps.text.get_section_text(
+                section_ids=[passage_id],
+                max_bytes_per=MAX_TEXT_BYTES_PER_CALL,
+                budget=budget,
+            )
+            if text_result.results and len(text_result.results) > 0:
+                neo4j_entry = text_result.results[0]
+                if neo4j_entry.get("text"):
+                    entry = {
+                        "text": neo4j_entry.get("text", ""),
+                        "section_id": passage_id,
+                        "doc_tag": neo4j_entry.get("doc_tag", ""),
+                        "heading": neo4j_entry.get("heading", ""),
+                        "last_start_char": 0,
+                        "last_end_char": 0,
+                    }
+                    logger.info(
+                        f"kb_expand_excerpt: fetched section '{passage_id}' directly from Neo4j"
+                    )
+        except Exception as e:
+            logger.warning(f"kb_expand_excerpt: Neo4j fallback failed: {e}")
+
     if not entry:
         return _error_payload(
             "INVALID_ARGUMENT",
-            f"Unknown passage_id '{passage_id}' for this session.",
+            f"Unknown passage_id '{passage_id}' for this session. "
+            f"Use passage_id from kb_search, or section_id from search_sections.",
         )
 
     before_tokens = max(0, min(int(before_tokens or 150), 800))
@@ -1792,7 +1876,7 @@ async def kb_expand_excerpt(
     truncated = start_char > 0 or end_char < len(text)
     next_start_char = end_char
     if truncated:
-        excerpt_truncations_total.labels("kb.expand_excerpt").inc()
+        excerpt_truncations_total.labels("kb_expand_excerpt").inc()
 
     options = options or {}
     if str(options.get("format", "text")).lower() == "bullets":
@@ -1823,11 +1907,11 @@ async def kb_expand_excerpt(
     }
     budget = _new_budget()
     tokens_estimate, bytes_estimate, budget_partial, budget_reason = _apply_budget(
-        payload, budget, "excerpt"
+        payload, budget, "snippets"  # excerpts use snippets budget phase
     )
     limit_reason = budget_reason if budget_partial else "none"
     finalized = _finalize_payload(
-        "kb.expand_excerpt",
+        "kb_expand_excerpt",
         payload,
         tokens=tokens_estimate,
         bytes_=bytes_estimate,
@@ -1877,7 +1961,7 @@ async def kb_extract_evidence(
     )
     limit_reason = budget_reason if budget_partial else "none"
     finalized = _finalize_payload(
-        "kb.extract_evidence",
+        "kb_extract_evidence",
         payload,
         tokens=tokens_estimate,
         bytes_=bytes_estimate,
@@ -1937,11 +2021,11 @@ async def kb_retrieve_evidence(
     payload = {"quotes": quotes}
     budget = _new_budget()
     tokens_estimate, bytes_estimate, budget_partial, budget_reason = _apply_budget(
-        payload, budget, "evidence"
+        payload, budget, "snippets"  # evidence quotes use snippets budget phase
     )
     limit_reason = budget_reason if budget_partial else "none"
     finalized = _finalize_payload(
-        "kb.retrieve_evidence",
+        "kb_retrieve_evidence",
         payload,
         tokens=tokens_estimate,
         bytes_=bytes_estimate,
@@ -1950,7 +2034,7 @@ async def kb_retrieve_evidence(
         session_id=effective_session,
     )
     diagnostic = await _emit_diagnostics(
-        tool_name="kb.retrieve_evidence",
+        tool_name="kb_retrieve_evidence",
         ctx=ctx,
         session_id=effective_session,
         diagnostic_context=diagnostic_context,
@@ -2231,6 +2315,16 @@ async def describe_nodes(
     Recipe:
     - search_sections → expand_neighbors (1–2 hops) → describe_nodes → get_section_text (few)
     """
+    # Coerce types - MCP clients may send strings instead of proper types
+    if isinstance(node_ids, str):
+        import json as _json
+
+        node_ids = _json.loads(node_ids)
+    if isinstance(fields, str):
+        import json as _json
+
+        fields = _json.loads(fields)
+
     # Check if graph is disabled
     if _neo4j_disabled:
         logger.info("describe_nodes called but neo4j_disabled=true, returning early")
@@ -2272,6 +2366,18 @@ async def expand_neighbors(
     Recipe:
     - search_sections (seeds) → expand_neighbors → describe_nodes → get_section_text (few)
     """
+    # Coerce types - MCP clients may send strings instead of proper types
+    if isinstance(node_ids, str):
+        import json as _json
+
+        node_ids = _json.loads(node_ids)
+    if isinstance(max_hops, str):
+        max_hops = int(max_hops)
+    if isinstance(page_size, str):
+        page_size = int(page_size)
+    if isinstance(include_snippet, str):
+        include_snippet = include_snippet.lower() in ("true", "1", "yes")
+
     # Check if graph is disabled
     if _neo4j_disabled:
         logger.info("expand_neighbors called but neo4j_disabled=true, returning early")
@@ -2318,6 +2424,24 @@ async def get_paths_between(
     Recipe:
     - search_sections(A,B) → get_paths_between → describe_nodes → get_section_text (pivots)
     """
+    # Coerce types - MCP clients may send strings instead of proper types
+    if isinstance(a_ids, str):
+        import json as _json
+
+        a_ids = _json.loads(a_ids)
+    if isinstance(b_ids, str):
+        import json as _json
+
+        b_ids = _json.loads(b_ids)
+    if isinstance(rel_types, str):
+        import json as _json
+
+        rel_types = _json.loads(rel_types)
+    if isinstance(max_hops, str):
+        max_hops = int(max_hops)
+    if isinstance(max_paths, str):
+        max_paths = int(max_paths)
+
     # Check if graph is disabled
     if _neo4j_disabled:
         logger.info("get_paths_between called but neo4j_disabled=true, returning early")
@@ -2356,6 +2480,10 @@ async def list_children(
     Recipe:
     - search_sections → list_parents / list_children → describe_nodes → selective get_section_text
     """
+    # Coerce types - MCP clients may send strings instead of proper types
+    if isinstance(page_size, str):
+        page_size = int(page_size)
+
     # Check if graph is disabled
     if _neo4j_disabled:
         logger.info("list_children called but neo4j_disabled=true, returning early")
@@ -2389,6 +2517,12 @@ async def list_parents(
     Recipe:
     - search_sections → list_parents → describe_nodes → get_section_text (few)
     """
+    # Coerce types - MCP clients may send strings instead of proper types
+    if isinstance(section_ids, str):
+        import json as _json
+
+        section_ids = _json.loads(section_ids)
+
     # Check if graph is disabled
     if _neo4j_disabled:
         logger.info("list_parents called but neo4j_disabled=true, returning early")
@@ -2419,6 +2553,18 @@ async def get_entities_for_sections(
     Recipe:
     - search_sections → get_entities_for_sections → get_sections_for_entities → describe_nodes → get_section_text
     """
+    # Coerce types - MCP clients may send strings instead of proper types
+    if isinstance(section_ids, str):
+        import json as _json
+
+        section_ids = _json.loads(section_ids)
+    if isinstance(labels, str):
+        import json as _json
+
+        labels = _json.loads(labels)
+    if isinstance(max_per_section, str):
+        max_per_section = int(max_per_section)
+
     # Check if graph is disabled
     if _neo4j_disabled:
         logger.info(
@@ -2455,6 +2601,14 @@ async def get_sections_for_entities(
     Recipe:
     - search_sections → get_entities_for_sections → get_sections_for_entities → describe_nodes → get_section_text
     """
+    # Coerce types - MCP clients may send strings instead of proper types
+    if isinstance(entity_ids, str):
+        import json as _json
+
+        entity_ids = _json.loads(entity_ids)
+    if isinstance(max_per, str):
+        max_per = int(max_per)
+
     # Check if graph is disabled
     if _neo4j_disabled:
         logger.info(
@@ -2488,6 +2642,14 @@ async def get_section_text(
     - Use only after graph exploration has narrowed candidates
     - Prefer multiple small calls over one large fetch; you can override max_bytes_per when essential
     """
+    # MCP framework may pass arguments as strings - coerce to proper types
+    if isinstance(section_ids, str):
+        try:
+            section_ids = json.loads(section_ids)
+        except json.JSONDecodeError:
+            section_ids = [section_ids]  # Single ID passed as string
+    if isinstance(max_bytes_per, str):
+        max_bytes_per = int(max_bytes_per)
     deps = _get_deps(ctx)
     if not deps.text:
         raise RuntimeError("TextService not initialized")
@@ -2640,7 +2802,7 @@ def _tool_specs() -> list[dict[str, Any]]:
     )
     specs = [
         {
-            "name": "kb.search",
+            "name": "kb_search",
             "handler": kb_search,
             "description": KB_SEARCH_DESCRIPTION,
             "input_schema": KB_SEARCH_INPUT_SCHEMA,
@@ -2648,7 +2810,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "kb.read_excerpt",
+            "name": "kb_read_excerpt",
             "handler": kb_read_excerpt,
             "description": KB_READ_EXCERPT_DESCRIPTION,
             "input_schema": KB_EXCERPT_INPUT_SCHEMA,
@@ -2656,7 +2818,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "kb.expand_excerpt",
+            "name": "kb_expand_excerpt",
             "handler": kb_expand_excerpt,
             "description": KB_EXPAND_EXCERPT_DESCRIPTION,
             "input_schema": KB_EXPAND_INPUT_SCHEMA,
@@ -2664,7 +2826,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "kb.extract_evidence",
+            "name": "kb_extract_evidence",
             "handler": kb_extract_evidence,
             "description": KB_EXTRACT_EVIDENCE_DESCRIPTION,
             "input_schema": KB_EXTRACT_INPUT_SCHEMA,
@@ -2672,7 +2834,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "kb.retrieve_evidence",
+            "name": "kb_retrieve_evidence",
             "handler": kb_retrieve_evidence,
             "description": KB_RETRIEVE_EVIDENCE_DESCRIPTION,
             "input_schema": KB_RETRIEVE_INPUT_SCHEMA,
@@ -2680,7 +2842,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "graph.describe",
+            "name": "graph_describe",
             "handler": describe_nodes,
             "description": _tool_description(describe_nodes, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2688,7 +2850,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "graph.expand",
+            "name": "graph_expand",
             "handler": expand_neighbors,
             "description": _tool_description(expand_neighbors, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2696,7 +2858,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "graph.paths",
+            "name": "graph_paths",
             "handler": get_paths_between,
             "description": _tool_description(get_paths_between, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2704,7 +2866,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "graph.parents",
+            "name": "graph_parents",
             "handler": list_parents,
             "description": _tool_description(list_parents, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2712,7 +2874,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "graph.children",
+            "name": "graph_children",
             "handler": list_children,
             "description": _tool_description(list_children, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2720,7 +2882,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "graph.entities_for_sections",
+            "name": "graph_entities_for_sections",
             "handler": get_entities_for_sections,
             "description": _tool_description(get_entities_for_sections, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2728,7 +2890,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "graph.sections_for_entities",
+            "name": "graph_sections_for_entities",
             "handler": get_sections_for_entities,
             "description": _tool_description(get_sections_for_entities, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2853,7 +3015,27 @@ def _summary_for_tool(name: str, result: dict) -> str:
         message = result.get("error", {}).get("message", "error")
         return f"{name} error: {message}"
     if "results" in result and isinstance(result["results"], list):
-        return f"{name} returned {len(result['results'])} results."
+        results = result["results"]
+        count = len(results)
+        # For kb_search, explicitly list passage_ids to help the AI use the correct IDs
+        if name == "kb_search" and count > 0:
+            passage_ids = [r.get("passage_id") for r in results if r.get("passage_id")]
+            if passage_ids:
+                ids_str = ", ".join(passage_ids[:5])  # Show up to 5 IDs
+                return (
+                    f"{name} returned {count} results. "
+                    f"Use these passage_ids with kb_read_excerpt: [{ids_str}]"
+                )
+        # For search_sections, explicitly list section_ids
+        if name == "search_sections" and count > 0:
+            section_ids = [r.get("section_id") for r in results if r.get("section_id")]
+            if section_ids:
+                ids_str = ", ".join(section_ids[:3])  # Show up to 3 IDs (they're long)
+                return (
+                    f"{name} returned {count} results. "
+                    f"Use these section_ids with get_section_text: [{ids_str[:150]}...]"
+                )
+        return f"{name} returned {count} results."
     if "quotes" in result and isinstance(result["quotes"], list):
         return f"{name} returned {len(result['quotes'])} quotes."
     if "nodes" in result and isinstance(result["nodes"], list):
@@ -2887,7 +3069,7 @@ def build_mcp_server() -> Server:
                     name=spec["name"],
                     description=spec["description"],
                     inputSchema=spec["input_schema"],
-                    outputSchema=spec["output_schema"],
+                    # outputSchema removed - Claude Desktop doesn't support it
                     annotations=spec.get("annotations"),
                 )
             )

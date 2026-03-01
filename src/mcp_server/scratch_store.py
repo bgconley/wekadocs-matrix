@@ -84,6 +84,38 @@ class ScratchStore:
             self._entries.move_to_end(key)
             return dict(entry.payload)
 
+    async def find_by_section_id(
+        self, session_id: str, section_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Fallback lookup: find entry by section_id within a session.
+
+        This handles cases where the AI passes section_id instead of passage_id.
+        O(n) search but tolerable given limited entries per session.
+        """
+        now = time.time()
+        async with self._lock:
+            self._evict_expired_locked(now)
+            for key, entry in self._entries.items():
+                if key[0] != session_id:
+                    continue
+                payload = entry.payload
+                # Check if section_id matches (exact or suffix match for doc paths)
+                entry_section_id = payload.get("section_id", "")
+                if entry_section_id == section_id:
+                    entry.last_access = now
+                    self._entries.move_to_end(key)
+                    return dict(payload)
+                # Also check partial match (AI might pass truncated IDs)
+                if section_id and len(section_id) >= 8:
+                    if entry_section_id.startswith(
+                        section_id
+                    ) or entry_section_id.endswith(section_id):
+                        entry.last_access = now
+                        self._entries.move_to_end(key)
+                        return dict(payload)
+            return None
+
     async def update(
         self, session_id: str, passage_id: str, updates: Dict[str, Any]
     ) -> bool:
