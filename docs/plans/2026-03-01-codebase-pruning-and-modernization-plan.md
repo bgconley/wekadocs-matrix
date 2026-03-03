@@ -54,7 +54,7 @@ Phase B.6: Resolve remaining issues  ✓ DONE (2026-03-02)
   B.6.2: CLI kept → progress.py reclassified STANDALONE
   B.6.3: Migration script → RETIRED (all provisions subsumed)
   B.6.4: CI guard script created (scripts/ci/check_dead_imports.py)
-  B.6.5: Phase F test scope updated (19 files documented)
+  B.6.5: Phase F test scope updated (20 files documented)
 
 Phase C: Pull forward active logic   ← NEXT
   Extract active methods from legacy modules into clean new modules.
@@ -468,7 +468,7 @@ This prevents regressions where active code accidentally starts depending on dea
 
 ### B.6.5: Update Phase F test retirement scope — ✓ DONE
 
-Phase F now accounts for all 19 test files identified in Finding 4 (see Section 10).
+Phase F now accounts for all 20 test files (19 from Finding 4 + 1 added after B.6 reclassifications; see Section 10).
 
 ---
 
@@ -684,7 +684,7 @@ After Phase C.2 (pulling forward to `ingestion_validation.py`):
 | C (Pull forward) | Moderate — new modules must be exact ports | Side-by-side diff of ported logic; run integration tests |
 | D (Prune modules) | Moderate — scripts and tests depend on "dead" symbols | Must resolve B.6.2 (CLI), B.6.3 (scripts) first |
 | E (Prune methods) | Moderate — must not remove active methods | Annotations + grep double-check before each removal |
-| F (Retire tests) | Low — 19 test files for dead code | Split active vs legacy suites; skip rather than delete if uncertain |
+| F (Retire tests) | Low — 20 test files for dead code | Split active vs legacy suites; skip rather than delete if uncertain |
 
 ---
 
