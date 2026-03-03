@@ -5,6 +5,9 @@ CI guard: detect ACTIVE/MIXED/STANDALONE modules importing DEAD/PHANTOM modules.
 Scans all @status annotations in src/ and checks that no live module imports
 from a dead or phantom module. Exits non-zero if violations are found.
 
+Also enforces allowlist hygiene: stale allowlist entries (that no longer
+correspond to real violations) cause a failure to prevent accumulation.
+
 Usage:
     python scripts/ci/check_dead_imports.py
     python scripts/ci/check_dead_imports.py --verbose
@@ -29,12 +32,10 @@ STATUS_PATTERN = re.compile(r"#\s*@status:\s*(\S+)")
 # Known violations that are intentional and scheduled for cleanup.
 # Format: (source_relative_path, target_relative_path)
 # Remove entries as they are resolved in later phases.
+# IMPORTANT: Stale entries (no longer matching real violations) will fail CI.
 ALLOWLIST = {
     # MIXED module — dead import is inside dead method, cleaned in Phase E
     ("src/ingestion/build_graph.py", "src/ingestion/reconcile.py"),
-    # Lazy import inside config-gated _parse_with_shadow_comparison()
-    # shadow_comparison only loads when shadow_mode=true (never in prod)
-    ("src/ingestion/parsers/__init__.py", "src/ingestion/parsers/shadow_comparison.py"),
 }
 
 
@@ -55,13 +56,20 @@ def get_module_status(filepath: Path) -> str | None:
 
 
 def get_imports_from_file(filepath: Path) -> list[tuple[int, str]]:
-    """Extract all 'from src.X import Y' lines with line numbers."""
+    """Extract all src.* import lines with line numbers.
+
+    Handles both forms:
+        from src.foo.bar import baz
+        import src.foo.bar
+    """
     imports = []
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             for lineno, line in enumerate(f, 1):
                 stripped = line.strip()
                 if stripped.startswith("from src.") and "import" in stripped:
+                    imports.append((lineno, stripped))
+                elif stripped.startswith("import src."):
                     imports.append((lineno, stripped))
     except (OSError, UnicodeDecodeError):
         pass
@@ -71,10 +79,17 @@ def get_imports_from_file(filepath: Path) -> list[tuple[int, str]]:
 def module_path_from_import(import_line: str) -> str | None:
     """Extract the module path from an import statement.
 
-    'from src.neo.contract_checks import foo' -> 'src/neo/contract_checks.py'
-    'from src.learning import bar' -> 'src/learning/__init__.py'
+    Handles:
+        'from src.neo.contract_checks import foo' -> 'src/neo/contract_checks.py'
+        'from src.learning import bar' -> 'src/learning/__init__.py'
+        'import src.neo.contract_checks' -> 'src/neo/contract_checks.py'
+        'import src.learning' -> 'src/learning/__init__.py'
     """
+    # Try 'from X import Y' form first
     match = re.match(r"from\s+(src\.[^\s]+)\s+import", import_line)
+    if not match:
+        # Try 'import X' form
+        match = re.match(r"import\s+(src\.[^\s,]+)", import_line)
     if not match:
         return None
     dotted = match.group(1)
@@ -90,8 +105,12 @@ def module_path_from_import(import_line: str) -> str | None:
     return None
 
 
-def check_violations(verbose: bool = False) -> list[dict]:
-    """Scan for ACTIVE→DEAD import violations."""
+def check_violations(verbose: bool = False) -> tuple[list[dict], set[tuple]]:
+    """Scan for ACTIVE→DEAD import violations.
+
+    Returns:
+        (violations, used_allowlist_entries)
+    """
     # Build status map
     status_map: dict[str, str] = {}
     for py_file in SRC_DIR.rglob("*.py"):
@@ -101,6 +120,7 @@ def check_violations(verbose: bool = False) -> list[dict]:
             status_map[rel] = status
 
     violations = []
+    used_allowlist: set[tuple] = set()
 
     for filepath, source_status in status_map.items():
         if source_status not in LIVE_STATUSES:
@@ -116,7 +136,9 @@ def check_violations(verbose: bool = False) -> list[dict]:
 
             target_status = status_map.get(target_path)
             if target_status and target_status in DEAD_STATUSES:
-                if (filepath, target_path) in ALLOWLIST:
+                key = (filepath, target_path)
+                if key in ALLOWLIST:
+                    used_allowlist.add(key)
                     continue
                 violations.append(
                     {
@@ -129,7 +151,7 @@ def check_violations(verbose: bool = False) -> list[dict]:
                     }
                 )
 
-    return violations
+    return violations, used_allowlist
 
 
 def main():
@@ -139,20 +161,36 @@ def main():
     )
     args = parser.parse_args()
 
-    violations = check_violations(verbose=args.verbose)
+    violations, used_allowlist = check_violations(verbose=args.verbose)
 
-    if not violations:
-        print("OK: No ACTIVE->DEAD import violations found in src/")
-        return 0
+    exit_code = 0
 
-    print(f"FAIL: {len(violations)} import violation(s) found:\n")
-    for v in violations:
-        print(f"  {v['source']}:{v['line']}")
-        print(f"    [{v['source_status']}] imports [{v['target_status']}]")
-        print(f"    {v['import']}")
-        print()
+    # Check for stale allowlist entries
+    stale = ALLOWLIST - used_allowlist
+    if stale:
+        print(f"FAIL: {len(stale)} stale allowlist entry/entries:\n")
+        for src, tgt in sorted(stale):
+            print(f"  {src} -> {tgt}")
+            print("  (no longer a real violation — remove from ALLOWLIST)")
+            print()
+        exit_code = 1
 
-    return 1
+    # Check for violations
+    if violations:
+        print(f"FAIL: {len(violations)} import violation(s) found:\n")
+        for v in violations:
+            print(f"  {v['source']}:{v['line']}")
+            print(f"    [{v['source_status']}] imports [{v['target_status']}]")
+            print(f"    {v['import']}")
+            print()
+        exit_code = 1
+
+    if exit_code == 0:
+        allowed = len(used_allowlist)
+        suffix = f" ({allowed} allowlisted)" if allowed else ""
+        print(f"OK: No ACTIVE->DEAD import violations found in src/{suffix}")
+
+    return exit_code
 
 
 if __name__ == "__main__":
