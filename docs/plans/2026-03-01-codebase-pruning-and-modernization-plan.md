@@ -70,7 +70,7 @@ Phase E: Prune dead methods in active modules
 
 Phase F: Retire dead tests
   Remove or skip tests that exercise dead code paths.
-  19 test files currently import from DEAD modules.
+  20 test files currently import from DEAD modules.
 ```
 
 ---
@@ -88,7 +88,7 @@ Phase F: Retire dead tests
 **Tags:**
 | Tag | Meaning |
 |-----|---------|
-| `@status` | ACTIVE / DEAD / PHANTOM / DORMANT / MIXED / STANDALONE / PHANTOM-SOURCE |
+| `@status` | ACTIVE / DEAD / PHANTOM / DORMANT / MIXED / STANDALONE / PHANTOM-SOURCE / TEST_ONLY / RETIRED |
 | `@reason` | Why this status |
 | `@superseded-by` | What replaced this code |
 | `@called-by` | Primary production caller |
@@ -96,6 +96,20 @@ Phase F: Retire dead tests
 | `@gated-by` | Config key that enables it |
 | `@pull-forward` | What active logic needs extraction |
 | `@safe-to-delete` | Explicit go/no-go for deletion |
+| `@retired-date` | When a script/module was retired |
+
+**Status taxonomy:**
+| Status | Meaning | Delete in Phase D? |
+|--------|---------|-------------------|
+| ACTIVE | In production use | No |
+| DEAD | Zero active callers | Yes |
+| PHANTOM | Loaded via `__init__` but never called | Yes (after `__init__` cleanup) |
+| PHANTOM-SOURCE | `__init__.py` that causes phantom loading | Clean imports |
+| DORMANT | Config-gated, not active in default config | Keep |
+| MIXED | File has both active and dead symbols | Trim dead parts in Phase E |
+| STANDALONE | Works independently, not in main runtime | Policy decision |
+| TEST_ONLY | Only used by test infrastructure | Keep with tests |
+| RETIRED | Script/module that completed its purpose | Keep annotated, add runtime guard |
 
 **Files to annotate (complete list):**
 
@@ -283,12 +297,12 @@ from .connections import ConnectionManager, close_connections, ...
 | Status | Count | Description |
 |--------|-------|-------------|
 | ACTIVE | 110 | Module headers (107) + entry point markers (3 `ACTIVE -- ENTRY POINT`) |
-| DEAD | 93 | 35 module headers + 58 method/class-level annotations within MIXED files |
+| DEAD | 93→92 | 34 module headers + 58 method/class-level annotations within MIXED files |
 | MIXED | 4 | `build_graph.py`, `saga.py`, `contract_checks.py`, `connections.py` |
 | STANDALONE | 2→3 | `stdio_server.py`, `cli.py`, `progress.py` (B.6.2) |
-| DORMANT | 2 | `markdown.py` (legacy parser), `ner_gliner.py` (config-gated) |
+| DORMANT | 2→3 | `markdown.py`, `ner_gliner.py`, `shadow_comparison.py` (all config-gated) |
 | TEST_ONLY | 1 | `templates/advanced/schemas.py` |
-| PHANTOM | 1→0 | `shadow_comparison.py` reclassified to DEAD (B.6.1) |
+| PHANTOM | 1→0 | `shadow_comparison.py` reclassified to DORMANT (B.6.1) |
 | PHANTOM-SOURCE | 0 | All cleaned in Phase B |
 | **Total** | **213** | **annotations across all `src/` files** |
 
@@ -620,7 +634,7 @@ After Phase C.2 (pulling forward to `ingestion_validation.py`):
 
 ## 10. Phase F: Retire Dead Tests
 
-**Scope:** 19 test files currently import from modules annotated `@status: DEAD` (identified in code review, Finding 4). These must be retired, updated, or isolated before Phase D deletions.
+**Scope:** 20 test files currently import from modules annotated `@status: DEAD` (identified in code review Finding 4, updated after B.6 reclassifications). These must be retired, updated, or isolated before Phase D deletions.
 
 **Strategy:** Split into active vs legacy test suites. Do not gate pruning on legacy test pass.
 
@@ -645,8 +659,9 @@ After Phase C.2 (pulling forward to `ingestion_validation.py`):
 | 15 | `tests/ingestion/test_per_call_embedding_overrides.py` | `src.ingestion.api` | Review — update import path or delete |
 | 16 | `tests/unit/test_graph_enhancements.py` | `src.neo.graph_enhancements` | Delete |
 | 17 | `tests/p6_t1_test.py` | `src.ingestion.auto.watcher` + dead auto modules | Keep watcher tests; remove dead module tests |
-| 18 | `tests/p6_t2_test.py` | `src.ingestion.auto.progress` + dead auto modules | Delete (or keep if CLI is maintained — see B.6.2) |
-| 19 | `tests/p6_t4_test.py` | `src.ingestion.auto.verification` | Delete |
+| 18 | `tests/p6_t2_test.py` | `src.ingestion.auto.orchestrator` (dead) | Delete |
+| 19 | `tests/p6_t4_test.py` | `src.ingestion.auto.verification` + `report` | Delete |
+| 20 | `tests/neo/test_explain_guard.py` | `src.neo.explain_guard` | Delete |
 
 ### Additional test considerations
 
@@ -665,7 +680,7 @@ After Phase C.2 (pulling forward to `ingestion_validation.py`):
 |-------|------|-----------|
 | A (Annotate) | Zero — no code changes | Comments only. **DONE.** |
 | B (__init__ cleanup) | Low — may break test imports | Run full test suite; update imports. **DONE.** |
-| B.6 (Prerequisites) | Low — classification decisions | Explicit policy on CLI/progress, migration scripts |
+| B.6 (Prerequisites) | Low — classification decisions | Explicit policy on CLI/progress, migration scripts. **DONE.** |
 | C (Pull forward) | Moderate — new modules must be exact ports | Side-by-side diff of ported logic; run integration tests |
 | D (Prune modules) | Moderate — scripts and tests depend on "dead" symbols | Must resolve B.6.2 (CLI), B.6.3 (scripts) first |
 | E (Prune methods) | Moderate — must not remove active methods | Annotations + grep double-check before each removal |
