@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: factory.py (registered provider)
+# =============================================================================
 """
 No-op reranker implementation.
 Phase 7C: Passthrough reranker that preserves original ordering.

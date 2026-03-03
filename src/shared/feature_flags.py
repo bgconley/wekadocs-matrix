@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: 0 src/ imports; FeatureFlagsConfig is defined in config.py, not here
+# @safe-to-delete: Yes
+# =============================================================================
 """
 Feature Flags for Runtime Toggles
 Phase 5 Task 5.4 - Production Deployment

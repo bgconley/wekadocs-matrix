@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: atomic.py, build_graph.py
+# =============================================================================
 """
 Chunk utilities for Phase 7E-1 (Dual-Label Idempotent Ingestion).
 

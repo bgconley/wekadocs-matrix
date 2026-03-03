@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: semantic_chunker.py
+# =============================================================================
 """
 Adapter to use Snowflake Arctic embedding service with Chonkie's SemanticChunker.
 

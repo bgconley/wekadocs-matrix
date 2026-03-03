@@ -1,3 +1,9 @@
+# =============================================================================
+# @status: STANDALONE
+# @reason: Operator CLI tool (ingestctl) for queue management. Run via
+#          python -m src.ingestion.auto.cli. Not in docker-compose; no other
+#          src/ module imports it. Depends on auto.queue and auto.progress.
+# =============================================================================
 """
 Phase 6, Task 6.3: CLI & Progress UI
 

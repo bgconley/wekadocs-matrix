@@ -1,3 +1,9 @@
+# =============================================================================
+# @status: DEAD
+# @reason: PostIngestVerifier is never instantiated in the production path.
+#          No longer phantom-loaded after Phase B __init__.py cleanup.
+# @loaded-via: (none — orchestrator.py no longer loaded via auto/__init__.py)
+# =============================================================================
 """
 Phase 6, Task 6.4: Post-Ingest Verification
 

@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: github.py, manager.py
+# =============================================================================
 """
 Base connector class for external systems integration.
 Implements polling, webhooks, queue-based ingestion, and circuit breaker integration.

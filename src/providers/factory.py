@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: atomic.py, hybrid_retrieval.py, main.py
+# =============================================================================
 """
 Provider factory for ENV-selectable embedding and rerank providers.
 Phase 7C, Task 7C.1: Factory pattern for docker-compose friendly configuration.

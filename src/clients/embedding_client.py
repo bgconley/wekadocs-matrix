@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: providers/embeddings/bge_m3_service.py
+# =============================================================================
 from __future__ import annotations
 
 import os

@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: parsers/__init__.py (default engine)
+# =============================================================================
 """
 markdown-it-py based parser for WekaDocs RAG pipeline.
 

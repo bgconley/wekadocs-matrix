@@ -1,3 +1,11 @@
+# =============================================================================
+# @status: DEAD
+# @reason: Orchestrator class is never instantiated in the production path.
+#          Superseded by worker.py -> AtomicIngestionCoordinator (atomic.py).
+#          No longer phantom-loaded after Phase B __init__.py cleanup.
+# @loaded-via: (none — removed from auto/__init__.py in Phase B)
+# @superseded-by: src/ingestion/atomic.py:AtomicIngestionCoordinator
+# =============================================================================
 # Implements Phase 6, Task 6.2 (Orchestrator - resumable, idempotent job processing)
 # See: /docs/app-spec-phase6.md
 # See: /docs/implementation-plan-phase-6.md → Task 6.2

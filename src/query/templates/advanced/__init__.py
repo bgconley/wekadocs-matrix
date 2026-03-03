@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: (package init)
+# =============================================================================
 """
 Advanced query templates with schemas and guardrails.
 Phase 4, Task 4.1

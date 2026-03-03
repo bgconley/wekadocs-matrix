@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: main.py
+# =============================================================================
 """
 Phase 7E-4: Health Check System
 Verifies Neo4j schema v2.2, Qdrant 1024-D, embedding configuration at startup

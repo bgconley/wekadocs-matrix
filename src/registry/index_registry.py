@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: Entire registry package is orphaned; 0 imports from any active src/ module
+# @safe-to-delete: Yes
+# =============================================================================
 """
 Index registry with dimension enforcement.
 Phase 7C, Task 7C.2: Prevent cross-dimension writes/queries.

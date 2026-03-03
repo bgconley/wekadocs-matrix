@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: 0 external src/ imports; superseded by src/ingestion/structural_edges.py
+# @safe-to-delete: Yes
+# =============================================================================
 """
 Per-document structural edge builder for Neo4j graph.
 

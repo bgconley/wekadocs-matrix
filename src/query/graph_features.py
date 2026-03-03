@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: Only imported by diffusion_reranker.py (also dead); graph feature extraction never integrated
+# @safe-to-delete: Yes
+# =============================================================================
 """
 Graph feature extraction for candidate reranking.
 

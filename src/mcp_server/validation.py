@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: 0 src/ imports; never wired into mcp_app.py or main.py
+# @safe-to-delete: Yes
+# =============================================================================
 """
 Cypher Validation System (Task 2.2)
 Implements regex guards + EXPLAIN plan gates for safe query execution.

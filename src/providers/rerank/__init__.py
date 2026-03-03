@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: (package init)
+# =============================================================================
 """
 Rerank provider package.
 Phase 7C: Reranking providers for post-ANN candidate refinement.

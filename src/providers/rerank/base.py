@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: factory.py (protocol definition)
+# =============================================================================
 """
 Base rerank provider protocol.
 Phase 7C: Defines the interface for all reranking providers.

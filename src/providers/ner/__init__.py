@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: (package init)
+# =============================================================================
 """
 NER (Named Entity Recognition) provider package.
 GLiNER integration for zero-shot entity extraction.

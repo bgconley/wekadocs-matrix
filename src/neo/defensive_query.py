@@ -1,3 +1,10 @@
+# =============================================================================
+# @status: DEAD
+# @reason: No longer phantom-loaded after Phase B neo/__init__.py cleanup.
+#          run_defensive_query and run_existence_check are never called by
+#          active code.
+# @safe-to-delete: Yes (verify no test-only usage first)
+# =============================================================================
 """Defensive query wrapper with logging for empty results.
 
 This module provides a query wrapper that detects and logs

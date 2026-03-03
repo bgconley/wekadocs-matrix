@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: disambiguation.py (eager top-level import)
+# =============================================================================
 """
 GLiNER Service for zero-shot Named Entity Recognition.
 

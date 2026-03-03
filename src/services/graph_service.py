@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: mcp_app.py
+# =============================================================================
 """
 GraphService implements projection-only Cypher queries with cursor-aware paging.
 

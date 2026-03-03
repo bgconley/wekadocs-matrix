@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: (package init)
+# =============================================================================
 """
 Phase 7E-4: Observability & SLOs
 Health checks, metrics, SLO monitoring for GraphRAG v2.1 (Jina v3)

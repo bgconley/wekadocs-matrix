@@ -1,3 +1,10 @@
+# =============================================================================
+# @status: MIXED
+# @reason: GraphContractChecker.__init__ and find_documents_needing_repair are
+#          ACTIVE (called by worker.py:256,264). run_all_checks,
+#          run_contract_checks, and all 6 individual check methods are DEAD.
+# @called-by: worker.py:256 (lazy import)
+# =============================================================================
 """
 Graph contract checks for CI gate validation and runtime monitoring.
 
@@ -99,6 +106,7 @@ class GraphContractChecker:
         self.session = session
         self.sample_limit = sample_limit
 
+    # @status: DEAD — only called by run_contract_checks (dead)
     def run_all_checks(
         self,
         *,
@@ -147,6 +155,7 @@ class GraphContractChecker:
 
         return result
 
+    # @status: DEAD — only called by run_all_checks (dead)
     def check_chunk_document_membership(self) -> CheckResult:
         """
         Check that each chunk belongs to exactly one document via HAS_CHUNK.
@@ -181,6 +190,7 @@ class GraphContractChecker:
             message="All chunks have exactly one document membership",
         )
 
+    # @status: DEAD — only called by run_all_checks (dead)
     def check_next_chunk_no_branching(self) -> CheckResult:
         """
         Check that no chunk has multiple outgoing NEXT_CHUNK edges.
@@ -214,6 +224,7 @@ class GraphContractChecker:
             message="No NEXT_CHUNK branching detected",
         )
 
+    # @status: DEAD — only called by run_all_checks (dead)
     def check_next_chunk_no_cycles(self, max_depth: int = 50) -> CheckResult:
         """
         Check that NEXT_CHUNK relationships have no cycles.
@@ -248,6 +259,7 @@ class GraphContractChecker:
             message="No NEXT_CHUNK cycles detected",
         )
 
+    # @status: DEAD — only called by run_all_checks (dead)
     def check_hierarchy_coverage(self) -> CheckResult:
         """
         Check that chunks with parent_path have parent_chunk_id resolved.
@@ -314,6 +326,7 @@ class GraphContractChecker:
             sample_violations=sample_violations,
         )
 
+    # @status: DEAD — only called by run_all_checks (dead)
     def check_entity_normalization(self) -> CheckResult:
         """
         Check that all entities have normalized_name set.
@@ -356,6 +369,7 @@ class GraphContractChecker:
             message="All entities have normalized_name",
         )
 
+    # @status: DEAD — only called by run_all_checks (dead)
     def check_chunk_id_uniqueness(self) -> CheckResult:
         """
         Check that chunk_id values are unique.
@@ -419,6 +433,7 @@ class GraphContractChecker:
         return [record["doc_id"] for record in result]
 
 
+# @status: DEAD — 0 external callers in src/
 def run_contract_checks(
     session,
     *,

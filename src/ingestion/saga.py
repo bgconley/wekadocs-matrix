@@ -1,3 +1,12 @@
+# =============================================================================
+# @status: MIXED
+# @reason: SagaContext, ValidationResult, and IngestionValidator are ACTIVE
+#          (used by atomic.py). SagaCoordinator, IngestionSagaBuilder, and all
+#          saga step/status classes are DEAD — atomic.py reimplemented saga
+#          execution inline rather than using these abstractions.
+# @called-by: atomic.py:AtomicIngestionCoordinator
+# @pull-forward: Extract active symbols into src/ingestion/ingestion_validation.py
+# =============================================================================
 """
 Saga Pattern Implementation for Atomic Neo4j + Qdrant Synchronization.
 
@@ -26,6 +35,7 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
+# @status: DEAD — atomic.py has its own status tracking
 class SagaStatus(Enum):
     """Status of a saga execution."""
 
@@ -37,6 +47,7 @@ class SagaStatus(Enum):
     FAILED = "failed"
 
 
+# @status: DEAD — atomic.py has its own step tracking
 class StepStatus(Enum):
     """Status of an individual saga step."""
 
@@ -49,6 +60,7 @@ class StepStatus(Enum):
     SKIPPED = "skipped"
 
 
+# @status: DEAD — atomic.py constructs results directly
 @dataclass
 class SagaStepResult:
     """Result of executing a saga step."""
@@ -59,6 +71,7 @@ class SagaStepResult:
     duration_ms: int = 0
 
 
+# @status: DEAD — atomic.py constructs saga steps inline
 @dataclass
 class SagaStep:
     """
@@ -114,6 +127,7 @@ class SagaContext:
     errors: List[str] = field(default_factory=list)
 
 
+# @status: DEAD — atomic.py:_execute_atomic_saga reimplements this inline
 class SagaCoordinator:
     """
     Coordinates execution of saga steps with compensation on failure.
@@ -325,12 +339,14 @@ class SagaCoordinator:
             )
 
 
+# @status: DEAD — never raised by active code
 class SagaStepFailure(Exception):
     """Raised when a saga step fails during execution."""
 
     pass
 
 
+# @status: DEAD — never raised by active code
 class SagaCompensationFailure(Exception):
     """Raised when compensation fails, requiring manual intervention."""
 
@@ -365,6 +381,7 @@ T = TypeVar("T")
 # AtomicIngestionCoordinator's inline approach trades flexibility for performance.
 
 
+# @status: DEAD — never instantiated by any active code path despite "NOT dead code" comment
 class IngestionSagaBuilder:
     """
     Factory for building ingestion sagas with Neo4j and Qdrant steps.

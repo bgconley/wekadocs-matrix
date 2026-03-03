@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: factory.py (registered provider, current plan.dense)
+# =============================================================================
 """
 Qwen3-Embedding-4B provider for dense embeddings via Triton gateway.
 

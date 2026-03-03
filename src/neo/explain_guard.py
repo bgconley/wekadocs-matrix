@@ -1,3 +1,9 @@
+# =============================================================================
+# @status: DEAD
+# @reason: No longer phantom-loaded after Phase B neo/__init__.py cleanup.
+#          ExplainGuard and validate_query_plan are never called by active code.
+# @safe-to-delete: Yes (verify no test-only usage first)
+# =============================================================================
 """
 EXPLAIN-plan validation guard for Neo4j queries.
 Phase 7a: Reject expensive/unbounded queries before execution.

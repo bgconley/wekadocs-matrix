@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: semantic_chunker.py
+# =============================================================================
 """
 Section metadata helpers for markdown-it-py enhanced parsing.
 

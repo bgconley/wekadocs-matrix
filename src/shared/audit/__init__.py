@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: (package init)
+# =============================================================================
 # Audit package
 from .logger import AuditLogger, get_audit_logger
 

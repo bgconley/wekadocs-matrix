@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: hybrid_retrieval.py
+# =============================================================================
 """
 Hybrid Search Engine (Task 2.3)
 Combines vector search with graph expansion and path finding.

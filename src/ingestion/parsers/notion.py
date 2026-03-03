@@ -1,3 +1,10 @@
+# =============================================================================
+# @status: DEAD
+# @reason: parse_notion is never called from the production path; only markdown
+#          and html formats are supported by AtomicIngestionCoordinator.
+#          No longer phantom-loaded after Phase B __init__.py cleanup.
+# @loaded-via: (none — orchestrator.py no longer loaded via auto/__init__.py)
+# =============================================================================
 # Implements Phase 3, Task 3.1 (Multi-format parser - Notion)
 # See: /docs/spec.md §3 (Data model - Document/Section)
 # See: /docs/implementation-plan.md → Task 3.1

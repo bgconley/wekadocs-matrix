@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: atomic.py
+# =============================================================================
 # Implements Phase 3, Task 3.2 (Entity extraction - main module)
 # See: /docs/spec.md §3.1 (Domain entities)
 # See: /docs/implementation-plan.md → Task 3.2

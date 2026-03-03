@@ -1,3 +1,9 @@
+# =============================================================================
+# @status: STANDALONE
+# @reason: Self-contained stdio MCP transport for Claude Desktop direct
+#          connection. Not in docker-compose; no other src/ module imports it.
+#          Has dependencies on mcp_app.py and shared.observability.
+# =============================================================================
 """
 STDIO MCP Server for Claude Desktop.
 Runs the shared low-level MCP server over STDIO transport.

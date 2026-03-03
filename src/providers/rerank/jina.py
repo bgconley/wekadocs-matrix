@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: factory.py (registered provider)
+# =============================================================================
 """
 Jina AI rerank provider implementation.
 Phase 7C: Remote API provider for jina-reranker models (v2/v3).

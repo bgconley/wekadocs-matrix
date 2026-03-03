@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: main.py
+# =============================================================================
 """
 Connector manager for coordinating multiple external system connectors.
 Handles registration, scheduling, and monitoring of all connectors.

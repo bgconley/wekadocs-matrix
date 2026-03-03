@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: graph_service.py
+# =============================================================================
 """
 Delta cache used to avoid resending graph elements across paged MCP tool calls.
 

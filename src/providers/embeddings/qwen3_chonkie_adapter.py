@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: semantic_chunker.py
+# =============================================================================
 """
 Adapter to use Qwen3-Embedding-4B gateway with Chonkie's SemanticChunker.
 

@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: main.py
+# =============================================================================
 """
 Shared MCP server factory + tool implementations for STDIO and HTTP transports.
 """

@@ -1,3 +1,11 @@
+# =============================================================================
+# @status: DEAD
+# @reason: ProgressTracker is only used by cli.py (standalone) and
+#          orchestrator.py (dead). Not called from worker.py or service.py
+#          production paths. No longer phantom-loaded after Phase B
+#          __init__.py cleanup.
+# @loaded-via: (none — removed from auto/__init__.py in Phase B)
+# =============================================================================
 # Implements Phase 6, Task 6.2 (Progress event emission)
 # See: /docs/app-spec-phase6.md
 # See: /docs/implementation-plan-phase-6.md → Task 6.2

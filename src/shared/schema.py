@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: hybrid_retrieval.py, build_graph.py
+# =============================================================================
 # Implements Phase 1, Task 1.3 (Database schema initialization)
 # See: /docs/spec.md §3 (Data model), §3.3 (IDs, versions, consistency)
 # See: /docs/implementation-plan.md → Task 1.3 DoD & Tests

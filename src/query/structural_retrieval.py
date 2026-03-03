@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: hybrid_retrieval.py
+# =============================================================================
 """
 Structural retrieval enhancements for query-type adaptive multi-vector search.
 

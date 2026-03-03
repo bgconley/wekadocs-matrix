@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: 0 external src/ imports; never integrated into active retrieval pipeline
+# @safe-to-delete: Yes
+# =============================================================================
 """
 Graph-based context expansion for retrieval.
 

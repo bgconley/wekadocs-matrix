@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: Entire ops/warmers package is orphaned; 0 imports from any active src/ module
+# @safe-to-delete: Yes
+# =============================================================================
 """
 Query cache warmer for preloading hot query patterns.
 

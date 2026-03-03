@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: Entire security package is orphaned; RateLimiter never wired into request handling
+# @safe-to-delete: Yes
+# =============================================================================
 # Implements Phase 1, Task 1.4 (Security layer)
 # See: /docs/spec.md §6 (Security)
 # See: /docs/implementation-plan.md → Task 1.4 DoD & Tests

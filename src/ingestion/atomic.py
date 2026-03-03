@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: worker.py
+# =============================================================================
 """
 Atomic Ingestion Coordinator for Neo4j + Qdrant Synchronization.
 

@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: factory.py (registered provider)
+# =============================================================================
 """
 Jina AI embedding provider implementation.
 Phase 7C: Remote API provider for jina-embeddings-v3 @ 1024-D.

@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: atomic.py
+# =============================================================================
 # src/ingestion/chunk_assembler.py
 from __future__ import annotations
 

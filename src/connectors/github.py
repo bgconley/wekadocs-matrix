@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: manager.py
+# =============================================================================
 """
 GitHub connector for repository documentation ingestion.
 Supports polling for changes and webhook-based real-time updates.

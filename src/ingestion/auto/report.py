@@ -1,3 +1,10 @@
+# =============================================================================
+# @status: DEAD
+# @reason: ReportGenerator is never instantiated in the production path.
+#          No longer phantom-loaded after Phase B __init__.py cleanup.
+# @loaded-via: (none — orchestrator.py no longer loaded via auto/__init__.py)
+# @superseded-by: No equivalent in atomic.py; report generation was not ported
+# =============================================================================
 """
 Phase 6, Task 6.4: Ingestion Report Generation
 

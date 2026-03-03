@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: hybrid_retrieval.py, atomic.py
+# =============================================================================
 """
 Tokenizer service for accurate token counting and text splitting.
 

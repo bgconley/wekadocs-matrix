@@ -1,3 +1,10 @@
+# =============================================================================
+# @status: DEAD
+# @reason: IncrementalUpdater is never instantiated in the production path.
+#          Incremental update logic was not ported to atomic.py.
+#          No longer phantom-loaded after Phase B __init__.py cleanup.
+# @loaded-via: (none — orchestrator.py no longer loaded via auto/__init__.py)
+# =============================================================================
 # Implements Phase 3, Task 3.4 (Incremental updates)
 # See: /docs/spec.md §8 (Ingestion pipeline - incremental)
 # See: /docs/implementation-plan.md → Task 3.4

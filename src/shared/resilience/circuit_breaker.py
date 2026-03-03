@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: reranker, GLiNER providers
+# =============================================================================
 """
 Thread-safe Circuit Breaker pattern implementation.
 

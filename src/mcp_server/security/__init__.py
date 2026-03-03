@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: Entire security package is orphaned; nothing imports from src.mcp_server.security
+# @safe-to-delete: Yes
+# =============================================================================
 # Security package
 from .auth import JWTAuth, get_jwt_auth, optional_jwt_token, verify_jwt_token
 from .rate_limiter import RateLimiter, check_rate_limit, get_rate_limiter

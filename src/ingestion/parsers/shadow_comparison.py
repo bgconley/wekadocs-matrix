@@ -1,3 +1,12 @@
+# =============================================================================
+# @status: PHANTOM
+# @reason: Always imported at module load by parsers/__init__.py:24
+#          (ShadowModeError is eagerly imported). The shadow comparison logic
+#          only runs when config.ingestion.parser.shadow_mode=true, which
+#          defaults to false.
+# @loaded-via: src/ingestion/parsers/__init__.py:24
+# @gated-by: config.ingestion.parser.shadow_mode (runtime execution only)
+# =============================================================================
 """
 Shadow mode comparison utilities for parser migration.
 

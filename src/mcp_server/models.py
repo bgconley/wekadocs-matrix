@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: main.py
+# =============================================================================
 # Implements Phase 1, Task 1.2 (MCP server foundation)
 # See: /docs/spec.md §9 (Interfaces)
 # MCP protocol models

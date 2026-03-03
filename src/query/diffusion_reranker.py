@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: 0 external src/ imports; graph-based reranking experiment never integrated into HybridRetriever
+# @safe-to-delete: Yes
+# =============================================================================
 """
 Graph-based diffusion reranking for retrieval candidates.
 

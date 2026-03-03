@@ -1,3 +1,10 @@
+# =============================================================================
+# @status: MIXED
+# @reason: Almost entirely ACTIVE — core infrastructure for Neo4j, Qdrant, Redis
+#          connections. Two methods on CompatQdrantClient are DEAD:
+#          purge_document and create_collection_with_dims (0 external callers).
+# @called-by: worker.py, main.py, mcp_app.py, query_service.py
+# =============================================================================
 # Implements Phase 1, Task 1.2 (MCP server foundation)
 # See: /docs/spec.md §2 (Architecture)
 # See: /docs/expert-coder-guidance.md → 1.2 (connection pools, graceful shutdown)
@@ -168,6 +175,7 @@ class CompatQdrantClient(QdrantClient):
             collection_name=collection_name, wait=wait_arg, **normalized
         )
 
+    # @status: DEAD — 0 external callers
     def purge_document(self, collection_name: str, document_id: str):
         """Delete all vectors for a specific document."""
         filt = Filter(
@@ -344,6 +352,7 @@ class CompatQdrantClient(QdrantClient):
                 return None
         return None
 
+    # @status: DEAD — 0 external callers
     def create_collection_with_dims(
         self,
         collection_name: str,

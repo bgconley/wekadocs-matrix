@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: 0 imports anywhere; watchers.py (plural) is the active file used by service.py
+# @safe-to-delete: Yes
+# =============================================================================
 """
 Deprecated minimal watchdog-based watcher.
 

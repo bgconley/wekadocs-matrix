@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: chunk_assembler.py
+# =============================================================================
 # src/ingestion/semantic_chunker.py
 """
 Semantic-first chunking using Chonkie.

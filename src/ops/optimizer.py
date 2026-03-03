@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: 0 imports from any active src/ module; only referenced by tests
+# @safe-to-delete: Yes
+# =============================================================================
 """
 Query Optimizer (Phase 4, Task 4.2)
 Analyzes slow queries, recommends indexes, and caches compiled plans.

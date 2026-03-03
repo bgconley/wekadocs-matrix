@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: 0 imports from any active src/ module; only referenced by tests
+# @safe-to-delete: Yes
+# =============================================================================
 #!/usr/bin/env python3
 """
 Session cleanup job for expired multi-turn conversation sessions.

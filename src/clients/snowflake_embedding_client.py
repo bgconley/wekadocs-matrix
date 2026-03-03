@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: providers/embeddings/snowflake_arctic.py, arctic_chonkie_adapter.py
+# =============================================================================
 from __future__ import annotations
 
 import logging

@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE — ENTRY POINT
+# @called-by: uvicorn (docker CMD)
+# =============================================================================
 # Implements Phase 1, Task 1.2 (MCP server foundation)
 # See: /docs/spec.md §2 (Architecture), §9 (Interfaces)
 # See: /docs/implementation-plan.md → Task 1.2 DoD & Tests

@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: factory.py (registered provider)
+# =============================================================================
 """
 Snowflake Arctic embedding provider for dense embeddings.
 

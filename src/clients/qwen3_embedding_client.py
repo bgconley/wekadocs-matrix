@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: providers/embeddings/qwen3_triton.py, qwen3_chonkie_adapter.py
+# =============================================================================
 """
 HTTP client for the Qwen3-Embedding-4B service via custom FastAPI gateway.
 

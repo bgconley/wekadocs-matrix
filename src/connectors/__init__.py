@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: main.py
+# =============================================================================
 """
 Phase 5, Task 5.1 - External Systems Integration
 Connectors for Notion, GitHub, Confluence with queue-based ingestion and circuit breakers.

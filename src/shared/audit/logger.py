@@ -1,3 +1,10 @@
+# =============================================================================
+# @status: DEAD
+# @reason: AuditLogger and get_audit_logger() are never called by any active
+#          production code path. No longer phantom-loaded after Phase B
+#          __init__.py cleanup (audit import removed from shared/__init__.py).
+# @loaded-via: (none — removed from shared/__init__.py in Phase B)
+# =============================================================================
 # Implements Phase 1, Task 1.4 (Security layer)
 # See: /docs/spec.md §6 (Security), §7 (Observability)
 # See: /docs/implementation-plan.md → Task 1.4 DoD & Tests

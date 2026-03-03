@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: 0 external src/ imports; only has self-referential usage docstring
+# @safe-to-delete: Yes
+# =============================================================================
 """
 Neo4j Graph Enhancements for Phase 3 (markdown-it-py Integration).
 

@@ -1,3 +1,12 @@
+# =============================================================================
+# @status: DEAD
+# @reason: Loaded transitively by orchestrator.py (now dead) which imported it
+#          eagerly. Also lazily imported by build_graph.py behind
+#          config.ingestion.reconciliation.enabled, but that code path is dead
+#          (build_graph.py write methods are superseded by atomic.py).
+#          No longer phantom-loaded after Phase B __init__.py cleanup.
+# @loaded-via: (none — orchestrator.py no longer loaded via auto/__init__.py)
+# =============================================================================
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple

@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: extract/__init__.py
+# =============================================================================
 # Implements Phase 3, Task 3.2 (Entity extraction - Commands)
 # See: /docs/spec.md §3.1 (Domain entities)
 # See: /docs/implementation-plan.md → Task 3.2

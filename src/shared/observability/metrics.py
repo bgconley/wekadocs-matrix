@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: hybrid_retrieval.py, build_graph.py
+# =============================================================================
 # Implements Phase 5, Task 5.2 (Monitoring & observability)
 # See: /docs/spec.md §7 (Observability & SLOs)
 # Prometheus metrics for WekaDocs GraphRAG MCP

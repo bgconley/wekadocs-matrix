@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: atomic.py, build_graph.py
+# =============================================================================
 """
 Embedding field canonicalization helpers for GraphRAG v2.1.
 

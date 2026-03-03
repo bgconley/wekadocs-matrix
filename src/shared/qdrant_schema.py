@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: build_graph.py, hybrid_retrieval.py
+# =============================================================================
 from __future__ import annotations
 
 import logging

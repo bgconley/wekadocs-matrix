@@ -1,3 +1,10 @@
+# =============================================================================
+# @status: DEAD
+# @reason: No longer phantom-loaded after Phase B neo/__init__.py cleanup.
+#          check_neo4j_health and check_neo4j_connectivity are never called
+#          by active code. MCP server uses src/monitoring/health.py instead.
+# @safe-to-delete: Yes (verify no test-only usage first)
+# =============================================================================
 """Neo4j health checks for runtime monitoring.
 
 This module provides health check functions for Neo4j

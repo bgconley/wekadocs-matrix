@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: mcp_app.py
+# =============================================================================
 """
 Phase 7E-2: Context Assembly and Budget Enforcement
 Integrates with hybrid retrieval to assemble coherent context within token budget

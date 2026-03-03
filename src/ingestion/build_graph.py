@@ -1,3 +1,12 @@
+# =============================================================================
+# @status: MIXED
+# @reason: GraphBuilder.__init__, ensure_embedder, _build_section_text_for_embedding,
+#          and _build_title_text_for_embedding are ACTIVE (used by atomic.py as a
+#          settings container and text utility). All other methods (39 total) are
+#          DEAD — their logic was ported into atomic.py's saga-coordinated write path.
+# @called-by: atomic.py:1055 (GraphBuilder instantiation)
+# @pull-forward: Extract active methods into a new EmbeddingContext class (~200 lines)
+# =============================================================================
 # Implements Phase 3, Task 3.3 (Graph construction with embeddings)
 # See: /docs/spec.md §3 (Data model, IDs, vectors)
 # See: /docs/implementation-plan.md → Task 3.3
@@ -252,6 +261,7 @@ class GraphBuilder:
             strict_mode = runtime_settings.embedding_strict_mode
         self._strict_mode_enabled = bool(strict_mode)
 
+    # @status: DEAD — only called by self.upsert_document (dead)
     def _validate_schema_version(self, session) -> None:
         """
         Ensure the Neo4j SchemaVersion marker matches the configured expectation.
@@ -268,6 +278,7 @@ class GraphBuilder:
         ensure_schema_version(self.driver, self.expected_schema_version)
         self._schema_version_verified = True
 
+    # @status: DEAD — only called by self.upsert_document (dead)
     def _enforce_profile_guard(self) -> None:
         """Detect and optionally block ingestion if legacy embeddings persist."""
         if self._profile_alignment_verified:
@@ -379,6 +390,7 @@ class GraphBuilder:
             actual_dims=self.embedder.dims,
         )
 
+    # @status: DEAD — superseded by atomic.py:_execute_atomic_saga
     def upsert_document(
         self,
         document: Dict,
@@ -623,6 +635,7 @@ class GraphBuilder:
 
         return stats
 
+    # @status: DEAD — only called internally by upsert_document
     def _upsert_document_node(self, session, document: Dict):
         """Upsert Document node."""
         query = """
@@ -646,6 +659,7 @@ class GraphBuilder:
         session.run(query, **params)
         logger.debug("Document upserted", document_id=document["id"])
 
+    # @status: DEAD — only called internally by upsert_document
     def _upsert_sections(self, session, document_id: str, sections: List[Dict]) -> int:
         """
         Upsert Chunk nodes with HAS_CHUNK relationships in batches.
@@ -752,6 +766,7 @@ class GraphBuilder:
 
         return total_sections
 
+    # @status: DEAD — only called internally by upsert_document
     def _create_heading_concept_entities(
         self, session, document_id: str, sections: List[Dict]
     ) -> Dict[str, int]:
@@ -876,6 +891,7 @@ class GraphBuilder:
 
         return stats
 
+    # @status: DEAD — only called internally by upsert_document
     def _upsert_citation_units(
         self, session, document_id: str, chunks: List[Dict]
     ) -> int:
@@ -945,6 +961,7 @@ class GraphBuilder:
 
         return len(units)
 
+    # @status: DEAD — only called internally by upsert_document
     def _delete_stale_chunks_neo4j(
         self, session, document_id: str, current_sections: List[Dict]
     ):
@@ -1002,6 +1019,7 @@ class GraphBuilder:
             current_citation_ids=current_citation_ids,
         )
 
+    # @status: DEAD — only called internally by upsert_document
     def _create_next_chunk_relationships(
         self, session, document_id: str, sections: List[Dict]
     ):
@@ -1040,6 +1058,7 @@ class GraphBuilder:
             count=count,
         )
 
+    # @status: DEAD — only called internally by upsert_document
     def _build_typed_relationships(self, session, document_id: str) -> Dict[str, int]:
         """
         Materialize typed chunk/section relationships defined in the v2.2 schema.
@@ -1217,6 +1236,7 @@ class GraphBuilder:
 
         return results
 
+    # @status: DEAD — only called internally
     def _log_relationship_builder(
         self,
         *,
@@ -1237,6 +1257,7 @@ class GraphBuilder:
             verification=verification,
         )
 
+    # @status: DEAD — only called internally
     def _verify_relationship_count(
         self, session, builder: str, document_id: str
     ) -> int:
@@ -1286,6 +1307,7 @@ class GraphBuilder:
         record = session.run(query, doc_id=document_id).single()
         return int(record["count"]) if record and "count" in record else 0
 
+    # @status: DEAD — only called internally by upsert_document
     def _repair_incorrect_combined_flags(self, session, document_id: str) -> int:
         """
         Optional repair step: ensure chunks marked as combined truly reference >1 section.
@@ -1306,6 +1328,7 @@ class GraphBuilder:
         repaired = result.single()["repaired"] or 0
         return repaired
 
+    # @status: DEAD — defined but never called anywhere
     def _remove_missing_sections(
         self, session, document_id: str, valid_section_ids: List[str]
     ) -> int:
@@ -1413,6 +1436,7 @@ class GraphBuilder:
 
         return total_removed
 
+    # @status: DEAD — only called internally by upsert_document
     def _upsert_entities(self, session, entities: Dict[str, Dict]) -> int:
         """
         Upsert Entity nodes in batches.
@@ -1501,6 +1525,7 @@ class GraphBuilder:
 
         return total_entities
 
+    # @status: DEAD — only called internally by upsert_document
     def _create_mentions(self, session, mentions: List[Dict]) -> int:
         """
         Create relationship batches (both MENTIONS and other types like CONTAINS_STEP).
@@ -1536,6 +1561,7 @@ class GraphBuilder:
 
         return total_created
 
+    # @status: DEAD — only called internally
     def _create_section_entity_mentions(
         self, session, mentions: List[Dict], batch_size: int
     ) -> int:
@@ -1572,6 +1598,7 @@ class GraphBuilder:
 
         return total_mentions
 
+    # @status: DEAD — only called internally
     def _create_entity_entity_relationships(
         self, session, relationships: List[Dict], batch_size: int
     ) -> int:
@@ -1630,6 +1657,7 @@ class GraphBuilder:
 
         return total_created
 
+    # @status: DEAD — ported to atomic.py:_compute_embeddings (line 1445)
     def _process_embeddings(
         self, document: Dict, sections: List[Dict], entities: Dict[str, Dict]
     ) -> Dict:
@@ -2128,6 +2156,7 @@ class GraphBuilder:
         text = (section.get("text") or "").strip()
         return text[:256]
 
+    # @status: DEAD — not used by atomic.py
     def _build_entity_text_for_embedding(
         self, section: Dict, entities: Dict[str, Dict]
     ) -> str:
@@ -2164,10 +2193,12 @@ class GraphBuilder:
         unique_names = list(dict.fromkeys(entity_names))
         return " ".join(unique_names)
 
+    # @status: DEAD — atomic.py has its own copy (line 3308)
     def _compute_text_hash(self, text: str) -> str:
         value = text or ""
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
+    # @status: DEAD — atomic.py has its own copy (line 3313)
     def _compute_shingle_hash(self, text: str, n: int = 8) -> str:
         if not text:
             return ""
@@ -2185,6 +2216,7 @@ class GraphBuilder:
         joined = "||".join(shingles)
         return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
+    # @status: DEAD — atomic.py has its own copy (line 3461)
     def _extract_semantic_metadata(self, section: Dict) -> Dict[str, Any]:
         """
         Placeholder for semantic chunk metadata (NER, topics, etc.).
@@ -2198,6 +2230,7 @@ class GraphBuilder:
             return metadata
         return {"entities": [], "topics": []}
 
+    # @status: DEAD — only called internally from __init__
     def _ensure_qdrant_collection(self):
         """
         Ensure Qdrant collection exists with multi-vector schema + payload indexes.
@@ -2259,6 +2292,7 @@ class GraphBuilder:
             )
             raise
 
+    # @status: DEAD — only called internally from __init__
     def _ensure_neo4j_vector_index(self) -> None:
         """
         Auto-provision the namespaced Neo4j vector index for the active profile.
@@ -2325,6 +2359,7 @@ class GraphBuilder:
                     extra={"index": index_name, "error": str(exc)},
                 )
 
+    # @status: DEAD — only called internally from __init__
     def _reconcile_schema_version_embedding_metadata(self) -> None:
         """
         Update SchemaVersion node to reflect the active embedding profile.
@@ -2378,6 +2413,7 @@ class GraphBuilder:
                 extra={"error": str(exc)},
             )
 
+    # @status: DEAD — only called internally
     def _ensure_qdrant_payload_indexes(
         self, collection: str, fields: Sequence[tuple[str, PayloadSchemaType]]
     ) -> None:
@@ -2403,6 +2439,7 @@ class GraphBuilder:
         # Mark collection as having indexes ensured
         GraphBuilder._payload_indexes_ensured.add(collection)
 
+    # @status: DEAD — only called internally
     def _create_qdrant_collection(
         self,
         collection: str,
@@ -2444,6 +2481,7 @@ class GraphBuilder:
                 raise
         logger.info("Created Qdrant collection", collection=collection)
 
+    # @status: DEAD — only called internally
     def _reconcile_qdrant_collection(
         self,
         collection: str,
@@ -2492,6 +2530,7 @@ class GraphBuilder:
                 sparse_vectors_config=sparse_vectors_config,
             )
 
+    # @status: DEAD — only called internally
     def _get_qdrant_collection_payload(self, collection: str) -> Dict[str, Any]:
         try:
             info = self.qdrant_client.get_collection(collection_name=collection)
@@ -2508,6 +2547,7 @@ class GraphBuilder:
         return {}
 
     @staticmethod
+    # @status: DEAD — only called internally
     def _parse_qdrant_vectors_meta(meta: Any) -> (set, bool):
         """
         Returns (vector_names, is_single_vector_schema)
@@ -2519,6 +2559,7 @@ class GraphBuilder:
             return set(meta.keys()), False
         return set(), True
 
+    # @status: DEAD — only called internally
     def _update_qdrant_vectors_config(
         self, collection: str, vectors_config: Dict[str, VectorParams]
     ) -> bool:
@@ -2541,6 +2582,7 @@ class GraphBuilder:
             )
             return False
 
+    # @status: DEAD — only called internally
     def _maybe_recreate_qdrant_collection(
         self,
         collection: str,
@@ -2563,6 +2605,7 @@ class GraphBuilder:
             collection, vectors_config, sparse_vectors_config
         )
 
+    # @status: DEAD — superseded by atomic.py saga-coordinated Qdrant writes
     def _upsert_to_qdrant(
         self,
         node_id: str,
@@ -2807,6 +2850,7 @@ class GraphBuilder:
         )
 
     @staticmethod
+    # @status: DEAD — only called internally
     def _vector_expected_dim(vector: Any) -> Optional[int]:
         """Return the expected dimension for validation (if applicable)."""
         if isinstance(vector, list):
@@ -2818,6 +2862,7 @@ class GraphBuilder:
             return len(vector)
         return None
 
+    # @status: DEAD — only called internally
     def _upsert_to_neo4j_vector(self, node_id: str, embedding: List[float], label: str):
         """Upsert embedding to Neo4j vector property."""
         query = f"""
@@ -2841,6 +2886,7 @@ class GraphBuilder:
             label=label,
         )
 
+    # @status: DEAD — defined but never called anywhere
     def _set_embedding_version_in_neo4j(self, node_id: str, label: str):
         """Set embedding_version metadata in Neo4j without storing vector."""
         query = f"""
@@ -2862,6 +2908,7 @@ class GraphBuilder:
             label=label,
         )
 
+    # @status: DEAD — only called internally
     def _upsert_section_embedding_metadata(
         self, node_id: str, embedding: List[float], metadata: Dict
     ):
@@ -2922,6 +2969,7 @@ class GraphBuilder:
             vector_stored=True,
         )
 
+    # @status: DEAD — only called internally by upsert_document
     def _invalidate_caches_post_ingest(
         self, document_id: str, chunk_ids: List[str]
     ) -> Dict[str, any]:
@@ -3020,6 +3068,7 @@ class GraphBuilder:
 
 
 # Integration test wrapper
+# @status: DEAD — test facade only; called by api.py (phantom)
 def ingest_document(
     source_uri: str,
     content: str,

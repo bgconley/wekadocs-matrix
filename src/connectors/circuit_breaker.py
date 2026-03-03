@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: base.py
+# =============================================================================
 """
 Circuit breaker implementation for connector resilience.
 Prevents cascading failures by opening circuit after threshold failures.

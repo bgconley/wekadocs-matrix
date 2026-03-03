@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: query_service.py
+# =============================================================================
 """
 Response Builder (Task 2.4)
 Generates Markdown + JSON responses with evidence and confidence.

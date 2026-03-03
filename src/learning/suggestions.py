@@ -1,3 +1,8 @@
+# =============================================================================
+# @status: DEAD
+# @reason: Entire learning package is orphaned; 0 imports from any active src/ module
+# @safe-to-delete: Yes
+# =============================================================================
 """Template and index suggestion engine.
 
 Implements Phase 4 Task 4.4 - Learning & adaptation.

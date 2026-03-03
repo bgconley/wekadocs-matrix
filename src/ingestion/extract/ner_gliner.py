@@ -1,3 +1,12 @@
+# =============================================================================
+# @status: DORMANT
+# @reason: GLiNER NER enrichment for chunks. Only loaded via lazy import in
+#          atomic.py:1042, gated by config.ner.enabled (defaults to enabled
+#          when GLiNER service is configured). Non-blocking: failure passes
+#          through without aborting ingestion.
+# @gated-by: config.ner.enabled
+# @called-by: atomic.py:1042 (lazy import inside _prepare_ingestion)
+# =============================================================================
 """GLiNER entity extraction for document ingestion enrichment.
 
 Phase 2 of GLiNER integration: Document Ingestion Pipeline.

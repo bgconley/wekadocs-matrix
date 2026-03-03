@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: mcp_app.py (lazy health check import)
+# =============================================================================
 """Neo4j schema validation for MCP server startup.
 
 This module validates the Neo4j graph schema at startup to detect

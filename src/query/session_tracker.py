@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: query_service.py
+# =============================================================================
 """
 Session tracking service for multi-turn conversation support.
 

@@ -1,3 +1,9 @@
+# =============================================================================
+# @status: DEAD
+# @reason: BackPressureMonitor is never instantiated in the production path.
+#          No longer phantom-loaded after Phase B __init__.py cleanup.
+# @loaded-via: (none — removed from auto/__init__.py in Phase B)
+# =============================================================================
 """
 Phase 6, Task 6.1: Back-Pressure Monitoring
 

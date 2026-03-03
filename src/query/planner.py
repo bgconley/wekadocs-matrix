@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: query_service.py
+# =============================================================================
 """
 NL→Cypher Query Planner (Task 2.1)
 Implements templates-first approach with intent classification and entity linking.

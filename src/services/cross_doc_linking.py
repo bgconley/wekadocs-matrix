@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: atomic.py
+# =============================================================================
 """
 Cross-document linking service for Phase 3.5 semantic similarity edges.
 

@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: disambiguation.py (eager top-level import)
+# =============================================================================
 """
 Entity label configuration for GLiNER zero-shot NER.
 

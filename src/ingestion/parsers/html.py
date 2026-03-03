@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: atomic.py (for .html format files)
+# =============================================================================
 # Implements Phase 3, Task 3.1 (Multi-format parser - HTML)
 # See: /docs/spec.md §3 (Data model - Document/Section)
 # See: /docs/implementation-plan.md → Task 3.1

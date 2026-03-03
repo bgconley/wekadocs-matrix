@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: (core infrastructure, imported everywhere)
+# =============================================================================
 # Implements Phase 1, Task 1.2 (MCP server foundation)
 # See: /docs/spec.md §2 (Architecture)
 # Configuration loader with environment variable support
