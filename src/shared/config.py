@@ -409,13 +409,43 @@ class ExpansionConfig(BaseModel):
     )
 
 
+class SignalPoolConfig(BaseModel):
+    """Signal-diverse rerank pool configuration.
+
+    Instead of sending the flat top-N by fused score to the reranker,
+    the signal pool builder selects candidates that maximize coverage
+    across all retrieval signal types (dense, sparse, BM25, structural).
+    """
+
+    enabled: bool = False
+    pool_size: int = 200
+
+    # Slot allocations (should sum to <= pool_size; remainder is backfill)
+    consensus_slots: int = 50  # Top by fused_score (multi-signal agreement)
+    content_dense_slots: int = 20  # Unique to content-dense vector
+    title_dense_slots: int = 15  # Unique to title-dense vector
+    doc_title_dense_slots: int = 15  # Unique to doc_title-dense vector
+    text_sparse_slots: int = 20  # Unique to text-sparse / BM25
+    entity_sparse_slots: int = 15  # Unique to entity-sparse
+    title_sparse_slots: int = 15  # Unique to title-sparse
+    structural_slots: int = 20  # NEXT_CHUNK + sibling graph expansion
+    per_doc_depth_slots: int = 30  # Per-document depth coverage
+
+    # Per-document depth parameters
+    per_doc_k: int = 5  # Top K documents by best chunk score
+    per_doc_m: int = 6  # Target signal-diverse chunks per document
+
+    # Graceful degradation: use BM25/vector provenance when per-field scores unavailable
+    fallback_to_provenance: bool = True
+
+
 class RerankerConfig(BaseModel):
     enabled: bool = False
-    provider: Optional[str] = None
-    model: Optional[str] = None
+    provider: Optional[str] = "local-reranker-service"
+    model: Optional[str] = "Qwen/Qwen3-Reranker-4B"
     top_n: int = 100
-    max_pairs: int = 50
-    max_tokens_per_pair: int = 1024
+    max_pairs: int = 50  # unused — never referenced by any code
+    max_tokens_per_pair: int = 1024  # unused — never referenced by any code
 
 
 class StructuralRetrievalConfig(BaseModel):
@@ -523,6 +553,7 @@ class HybridSearchConfig(BaseModel):
         }
     )
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
+    signal_pool: SignalPoolConfig = Field(default_factory=SignalPoolConfig)
     bm25: BM25Config = Field(default_factory=BM25Config)  # Phase 7E
     expansion: ExpansionConfig = Field(default_factory=ExpansionConfig)  # Phase 7E
     structural: StructuralRetrievalConfig = Field(
@@ -945,6 +976,12 @@ class FeatureFlagsConfig(BaseModel):
     structure_aware_expansion: bool = Field(
         default=False,
         description="Enable sibling, parent section, and shared-entity context expansion",
+    )
+
+    # Signal-diverse rerank pool (requires query_api_weighted_fusion for full per-field scores)
+    signal_diverse_rerank_pool: bool = Field(
+        default=False,
+        description="Enable signal-diverse rerank pool with 200-candidate budget",
     )
 
 

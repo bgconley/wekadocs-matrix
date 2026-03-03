@@ -52,6 +52,7 @@ from src.providers.settings import EmbeddingSettings
 from src.providers.tokenizer_service import TokenizerService
 from src.query.entity_extraction import EntityExtractor
 from src.query.processing.disambiguation import QueryAnalysis, QueryDisambiguator
+from src.query.signal_pool import SignalPoolResult, build_signal_pool
 from src.query.structural_retrieval import StructuralRetrievalConfig as StructuralConfig
 from src.query.structural_retrieval import (
     apply_structural_boost as _apply_structural_boost_pure,
@@ -180,6 +181,10 @@ class ChunkResult:
     # Fields: has_code, has_table, parent_path_depth, block_type, code_ratio
     structural_metadata: Optional[Dict[str, Any]] = None
     structural_boost_applied: bool = False
+
+    # Full heading hierarchy path from Neo4j (e.g., "Configuration > S3 Backend > Buckets")
+    # Hydrated from Neo4j for rerank candidates; used for reranker context enrichment
+    parent_path_norm: Optional[str] = None
 
     # RRF debug: per-field contributions to fused_score (when rrf_debug_logging=true)
     # Structure: {"field_name": {"rank": int, "weight": float, "contribution": float}, ...}
@@ -1240,26 +1245,43 @@ class QdrantMultiVectorRetriever:
         )
 
     def _build_query_bundle(self, query: str) -> QueryEmbeddingBundle:
+        from src.providers.embeddings.embedding_service import (
+            _to_multivector,
+            _to_sparse_embedding,
+        )
+
         dense = self.embedder.embed_query(query)
         sparse = None
         multivector = None
-        if self.schema_supports_sparse or self.schema_supports_colbert:
-            bundle_provider = (
-                self.colbert_embedder
-                if self.schema_supports_colbert
-                else self.sparse_embedder
-            )
-            if hasattr(bundle_provider, "embed_query_all"):
-                bundle = bundle_provider.embed_query_all(query)
-                if self.schema_supports_sparse:
-                    sparse = bundle.sparse
-                if self.schema_supports_colbert:
-                    multivector = bundle.multivector
-            elif self.schema_supports_sparse and hasattr(
+
+        # When sparse and colbert are the SAME provider (e.g., BGE-M3),
+        # use embed_query_all for efficiency (one call, all heads).
+        # When they're DIFFERENT providers (e.g., SPLADEv3 + ColBERTv2),
+        # call each independently.
+        same_provider = self.sparse_embedder is self.colbert_embedder
+
+        if same_provider and hasattr(self.colbert_embedder, "embed_query_all"):
+            bundle = self.colbert_embedder.embed_query_all(query)
+            if self.schema_supports_sparse:
+                sparse = bundle.sparse
+            if self.schema_supports_colbert:
+                multivector = bundle.multivector
+        else:
+            # Separate providers — call each role independently
+            if self.schema_supports_sparse and hasattr(
                 self.sparse_embedder, "embed_sparse"
             ):
                 sparse_list = self.sparse_embedder.embed_sparse([query])
-                sparse = sparse_list[0] if sparse_list else None
+                if sparse_list:
+                    sparse = _to_sparse_embedding(sparse_list[0])
+
+            if self.schema_supports_colbert and hasattr(
+                self.colbert_embedder, "embed_colbert"
+            ):
+                colbert_list = self.colbert_embedder.embed_colbert([query])
+                if colbert_list:
+                    multivector = _to_multivector(colbert_list[0])
+
         return QueryEmbeddingBundle(
             dense=list(dense),
             sparse=sparse,
@@ -2311,6 +2333,39 @@ class HybridRetriever:
         self._reranker_available: bool = True
         if self._reranker_enabled:
             logger.info("HybridRetriever reranker enabled via configuration")
+
+        # Signal-diverse rerank pool configuration
+        self._signal_pool_config = getattr(hybrid_config, "signal_pool", None)
+        self._signal_pool_enabled = bool(
+            getattr(self._signal_pool_config, "enabled", False)
+            and getattr(
+                getattr(self.config, "feature_flags", None),
+                "signal_diverse_rerank_pool",
+                False,
+            )
+        )
+        if self._signal_pool_enabled:
+            _weighted_fusion_on = bool(
+                getattr(
+                    getattr(self.config, "feature_flags", None),
+                    "query_api_weighted_fusion",
+                    False,
+                )
+            )
+            logger.info(
+                "Signal-diverse rerank pool enabled",
+                extra={
+                    "pool_size": getattr(self._signal_pool_config, "pool_size", 200),
+                    "weighted_fusion": _weighted_fusion_on,
+                },
+            )
+            if not _weighted_fusion_on:
+                logger.warning(
+                    "Signal pool enabled without weighted fusion; "
+                    "pool will degrade to BM25/vector provenance only. "
+                    "Enable feature_flags.query_api_weighted_fusion "
+                    "for full per-field signal coverage."
+                )
         self.context_group_cap = getattr(
             search_config.response, "max_sections_per_parent", 3
         )
@@ -3276,9 +3331,40 @@ class HybridRetriever:
         seeds: List[ChunkResult]
 
         if self._reranker_enabled and fused_results:
-            pool_cap = self.rerank_top_n or top_k
-            rerank_pool_size = min(pool_cap, len(fused_results))
-            rerank_candidates = fused_results[:rerank_pool_size]
+            # Build the rerank candidate pool
+            if self._signal_pool_enabled and self._signal_pool_config:
+                # Signal-diverse pool: pre-rerank structural expansion + signal-aware selection
+                pre_rerank_structural: List[ChunkResult] = []
+                try:
+                    pre_rerank_structural = self._expand_with_structure(
+                        query, fused_results[:10], doc_tag, force=True
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "pre_rerank_structural_expansion_failed",
+                        extra={"error": str(e)},
+                    )
+
+                pool_result: SignalPoolResult = build_signal_pool(
+                    fused_results, pre_rerank_structural, self._signal_pool_config
+                )
+                rerank_candidates = pool_result.pool
+
+                metrics["signal_pool_enabled"] = True
+                metrics["signal_pool_size"] = len(rerank_candidates)
+                metrics["signal_pool_slot_fills"] = pool_result.slot_fills
+                metrics["signal_pool_degraded"] = pool_result.degraded
+            else:
+                # Legacy behavior: flat top-N by fused score
+                pool_cap = self.rerank_top_n or top_k
+                rerank_pool_size = min(pool_cap, len(fused_results))
+                rerank_candidates = fused_results[:rerank_pool_size]
+                metrics["signal_pool_enabled"] = False
+
+            # Hydrate parent_path_norm for reranker context enrichment
+            # Runs for all rerank candidates (standalone improvement, not signal-pool-gated)
+            self._hydrate_parent_paths(rerank_candidates)
+
             # Track pre-rerank order for rank change calculation
             pre_bge_order = {r.chunk_id: idx for idx, r in enumerate(rerank_candidates)}
             ordered_candidates = self._apply_reranker(query, rerank_candidates, metrics)
@@ -3293,9 +3379,9 @@ class HybridRetriever:
                 )
                 seeds = ordered_candidates[:top_k]
 
-                # LGTM Phase 4: Verbose log event 7 - bge_rerank_complete
+                # LGTM Phase 4: Verbose log event 7 - rerank_complete
                 logger.info(
-                    "bge_rerank_complete",
+                    "rerank_complete",
                     input_count=len(rerank_candidates),
                     output_count=len(seeds),
                     reranker_model=metrics.get("reranker_model", "unknown"),
@@ -3339,40 +3425,6 @@ class HybridRetriever:
         seed_ids: Optional[Set[str]] = None
         if reranker_active:
             seed_ids = {chunk.chunk_id for chunk in seeds}
-
-        # Step 4: Optional dominance gating before expansion (stabilize doc continuity)
-        # Gate seeds to a primary document only if dominance is clear
-        def _gate_to_primary_document(
-            cs: List[ChunkResult], sample_size: int = 8
-        ) -> List[ChunkResult]:
-            if not cs:
-                return cs
-            from collections import Counter
-
-            sample_ids = [
-                getattr(c, "document_id", None)
-                for c in cs[:sample_size]
-                if getattr(c, "document_id", None)
-            ]
-            if not sample_ids:
-                return cs
-            doc_id, count = Counter(sample_ids).most_common(1)[0]
-            top3 = sample_ids[:3]
-            dominance = (
-                (top3.count(doc_id) >= 2)
-                or (count >= 3)
-                or (count / max(1, len(sample_ids)) >= 0.5)
-            )
-            if dominance:
-                gated = [c for c in cs if getattr(c, "document_id", None) == doc_id]
-                logger.info(
-                    "Gating seeds to primary document %s: kept %d/%d",
-                    (doc_id or "")[:8],
-                    len(gated),
-                    len(cs),
-                )
-                return gated
-            return cs
 
         microdoc_extras: List[ChunkResult] = []
         microdoc_tokens = 0
@@ -3832,6 +3884,43 @@ class HybridRetriever:
         )
         return boosted
 
+    def _hydrate_parent_paths(self, chunks: List[ChunkResult]) -> None:
+        """
+        Batch-fetch parent_path_norm from Neo4j for rerank candidates.
+
+        Adds full heading hierarchy paths (e.g., "Config > S3 > Buckets")
+        to ChunkResult objects. Used by _apply_reranker to prepend structural
+        context to reranker input text.
+
+        Skips if Neo4j is disabled. Failures are non-fatal.
+        """
+        if self.neo4j_disabled or not self.neo4j_driver:
+            return
+
+        chunk_ids = [c.chunk_id for c in chunks if c.parent_path_norm is None]
+        if not chunk_ids:
+            return
+
+        query = """
+        UNWIND $ids AS cid
+        MATCH (c:Chunk {id: cid})
+        WHERE c.parent_path_norm IS NOT NULL
+        RETURN c.id AS chunk_id, c.parent_path_norm AS parent_path_norm
+        """
+        try:
+            with self.neo4j_driver.session() as session:
+                rows = session.run(query, ids=chunk_ids).data()
+
+            lookup = {row["chunk_id"]: row["parent_path_norm"] for row in rows}
+            for chunk in chunks:
+                if chunk.parent_path_norm is None:
+                    chunk.parent_path_norm = lookup.get(chunk.chunk_id)
+        except Exception as e:
+            logger.warning(
+                "parent_path_norm hydration failed",
+                extra={"error": str(e), "chunk_count": len(chunk_ids)},
+            )
+
     def _hydrate_missing_citations(self, chunks: List[ChunkResult]) -> None:
         """
         Ensure chunks from vectors emit citation labels.
@@ -4028,7 +4117,13 @@ class HybridRetriever:
         for chunk in seeds:
             text_body = (chunk.text or "").strip()
             heading = (chunk.heading or "").strip()
-            if heading and text_body:
+            parent_path = (chunk.parent_path_norm or "").strip()
+
+            # Build reranker text with structural context:
+            # "path > to > section\n\nHeading\n\nbody text"
+            if parent_path and heading and text_body:
+                text = f"{parent_path}\n\n{heading}\n\n{text_body}"
+            elif heading and text_body:
                 text = f"{heading}\n\n{text_body}"
             else:
                 text = text_body or heading
@@ -4059,7 +4154,7 @@ class HybridRetriever:
 
         # Batch candidates to respect reranker service limits
         service_max_batch = 32
-        service_max_batch_tokens = 1024  # user-requested cap
+        service_max_batch_tokens = 4096  # Qwen3-Reranker-4B supports 8K context
 
         def _approx_tokens(text: str) -> int:
             # Simple word-count approximation
@@ -4447,6 +4542,8 @@ class HybridRetriever:
         query: str,
         seeds: List[ChunkResult],
         doc_tag: Optional[str] = None,
+        *,
+        force: bool = False,
     ) -> List[ChunkResult]:
         """
         Structure-aware context expansion (Phase C.4).
@@ -4461,14 +4558,19 @@ class HybridRetriever:
         - expansion_source=seed_chunk_id
         - context_source=<type>
 
+        Args:
+            force: Bypass the structure_aware_expansion feature flag check.
+                   Used by the signal-diverse pool to run structural expansion
+                   pre-rerank without globally enabling post-rerank expansion.
+
         Returns combined list of expanded chunks (no duplicates).
         """
         # PHASE 1 VECTOR-ONLY: Skip structure expansion when neo4j_disabled
         if not seeds or self.neo4j_disabled:
             return []
 
-        # Check feature flag
-        if not getattr(
+        # Check feature flag (bypass if force=True for signal pool pre-rerank)
+        if not force and not getattr(
             getattr(self.config, "feature_flags", None),
             "structure_aware_expansion",
             False,

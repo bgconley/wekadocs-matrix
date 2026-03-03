@@ -7,8 +7,10 @@ class FakeRerankProvider:
     def __init__(self):
         self.model_id = "fake-v3"
         self.provider_name = "fake"
+        self.last_candidates = None  # Capture for test inspection
 
     def rerank(self, query, candidates, top_k=10):
+        self.last_candidates = list(candidates)  # Capture input
         sliced = list(candidates[:top_k])
         for idx, cand in enumerate(sliced, start=1):
             cand["original_rank"] = idx
@@ -36,6 +38,7 @@ def _bootstrap_retriever(reranker_enabled=True):
     hr._reranker_enabled = reranker_enabled
     hr.rerank_top_n = 2 if reranker_enabled else 0
     hr._reranker = None
+    hr._reranker_available = True
     return hr
 
 
@@ -105,15 +108,59 @@ def test_apply_reranker_skips_when_no_text(monkeypatch):
     assert metrics["reranker_reason"] == "no_text"
 
 
-def test_apply_reranker_skips_zero_token_headings(monkeypatch):
+def test_apply_reranker_uses_heading_when_text_empty(monkeypatch):
+    """A chunk with empty text but a valid heading is still reranked using the heading."""
     hr = _bootstrap_retriever(reranker_enabled=True)
-    monkeypatch.setattr(hr, "_reranker", FakeRerankProvider())
+    fake = FakeRerankProvider()
+    monkeypatch.setattr(hr, "_reranker", fake)
 
     chunk = _chunk("a", "", 0.1)
     chunk.heading = "Heading only"
     chunk.token_count = 0
     metrics = {}
 
-    reranked = hr._apply_reranker("query", [chunk], metrics)
-    assert reranked == [chunk]
-    assert metrics["reranker_reason"] == "no_text"
+    hr._apply_reranker("query", [chunk], metrics)
+    # Heading-only chunks ARE sent to reranker (heading is meaningful content)
+    assert metrics["reranker_applied"] is True
+    assert fake.last_candidates is not None
+    assert fake.last_candidates[0]["text"] == "Heading only"
+
+
+def test_apply_reranker_prepends_parent_path_norm(monkeypatch):
+    """Verify reranker text includes parent_path_norm > heading > body."""
+    hr = _bootstrap_retriever(reranker_enabled=True)
+    fake = FakeRerankProvider()
+    monkeypatch.setattr(hr, "_reranker", fake)
+
+    chunk = _chunk("a", "Body content here", 0.5)
+    chunk.heading = "Bucket Settings"
+    chunk.parent_path_norm = "Configuration > S3 Backend"
+    metrics = {}
+
+    hr._apply_reranker("how to configure S3", [chunk], metrics)
+
+    # Verify the reranker received text with parent_path prepended
+    assert fake.last_candidates is not None
+    text = fake.last_candidates[0]["text"]
+    assert text.startswith("Configuration > S3 Backend")
+    assert "Bucket Settings" in text
+    assert "Body content here" in text
+
+
+def test_apply_reranker_without_parent_path_norm(monkeypatch):
+    """Without parent_path_norm, text is heading + body (legacy behavior)."""
+    hr = _bootstrap_retriever(reranker_enabled=True)
+    fake = FakeRerankProvider()
+    monkeypatch.setattr(hr, "_reranker", fake)
+
+    chunk = _chunk("a", "Body content here", 0.5)
+    chunk.heading = "Bucket Settings"
+    # parent_path_norm is None (default)
+    metrics = {}
+
+    hr._apply_reranker("query", [chunk], metrics)
+
+    text = fake.last_candidates[0]["text"]
+    assert text.startswith("Bucket Settings")
+    assert "Body content here" in text
+    assert ">" not in text.split("\n")[0]  # No breadcrumb path
