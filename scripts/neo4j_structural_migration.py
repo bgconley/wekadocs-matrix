@@ -1,4 +1,17 @@
 #!/usr/bin/env python3
+# =============================================================================
+# @status: RETIRED
+# @reason: One-time migration script. All provisions are now subsumed by the
+#          active ingestion pipeline:
+#          - parent_path_norm / parent_chunk_id: structural_edges.py (per-doc)
+#          - Structural edges (NEXT_CHUNK, PARENT_HEADING): structural_edges.py
+#          - Index creation: indexes exist in DB; health.py monitors them
+#          - Entity normalization: historical backfill complete
+#          - Contract checks: one-time validation, not ongoing
+#          Imports 3 DEAD modules (contract_checks, entity_normalization,
+#          structural_builder) which are safe to delete in Phase D.
+# @retired-date: 2026-03-02
+# =============================================================================
 """
 One-time Neo4j structural edge migration script.
 

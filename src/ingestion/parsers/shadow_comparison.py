@@ -1,11 +1,11 @@
 # =============================================================================
-# @status: PHANTOM
-# @reason: Always imported at module load by parsers/__init__.py:24
-#          (ShadowModeError is eagerly imported). The shadow comparison logic
-#          only runs when config.ingestion.parser.shadow_mode=true, which
-#          defaults to false.
-# @loaded-via: src/ingestion/parsers/__init__.py:24
-# @gated-by: config.ingestion.parser.shadow_mode (runtime execution only)
+# @status: DEAD
+# @reason: Eager import from parsers/__init__.py removed (Phase B.6.1).
+#          Now only imported lazily inside _parse_with_shadow_comparison()
+#          when shadow_mode is enabled — which is never in production
+#          (config.ingestion.parser.shadow_mode defaults to false).
+#          No production code path reaches this module.
+# @safe-to-delete: Yes (after removing lazy import in parsers/__init__.py)
 # =============================================================================
 """
 Shadow mode comparison utilities for parser migration.
