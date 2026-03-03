@@ -3,10 +3,63 @@ from src.providers.embeddings.contracts import (
     QueryEmbeddingBundle,
     SparseEmbedding,
 )
+from src.providers.settings import EmbeddingCapabilities, EmbeddingSettings
 from src.query.hybrid_retrieval import QdrantMultiVectorRetriever
 
 
+def _sparse_settings():
+    return EmbeddingSettings(
+        profile="test",
+        provider="test",
+        model_id="test",
+        version="test",
+        dims=3,
+        similarity="cosine",
+        task="test",
+        tokenizer_backend="hf",
+        tokenizer_model_id="test",
+        service_url=None,
+        capabilities=EmbeddingCapabilities(supports_sparse=True),
+    )
+
+
+def _colbert_settings():
+    return EmbeddingSettings(
+        profile="test",
+        provider="test",
+        model_id="test",
+        version="test",
+        dims=3,
+        similarity="cosine",
+        task="test",
+        tokenizer_backend="hf",
+        tokenizer_model_id="test",
+        service_url=None,
+        capabilities=EmbeddingCapabilities(supports_colbert=True),
+    )
+
+
+class _SparseCaps:
+    supports_sparse = True
+    supports_colbert = False
+    supports_dense = True
+    supports_long_sequences = False
+    normalized_output = False
+    multilingual = False
+
+
+class _ColbertCaps:
+    supports_sparse = False
+    supports_colbert = True
+    supports_dense = True
+    supports_long_sequences = False
+    normalized_output = False
+    multilingual = False
+
+
 class DummySparseEmbedder:
+    capabilities = _SparseCaps()
+
     def embed_query(self, query: str):
         return [0.1, 0.2, 0.3]
 
@@ -16,6 +69,14 @@ class DummySparseEmbedder:
 
 
 class DummyColbertEmbedder:
+    capabilities = _ColbertCaps()
+
+    def embed_query(self, query: str):
+        return [0.1, 0.2, 0.3]
+
+    def embed_colbert(self, texts):
+        return [[[0.1, 0.2], [0.3, 0.4]] for _ in texts]
+
     def embed_query_all(self, query: str):
         return QueryEmbeddingBundle(
             dense=[0.1, 0.2, 0.3],
@@ -30,7 +91,7 @@ def test_prefetch_payload_dense_and_sparse():
         embedder=DummySparseEmbedder(),
         collection_name="chunks_multi",
         field_weights={"content": 1.0, "text-sparse": 0.5},
-        embedding_settings=None,
+        embedding_settings=_sparse_settings(),
         query_api_dense_limit=10,
         query_api_sparse_limit=10,
         schema_supports_sparse=True,
@@ -63,14 +124,20 @@ def test_query_payload_colbert_and_dense():
         embedder=DummyColbertEmbedder(),
         collection_name="chunks_multi",
         field_weights={"content": 1.0},
-        embedding_settings=None,
+        embedding_settings=_colbert_settings(),
         schema_supports_colbert=True,
         query_api_dense_limit=10,
     )
 
     bundle = retriever._build_query_bundle("test query")
 
+    # _build_query_api_query always returns (dense, primary_vector_name)
+    # ColBERT vectors are used in the reranking stage, not the query payload
     payload, using_name = retriever._build_query_api_query(bundle)
-    assert using_name == "late-interaction"
+    assert using_name == "content"
     assert isinstance(payload, list)
-    assert payload == [[0.1, 0.2], [0.3, 0.4]]
+    assert payload == [0.1, 0.2, 0.3]  # dense embedding from embed_query
+
+    # ColBERT vectors should be in the bundle for later use
+    assert bundle.multivector is not None
+    assert bundle.multivector.vectors == [[0.1, 0.2], [0.3, 0.4]]

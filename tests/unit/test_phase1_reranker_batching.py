@@ -22,14 +22,14 @@ class TestBatchDocuments:
 
     def test_batch_documents_empty_list(self):
         """Verify empty input returns empty batches."""
-        from src.providers.rerank.local_bge_service import batch_documents
+        from src.providers.rerank.local_reranker_service import batch_documents
 
         result = batch_documents([])
         assert result == []
 
     def test_batch_documents_single_item(self):
         """Verify single document creates one batch."""
-        from src.providers.rerank.local_bge_service import batch_documents
+        from src.providers.rerank.local_reranker_service import batch_documents
 
         # Input is now (index, text) tuples
         docs = [(0, "Document 1")]
@@ -41,7 +41,7 @@ class TestBatchDocuments:
 
     def test_batch_documents_exact_batch_size(self):
         """Verify documents exactly filling batch size."""
-        from src.providers.rerank.local_bge_service import batch_documents
+        from src.providers.rerank.local_reranker_service import batch_documents
 
         # Input is now (index, text) tuples
         docs = [(i, f"Document {i}") for i in range(16)]
@@ -52,7 +52,7 @@ class TestBatchDocuments:
 
     def test_batch_documents_multiple_batches(self):
         """Verify 50 documents creates correct number of batches."""
-        from src.providers.rerank.local_bge_service import batch_documents
+        from src.providers.rerank.local_reranker_service import batch_documents
 
         # Input is now (index, text) tuples
         docs = [(i, f"Document {i}") for i in range(50)]
@@ -71,7 +71,7 @@ class TestBatchDocuments:
 
     def test_batch_documents_preserves_original_indices(self):
         """Verify original indices are preserved in batches."""
-        from src.providers.rerank.local_bge_service import batch_documents
+        from src.providers.rerank.local_reranker_service import batch_documents
 
         # Input is now (index, text) tuples - indices can be arbitrary
         docs = [(10, "A"), (20, "B"), (30, "C"), (40, "D"), (50, "E")]
@@ -91,7 +91,7 @@ class TestBatchDocuments:
         This is the key fix from Issue #3 - we no longer reconstruct indices
         with a counter, so gaps/non-sequential indices are preserved.
         """
-        from src.providers.rerank.local_bge_service import batch_documents
+        from src.providers.rerank.local_reranker_service import batch_documents
 
         # Simulate filtered candidates with gaps in indices
         docs = [(0, "A"), (5, "B"), (10, "C"), (15, "D")]
@@ -116,10 +116,14 @@ class TestBGERerankerBatching:
 
     def test_rerank_uses_batching_by_default(self, mock_client):
         """Verify batching is enabled by default."""
-        from src.providers.rerank.local_bge_service import BGERerankerServiceProvider
+        from src.providers.rerank.local_reranker_service import (
+            LocalRerankerServiceProvider,
+        )
 
         with patch.dict("os.environ", {}, clear=True):
-            provider = BGERerankerServiceProvider.__new__(BGERerankerServiceProvider)
+            provider = LocalRerankerServiceProvider.__new__(
+                LocalRerankerServiceProvider
+            )
             provider._model_id = "test-model"
             provider._provider_name = "test"
             provider._client = mock_client
@@ -132,15 +136,19 @@ class TestBGERerankerBatching:
 
     def test_rerank_batching_disabled_via_env(self):
         """Verify batching can be disabled via environment variable."""
-        from src.providers.rerank.local_bge_service import BGERerankerServiceProvider
+        from src.providers.rerank.local_reranker_service import (
+            LocalRerankerServiceProvider,
+        )
 
         with patch.dict("os.environ", {"RERANKER_DISABLE_BATCHING": "true"}):
-            provider = BGERerankerServiceProvider(base_url="http://test:9001")
+            provider = LocalRerankerServiceProvider(base_url="http://test:9001")
             assert provider._use_batching is False
 
     def test_rerank_batch_reduces_http_calls(self, mock_client):
         """Verify batching reduces number of HTTP calls."""
-        from src.providers.rerank.local_bge_service import BGERerankerServiceProvider
+        from src.providers.rerank.local_reranker_service import (
+            LocalRerankerServiceProvider,
+        )
 
         # Setup mock response
         mock_response = Mock()
@@ -150,7 +158,7 @@ class TestBGERerankerBatching:
         }
         mock_client.post.return_value = mock_response
 
-        provider = BGERerankerServiceProvider.__new__(BGERerankerServiceProvider)
+        provider = LocalRerankerServiceProvider.__new__(LocalRerankerServiceProvider)
         provider._model_id = "test-model"
         provider._provider_name = "test"
         provider._client = mock_client
@@ -175,7 +183,9 @@ class TestBGERerankerBatching:
         fall back to individual processing. HTTP 500/502/504 are now treated
         as "service unhealthy" and skip entirely.
         """
-        from src.providers.rerank.local_bge_service import BGERerankerServiceProvider
+        from src.providers.rerank.local_reranker_service import (
+            LocalRerankerServiceProvider,
+        )
 
         # First call fails with 400 (payload issue), subsequent calls succeed
         call_count = [0]
@@ -197,7 +207,7 @@ class TestBGERerankerBatching:
 
         mock_client.post.side_effect = mock_post
 
-        provider = BGERerankerServiceProvider.__new__(BGERerankerServiceProvider)
+        provider = LocalRerankerServiceProvider.__new__(LocalRerankerServiceProvider)
         provider._model_id = "test-model"
         provider._provider_name = "test"
         provider._client = mock_client
@@ -226,7 +236,9 @@ class TestBGERerankerBatching:
         H2 Fix Update: When all batches fail, we now return fallback results
         with rerank_score=0.0 instead of empty results, preserving UX.
         """
-        from src.providers.rerank.local_bge_service import BGERerankerServiceProvider
+        from src.providers.rerank.local_reranker_service import (
+            LocalRerankerServiceProvider,
+        )
 
         # Simulate timeout on first batch
         def mock_post(*args, **kwargs):
@@ -238,7 +250,7 @@ class TestBGERerankerBatching:
 
         mock_client.post.side_effect = mock_post
 
-        provider = BGERerankerServiceProvider.__new__(BGERerankerServiceProvider)
+        provider = LocalRerankerServiceProvider.__new__(LocalRerankerServiceProvider)
         provider._model_id = "test-model"
         provider._provider_name = "test"
         provider._client = mock_client
@@ -264,14 +276,16 @@ class TestBGERerankerBatching:
 
     def test_rerank_429_triggers_skip(self, mock_client):
         """Verify 429 Too Many Requests triggers skip, not retry."""
-        from src.providers.rerank.local_bge_service import BGERerankerServiceProvider
+        from src.providers.rerank.local_reranker_service import (
+            LocalRerankerServiceProvider,
+        )
 
         def mock_post(*args, **kwargs):
             raise RuntimeError("429 Too Many Requests")
 
         mock_client.post.side_effect = mock_post
 
-        provider = BGERerankerServiceProvider.__new__(BGERerankerServiceProvider)
+        provider = LocalRerankerServiceProvider.__new__(LocalRerankerServiceProvider)
         provider._model_id = "test-model"
         provider._provider_name = "test"
         provider._client = mock_client
@@ -366,21 +380,23 @@ class TestTruncation:
 
     def test_truncate_short_text(self):
         """Verify short text is not truncated."""
-        from src.providers.rerank.local_bge_service import BGERerankerServiceProvider
+        from src.providers.rerank.local_reranker_service import (
+            LocalRerankerServiceProvider,
+        )
 
-        provider = BGERerankerServiceProvider.__new__(BGERerankerServiceProvider)
+        provider = LocalRerankerServiceProvider.__new__(LocalRerankerServiceProvider)
         text = "This is a short document."
         result = provider._truncate_text(text)
         assert result == text
 
     def test_truncate_long_text(self):
         """Verify long text is truncated to token limit."""
-        from src.providers.rerank.local_bge_service import (
+        from src.providers.rerank.local_reranker_service import (
             MAX_TOKENS_PER_DOC,
-            BGERerankerServiceProvider,
+            LocalRerankerServiceProvider,
         )
 
-        provider = BGERerankerServiceProvider.__new__(BGERerankerServiceProvider)
+        provider = LocalRerankerServiceProvider.__new__(LocalRerankerServiceProvider)
 
         # Create text with more tokens than limit
         words = ["word"] * (MAX_TOKENS_PER_DOC + 100)

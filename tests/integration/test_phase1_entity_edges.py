@@ -184,14 +184,14 @@ class TestRerankerBatchLatency:
     def reranker(self):
         """Provide reranker instance."""
         try:
-            from src.providers.rerank.local_bge_service import (
-                BGERerankerServiceProvider,
+            from src.providers.rerank.local_reranker_service import (
+                LocalRerankerServiceProvider,
             )
         except ImportError:
-            pytest.skip("BGERerankerServiceProvider not available")
+            pytest.skip("LocalRerankerServiceProvider not available")
 
         try:
-            provider = BGERerankerServiceProvider()
+            provider = LocalRerankerServiceProvider()
             # Quick health check
             if not provider.health_check():
                 pytest.skip("Reranker service not available")
@@ -344,11 +344,13 @@ class TestRegressionGuards:
 
             MockClient.return_value = mock_client
 
-            from src.providers.rerank.local_bge_service import (
-                BGERerankerServiceProvider,
+            from src.providers.rerank.local_reranker_service import (
+                LocalRerankerServiceProvider,
             )
 
-            provider = BGERerankerServiceProvider.__new__(BGERerankerServiceProvider)
+            provider = LocalRerankerServiceProvider.__new__(
+                LocalRerankerServiceProvider
+            )
             provider._model_id = "test-model"
             provider._provider_name = "test"
             provider._client = mock_client

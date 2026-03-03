@@ -7,7 +7,34 @@ from src.providers.settings import EmbeddingCapabilities, EmbeddingSettings
 from src.query.hybrid_retrieval import QdrantMultiVectorRetriever
 
 
+def _sparse_settings():
+    return EmbeddingSettings(
+        profile="test",
+        provider="test",
+        model_id="test",
+        version="test",
+        dims=4,
+        similarity="cosine",
+        task="test",
+        tokenizer_backend="hf",
+        tokenizer_model_id="test",
+        service_url=None,
+        capabilities=EmbeddingCapabilities(supports_sparse=True),
+    )
+
+
+class _FakeCaps:
+    supports_sparse = True
+    supports_colbert = False
+    supports_dense = True
+    supports_long_sequences = False
+    normalized_output = False
+    multilingual = False
+
+
 class _FakeEmbedder:
+    capabilities = _FakeCaps()
+
     def __init__(self):
         self.dims = 4
         self.provider_name = "fake"
@@ -55,6 +82,8 @@ def test_build_query_vectors_includes_sparse_leg():
         qdrant_client=_FakeClient(),
         embedder=_FakeEmbedder(),
         field_weights={"content": 1.0, "lexical": 0.5},
+        embedding_settings=_sparse_settings(),
+        schema_supports_sparse=True,
     )
     vectors = retriever._build_query_vectors("hello world")
     kinds = {name: kind for name, kind, _ in vectors}
@@ -68,6 +97,8 @@ def test_search_dispatches_sparse_branch(monkeypatch):
         qdrant_client=client,
         embedder=_FakeEmbedder(),
         field_weights={"content": 1.0, "lexical": 0.5},
+        embedding_settings=_sparse_settings(),
+        schema_supports_sparse=True,
     )
 
     def fake_dense(vector_name, vector, top_k, qdrant_filter, ef):

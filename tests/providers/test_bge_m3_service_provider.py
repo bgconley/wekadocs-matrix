@@ -4,10 +4,12 @@ from typing import List
 
 import pytest
 
-from src.providers.embeddings.bge_m3_service import BGEM3ServiceProvider
 from src.providers.embeddings.contracts import (
     DocumentEmbeddingBundle,
     QueryEmbeddingBundle,
+)
+from src.providers.embeddings.embedding_service import (
+    EmbeddingServiceProvider as BGEM3ServiceProvider,  # renamed
 )
 from src.providers.settings import EmbeddingCapabilities, EmbeddingSettings
 
