@@ -28,7 +28,7 @@ class RerankProvider(Protocol):
         Get the model identifier.
 
         Returns:
-            str: Model identifier (e.g., "jina-reranker-v3", "bge-reranker-large")
+            str: Model identifier (e.g., "Qwen/Qwen3-Reranker-4B", "jina-reranker-v3")
         """
         ...
 
@@ -38,7 +38,7 @@ class RerankProvider(Protocol):
         Get the provider name.
 
         Returns:
-            str: Provider name (e.g., "jina-ai", "bge-reranker", "noop")
+            str: Provider name (e.g., "local-reranker-service", "jina-ai", "noop")
         """
         ...
 

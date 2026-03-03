@@ -1,6 +1,6 @@
 # =============================================================================
 # @status: ACTIVE
-# @called-by: providers/embeddings/bge_m3_service.py
+# @called-by: providers/embeddings/embedding_service.py
 # =============================================================================
 from __future__ import annotations
 
@@ -15,22 +15,26 @@ class EmbeddingClientError(RuntimeError):
 
 
 class EmbeddingClient:
-    """Python client for the BGE-M3 embedding service.
+    """HTTP client for the unified embedding gateway.
 
-    This implements the interfaces described in the canonical app spec
-    (embedding_client_python): embed_dense, embed_sparse, embed_colbert.
+    Supports dense (/v1/embeddings), sparse (/v1/embeddings/sparse),
+    and ColBERT (/v1/embeddings/colbert) endpoints. Model routing is
+    handled server-side based on the model parameter in the payload.
     """
 
     def __init__(
         self,
         base_url: Optional[str] = None,
-        model: str = "BAAI/bge-m3",
+        model: str = "Qwen/Qwen3-Embedding-0.6B",
         timeout: Optional[float] = None,
         client: Optional[httpx.Client] = None,
     ) -> None:
-        self._base_url = base_url or os.getenv(
-            "EMBEDDING_BASE_URL", "http://127.0.0.1:9000"
-        )
+        self._base_url = base_url or os.getenv("EMBEDDING_BASE_URL")
+        if not self._base_url:
+            raise RuntimeError(
+                "EMBEDDING_BASE_URL environment variable is required. "
+                "Set it to the unified embedding gateway URL."
+            )
         self._model = os.getenv("EMBEDDING_MODEL_ID", model)
         timeout_value = (
             timeout

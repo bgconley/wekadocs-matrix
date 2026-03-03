@@ -89,7 +89,7 @@ class LocalRerankerServiceProvider(RerankProvider):
     def __init__(
         self,
         model: str = "Qwen/Qwen3-Reranker-4B",
-        base_url: str = "http://10.25.0.50:8080",
+        base_url: str = "",
         timeout: float = 60.0,
         batch_size: int = DEFAULT_BATCH_SIZE,
     ) -> None:

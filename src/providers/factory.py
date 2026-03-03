@@ -51,9 +51,15 @@ class ProviderFactory:
         str, Callable[[ProviderEmbeddingSettings], EmbeddingProvider]
     ] = {}
     _EMBEDDING_PROVIDER_ALIASES = {
-        "bge-m3": "bge-m3-service",
-        "bge_m3": "bge-m3-service",
-        "bge_m3_service": "bge-m3-service",
+        # Unified embedding service (gateway at /v1/embeddings/*)
+        "embedding-service": "embedding-service",
+        "embedding_service": "embedding-service",
+        # Legacy BGE-M3 aliases → unified embedding service
+        "bge-m3": "embedding-service",
+        "bge_m3": "embedding-service",
+        "bge-m3-service": "embedding-service",
+        "bge_m3_service": "embedding-service",
+        # SentenceTransformers
         "st_minilm": "sentence-transformers",
         "st-minilm": "sentence-transformers",
         "sentence_transformers": "sentence-transformers",
@@ -63,7 +69,7 @@ class ProviderFactory:
         "snowflake-arctic": "snowflake-arctic-service",
         "snowflake_arctic": "snowflake-arctic-service",
         "arctic": "snowflake-arctic-service",
-        # Qwen3 Triton gateway aliases
+        # Qwen3 Triton gateway aliases (legacy — prefer embedding-service)
         "qwen3-triton": "qwen3-triton-service",
         "qwen3_triton": "qwen3-triton-service",
         "qwen3_4b": "qwen3-triton-service",
@@ -168,11 +174,20 @@ class ProviderFactory:
         profile_name: str, profile
     ) -> ProviderEmbeddingSettings:
         service_url = None
-        if profile.provider == "bge-m3-service":
-            service_url = os.getenv("BGE_M3_API_URL")
+        if profile.provider == "embedding-service":
+            service_url = os.getenv("EMBEDDING_BASE_URL")
             if not service_url:
                 logger.warning(
-                    "BGE_M3_API_URL is not set but provider bge-m3-service is active."
+                    "EMBEDDING_BASE_URL is not set but provider "
+                    "embedding-service is active."
+                )
+        elif profile.provider in {"bge-m3-service", "bge-m3"}:
+            # Legacy: resolve BGE_M3_API_URL, fall back to unified gateway
+            service_url = os.getenv("BGE_M3_API_URL") or os.getenv("EMBEDDING_BASE_URL")
+            if not service_url:
+                logger.warning(
+                    "Neither BGE_M3_API_URL nor EMBEDDING_BASE_URL is set "
+                    "but provider bge-m3-service is active."
                 )
         elif profile.provider == "snowflake-arctic-service":
             service_url = os.getenv("CHONKIE_EMBEDDINGS_BASE_URL")
@@ -249,12 +264,13 @@ class ProviderFactory:
         )
 
     @staticmethod
-    def _create_bge_m3_service_provider(
+    def _create_embedding_service_provider(
         settings: ProviderEmbeddingSettings, **kwargs
     ) -> EmbeddingProvider:
-        from src.providers.embeddings.bge_m3_service import BGEM3ServiceProvider
+        """Create provider for unified embedding service (/v1/embeddings/*)."""
+        from src.providers.embeddings.embedding_service import EmbeddingServiceProvider
 
-        return BGEM3ServiceProvider(settings=settings, **kwargs)
+        return EmbeddingServiceProvider(settings=settings, **kwargs)
 
     @staticmethod
     def _create_voyage_provider(
@@ -318,6 +334,12 @@ class ProviderFactory:
                 return "jina-ai"
             if normalized in {"none", "disabled"}:
                 return "noop"
+            if normalized in {
+                "local-reranker-service",
+                "local-reranker",
+                "local_reranker",
+            }:
+                return "local-reranker-service"
             return normalized
 
         def _normalize_model(value: Optional[str]) -> Optional[str]:
@@ -348,10 +370,13 @@ class ProviderFactory:
             _normalize_provider(provider)
             or env_provider
             or config_provider
-            or "jina-ai"
+            or "local-reranker-service"
         )
         model = (
-            _normalize_model(model) or env_model or config_model or "jina-reranker-v3"
+            _normalize_model(model)
+            or env_model
+            or config_model
+            or "Qwen/Qwen3-Reranker-4B"
         )
 
         logger.info(f"Creating rerank provider: provider={provider}, model={model}")
@@ -363,29 +388,33 @@ class ProviderFactory:
             api_key = kwargs.get("api_key") or os.getenv("JINA_API_KEY")
             return JinaRerankProvider(model=model, api_key=api_key, **kwargs)
 
-        elif provider in {"bge-reranker-service", "bge-reranker"}:
-            from src.providers.rerank.local_bge_service import (
-                BGERerankerServiceProvider,
+        elif provider == "local-reranker-service":
+            from src.providers.rerank.local_reranker_service import (
+                LocalRerankerServiceProvider,
             )
 
-            base_url = kwargs.get("base_url") or os.getenv(
-                "RERANKER_BASE_URL", "http://qwen3-reranker-lambda:9003"
-            )
+            base_url = kwargs.get("base_url") or os.getenv("RERANKER_BASE_URL")
+            if not base_url:
+                raise ValueError(
+                    "RERANKER_BASE_URL environment variable is required "
+                    "for local-reranker-service provider."
+                )
             timeout = kwargs.get("timeout") or float(
                 os.getenv("RERANKER_TIMEOUT_SECONDS", "60")
             )
-            return BGERerankerServiceProvider(
+            return LocalRerankerServiceProvider(
                 model=model, base_url=base_url, timeout=timeout
             )
 
-        elif provider == "noop" or provider == "none":
+        elif provider in {"noop", "none", "disabled"}:
             from src.providers.rerank.noop import NoopReranker
 
             return NoopReranker()
 
         else:
             raise ValueError(
-                f"Unknown rerank provider: {provider}. Supported: jina-ai, noop"
+                f"Unknown rerank provider: {provider}. "
+                f"Supported: local-reranker-service, jina-ai, noop"
             )
 
     @staticmethod
@@ -418,8 +447,8 @@ class ProviderFactory:
         embedding_settings = get_embedding_settings()
         runtime_settings = get_settings()
 
-        rerank_provider = os.getenv("RERANK_PROVIDER", "jina-ai")
-        rerank_model = os.getenv("RERANK_MODEL", "jina-reranker-v3")
+        rerank_provider = os.getenv("RERANK_PROVIDER", "local-reranker-service")
+        rerank_model = os.getenv("RERANK_MODEL", "Qwen/Qwen3-Reranker-4B")
 
         telemetry = build_embedding_telemetry(embedding_settings)
         telemetry["embedding_namespace_mode"] = (
@@ -516,7 +545,7 @@ def create_rerank_provider(*args, **kwargs) -> RerankProvider:
 ProviderFactory._EMBEDDING_PROVIDER_CREATORS = {
     "jina-ai": ProviderFactory._create_jina_embedding_provider,
     "sentence-transformers": ProviderFactory._create_sentence_transformers_provider,
-    "bge-m3-service": ProviderFactory._create_bge_m3_service_provider,
+    "embedding-service": ProviderFactory._create_embedding_service_provider,
     "voyage-ai": ProviderFactory._create_voyage_provider,
     "snowflake-arctic-service": ProviderFactory._create_snowflake_arctic_provider,
     "qwen3-triton-service": ProviderFactory._create_qwen3_triton_provider,

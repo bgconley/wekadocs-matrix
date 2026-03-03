@@ -8,7 +8,7 @@ Embedding provider interfaces and implementations.
 Providers:
 - SentenceTransformersProvider: Local HuggingFace models
 - SnowflakeArcticProvider: Dense embeddings via local Arctic service
-- BGEM3ServiceProvider: Multi-head (dense + sparse + ColBERT) via BGE-M3 service
+- EmbeddingServiceProvider: Unified gateway (dense + sparse + ColBERT) via /v1/embeddings/*
 - VoyageEmbeddingProvider: Voyage AI contextual embeddings
 - JinaEmbeddingProvider: Jina AI embeddings
 """

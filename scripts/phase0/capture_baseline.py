@@ -159,13 +159,15 @@ def measure_reranker_latency(
     baseline latency before the batching fix (Phase 1.1).
     """
     try:
-        from src.providers.rerank.local_bge_service import BGERerankerServiceProvider
+        from src.providers.rerank.local_reranker_service import (
+            LocalRerankerServiceProvider,
+        )
     except ImportError as e:
         logger.error(f"Cannot import reranker: {e}")
         return None
 
     try:
-        reranker = BGERerankerServiceProvider()
+        reranker = LocalRerankerServiceProvider()
         # Health check
         if not reranker.health_check():
             logger.warning("Reranker health check failed - service may be unavailable")
