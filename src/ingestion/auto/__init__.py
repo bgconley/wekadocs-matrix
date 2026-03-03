@@ -1,3 +1,10 @@
+# =============================================================================
+# @status: ACTIVE
+# @reason: Package init for auto-ingestion. Eager imports of Orchestrator,
+#          BackPressureMonitor, and ProgressTracker were removed (Phase B cleanup)
+#          to eliminate phantom loading of 8 modules at worker startup.
+#          Consumers needing those classes should import directly from submodules.
+# =============================================================================
 """
 Phase 6: Auto-Ingestion Layer
 
@@ -15,18 +22,4 @@ See: /docs/app-spec-phase6.md
 See: /docs/implementation-plan-phase-6.md
 """
 
-from .backpressure import BackPressureMonitor
-from .orchestrator import JobState, Orchestrator
-from .progress import JobStage, ProgressEvent, ProgressReader, ProgressTracker
-
 __version__ = "0.1.0"
-
-__all__ = [
-    "BackPressureMonitor",
-    "JobStage",
-    "JobState",
-    "Orchestrator",
-    "ProgressEvent",
-    "ProgressReader",
-    "ProgressTracker",
-]
