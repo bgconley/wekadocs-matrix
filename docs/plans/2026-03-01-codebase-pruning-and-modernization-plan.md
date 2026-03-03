@@ -48,10 +48,13 @@ Phase A: Annotate          ✓ DONE (2026-03-01)
 Phase B: Clean __init__.py phantom chains  ✓ DONE (2026-03-01)
   Removed eager imports from 4 __init__.py files.
   Eliminated 13 of 14 phantom module loads at startup.
-  1 remaining: shadow_comparison.py via parsers/__init__.py.
 
-Phase B.6: Resolve remaining issues  ← DO THIS BEFORE PROCEEDING
-  See "Code Review Findings" section below.
+Phase B.6: Resolve remaining issues  ✓ DONE (2026-03-02)
+  B.6.1: shadow_comparison eager import removed → PHANTOM count now 0
+  B.6.2: CLI kept → progress.py reclassified STANDALONE
+  B.6.3: Migration script → RETIRED (all provisions subsumed)
+  B.6.4: CI guard script created (scripts/ci/check_dead_imports.py)
+  B.6.5: Phase F test scope updated (19 files documented)
 
 Phase C: Pull forward active logic   ← NEXT
   Extract active methods from legacy modules into clean new modules.
@@ -282,10 +285,10 @@ from .connections import ConnectionManager, close_connections, ...
 | ACTIVE | 110 | Module headers (107) + entry point markers (3 `ACTIVE -- ENTRY POINT`) |
 | DEAD | 93 | 35 module headers + 58 method/class-level annotations within MIXED files |
 | MIXED | 4 | `build_graph.py`, `saga.py`, `contract_checks.py`, `connections.py` |
-| STANDALONE | 2 | `stdio_server.py`, `cli.py` |
+| STANDALONE | 2→3 | `stdio_server.py`, `cli.py`, `progress.py` (B.6.2) |
 | DORMANT | 2 | `markdown.py` (legacy parser), `ner_gliner.py` (config-gated) |
 | TEST_ONLY | 1 | `templates/advanced/schemas.py` |
-| PHANTOM | 1 | `shadow_comparison.py` (still eagerly imported by `parsers/__init__.py`) |
+| PHANTOM | 1→0 | `shadow_comparison.py` reclassified to DEAD (B.6.1) |
 | PHANTOM-SOURCE | 0 | All cleaned in Phase B |
 | **Total** | **213** | **annotations across all `src/` files** |
 
@@ -298,7 +301,7 @@ from .connections import ConnectionManager, close_connections, ...
 | `neo/__init__.py` | Loads 3 phantom modules | Empty — no phantom loading |
 | `shared/__init__.py` | Loads `audit/logger.py` | Clean — only `config` + `connections` |
 
-**Net result:** 13 of 14 phantom loading chains eliminated. 1 remaining: `shadow_comparison.py` via `parsers/__init__.py:28`.
+**Net result:** All 14 phantom loading chains eliminated. Last one (`shadow_comparison.py`) resolved in Phase B.6.1.
 
 ### Entry Point Verification (all passing)
 
@@ -392,9 +395,9 @@ If this script is still operational or might need to run again, Phase D/E deleti
 
 ## 6. Phase B.6: Pre-Phase-C Prerequisites
 
-These items must be resolved before proceeding with Phases C-F.
+**Status:** ALL RESOLVED (2026-03-02)
 
-### B.6.1: Remove or lazy-bind `shadow_comparison` import
+### B.6.1: Remove or lazy-bind `shadow_comparison` import — ✓ DONE
 
 **File:** `src/ingestion/parsers/__init__.py:28`
 
@@ -410,30 +413,32 @@ from src.ingestion.parsers.shadow_comparison import ShadowModeError
 
 After this change, update `shadow_comparison.py` annotation from `@status: PHANTOM` to `@status: DEAD` (or DORMANT if shadow mode is a planned feature).
 
-### B.6.2: Resolve CLI / progress classification conflict
+### B.6.2: Resolve CLI / progress classification conflict — ✓ DONE
 
-**Decision required:** Is `ingestctl` (cli.py) still an operational tool?
+**Decision:** Keep CLI. `ingestctl` will be developed into a first-class tool.
 
 | Decision | Action |
 |----------|--------|
 | **Keep CLI** | Reclassify `progress.py` from DEAD to STANDALONE. Both survive Phase D. |
 | **Retire CLI** | Reclassify `cli.py` from STANDALONE to DEAD. Both deleted in Phase D. |
 
-### B.6.3: Classify migration scripts
+### B.6.3: Classify migration scripts — ✓ DONE (RETIRED)
 
 **File:** `scripts/neo4j_structural_migration.py`
 
-Determine if this script is retired or may need to run again. Its imports of `run_contract_checks`, `normalize_entities_backfill`, and `StructuralEdgeBuilder` block deletion of:
+**Analysis:** All provisions are subsumed by the active ingestion pipeline (`structural_edges.py` + `atomic.py`). Indexes exist in DB and are monitored by `health.py`. Entity normalization backfill is a historical one-time operation. Script header annotated `@status: RETIRED`.
+
+Its imports of `run_contract_checks`, `normalize_entities_backfill`, and `StructuralEdgeBuilder` no longer block deletion of:
 - `src/neo/contract_checks.py` (specifically `run_contract_checks`)
 - `src/neo/entity_normalization.py`
 - `src/neo/structural_builder.py`
 
 | Decision | Action |
 |----------|--------|
-| **Script is retired** | Add `# @status: RETIRED` header to script. Proceed with Phase D/E deletions. |
+| ~~**Script is retired**~~ | ~~Add `# @status: RETIRED` header to script. Proceed with Phase D/E deletions.~~ **← Applied** |
 | **Script may run again** | Remove DEAD annotation from the 3 imported modules (or classify them as STANDALONE). |
 
-### B.6.4: Add CI guard (recommended)
+### B.6.4: Add CI guard — ✓ DONE
 
 Add a lint check that fails if any ACTIVE or MIXED module imports from a DEAD or PHANTOM module:
 ```bash
@@ -447,9 +452,9 @@ grep -rn "@status: DEAD" src/ | sed 's/:.*//;s|src/||;s|\.py||;s|/|.|g' | \
 
 This prevents regressions where active code accidentally starts depending on dead code.
 
-### B.6.5: Update Phase F test retirement scope
+### B.6.5: Update Phase F test retirement scope — ✓ DONE
 
-Phase F must now account for all 19 test files identified in Finding 4 (see table above), not just the 7 originally listed.
+Phase F now accounts for all 19 test files identified in Finding 4 (see Section 10).
 
 ---
 
