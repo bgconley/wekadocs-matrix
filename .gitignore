@@ -5,6 +5,7 @@ __pycache__/
 .env
 .env.docker
 .env.local
+.env.production
 .pytest_cache/
 
 # macOS

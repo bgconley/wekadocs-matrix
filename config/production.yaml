@@ -485,10 +485,9 @@ ner:
   threshold: 0.45  # Minimum confidence (0.0-1.0)
   device: "auto"  # auto-detect: MPS → CUDA → CPU
   batch_size: 32  # Optimal for Apple Silicon (M1/M2/M3)
-  # External GLiNER service with MPS acceleration (5-10x faster than CPU)
-  # Run: cd services/gliner-ner && ./run.sh
-  # Falls back to local model if service unavailable
-  service_url: "http://10.25.0.50:8080"
+  # GPU gateway on the same host as Docker (production deployment)
+  # Containers reach it via host.docker.internal (resolved by extra_hosts directive)
+  service_url: "http://host.docker.internal:8080"
   # Entity exclusions: terms too common to be useful (filtered post-extraction)
   # Note: "WEKA" and variants are excluded in src/providers/ner/labels.py
   labels:

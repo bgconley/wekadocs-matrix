@@ -15,9 +15,7 @@ volumes:
   qdrant-data:
   redis-data:
   hf-cache:  # Phase 7C: HuggingFace tokenizer cache
-  # Tailscale state volumes for sidecar containers
-  ts-mcp-server-state:
-  ts-ingestion-worker-state:
+  # (Tailscale sidecar volumes removed — sidecars no longer used)
 
 services:
   neo4j:
@@ -121,68 +119,6 @@ services:
       start_period: 5s
 
   # ============================================================================
-  # Tailscale Sidecar Containers
-  # These provide Tailnet/MagicDNS access to app containers via network_mode
-  # See: https://tailscale.com/kb/1282/docker
-  # ============================================================================
-
-  ts-mcp-server:
-    image: tailscale/tailscale:latest
-    container_name: weka-ts-mcp-server
-    hostname: weka-mcp-server
-    networks:
-      - weka-net
-    ports:
-      - "${MCP_PORT:-8000}:8000"  # Expose MCP server port through sidecar
-    environment:
-      - TS_AUTHKEY=tskey-auth-kNYNccYUth11CNTRL-DEUXtBuVL7QiXjKYzK748QaQ9knSK7AtK
-      - TS_STATE_DIR=/var/lib/tailscale
-      - TS_USERSPACE=false
-      - TS_ACCEPT_DNS=true
-      - TS_EXTRA_ARGS=--advertise-tags=tag:container --hostname=weka-mcp-server
-    volumes:
-      - ts-mcp-server-state:/var/lib/tailscale
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    cap_add:
-      - net_admin
-      - sys_module
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "tailscale", "status", "--json"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-  ts-ingestion-worker:
-    image: tailscale/tailscale:latest
-    container_name: weka-ts-ingestion-worker
-    hostname: weka-ingestion-worker
-    networks:
-      - weka-net
-    environment:
-      - TS_AUTHKEY=${TS_AUTHKEY}
-      - TS_STATE_DIR=/var/lib/tailscale
-      - TS_USERSPACE=false
-      - TS_ACCEPT_DNS=true
-      - TS_EXTRA_ARGS=--advertise-tags=tag:container --hostname=weka-ingestion-worker
-    volumes:
-      - ts-ingestion-worker-state:/var/lib/tailscale
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    cap_add:
-      - net_admin
-      - sys_module
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "tailscale", "status", "--json"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-  # ============================================================================
   # Application Services
   # ============================================================================
 
@@ -191,9 +127,12 @@ services:
       context: .
       dockerfile: docker/mcp-server.Dockerfile
     container_name: weka-mcp-server
-    # Use Tailscale sidecar's network for MagicDNS access to reranker
-    network_mode: service:ts-mcp-server
-    # Note: ports moved to ts-mcp-server sidecar
+    networks:
+      - weka-net
+    ports:
+      - "${MCP_PORT:-8000}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./config:/app/config:ro
       - ./src:/app/src:ro
@@ -209,8 +148,8 @@ services:
       # Phase 7C: Embedding Provider Configuration
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
-      - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
-      - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://host.docker.internal:9002}
+      - BGE_M3_API_URL=${BGE_M3_API_URL:-http://10.25.0.50:8080}
+      - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://10.25.0.50:8080}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-local-reranker-service}
       - RERANK_MODEL=${RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}
       - RERANKER_TOKENIZER_ID=${RERANKER_TOKENIZER_ID:-Qwen/Qwen3-Reranker-4B}
@@ -265,8 +204,6 @@ services:
       - OTEL_LOGS_EXPORTER=otlp
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
-      ts-mcp-server:
-        condition: service_healthy
       neo4j:
         condition: service_healthy
       qdrant:
@@ -295,8 +232,10 @@ services:
       dockerfile: docker/ingestion-worker.Dockerfile
     container_name: weka-ingestion-worker
     command: python -m src.ingestion.worker
-    # Use Tailscale sidecar's network for MagicDNS access to reranker
-    network_mode: service:ts-ingestion-worker
+    networks:
+      - weka-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./config:/app/config:ro
       - ./src:/app/src
@@ -313,8 +252,8 @@ services:
       # Phase 7C: Embedding Provider Configuration
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
-      - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
-      - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://host.docker.internal:9002}
+      - BGE_M3_API_URL=${BGE_M3_API_URL:-http://10.25.0.50:8080}
+      - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://10.25.0.50:8080}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-local-reranker-service}
       - RERANK_MODEL=${RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}
       - RERANKER_TOKENIZER_ID=${RERANKER_TOKENIZER_ID:-Qwen/Qwen3-Reranker-4B}
@@ -384,8 +323,6 @@ services:
       - OTEL_LOGS_EXPORTER=otlp
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
-      ts-ingestion-worker:
-        condition: service_healthy
       neo4j:
         condition: service_healthy
       qdrant:
@@ -413,6 +350,8 @@ services:
       - weka-net
     ports:
       - "8081:8081"  # Health/metrics/ready endpoints
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./config:/app/config:ro
       - ./src:/app/src
@@ -430,8 +369,8 @@ services:
       # Phase 7C: Embedding Provider Configuration
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
-      - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
-      - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://host.docker.internal:9002}
+      - BGE_M3_API_URL=${BGE_M3_API_URL:-http://10.25.0.50:8080}
+      - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://10.25.0.50:8080}
       - RERANK_PROVIDER=${RERANK_PROVIDER:-local-reranker-service}
       - RERANK_MODEL=${RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}
       - RERANKER_TOKENIZER_ID=${RERANKER_TOKENIZER_ID:-Qwen/Qwen3-Reranker-4B}
