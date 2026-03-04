@@ -467,6 +467,9 @@ class TokenizerService:
             "snowflake-arctic-v2l",
             "snowflake_arctic",
             "snowflake-arctic-service",
+            # Qwen3 profiles - HF tokenizer required, no Jina segmenter fallback
+            "qwen3_0_6b",
+            "qwen3_4b",
         }
 
         if backend_name == "hf":

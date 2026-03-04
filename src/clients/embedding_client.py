@@ -84,13 +84,30 @@ class EmbeddingClient:
             self._handle_error(response)
 
         data = response.json()["data"]
-        return [
-            {
-                "indices": [int(i) for i in item["indices"]],
-                "values": [float(v) for v in item["values"]],
-            }
-            for item in data
-        ]
+        results = []
+        for item in data:
+            if "indices" in item and "values" in item:
+                # Legacy format: {"indices": [...], "values": [...]}
+                results.append(
+                    {
+                        "indices": [int(i) for i in item["indices"]],
+                        "values": [float(v) for v in item["values"]],
+                    }
+                )
+            elif "embedding" in item:
+                # Unified gateway format: {"embedding": [{"index": int, "value": float}, ...]}
+                pairs = item["embedding"]
+                results.append(
+                    {
+                        "indices": [int(p["index"]) for p in pairs],
+                        "values": [float(p["value"]) for p in pairs],
+                    }
+                )
+            else:
+                raise ValueError(
+                    f"Unexpected sparse embedding format: {list(item.keys())}"
+                )
+        return results
 
     def embed_colbert(self, texts: List[str]) -> List[List[List[float]]]:
         """Return ColBERT multi-vectors using /v1/embeddings/colbert."""

@@ -33,6 +33,13 @@ except Exception:  # pragma: no cover - optional dependency
     StatusCode = None  # type: ignore
 
 from src.mcp_server.query_service import QueryService, get_query_service
+from src.mcp_server.retrieval_trace import (
+    RetrievalTraceBuilder,
+    TraceQuote,
+    append_followup_and_write,
+    set_active_trace,
+    write_trace,
+)
 from src.mcp_server.scratch_store import ScratchStore
 from src.query.hybrid_retrieval import ChunkResult
 from src.query.traversal import TraversalService
@@ -69,6 +76,8 @@ KB_SEARCH_MAX_TOP_K = 20
 KB_SEARCH_MAX_PAGE_SIZE = 20
 KB_SEARCH_DEFAULT_SNIPPET_CHARS = 280
 KB_SEARCH_MAX_SNIPPET_CHARS = 500
+KB_EVIDENCE_INTERNAL_FETCH_K = 60  # How deep the evidence pack searches internally
+KB_EVIDENCE_MAX_FETCH_K = 150  # Hard cap on internal retrieval depth
 SCRATCH_TTL_SECONDS = int(os.getenv("MCP_SCRATCH_TTL_SECONDS", "1800"))
 SCRATCH_MAX_BYTES = int(os.getenv("MCP_SCRATCH_MAX_BYTES", str(256 * 1024 * 1024)))
 # _SESSION_IDS removed - now using single _GLOBAL_SESSION_ID for stable scratch storage
@@ -78,6 +87,7 @@ LEGACY_SEARCH_DOCUMENTATION_ENABLED = os.getenv(
 DIAGNOSTICS_RESOURCES_ENABLED = os.getenv(
     "MCP_DIAGNOSTICS_RESOURCES_ENABLED", "false"
 ).lower() in {"1", "true", "yes", "on"}
+MCP_TOOL_PROFILE = os.getenv("MCP_TOOL_PROFILE", "production")
 
 
 def _encode_cursor(offset: int) -> str:
@@ -396,6 +406,7 @@ async def _kb_search_candidates(
     options: Optional[dict[str, Any]],
     deps: Deps,
     effective_session: str,
+    _fetch_k_override: Optional[int] = None,
 ) -> tuple[dict, dict]:
     normalized_scope = _normalize_scope(scope)
     merged_filters = _merge_scope_filters(filters, normalized_scope)
@@ -411,8 +422,13 @@ async def _kb_search_candidates(
     max_per_doc = int(options.get("max_per_doc", 1))
     max_per_doc = max(1, min(max_per_doc, 5))
 
-    top_k = max(1, min(int(top_k or KB_SEARCH_DEFAULT_TOP_K), KB_SEARCH_MAX_TOP_K))
-    page = max(1, min(int(page_size or top_k), KB_SEARCH_MAX_PAGE_SIZE))
+    if _fetch_k_override is not None:
+        # Evidence pack path: bypass the KB_SEARCH_MAX_TOP_K cap
+        top_k = max(1, int(_fetch_k_override))
+        page = top_k
+    else:
+        top_k = max(1, min(int(top_k or KB_SEARCH_DEFAULT_TOP_K), KB_SEARCH_MAX_TOP_K))
+        page = max(1, min(int(page_size or top_k), KB_SEARCH_MAX_PAGE_SIZE))
 
     offset = _decode_cursor(cursor)
     effective_limit = min(page, top_k)
@@ -468,6 +484,18 @@ async def _kb_search_candidates(
             "text": chunk.text,
             "source_uri": getattr(chunk, "source_path", None),
             "created_at": datetime.utcnow().isoformat() + "Z",
+            # Retrieval scores — preserved for evidence extraction
+            "rerank_score": chunk.rerank_score,
+            "fused_score": chunk.fused_score,
+            "vector_score": chunk.vector_score,
+            "bm25_score": chunk.bm25_score,
+            "graph_score": getattr(chunk, "graph_score", None),
+            "parent_path_norm": chunk.parent_path_norm,
+            "rerank_rank": chunk.rerank_rank,
+            "fusion_method": chunk.fusion_method,
+            "is_expanded": chunk.is_expanded,
+            "expansion_source": chunk.expansion_source,
+            "source": source,
         }
         size_bytes = await deps.scratch.put(
             effective_session, passage_id, scratch_payload
@@ -570,71 +598,197 @@ async def _extract_evidence_from_passages(
     deps: Deps,
     effective_session: str,
 ) -> list[dict[str, Any]]:
+    """Extract evidence quotes using retrieval scores + lexical blending.
+
+    Stage 1: Rank passages by retrieval score (rerank > fused > vector > bm25).
+    Stage 2: Within each passage, select the best span using a blended score
+    of retrieval quality (70%) and keyword overlap (30%).
+    """
     query_tokens = _tokenize_query(question)
     if not passage_ids:
         return []
 
-    spans = []
-    for passage_id in passage_ids:
+    # Stage 1: Load passages with their retrieval scores
+    passages = []
+    for rank, passage_id in enumerate(passage_ids):
         entry = await deps.scratch.get(effective_session, passage_id)
         if not entry:
             continue
-        text = entry.get("text") or ""
-        section_id = entry.get("section_id")
-        title = entry.get("title")
-        for idx, (span, start, end) in enumerate(_split_spans_with_offsets(text)):
-            lowered = span.lower()
-            hits = sum(1 for t in query_tokens if t in lowered)
-            score = hits / max(1, len(query_tokens)) if query_tokens else 0.0
-            spans.append(
-                {
-                    "score": score,
-                    "length": len(span),
-                    "position": idx,
-                    "span": span,
-                    "start": start,
-                    "end": end,
-                    "passage_id": passage_id,
-                    "section_id": section_id,
-                    "title": title,
-                    "text": text,
-                }
-            )
+        retrieval_score = (
+            entry.get("rerank_score")
+            or entry.get("fused_score")
+            or entry.get("vector_score")
+            or entry.get("bm25_score")
+            or 0.0
+        )
+        passages.append(
+            {
+                "passage_id": passage_id,
+                "entry": entry,
+                "retrieval_score": float(retrieval_score),
+                "rank": rank + 1,
+            }
+        )
 
-    if not spans:
+    if not passages:
         return []
 
-    spans.sort(key=lambda item: (-item["score"], item["length"], item["position"]))
-    has_positive = any(item["score"] > 0 for item in spans)
-    if has_positive:
-        spans = [item for item in spans if item["score"] > 0]
+    # Sort passages by retrieval score descending
+    passages.sort(key=lambda p: -p["retrieval_score"])
 
     max_quotes = max(1, min(int(max_quotes or 6), 12))
     max_quote_tokens = max(1, min(int(max_quote_tokens or 80), 200))
     include_context_tokens = max(0, min(int(include_context_tokens or 20), 200))
-
     context_chars = include_context_tokens * 4
     max_quote_chars = min(max_quote_tokens * 4, 500)
 
+    # Stage 2: For each passage (by retrieval score), extract best span
+    retrieval_weight = 0.7
+    lexical_weight = 0.3
     quotes = []
-    for item in spans[:max_quotes]:
-        text = item["text"]
-        start = max(0, item["start"] - context_chars)
-        end = min(len(text), item["end"] + context_chars)
-        quote = text[start:end].strip()
-        quote = quote[:max_quote_chars]
+    seen_passage_ids: set[str] = set()
+
+    for passage in passages:
+        if len(quotes) >= max_quotes:
+            break
+        pid = passage["passage_id"]
+        if pid in seen_passage_ids:
+            continue
+        seen_passage_ids.add(pid)
+
+        entry = passage["entry"]
+        text = entry.get("text") or ""
+        section_id = entry.get("section_id")
+        title = entry.get("title")
+        retrieval_score = passage["retrieval_score"]
+
+        # Score each span with blended retrieval + lexical
+        best_span = None
+        best_blended = -1.0
+        for idx, (span, start, end) in enumerate(_split_spans_with_offsets(text)):
+            lowered = span.lower()
+            hits = sum(1 for t in query_tokens if t in lowered)
+            lexical = hits / max(1, len(query_tokens)) if query_tokens else 0.0
+            blended = (retrieval_weight * retrieval_score) + (lexical_weight * lexical)
+            if blended > best_blended:
+                best_blended = blended
+                best_span = (span, start, end, blended)
+
+        if best_span is None:
+            continue
+
+        _, start, end, blended_score = best_span
+        start = max(0, start - context_chars)
+        end = min(len(text), end + context_chars)
+        quote = text[start:end].strip()[:max_quote_chars]
+
         quotes.append(
             {
                 "quote": quote,
-                "passage_id": item["passage_id"],
-                "section_id": item["section_id"],
-                "title": item["title"],
-                "uri": ScratchStore.build_uri(effective_session, item["passage_id"]),
-                "confidence": round(float(item["score"]), 3),
+                "passage_id": pid,
+                "section_id": section_id,
+                "doc_tag": entry.get("doc_tag"),
+                "title": title,
+                "parent_path": entry.get("parent_path_norm"),
+                "uri": ScratchStore.build_uri(effective_session, pid),
+                "confidence": round(blended_score, 3),
+                "source": entry.get("source", "hybrid"),
+                "rank": passage["rank"],
             }
         )
 
     return quotes
+
+
+async def _expand_evidence_with_structure(
+    *,
+    section_ids: list[str],
+    deps: Deps,
+    effective_session: str,
+    max_neighbors: int = 20,
+) -> list[str]:
+    """Fetch structural neighbors (NEXT_CHUNK, siblings) and store in scratch.
+
+    Always-on graph enrichment: adds sequential and sibling chunks to the
+    evidence extraction candidate pool. Returns new passage_ids for the
+    expanded neighbors. Skips gracefully if Neo4j is unavailable.
+    """
+    if _neo4j_disabled or not deps.graph or not section_ids:
+        return []
+
+    seed_ids = section_ids[:10]  # Top 10 seeds for structural expansion
+
+    cypher = """
+    UNWIND $ids AS sid
+    MATCH (c:Chunk {id: sid})
+    OPTIONAL MATCH (c)-[:NEXT_CHUNK]->(nxt:Chunk)
+    OPTIONAL MATCH (prev:Chunk)-[:NEXT_CHUNK]->(c)
+    OPTIONAL MATCH (sib:Chunk {parent_section_id: c.parent_section_id})
+      WHERE sib.id <> c.id
+    WITH c, nxt, prev, collect(DISTINCT sib)[..3] AS sibs
+    UNWIND (
+      CASE WHEN nxt IS NOT NULL THEN [nxt] ELSE [] END +
+      CASE WHEN prev IS NOT NULL THEN [prev] ELSE [] END +
+      sibs
+    ) AS neighbor
+    WHERE neighbor.id NOT IN $ids
+    RETURN DISTINCT neighbor.id AS chunk_id,
+           neighbor.heading AS heading,
+           neighbor.text AS text,
+           neighbor.doc_tag AS doc_tag,
+           neighbor.parent_path_norm AS parent_path_norm,
+           neighbor.parent_section_id AS parent_section_id
+    LIMIT $limit
+    """
+    try:
+        with deps.graph.driver.session() as session:
+            result = session.run(cypher, ids=seed_ids, limit=max_neighbors)
+            records = list(result)
+    except Exception as exc:
+        logger.warning(f"evidence_graph_expansion_failed: {exc}")
+        return []
+
+    if not records:
+        return []
+
+    # Store expanded neighbors in scratch with synthetic scores
+    new_passage_ids = []
+    existing_section_ids = set(section_ids)
+    for record in records:
+        cid = record["chunk_id"]
+        if cid in existing_section_ids:
+            continue
+        existing_section_ids.add(cid)
+
+        passage_id = uuid4().hex
+        scratch_payload = {
+            "section_id": cid,
+            "doc_tag": record["doc_tag"],
+            "title": record["heading"] or "",
+            "text": record["text"] or "",
+            "source_uri": None,
+            "created_at": datetime.utcnow().isoformat() + "Z",
+            # Structural neighbors get a moderate synthetic score
+            # so they can compete in the blended ranking
+            "rerank_score": None,
+            "fused_score": 0.3,  # synthetic: below typical reranked scores
+            "vector_score": None,
+            "bm25_score": None,
+            "graph_score": 0.5,
+            "parent_path_norm": record["parent_path_norm"],
+            "rerank_rank": None,
+            "fusion_method": "graph_expansion",
+            "is_expanded": True,
+            "expansion_source": "evidence_structural",
+            "source": "graph_expanded",
+        }
+        await deps.scratch.put(effective_session, passage_id, scratch_payload)
+        new_passage_ids.append(passage_id)
+
+    logger.info(
+        f"evidence_graph_expansion: seeds={len(seed_ids)}, neighbors_added={len(new_passage_ids)}"
+    )
+    return new_passage_ids
 
 
 def _infer_source(chunk: ChunkResult) -> str:
@@ -946,39 +1100,53 @@ async def lifespan(server: Server) -> AsyncIterator[Deps]:
                 logger.info("STDIO server lifespan: connections closed")
 
 
-# Create FastMCP instance with lifespan and mode-appropriate instructions
-GRAPH_FIRST_INSTRUCTIONS = (
-    "You are connected to the Weka docs graph via MCP tools. "
-    "Always start with kb.search to collect seed IDs (use search_sections only for legacy callers); "
-    "then explore the neighborhood with expand_neighbors, get_paths_between, describe_nodes, "
-    "list_children, list_parents, get_entities_for_sections, get_sections_for_entities, and compute_context_bundle. "
-    "Only after mapping the graph should you call get_section_text for a small number of high-value sections, "
-    "using conservative max_bytes_per (4–8KB) and multiple small calls. Avoid unbounded text dumps and prefer cursors. "
-    "CRITICAL: Only state that a feature, API, or capability is supported if it is EXPLICITLY listed in the documentation. "
-    "Do NOT infer or assume support based on related concepts or similar terminology. "
-    "If something is not explicitly documented as supported, clearly state that you could not find documentation for it rather than guessing or fabricating details."
+# ── MCP instructions (profile-aware) ──────────────────────────────────
+# Production: evidence-pack-first workflow with 3 tools.
+# Analyst: full tool access with evidence pack as recommended start.
+# Legacy instructions retained for reference but no longer active.
+
+PRODUCTION_INSTRUCTIONS = (
+    "You are connected to the WEKA documentation knowledge base. "
+    "Start with kb.retrieve_evidence to get an evidence pack for any question. "
+    "The evidence pack includes quotes with confidence scores, document context "
+    "(doc_tag, parent_path), and coverage metadata showing retrieval depth. "
+    "Use kb.read_excerpt to read the full text of a passage if you need more context "
+    "beyond the quote snippet. "
+    "Use graph.expand only for follow-up navigation when the user asks about related "
+    "content near a specific section (e.g., 'what else is in that configuration page?'). "
+    "Do NOT use graph.expand for initial research — kb.retrieve_evidence handles that "
+    "with server-side graph enrichment and deep retrieval. "
+    "CRITICAL: Only state that a feature, API, or capability is supported if it is "
+    "EXPLICITLY listed in the documentation. If something is not explicitly documented, "
+    "clearly state that you could not find documentation for it."
 )
 
-VECTOR_ONLY_INSTRUCTIONS = (
-    "You are connected to the Weka docs via MCP vector search tools. "
-    "Graph traversal is DISABLED - do NOT use expand_neighbors, get_paths_between, list_children, list_parents, or traverse_relationships. "
-    "Use kb.search (or search_sections for legacy callers) to find relevant documentation, then get_section_text to retrieve content. "
-    "Complete your response in 2-3 tool calls maximum. Do not loop or retry failed graph operations. "
-    "CRITICAL: Only state that a feature, API, or capability is supported if it is EXPLICITLY listed in the documentation. "
-    "Do NOT infer or assume support based on related concepts or similar terminology. "
-    "If something is not explicitly documented as supported, clearly state that you could not find documentation for it rather than guessing or fabricating details."
+ANALYST_INSTRUCTIONS = (
+    "You are connected to the WEKA documentation knowledge base with full tool access. "
+    "For most queries, start with kb.retrieve_evidence for a server-built evidence pack "
+    "with retrieval-score-based confidence and coverage metadata. "
+    "Use kb.search for browsing candidates, graph.* tools for structural exploration "
+    "(graph.expand, graph.describe, graph.paths, graph.parents, graph.children), "
+    "and kb.get_section_text for full text retrieval. "
+    "kb.extract_evidence extracts quotes from known passage_ids (post-search). "
+    "CRITICAL: Only state that a feature, API, or capability is supported if it is "
+    "EXPLICITLY listed in the documentation. If something is not explicitly documented, "
+    "clearly state that you could not find documentation for it."
 )
 
-# Select instructions based on neo4j_disabled config
+# Select instructions based on tool profile
 _config = get_config()
 _neo4j_disabled = getattr(getattr(_config, "hybrid", None), "neo4j_disabled", False)
 _instructions = (
-    VECTOR_ONLY_INSTRUCTIONS if _neo4j_disabled else GRAPH_FIRST_INSTRUCTIONS
+    PRODUCTION_INSTRUCTIONS
+    if MCP_TOOL_PROFILE == "production"
+    else ANALYST_INSTRUCTIONS
 )
 logger.info(
     "MCP instructions mode",
     neo4j_disabled=_neo4j_disabled,
-    mode="vector_only" if _neo4j_disabled else "graph_first",
+    profile=MCP_TOOL_PROFILE,
+    mode="production" if MCP_TOOL_PROFILE == "production" else "analyst",
 )
 
 KB_SEARCH_DESCRIPTION = (
@@ -1201,11 +1369,35 @@ KB_EXTRACT_INPUT_SCHEMA = {
 KB_RETRIEVE_INPUT_SCHEMA = {
     "type": "object",
     "properties": {
-        "question": {"type": "string"},
-        "top_k": {"type": "integer", "default": KB_SEARCH_DEFAULT_TOP_K},
-        "max_quotes": {"type": "integer", "default": 6},
-        "max_quote_tokens": {"type": "integer", "default": 80},
-        "include_context_tokens": {"type": "integer", "default": 20},
+        "question": {
+            "type": "string",
+            "description": "The question to find evidence for",
+        },
+        "max_quotes": {
+            "type": "integer",
+            "default": 6,
+            "description": "Max evidence quotes to return (1-12)",
+        },
+        "max_quote_tokens": {
+            "type": "integer",
+            "default": 80,
+            "description": "Max tokens per quote",
+        },
+        "include_context_tokens": {
+            "type": "integer",
+            "default": 20,
+            "description": "Context tokens around each quote",
+        },
+        "retrieval_depth": {
+            "type": "integer",
+            "default": KB_EVIDENCE_INTERNAL_FETCH_K,
+            "description": "Internal search depth (default 60, max 150). Searches this many candidates to find the best quotes.",
+        },
+        "top_k": {
+            "type": "integer",
+            "default": KB_SEARCH_DEFAULT_TOP_K,
+            "description": "Backward compat alias for max_quotes",
+        },
         "scope": SCOPE_SCHEMA,
         "filters": FILTERS_SCHEMA,
         "options": KB_SEARCH_OPTIONS_SCHEMA,
@@ -1982,13 +2174,20 @@ async def kb_retrieve_evidence(
     max_quotes: int = 6,
     max_quote_tokens: int = 80,
     include_context_tokens: int = 20,
+    retrieval_depth: int = KB_EVIDENCE_INTERNAL_FETCH_K,
     scope: Optional[dict[str, Any]] = None,
     filters: Optional[dict[str, Any]] = None,
     options: Optional[dict[str, Any]] = None,
     session_id: Optional[str] = None,
     ctx: Any | None = None,
 ) -> dict:
-    """Search for candidates then extract minimal evidence quotes."""
+    """Search deeply then extract the best evidence quotes.
+
+    Unlike kb_search (which returns ranked passages), this tool returns
+    minimal evidence quotes with retrieval-score-based confidence. It
+    searches much deeper than the number of quotes returned — retrieval_depth
+    controls internal search depth while max_quotes controls output size.
+    """
 
     deps = _get_deps(ctx)
     if not deps.scratch:
@@ -1999,19 +2198,130 @@ async def kb_retrieve_evidence(
     except ValueError as exc:
         return _error_payload("SCOPE_VIOLATION", str(exc))
 
+    # Backward compat: if caller passes top_k but not max_quotes, use top_k
+    # as max_quotes (legacy behavior where top_k controlled output size).
+    if top_k != KB_SEARCH_DEFAULT_TOP_K and max_quotes == 6:
+        max_quotes = top_k
+
+    # Clamp retrieval depth: search deep internally, return few quotes
+    internal_fetch_k = max(
+        max_quotes,
+        min(
+            int(retrieval_depth or KB_EVIDENCE_INTERNAL_FETCH_K),
+            KB_EVIDENCE_MAX_FETCH_K,
+        ),
+    )
+
     effective_session = _resolve_session_id(ctx, session_id)
+
+    # Override options to allow deep retrieval without per-doc dedup cap
+    evidence_options = dict(options or {})
+    evidence_options.setdefault("max_per_doc", 5)  # allow depth within documents
+
+    # ── Retrieval trace (always-on) ──────────────────────────────────
+    trace = RetrievalTraceBuilder(trace_id=uuid4().hex, session_id=effective_session)
+
     search_payload, diagnostic_context = await _kb_search_candidates(
         query=question,
-        top_k=top_k,
+        top_k=internal_fetch_k,
         cursor=None,
-        page_size=top_k,
+        page_size=internal_fetch_k,
         scope=scope,
         filters=filters,
-        options=options,
+        options=evidence_options,
+        deps=deps,
+        effective_session=effective_session,
+        _fetch_k_override=internal_fetch_k,
+    )
+
+    # Trace: record query (reformulation data comes from metrics)
+    search_metrics = search_payload.get("metrics") or {}
+    trace.record_query(
+        client_query=search_metrics.get("query_rewrite_original", question),
+        reformulated=search_metrics.get("query_rewrite_result", question),
+        method=(
+            search_metrics.get("query_rewrite_method", "passthrough")
+            if search_metrics.get("query_rewrite_applied")
+            else "passthrough"
+        ),
+        latency_ms=search_metrics.get("query_rewrite_latency_ms", 0),
+        dual_query_active=bool(search_metrics.get("dual_query_active")),
+    )
+
+    # Trace: record signal pool state
+    trace.record_signal_pool(
+        enabled=bool(search_metrics.get("signal_pool_enabled")),
+        pool_size=int(search_metrics.get("signal_pool_size", 0)),
+        slot_fills=search_metrics.get("signal_pool_slot_fills", {}),
+        degraded=bool(search_metrics.get("signal_pool_degraded")),
+    )
+
+    # Trace: record reranker
+    trace.record_reranker(
+        model=search_metrics.get("reranker_model", "unknown"),
+        instruction=search_metrics.get("reranker_instruction"),
+        input_count=int(search_metrics.get("reranker_input_count", 0)),
+        output_count=len(search_payload.get("results", [])),
+        latency_ms=search_metrics.get("rerank_time_ms", 0),
+        top_results=[
+            {
+                "chunk_id": r.get("section_id", ""),
+                "score": r.get("score", 0),
+                "heading": r.get("title", ""),
+                "rank": r.get("rank", 0),
+                "original_rank": idx + 1,
+            }
+            for idx, r in enumerate(search_payload.get("results", [])[:10])
+        ],
+    )
+
+    # Trace: record appendix (full text of top 20 for deep inspection)
+    trace.record_appendix_chunks(
+        [
+            {
+                "chunk_id": r.get("section_id", ""),
+                "rerank_score": r.get("score"),
+                "doc_tag": r.get("doc_tag"),
+                "parent_path_norm": None,  # not in result dict, available in scratch
+                "heading": r.get("title", ""),
+                "text": "",  # populated from scratch below
+            }
+            for r in search_payload.get("results", [])[:20]
+        ]
+    )
+
+    passage_ids = [item["passage_id"] for item in search_payload["results"]]
+
+    # Populate appendix full text from scratch
+    for idx, pid in enumerate(passage_ids[:20]):
+        entry = await deps.scratch.get(effective_session, pid)
+        if entry and idx < len(trace._appendix_chunks):
+            trace._appendix_chunks[idx]["text"] = entry.get("text", "")
+            trace._appendix_chunks[idx]["parent_path_norm"] = entry.get(
+                "parent_path_norm"
+            )
+
+    # Always-on graph enrichment: expand top passages with structural neighbors
+    section_ids = [
+        item["section_id"]
+        for item in search_payload["results"]
+        if item.get("section_id")
+    ]
+    graph_passage_ids = await _expand_evidence_with_structure(
+        section_ids=section_ids,
         deps=deps,
         effective_session=effective_session,
     )
-    passage_ids = [item["passage_id"] for item in search_payload["results"]]
+    passage_ids.extend(graph_passage_ids)
+    graph_expansion_applied = len(graph_passage_ids) > 0
+
+    # Trace: record graph enrichment
+    trace.record_graph_enrichment(
+        seeds=min(10, len(section_ids)),
+        neighbors_added=len(graph_passage_ids),
+        neighbor_details=[],  # detail populated if we add tracking to _expand_evidence
+    )
+
     quotes = await _extract_evidence_from_passages(
         question=question,
         passage_ids=passage_ids,
@@ -2022,10 +2332,43 @@ async def kb_retrieve_evidence(
         effective_session=effective_session,
     )
 
-    payload = {"quotes": quotes}
+    # Build coverage metadata
+    search_results = search_payload.get("results", [])
+    unique_docs = {r.get("doc_tag") for r in search_results if r.get("doc_tag")}
+    docs_with_evidence = {q.get("doc_tag") for q in quotes if q.get("doc_tag")}
+    coverage = {
+        "documents_searched": len(unique_docs),
+        "documents_with_evidence": len(docs_with_evidence),
+        "retrieval_depth": len(search_results),
+        "reranker_applied": bool(search_metrics.get("rerank_applied")),
+        "signal_pool_active": bool(search_metrics.get("signal_pool_enabled")),
+        "graph_expansion_applied": graph_expansion_applied,
+    }
+
+    # Trace: record evidence pack
+    trace.record_evidence_pack(
+        quotes=[
+            TraceQuote(
+                rank=q.get("rank", 0),
+                confidence=q.get("confidence", 0),
+                doc_tag=q.get("doc_tag"),
+                parent_path=q.get("parent_path"),
+                source=q.get("source", ""),
+                text=q.get("quote", ""),
+            )
+            for q in quotes
+        ],
+        coverage=coverage,
+    )
+
+    # Write trace and set as active for follow-up correlation
+    write_trace(trace)
+    set_active_trace(effective_session, trace)
+
+    payload = {"quotes": quotes, "coverage": coverage}
     budget = _new_budget()
     tokens_estimate, bytes_estimate, budget_partial, budget_reason = _apply_budget(
-        payload, budget, "snippets"  # evidence quotes use snippets budget phase
+        payload, budget, "snippets"
     )
     limit_reason = budget_reason if budget_partial else "none"
     finalized = _finalize_payload(
@@ -2056,6 +2399,9 @@ async def kb_retrieve_evidence(
                 finalized["diagnostic_uri"] = _diagnostics_uri(
                     diagnostic["date"], diagnostic_id
                 )
+    # Add trace_id to response for correlation
+    finalized["trace_id"] = trace.trace_id
+
     return finalized
 
 
@@ -2804,9 +3150,15 @@ def _tool_specs() -> list[dict[str, Any]]:
         idempotentHint=True,
         destructiveHint=False,
     )
+
+    # ── Canonical tool definitions (dot notation) ─────────────────────
+    # These are the primary names matching api-contracts.md and
+    # contract tests. 7 bare-name graph duplicates (describe_nodes,
+    # expand_neighbors, etc.) have been removed.
     specs = [
+        # ── kb.* tools ──
         {
-            "name": "kb_search",
+            "name": "kb.search",
             "handler": kb_search,
             "description": KB_SEARCH_DESCRIPTION,
             "input_schema": KB_SEARCH_INPUT_SCHEMA,
@@ -2814,7 +3166,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "kb_read_excerpt",
+            "name": "kb.read_excerpt",
             "handler": kb_read_excerpt,
             "description": KB_READ_EXCERPT_DESCRIPTION,
             "input_schema": KB_EXCERPT_INPUT_SCHEMA,
@@ -2822,7 +3174,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "kb_expand_excerpt",
+            "name": "kb.expand_excerpt",
             "handler": kb_expand_excerpt,
             "description": KB_EXPAND_EXCERPT_DESCRIPTION,
             "input_schema": KB_EXPAND_INPUT_SCHEMA,
@@ -2830,7 +3182,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "kb_extract_evidence",
+            "name": "kb.extract_evidence",
             "handler": kb_extract_evidence,
             "description": KB_EXTRACT_EVIDENCE_DESCRIPTION,
             "input_schema": KB_EXTRACT_INPUT_SCHEMA,
@@ -2838,7 +3190,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "kb_retrieve_evidence",
+            "name": "kb.retrieve_evidence",
             "handler": kb_retrieve_evidence,
             "description": KB_RETRIEVE_EVIDENCE_DESCRIPTION,
             "input_schema": KB_RETRIEVE_INPUT_SCHEMA,
@@ -2846,63 +3198,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "graph_describe",
-            "handler": describe_nodes,
-            "description": _tool_description(describe_nodes, ""),
-            "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
-            "output_schema": GRAPH_DESCRIBE_OUTPUT_SCHEMA,
-            "annotations": readonly,
-        },
-        {
-            "name": "graph_expand",
-            "handler": expand_neighbors,
-            "description": _tool_description(expand_neighbors, ""),
-            "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
-            "output_schema": GRAPH_EXPAND_OUTPUT_SCHEMA,
-            "annotations": readonly,
-        },
-        {
-            "name": "graph_paths",
-            "handler": get_paths_between,
-            "description": _tool_description(get_paths_between, ""),
-            "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
-            "output_schema": GRAPH_PATHS_OUTPUT_SCHEMA,
-            "annotations": readonly,
-        },
-        {
-            "name": "graph_parents",
-            "handler": list_parents,
-            "description": _tool_description(list_parents, ""),
-            "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
-            "output_schema": GRAPH_PARENTS_OUTPUT_SCHEMA,
-            "annotations": readonly,
-        },
-        {
-            "name": "graph_children",
-            "handler": list_children,
-            "description": _tool_description(list_children, ""),
-            "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
-            "output_schema": GRAPH_CHILDREN_OUTPUT_SCHEMA,
-            "annotations": readonly,
-        },
-        {
-            "name": "graph_entities_for_sections",
-            "handler": get_entities_for_sections,
-            "description": _tool_description(get_entities_for_sections, ""),
-            "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
-            "output_schema": GRAPH_ENTITIES_OUTPUT_SCHEMA,
-            "annotations": readonly,
-        },
-        {
-            "name": "graph_sections_for_entities",
-            "handler": get_sections_for_entities,
-            "description": _tool_description(get_sections_for_entities, ""),
-            "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
-            "output_schema": GRAPH_SECTIONS_OUTPUT_SCHEMA,
-            "annotations": readonly,
-        },
-        {
-            "name": "search_sections",
+            "name": "kb.search_sections",
             "handler": search_sections,
             "description": _tool_description(search_sections, ""),
             "input_schema": SEARCH_SECTIONS_INPUT_SCHEMA,
@@ -2910,15 +3206,16 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "get_section_text",
+            "name": "kb.get_section_text",
             "handler": get_section_text,
             "description": _tool_description(get_section_text, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
             "output_schema": GENERIC_GRAPH_OUTPUT_SCHEMA,
             "annotations": readonly,
         },
+        # ── graph.* tools ──
         {
-            "name": "describe_nodes",
+            "name": "graph.describe",
             "handler": describe_nodes,
             "description": _tool_description(describe_nodes, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2926,7 +3223,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "expand_neighbors",
+            "name": "graph.expand",
             "handler": expand_neighbors,
             "description": _tool_description(expand_neighbors, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2934,7 +3231,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "get_paths_between",
+            "name": "graph.paths",
             "handler": get_paths_between,
             "description": _tool_description(get_paths_between, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2942,7 +3239,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "list_parents",
+            "name": "graph.parents",
             "handler": list_parents,
             "description": _tool_description(list_parents, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2950,7 +3247,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "list_children",
+            "name": "graph.children",
             "handler": list_children,
             "description": _tool_description(list_children, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2958,7 +3255,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "get_entities_for_sections",
+            "name": "graph.entities_for_sections",
             "handler": get_entities_for_sections,
             "description": _tool_description(get_entities_for_sections, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2966,7 +3263,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "get_sections_for_entities",
+            "name": "graph.sections_for_entities",
             "handler": get_sections_for_entities,
             "description": _tool_description(get_sections_for_entities, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2974,7 +3271,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "traverse_relationships",
+            "name": "graph.traverse",
             "handler": traverse_relationships,
             "description": _tool_description(traverse_relationships, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2982,7 +3279,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "summarize_neighborhood",
+            "name": "graph.summarize",
             "handler": summarize_neighborhood,
             "description": _tool_description(summarize_neighborhood, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2990,7 +3287,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
         {
-            "name": "compute_context_bundle",
+            "name": "graph.context_bundle",
             "handler": compute_context_bundle,
             "description": _tool_description(compute_context_bundle, ""),
             "input_schema": GENERIC_GRAPH_INPUT_SCHEMA,
@@ -2998,6 +3295,40 @@ def _tool_specs() -> list[dict[str, Any]]:
             "annotations": readonly,
         },
     ]
+
+    # ── Backward-compat aliases (underscore names) ────────────────────
+    # Temporary: will be removed after one release cycle. Both names
+    # point to the same handler; underscore versions are deprecated.
+    _UNDERSCORE_ALIASES = {
+        "kb_search": "kb.search",
+        "kb_read_excerpt": "kb.read_excerpt",
+        "kb_expand_excerpt": "kb.expand_excerpt",
+        "kb_extract_evidence": "kb.extract_evidence",
+        "kb_retrieve_evidence": "kb.retrieve_evidence",
+        "search_sections": "kb.search_sections",
+        "get_section_text": "kb.get_section_text",
+        "graph_describe": "graph.describe",
+        "graph_expand": "graph.expand",
+        "graph_paths": "graph.paths",
+        "graph_parents": "graph.parents",
+        "graph_children": "graph.children",
+        "graph_entities_for_sections": "graph.entities_for_sections",
+        "graph_sections_for_entities": "graph.sections_for_entities",
+        "traverse_relationships": "graph.traverse",
+        "summarize_neighborhood": "graph.summarize",
+        "compute_context_bundle": "graph.context_bundle",
+    }
+    canonical_by_name = {s["name"]: s for s in specs}
+    for alias_name, canonical_name in _UNDERSCORE_ALIASES.items():
+        canonical = canonical_by_name.get(canonical_name)
+        if canonical:
+            specs.append(
+                {
+                    **canonical,
+                    "name": alias_name,
+                    "description": f"[Deprecated: use {canonical_name}] {canonical['description']}",
+                }
+            )
 
     if LEGACY_SEARCH_DOCUMENTATION_ENABLED:
         specs.append(
@@ -3021,23 +3352,23 @@ def _summary_for_tool(name: str, result: dict) -> str:
     if "results" in result and isinstance(result["results"], list):
         results = result["results"]
         count = len(results)
-        # For kb_search, explicitly list passage_ids to help the AI use the correct IDs
-        if name == "kb_search" and count > 0:
+        # For kb.search, explicitly list passage_ids to help the AI use the correct IDs
+        if name in {"kb.search", "kb_search"} and count > 0:
             passage_ids = [r.get("passage_id") for r in results if r.get("passage_id")]
             if passage_ids:
-                ids_str = ", ".join(passage_ids[:5])  # Show up to 5 IDs
+                ids_str = ", ".join(passage_ids[:5])
                 return (
                     f"{name} returned {count} results. "
-                    f"Use these passage_ids with kb_read_excerpt: [{ids_str}]"
+                    f"Use these passage_ids with kb.read_excerpt: [{ids_str}]"
                 )
-        # For search_sections, explicitly list section_ids
-        if name == "search_sections" and count > 0:
+        # For kb.search_sections, explicitly list section_ids
+        if name in {"kb.search_sections", "search_sections"} and count > 0:
             section_ids = [r.get("section_id") for r in results if r.get("section_id")]
             if section_ids:
-                ids_str = ", ".join(section_ids[:3])  # Show up to 3 IDs (they're long)
+                ids_str = ", ".join(section_ids[:3])
                 return (
                     f"{name} returned {count} results. "
-                    f"Use these section_ids with get_section_text: [{ids_str[:150]}...]"
+                    f"Use these section_ids with kb.get_section_text: [{ids_str[:150]}...]"
                 )
         return f"{name} returned {count} results."
     if "quotes" in result and isinstance(result["quotes"], list):
@@ -3059,10 +3390,70 @@ async def _invoke_tool(handler, arguments: dict[str, Any]) -> dict:
     return await handler(**kwargs)
 
 
+# ── Tool profiles ─────────────────────────────────────────────────────
+# Config-driven via MCP_TOOL_PROFILE env var.  Default: "production"
+# (minimal 3-tool surface for LLM QA clients).
+TOOL_PROFILES: dict[str, Optional[set[str]]] = {
+    "production": {
+        "kb.retrieve_evidence",
+        "kb.read_excerpt",
+        "graph.expand",
+    },
+    "analyst": {
+        # All kb.* tools
+        "kb.search",
+        "kb.read_excerpt",
+        "kb.expand_excerpt",
+        "kb.extract_evidence",
+        "kb.retrieve_evidence",
+        "kb.search_sections",
+        "kb.get_section_text",
+        # All graph.* tools
+        "graph.describe",
+        "graph.expand",
+        "graph.paths",
+        "graph.parents",
+        "graph.children",
+        "graph.entities_for_sections",
+        "graph.sections_for_entities",
+        "graph.traverse",
+        "graph.summarize",
+        "graph.context_bundle",
+    },
+    "full": None,  # No filtering — all tools including backward aliases
+}
+
+
 def build_mcp_server() -> Server:
     server = Server("wekadocs", instructions=_instructions, lifespan=lifespan)
-    tool_specs = _tool_specs()
-    tool_map = {spec["name"]: spec["handler"] for spec in tool_specs}
+    all_specs = _tool_specs()
+
+    # Apply tool profile filtering
+    profile_name = MCP_TOOL_PROFILE
+    allowed = TOOL_PROFILES.get(profile_name)
+    if allowed is None and profile_name not in TOOL_PROFILES:
+        logger.warning(
+            "unknown_tool_profile",
+            profile=profile_name,
+            fallback="production",
+        )
+        allowed = TOOL_PROFILES["production"]
+
+    if allowed is not None:
+        tool_specs = [s for s in all_specs if s["name"] in allowed]
+    else:
+        tool_specs = all_specs
+
+    logger.info(
+        "mcp_tool_profile_applied",
+        profile=profile_name,
+        tools_available=len(tool_specs),
+        tool_names=[s["name"] for s in tool_specs],
+    )
+
+    # Allow calling tools by their canonical/alias name even if not listed
+    # (the call_tool handler uses the full map for backward compat)
+    full_tool_map = {spec["name"]: spec["handler"] for spec in all_specs}
 
     @server.list_tools()
     async def _list_tools():
@@ -3081,7 +3472,9 @@ def build_mcp_server() -> Server:
 
     @server.call_tool()
     async def _call_tool(name: str, arguments: dict | None):
-        handler = tool_map.get(name)
+        # Use full_tool_map so backward-compat aliases work even when
+        # not listed (profile filtering only affects list_tools, not call_tool)
+        handler = full_tool_map.get(name)
         if handler is None:
             payload = _error_payload("INVALID_ARGUMENT", f"Unknown tool '{name}'")
             summary = _summary_for_tool(name, payload)
@@ -3095,6 +3488,28 @@ def build_mcp_server() -> Server:
 
         result = await _invoke_tool(handler, arguments or {})
         summary = _summary_for_tool(name, result)
+
+        # Trace follow-up: record non-evidence tool calls on the active trace.
+        # Try multiple session ID sources to handle the edge case where
+        # kb.retrieve_evidence used an explicit session_id but the follow-up omits it.
+        if name not in {"kb.retrieve_evidence", "kb_retrieve_evidence"}:
+            from src.mcp_server.retrieval_trace import get_active_trace
+
+            session_id = (arguments or {}).get("session_id") or _resolve_session_id(
+                None, None
+            )
+            # Also try the result's session_id (set by _finalize_payload)
+            if isinstance(result, dict) and not get_active_trace(session_id):
+                result_session = result.get("session_id")
+                if result_session and get_active_trace(result_session):
+                    session_id = result_session
+            append_followup_and_write(
+                session_id=session_id,
+                tool_name=name,
+                arguments_summary=json.dumps(arguments or {}, default=str)[:200],
+                result_summary=summary[:200],
+            )
+
         return ([types.TextContent(type="text", text=summary)], result)
 
     @server.list_resources()

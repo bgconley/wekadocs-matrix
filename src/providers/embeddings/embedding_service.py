@@ -192,8 +192,14 @@ class EmbeddingServiceProvider(EmbeddingProvider):
     def embed_query(self, text: str) -> List[float]:
         if not text:
             raise ValueError("Query text must be non-empty.")
-        # BGE-M3 instruction for retrieval queries
-        instruction = "Represent this sentence for searching relevant passages: "
+        # Profile-aware query instruction prefix.
+        # Qwen3-Embedding uses "Instruct: ..\nQuery: " format.
+        # BGE-M3 uses "Represent this sentence..." format.
+        # Profiles without query_instruction get the BGE-M3 default.
+        instruction = (
+            self._settings.extra.get("query_instruction")
+            or "Represent this sentence for searching relevant passages: "
+        )
         return self.embed_documents([instruction + text])[0]
 
     def embed_sparse(self, texts: List[str]) -> List[dict]:
@@ -236,16 +242,11 @@ class EmbeddingServiceProvider(EmbeddingProvider):
         if not text:
             raise ValueError("Query text must be non-empty.")
 
-        # BGE-M3 instruction for retrieval queries
-        instruction = "Represent this sentence for searching relevant passages: "
+        instruction = (
+            self._settings.extra.get("query_instruction")
+            or "Represent this sentence for searching relevant passages: "
+        )
         query_text = instruction + text
-
-        dense = self.embed_query(
-            text
-        )  # embed_query now adds instruction internally? No, wait.
-        # Recursive call danger if I used self.embed_query(text).
-        # Actually, embed_query above DOES add it. But I need consistent usage.
-        # Let's use embed_documents directly to control it perfectly here.
 
         dense = self.embed_documents([query_text])[0]
         sparse_entry = (

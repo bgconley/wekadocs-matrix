@@ -928,11 +928,12 @@ class QdrantMultiVectorRetriever:
         top_k: int,
         filters: Optional[Dict[str, Any]] = None,
         ef: Optional[int] = 256,
+        lexical_query: Optional[str] = None,
     ) -> List[ChunkResult]:
         self.last_stats = {"path": "legacy"}
         if self.use_query_api and self._query_api_supported():
             try:
-                bundle = self._build_query_bundle(query)
+                bundle = self._build_query_bundle(query, lexical_query=lexical_query)
                 if self.query_api_weighted_fusion:
                     return self._search_via_query_api_weighted(bundle, top_k, filters)
                 return self._search_via_query_api(bundle, top_k, filters)
@@ -945,7 +946,9 @@ class QdrantMultiVectorRetriever:
                     "path": "legacy",
                     "fallback_reason": str(exc),
                 }
-        return self._search_legacy(query, top_k, filters, ef)
+        return self._search_legacy(
+            query, top_k, filters, ef, lexical_query=lexical_query
+        )
 
     def _search_legacy(
         self,
@@ -953,9 +956,10 @@ class QdrantMultiVectorRetriever:
         top_k: int,
         filters: Optional[Dict[str, Any]],
         ef: Optional[int],
+        lexical_query: Optional[str] = None,
     ) -> List[ChunkResult]:
         start_time = time.time()
-        query_vectors = self._build_query_vectors(query)
+        query_vectors = self._build_query_vectors(query, lexical_query=lexical_query)
         qdrant_filter = self._build_filter(filters)
 
         rankings: Dict[str, List[Tuple[str, float]]] = {}
@@ -1052,13 +1056,16 @@ class QdrantMultiVectorRetriever:
             return []
 
     def _build_query_vectors(
-        self, query: str
+        self,
+        query: str,
+        lexical_query: Optional[str] = None,
     ) -> List[Tuple[str, str, Sequence[float]]]:
         base_vector = self.embedder.embed_query(query)
+        sparse_q = lexical_query or query
         vectors: List[Tuple[str, str, Sequence[float]]] = []
         for vector_name in self.field_weights.keys():
             if vector_name == self.sparse_field_name:
-                sparse_vector = self._build_sparse_query(query)
+                sparse_vector = self._build_sparse_query(sparse_q)
                 if sparse_vector:
                     vectors.append((vector_name, "sparse", sparse_vector))
                 continue
@@ -1244,12 +1251,24 @@ class QdrantMultiVectorRetriever:
             },
         )
 
-    def _build_query_bundle(self, query: str) -> QueryEmbeddingBundle:
+    def _build_query_bundle(
+        self,
+        query: str,
+        lexical_query: Optional[str] = None,
+    ) -> QueryEmbeddingBundle:
+        """Build embedding bundle for query.
+
+        Args:
+            query: Reformulated query for dense/ColBERT embeddings.
+            lexical_query: Original keywords for sparse embeddings. When None,
+                ``query`` is used for all embeddings (backward compat).
+        """
         from src.providers.embeddings.embedding_service import (
             _to_multivector,
             _to_sparse_embedding,
         )
 
+        sparse_query = lexical_query or query
         dense = self.embedder.embed_query(query)
         sparse = None
         multivector = None
@@ -1257,21 +1276,24 @@ class QdrantMultiVectorRetriever:
         # When sparse and colbert are the SAME provider (e.g., BGE-M3),
         # use embed_query_all for efficiency (one call, all heads).
         # When they're DIFFERENT providers (e.g., SPLADEv3 + ColBERTv2),
-        # call each independently.
+        # call each independently with the appropriate query form.
         same_provider = self.sparse_embedder is self.colbert_embedder
 
         if same_provider and hasattr(self.colbert_embedder, "embed_query_all"):
+            # Same provider produces both — use reformulated query
+            # (can't split sparse/colbert when they share a provider)
             bundle = self.colbert_embedder.embed_query_all(query)
             if self.schema_supports_sparse:
                 sparse = bundle.sparse
             if self.schema_supports_colbert:
                 multivector = bundle.multivector
         else:
-            # Separate providers — call each role independently
+            # Separate providers — sparse gets lexical keywords,
+            # ColBERT gets reformulated query (semantic token matching)
             if self.schema_supports_sparse and hasattr(
                 self.sparse_embedder, "embed_sparse"
             ):
-                sparse_list = self.sparse_embedder.embed_sparse([query])
+                sparse_list = self.sparse_embedder.embed_sparse([sparse_query])
                 if sparse_list:
                     sparse = _to_sparse_embedding(sparse_list[0])
 
@@ -2978,21 +3000,28 @@ class HybridRetriever:
         filters: Optional[Dict[str, Any]] = None,
         expand: bool = True,
         expand_when: str = "auto",
+        query_original: Optional[str] = None,
     ) -> Tuple[List[ChunkResult], Dict[str, Any]]:
         """
         Perform hybrid retrieval with fusion and optional expansion.
 
         Args:
-            query: Search query text
+            query: Search query text (reformulated for dense/reranker)
             top_k: Number of final results to return
             filters: Optional filters for search
             expand: Whether to perform adjacency expansion
+            query_original: Original query keywords for BM25/sparse signals.
+                When provided, BM25 and sparse search use this instead of
+                ``query``. Dense embedding, ColBERT, and reranker still use
+                ``query``. When None, all signals use ``query``.
 
         Returns:
             Tuple of (results, metrics) with timing and diagnostic info
         """
         start_time = time.time()
         self._last_query_text = query
+        # Dual-query: lexical signals use original keywords when available
+        lexical_query = query_original or query
         metrics: Dict[str, Any] = {
             "namespace_mode": getattr(self, "namespace_mode", None),
             "bm25_index_name": getattr(self.bm25_retriever, "index_name", None),
@@ -3002,6 +3031,7 @@ class HybridRetriever:
                 getattr(self, "qdrant_collection_name", None),
             ),
         }
+        metrics["dual_query_active"] = lexical_query != query
         if self.embedding_settings:
             metrics["embedding_profile"] = self.embedding_settings.profile
             metrics["embedding_provider"] = self.embedding_settings.provider
@@ -3081,7 +3111,7 @@ class HybridRetriever:
             # BM25 search
             bm25_start = time.time()
             bm25_results = self.bm25_retriever.search(
-                query, candidate_k, normalized_filters
+                lexical_query, candidate_k, normalized_filters
             )
             metrics["bm25_time_ms"] = (time.time() - bm25_start) * 1000
             metrics["bm25_count"] = len(bm25_results)
@@ -3102,7 +3132,10 @@ class HybridRetriever:
         # Vector search (always)
         vec_start = time.time()
         vec_results = self.vector_retriever.search(
-            query, candidate_k, normalized_filters
+            query,
+            candidate_k,
+            normalized_filters,
+            lexical_query=lexical_query if lexical_query != query else None,
         )
         vector_stats = getattr(self.vector_retriever, "last_stats", {}) or {}
         metrics["vector_path"] = vector_stats.get("path", "legacy")

@@ -307,8 +307,11 @@ class QueryService:
             )
 
         retriever = self._get_7e_retriever()
+        # Dual-query strategy: reformulated query for dense/reranker,
+        # original keywords for BM25/sparse (lexical signals prefer raw keywords)
         chunks, metrics = retriever.retrieve(
             query=query,
+            query_original=original_query if was_rewritten else None,
             top_k=fetch_k,
             filters=filters or {},
             expand=expand,
@@ -623,17 +626,112 @@ class QueryService:
             function_ratio=round(function_ratio, 2),
         )
 
-        # Build a natural language question from keywords
-        # Strategy: Wrap in an explanatory question template
-        rewritten = f"Explain {query}. How does this work and what is the technical architecture?"
+        # Try LLM-based reformulation first, fall back to intent-aware templates
+        rewritten = self._llm_reformulate(query)
+        method = "llm" if rewritten else "heuristic_fallback"
+
+        if not rewritten:
+            rewritten = self._heuristic_reformulate(query, words)
 
         logger.info(
             "query_rewritten",
             original=query[:100],
             rewritten=rewritten[:150],
+            method=method,
         )
 
         return rewritten, True
+
+    def _llm_reformulate(self, query: str) -> Optional[str]:
+        """Reformulate a query using Qwen2.5-1.5B-Instruct via the unified gateway.
+
+        Returns None if the LLM is unavailable or the call fails, allowing
+        the caller to fall back to heuristic templates.
+        """
+        import os
+
+        gateway_url = os.getenv("EMBEDDING_BASE_URL")
+        if not gateway_url:
+            return None
+
+        import httpx
+
+        try:
+            client = httpx.Client(base_url=gateway_url, timeout=5.0)
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a query reformulator for a technical documentation "
+                                "search system about WEKA (a distributed file system). "
+                                "Rewrite the user's input as a clear, natural language question. "
+                                "Output ONLY the rewritten question, nothing else. "
+                                "If the input is already a well-formed question, return it unchanged."
+                            ),
+                        },
+                        {"role": "user", "content": query},
+                    ],
+                    "max_tokens": 100,
+                    "temperature": 0.0,
+                },
+            )
+            client.close()
+            if response.status_code == 200:
+                data = response.json()
+                content = (
+                    data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                )
+                reformulated = content.strip()
+                if reformulated and len(reformulated) > 5:
+                    return reformulated
+        except Exception as exc:
+            logger.debug("llm_reformulate_failed", error=str(exc))
+        return None
+
+    @staticmethod
+    def _heuristic_reformulate(query: str, words: list[str]) -> str:
+        """Intent-aware heuristic templates for query reformulation fallback."""
+        lowered = query.lower()
+
+        # Detect intent from keywords
+        config_keywords = {
+            "config",
+            "setup",
+            "configure",
+            "setting",
+            "enable",
+            "disable",
+            "install",
+        }
+        error_keywords = {
+            "error",
+            "fail",
+            "issue",
+            "troubleshoot",
+            "fix",
+            "debug",
+            "problem",
+        }
+        procedure_keywords = {
+            "how to",
+            "steps",
+            "procedure",
+            "upgrade",
+            "migrate",
+            "deploy",
+        }
+
+        if any(kw in lowered for kw in error_keywords):
+            return f"How do I troubleshoot {query} in WEKA?"
+        if any(kw in lowered for kw in procedure_keywords):
+            return f"What are the steps to {query} in WEKA?"
+        if any(kw in lowered for kw in config_keywords):
+            return f"How do I configure {query} in WEKA?"
+        return f"Explain {query} in the context of WEKA documentation."
 
     def search(
         self,

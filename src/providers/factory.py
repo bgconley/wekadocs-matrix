@@ -218,6 +218,7 @@ class ProviderFactory:
             "supports_contextualized_chunks": profile.supports_contextualized_chunks,
             "contextual_limits": contextual_limits,
             "token_counting": token_counting,
+            "query_instruction": getattr(profile, "query_instruction", None),
         }
         return ProviderEmbeddingSettings(
             profile=profile_name,
@@ -379,6 +380,14 @@ class ProviderFactory:
             or "Qwen/Qwen3-Reranker-4B"
         )
 
+        # Read reranker instruction from config if not explicitly provided
+        if "instruction" not in kwargs:
+            config_instruction = (
+                getattr(reranker_cfg, "instruction", None) if reranker_cfg else None
+            )
+            if config_instruction:
+                kwargs["instruction"] = config_instruction
+
         logger.info(f"Creating rerank provider: provider={provider}, model={model}")
 
         # Create provider based on type
@@ -402,8 +411,12 @@ class ProviderFactory:
             timeout = kwargs.get("timeout") or float(
                 os.getenv("RERANKER_TIMEOUT_SECONDS", "60")
             )
+            instruction = kwargs.get("instruction")
             return LocalRerankerServiceProvider(
-                model=model, base_url=base_url, timeout=timeout
+                model=model,
+                base_url=base_url,
+                timeout=timeout,
+                instruction=instruction,
             )
 
         elif provider in {"noop", "none", "disabled"}:

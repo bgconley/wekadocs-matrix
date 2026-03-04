@@ -64,7 +64,7 @@ setup_logging(config.app.log_level)
 logger = get_logger(__name__)
 
 MCP_HTTP_STREAMABLE_ENABLED = os.getenv(
-    "MCP_HTTP_STREAMABLE_ENABLED", "false"
+    "MCP_HTTP_STREAMABLE_ENABLED", "true"  # Default: ON (was "false")
 ).lower() in {
     "1",
     "true",
@@ -72,7 +72,7 @@ MCP_HTTP_STREAMABLE_ENABLED = os.getenv(
     "on",
 }
 MCP_HTTP_LEGACY_REST_ENABLED = os.getenv(
-    "MCP_HTTP_LEGACY_REST_ENABLED", "true"
+    "MCP_HTTP_LEGACY_REST_ENABLED", "false"  # Default: OFF (was "true")
 ).lower() in {"1", "true", "yes", "on"}
 MCP_HTTP_STREAMABLE_JSON_RESPONSE = os.getenv(
     "MCP_HTTP_STREAMABLE_JSON_RESPONSE", "false"
@@ -350,6 +350,12 @@ async def startup_event():
             app.state.mcp_session_manager_context = app.state.mcp_session_manager.run()
             await app.state.mcp_session_manager_context.__aenter__()
             logger.info("Streamable MCP HTTP enabled at /_mcp")
+
+        if MCP_HTTP_LEGACY_REST_ENABLED:
+            logger.warning(
+                "Legacy REST MCP endpoints (/mcp/*) are deprecated and will be removed. "
+                "Set MCP_HTTP_STREAMABLE_ENABLED=true and use /_mcp instead.",
+            )
     except Exception as e:
         logger.error("Failed to start MCP server", error=str(e))
         raise

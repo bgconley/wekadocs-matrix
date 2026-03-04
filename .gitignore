@@ -56,6 +56,9 @@ SESSION_CONTEXT_*.md
 *.log
 docker/*.log
 
+# Runtime logs and traces
+logs/
+
 # Reports: ignore heavy artifacts but keep gate files
 reports/**/coverage/
 reports/**/*.html

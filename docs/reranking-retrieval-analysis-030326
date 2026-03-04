@@ -1,0 +1,102 @@
+  Revised Analysis: Your Retrieval Depth Problem
+
+  With the full architecture map, the picture is more nuanced than I initially described. Let me walk through exactly where the problem lives and what levers you have.
+
+  What the Pipeline Already Does Well
+
+  The Qdrant prefetch stage casts a wide net — up to 200 candidates per vector field across multiple signal types:
+
+  ┌───────────────────┬───────┬───────────────────────────────────┐
+  │  Prefetch Group   │ Limit │         What It Captures          │
+  ├───────────────────┼───────┼───────────────────────────────────┤
+  │ content (dense)   │ 200   │ Semantic body similarity          │
+  ├───────────────────┼───────┼───────────────────────────────────┤
+  │ title (dense)     │ 200   │ Heading/title semantic match      │
+  ├───────────────────┼───────┼───────────────────────────────────┤
+  │ doc_title (dense) │ 200   │ Document-level title match        │
+  ├───────────────────┼───────┼───────────────────────────────────┤
+  │ text-sparse       │ 200   │ Lexical BM25 on body text         │
+  ├───────────────────┼───────┼───────────────────────────────────┤
+  │ doc_title-sparse  │ 50    │ Lexical match on doc titles       │
+  ├───────────────────┼───────┼───────────────────────────────────┤
+  │ title-sparse      │ 50    │ Lexical match on section headings │
+  ├───────────────────┼───────┼───────────────────────────────────┤
+  │ entity-sparse     │ 50    │ Entity name lexical match         │
+  └───────────────────┴───────┴───────────────────────────────────┘
+
+  These are fused server-side via RRF (k=60). Then BM25 from Neo4j Lucene adds more candidates. Then client-side RRF merges everything.
+
+  This multi-signal approach already provides some diversity — a chunk that scores well on entity-sparse but poorly on content-dense still enters the pool. The title and doc_title vectors help surface
+  chunks whose headings match the query even if the body text diverges.
+
+  Where the Gap Actually Is
+
+  The problem isn't in initial recall — 200 candidates per field across 7 fields gives you a large raw pool. The gap is in how that pool gets narrowed to the rerank window:
+
+  1. Server-side RRF (Qdrant) collapses 7 × 200 candidates into a single ranked list. Chunks that score well across multiple fields rise to the top. But a chunk that only scores well on content-dense and
+   nothing else can still dominate if its similarity score is high enough.
+  2. Client-side RRF merges Qdrant results with BM25, but this is still a flat merge — no per-document balancing.
+  3. Rerank pool (top 100 from fusion) — this is where depth is lost. If Document A's introduction scores 0.85 across 5 of 7 fields, and Document A's procedural Step 7 scores 0.60 on content-dense only,
+  the introduction eats the slot.
+  4. Dominance gating (_gate_to_primary_document, line 3345) actually makes this worse for your use case — when one document dominates the top 8 results, it gates seeds to only that document. This is
+  designed for document continuity but it means you get more chunks from the dominant doc's top-scoring sections, not its deeper content.
+  5. Post-rerank expansion (NEXT_CHUNK adjacency + structure-aware) could help, but:
+    - _bounded_expansion only pulls ±1 neighbor from the top 5 seeds — narrow window
+    - _expand_with_structure is disabled by default (feature_flags.structure_aware_expansion = false)
+
+  The Right Strategy for This Architecture
+
+  Given the existing infrastructure, here's what I'd recommend in priority order:
+
+  1. Per-Document Quota in Rerank Pool (highest impact, lowest risk)
+
+  Insert between Step 4 (client-side RRF) and Step 6 (rerank). Instead of fused_results[:100], do:
+
+  Group fused_results by document_id
+  For each of top K documents (by best chunk score):
+      Take top M chunks from that document
+  Flatten into rerank pool (K × M candidates)
+  Send to cross-encoder
+
+  The cross-encoder is specifically designed to rescue chunks that have weak embedding similarity but strong actual relevance. You just need to get those deep chunks in front of it.
+
+  Suggested defaults: K=15 documents × M=7 chunks = 105 candidates (within your rerank budget of 100). Tunable.
+
+  2. Enable Structure-Aware Expansion, Move It Pre-Rerank
+
+  The _expand_with_structure method at line 4445 already does exactly what you want:
+  - Sibling chunks — same parent_section_id (up to 3) — gets you adjacent content
+  - Parent section chunks — CHILD_OF traversal (up to 2) — gets you the broader context
+  - Shared-entity chunks — chunks mentioning same entities (up to 3) — gets you topically related deep content
+
+  This currently runs post-rerank. If you ran it (or a lighter variant) pre-rerank, those structural neighbors would get cross-encoder scoring. The graph data is already there from ingestion —
+  PARENT_HEADING, NEXT_CHUNK, CHILD_OF, MENTIONS edges all exist.
+
+  3. Reconsider Dominance Gating
+
+  The _gate_to_primary_document function (line 3345) enforces single-document focus when one doc dominates the top 8. For your use case, this is counterproductive — it narrows the pool to one document's
+  top-scoring chunks rather than ensuring depth. Consider:
+  - Disabling it when reranking is active (the reranker handles quality sorting)
+  - Or replacing it with a per-document quota that ensures depth within the dominant document
+
+  ★ Insight ─────────────────────────────────────
+  The architecture already has most of the pieces. The multi-vector
+  prefetch gives broad recall. The structure-aware expansion gives
+  depth traversal. The cross-encoder reranker gives accurate scoring.
+  The problem is sequencing — the depth mechanisms run after the
+  narrowing step (rerank pool selection), so they never get to
+  influence which chunks the cross-encoder evaluates.
+
+  The single most impactful change: move the per-document quota
+  into the space between fusion and reranking. Everything downstream
+  — the cross-encoder, expansion, context assembly — already handles
+  the result correctly. You're just feeding the reranker a more
+  representative sample of each relevant document.
+
+  The infrastructure cost is minimal: you're grouping an existing
+  list by a field (document_id) that's already on every
+  ChunkResult, then taking top-M per group. No new queries,
+  no new indexes, no new models.
+  ─────────────────────────────────────────────────
+
+  Want me to plan the implementation for Strategy 1 (per-document quota)?

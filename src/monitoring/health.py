@@ -4,7 +4,7 @@
 # =============================================================================
 """
 Phase 7E-4: Health Check System
-Verifies Neo4j schema v2.2, Qdrant 1024-D, embedding configuration at startup
+Verifies Neo4j schema v4.0, Qdrant 1024-D, embedding configuration at startup
 
 Reference: Canonical Spec L3513-3528, L535, L621, L3570
 Integration Guide L1905-1918
@@ -68,21 +68,21 @@ class SystemHealth:
 
 class HealthChecker:
     """
-    Comprehensive health check system for GraphRAG v2.2.
+    Comprehensive health check system for GraphRAG v4.0.
 
     Verifies:
-    - Neo4j constraints and indexes exist (v2.2 schema)
+    - Neo4j constraints and indexes exist (v4.0 schema, Chunk-only)
     - Vector indexes are 1024-D with cosine distance
     - Qdrant collection exists with 1024-D named vectors
-    - SchemaVersion marker is v2.2
+    - SchemaVersion marker is v4.0
     - Embedding configuration matches canonical spec
     """
 
-    # Canonical requirements from Phase 7E spec
-    REQUIRED_SCHEMA_VERSION = "v2.2"
+    # Canonical requirements — updated for unified gateway model stack
+    REQUIRED_SCHEMA_VERSION = "v4.0"
     REQUIRED_EMBED_DIM = 1024
-    REQUIRED_EMBED_MODEL = "BAAI/bge-m3"
-    REQUIRED_EMBED_PROVIDER = "bge-m3-service"
+    REQUIRED_EMBED_MODEL = "BAAI/bge-m3"  # profile-driven; legacy check
+    REQUIRED_EMBED_PROVIDER = "bge-m3-service"  # profile-driven; legacy check
     REQUIRED_DISTANCE = "cosine"
 
     def __init__(

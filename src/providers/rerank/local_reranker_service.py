@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -92,11 +92,13 @@ class LocalRerankerServiceProvider(RerankProvider):
         base_url: str = "",
         timeout: float = 60.0,
         batch_size: int = DEFAULT_BATCH_SIZE,
+        instruction: Optional[str] = None,
     ) -> None:
         self._model_id = model
         self._provider_name = "local-reranker-service"
         self._client = httpx.Client(base_url=base_url, timeout=timeout)
         self._batch_size = batch_size
+        self._instruction = instruction
         self._tokenizer = None
         self._tokenizer_loaded = False
         self._tokenizer_model_id = os.getenv("RERANKER_TOKENIZER_ID", self._model_id)
@@ -375,6 +377,12 @@ class LocalRerankerServiceProvider(RerankProvider):
                 {**cand, "rerank_score": 0.0, "reranker": "circuit_open"}
                 for cand in candidates[:top_k]
             ]
+
+        # Prepend domain-tuned instruction if configured.
+        # Qwen3-Reranker-4B interprets the instruction as guidance for
+        # relevance judgment (e.g., prefer procedures over introductions).
+        if self._instruction:
+            query = f"{self._instruction}\n\n{query}"
 
         query_tokens = self._count_tokens(query)
 

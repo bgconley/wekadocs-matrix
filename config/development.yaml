@@ -143,6 +143,7 @@ search:
       top_n: 20           # Final results after reranking
       max_pairs: 50       # Candidates to send to reranker (unused — never referenced by code)
       max_tokens_per_pair: 4096  # Unused — actual limits in local_reranker_service.py
+      instruction: "Judge whether the document is relevant to the search query about WEKA distributed file system. Consider configuration procedures, CLI commands, parameter references, and step-by-step instructions as highly relevant. Introductory overviews and general summaries are less relevant than specific technical procedures and settings. Answer only yes or no."
 
     top_k: 20  # Number of candidates to retrieve
 
@@ -343,7 +344,7 @@ ranking:
 
 # Schema configuration
 schema:
-  version: "v2.2"  # Phase 7E+: Hybrid retrieval enablement with multi-vector support
+  version: "v4.0"  # Phase 4+: Chunk-only schema, Section deprecated
   auto_migrate: false
 
 # Rate limiting configuration

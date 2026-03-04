@@ -172,6 +172,15 @@ class EmbeddingProfileDefinition(BaseModel):
     document_task: Optional[str] = None
     output_dimension: Optional[int] = None
     output_dtype: Optional[str] = None
+    query_instruction: Optional[str] = Field(
+        default=None,
+        description=(
+            "Instruction prefix prepended to queries (not documents) during embedding. "
+            "Qwen3-Embedding uses 'Instruct: ...\\nQuery: ' format. "
+            "BGE-M3 uses 'Represent this sentence...' format. "
+            "When None, the provider applies its own default."
+        ),
+    )
     tokenizer: EmbeddingProfileTokenizer = Field(
         default_factory=EmbeddingProfileTokenizer
     )
@@ -446,6 +455,14 @@ class RerankerConfig(BaseModel):
     top_n: int = 100
     max_pairs: int = 50  # unused — never referenced by any code
     max_tokens_per_pair: int = 1024  # unused — never referenced by any code
+    instruction: Optional[str] = Field(
+        default=None,
+        description=(
+            "Domain-tuned instruction for the cross-encoder reranker. "
+            "Qwen3-Reranker-4B supports custom instructions that guide relevance judgments. "
+            "When set, prepended to the query for each (query, document) rerank pair."
+        ),
+    )
 
 
 class StructuralRetrievalConfig(BaseModel):
