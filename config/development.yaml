@@ -149,7 +149,8 @@ search:
 
     # BM25/keyword retrieval settings
     bm25:
-      enabled: false  # DISABLED: Phase 1 vector-only hardening
+      enabled: true
+      index_name: "chunk_text_index_v3_bge_m3"
       top_k: 50  # Retrieve more candidates for fusion
       weight: 0.15  # Lower weight while sparse is primary lexical channel
 

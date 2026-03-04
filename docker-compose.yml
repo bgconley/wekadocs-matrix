@@ -211,10 +211,10 @@ services:
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
       - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
       - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://host.docker.internal:9002}
-      - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
-      - RERANK_MODEL=${RERANK_MODEL:-Qwen/Qwen3-Reranker-0.6B}
-      - RERANKER_TOKENIZER_ID=${RERANKER_TOKENIZER_ID:-Qwen/Qwen3-Reranker-0.6B}
-      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://host.docker.internal:9005}
+      - RERANK_PROVIDER=${RERANK_PROVIDER:-local-reranker-service}
+      - RERANK_MODEL=${RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}
+      - RERANKER_TOKENIZER_ID=${RERANKER_TOKENIZER_ID:-Qwen/Qwen3-Reranker-4B}
+      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://10.25.0.50:8080}
       - RERANKER_TIMEOUT_SECONDS=${RERANKER_TIMEOUT_SECONDS:-120}
       - JINA_API_KEY=${JINA_API_KEY}
       - ANSWER_MODEL=${ANSWER_MODEL:-search-result-formatting}
@@ -315,10 +315,10 @@ services:
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
       - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
       - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://host.docker.internal:9002}
-      - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
-      - RERANK_MODEL=${RERANK_MODEL:-Qwen/Qwen3-Reranker-0.6B}
-      - RERANKER_TOKENIZER_ID=${RERANKER_TOKENIZER_ID:-Qwen/Qwen3-Reranker-0.6B}
-      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://host.docker.internal:9005}
+      - RERANK_PROVIDER=${RERANK_PROVIDER:-local-reranker-service}
+      - RERANK_MODEL=${RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}
+      - RERANKER_TOKENIZER_ID=${RERANKER_TOKENIZER_ID:-Qwen/Qwen3-Reranker-4B}
+      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://10.25.0.50:8080}
       - RERANKER_TIMEOUT_SECONDS=${RERANKER_TIMEOUT_SECONDS:-120}
       - JINA_API_KEY=${JINA_API_KEY}
       # Phase 7C Hotfix: Tokenizer Service Configuration
@@ -432,10 +432,10 @@ services:
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
       - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
       - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://host.docker.internal:9002}
-      - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
-      - RERANK_MODEL=${RERANK_MODEL:-Qwen/Qwen3-Reranker-0.6B}
-      - RERANKER_TOKENIZER_ID=${RERANKER_TOKENIZER_ID:-Qwen/Qwen3-Reranker-0.6B}
-      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://host.docker.internal:9005}
+      - RERANK_PROVIDER=${RERANK_PROVIDER:-local-reranker-service}
+      - RERANK_MODEL=${RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}
+      - RERANKER_TOKENIZER_ID=${RERANKER_TOKENIZER_ID:-Qwen/Qwen3-Reranker-4B}
+      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://10.25.0.50:8080}
       - RERANKER_TIMEOUT_SECONDS=${RERANKER_TIMEOUT_SECONDS:-120}
       - JINA_API_KEY=${JINA_API_KEY}
       # Phase 7C Hotfix: Tokenizer Service Configuration

@@ -731,7 +731,7 @@ async def _expand_evidence_with_structure(
       CASE WHEN prev IS NOT NULL THEN [prev] ELSE [] END +
       sibs
     ) AS neighbor
-    WHERE neighbor.id NOT IN $ids
+    WITH neighbor WHERE NOT neighbor.id IN $ids
     RETURN DISTINCT neighbor.id AS chunk_id,
            neighbor.heading AS heading,
            neighbor.text AS text,
@@ -2340,7 +2340,7 @@ async def kb_retrieve_evidence(
         "documents_searched": len(unique_docs),
         "documents_with_evidence": len(docs_with_evidence),
         "retrieval_depth": len(search_results),
-        "reranker_applied": bool(search_metrics.get("rerank_applied")),
+        "reranker_applied": bool(search_metrics.get("reranker_applied")),
         "signal_pool_active": bool(search_metrics.get("signal_pool_enabled")),
         "graph_expansion_applied": graph_expansion_applied,
     }

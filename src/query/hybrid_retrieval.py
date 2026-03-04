@@ -3108,10 +3108,15 @@ class HybridRetriever:
         vec_results: List[ChunkResult] = []
 
         if self.hybrid_mode != "bge_reranker" and self.bm25_retriever:
-            # BM25 search
+            # BM25 search — strip embedding_version since fulltext search
+            # is embedding-agnostic and the version filter would exclude
+            # all chunks ingested under a different embedding plan.
+            bm25_filters = {
+                k: v for k, v in normalized_filters.items() if k != "embedding_version"
+            }
             bm25_start = time.time()
             bm25_results = self.bm25_retriever.search(
-                lexical_query, candidate_k, normalized_filters
+                lexical_query, candidate_k, bm25_filters
             )
             metrics["bm25_time_ms"] = (time.time() - bm25_start) * 1000
             metrics["bm25_count"] = len(bm25_results)

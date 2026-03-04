@@ -121,7 +121,14 @@ class EmbeddingClient:
             self._handle_error(response)
 
         data = response.json()["data"]
-        return [[[float(x) for x in row] for row in item["vectors"]] for item in data]
+        # Dual-format: gateway returns "embeddings", some providers return "vectors"
+        return [
+            [
+                [float(x) for x in row]
+                for row in item.get("embeddings", item.get("vectors", []))
+            ]
+            for item in data
+        ]
 
 
 __all__ = ["EmbeddingClient", "EmbeddingClientError"]
