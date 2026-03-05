@@ -68,18 +68,19 @@ class SystemHealth:
 
 class HealthChecker:
     """
-    Comprehensive health check system for GraphRAG v4.0.
+    Comprehensive health check system for GraphRAG v4.1.
 
     Verifies:
-    - Neo4j constraints and indexes exist (v4.0 schema, Chunk-only)
+    - Neo4j constraints and indexes exist (v4.1 schema, Chunk-only + RELATED_TO v2)
     - Vector indexes are 1024-D with cosine distance
     - Qdrant collection exists with 1024-D named vectors
-    - SchemaVersion marker is v4.0
+    - SchemaVersion marker is v4.1
+    - RELATED_TO relationship indexes for GDS prerequisites (DEGRADED if missing)
     - Embedding configuration matches canonical spec
     """
 
     # Canonical requirements — updated for unified gateway model stack
-    REQUIRED_SCHEMA_VERSION = "v4.0"
+    REQUIRED_SCHEMA_VERSION = "v4.1"
     REQUIRED_EMBED_DIM = 1024
     REQUIRED_EMBED_MODEL = "BAAI/bge-m3"  # profile-driven; legacy check
     REQUIRED_EMBED_PROVIDER = "bge-m3-service"  # profile-driven; legacy check
@@ -300,6 +301,15 @@ class HealthChecker:
             "chunk_parent_chunk_id",
             "entity_type_normalized_name",
         ]
+        # RELATED_TO v2 indexes (GDS prerequisites) — DEGRADED if missing
+        # These are checked separately because the DDL must land before code deployment.
+        # Once DDL is confirmed on all environments, these can be promoted to required.
+        gds_indexes = [
+            "related_to_score_final_idx",
+            "related_to_method_idx",
+            "related_to_quality_tier_idx",
+            "related_to_is_mutual_idx",
+        ]
 
         try:
             with self.neo4j_driver.session() as session:
@@ -311,20 +321,33 @@ class HealthChecker:
                 missing = [
                     idx for idx in required_indexes if idx not in existing_indexes
                 ]
+                missing_gds = [
+                    idx for idx in gds_indexes if idx not in existing_indexes
+                ]
 
-                if not missing:
+                if not missing and not missing_gds:
                     return HealthCheckResult(
                         name="neo4j_indexes",
                         status=HealthStatus.HEALTHY,
-                        message=f"All {len(required_indexes)} required property indexes exist",
-                        details={"indexes": required_indexes},
+                        message=f"All {len(required_indexes) + len(gds_indexes)} indexes exist (incl. GDS prerequisites)",
+                        details={
+                            "indexes": required_indexes,
+                            "gds_indexes": gds_indexes,
+                        },
+                    )
+                elif not missing and missing_gds:
+                    return HealthCheckResult(
+                        name="neo4j_indexes",
+                        status=HealthStatus.DEGRADED,
+                        message=f"Core indexes OK; missing GDS prerequisites: {', '.join(missing_gds)}",
+                        details={"missing_gds": missing_gds},
                     )
                 else:
                     return HealthCheckResult(
                         name="neo4j_indexes",
                         status=HealthStatus.DEGRADED,
-                        message=f"Missing optional indexes: {', '.join(missing)} (performance may be impacted)",
-                        details={"missing": missing},
+                        message=f"Missing indexes: {', '.join(missing + missing_gds)} (performance may be impacted)",
+                        details={"missing": missing, "missing_gds": missing_gds},
                     )
         except Exception as e:
             logger.exception("Index check failed")

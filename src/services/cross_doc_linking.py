@@ -15,6 +15,8 @@ Architecture:
     Stage 2: Aggregate chunks to documents (max-score wins)
     Stage 3: RRF fusion of dense and sparse results (if using rrf method)
     Stage 4: Filter by threshold and create RELATED_TO edges
+    Stage 5: Reciprocity reconciliation (is_mutual / mutual_score)
+    Stage 6: Structural priors materialization (REFERENCES, entities, taxonomy)
 
 Reference: docs/plans/phase-3.5-cross-doc-linking.md
 """
@@ -28,6 +30,14 @@ import numpy as np
 import structlog
 from qdrant_client import QdrantClient, models
 
+from src.services.cross_doc_edge_model import (
+    EDGE_MODEL_VERSION,
+    CandidateSignals,
+    EdgePayload,
+    StructuralPriors,
+    aggregate_chunks_to_candidates,
+    reciprocal_rank_fusion_v2,
+)
 from src.shared.config import CrossDocLinkingConfig
 
 logger = structlog.get_logger(__name__)
@@ -58,6 +68,59 @@ DISCOVERY_THRESHOLDS = {
 # RRF constant (standard value from literature)
 DEFAULT_RRF_K = 60
 
+# ---------------------------------------------------------------------------
+# Cypher: Stage 5 — Reciprocity reconciliation
+# ---------------------------------------------------------------------------
+
+CYPHER_RECIPROCITY = """
+MATCH (a:Document {id: $doc_id})-[r1:RELATED_TO]->(b:Document)
+OPTIONAL MATCH (b)-[r2:RELATED_TO]->(a)
+WITH r1, r2,
+     CASE WHEN r2 IS NOT NULL THEN true ELSE false END AS mutual,
+     CASE WHEN r2 IS NOT NULL
+          THEN (coalesce(r1.score_final, r1.score, 0.0) + coalesce(r2.score_final, r2.score, 0.0)) / 2.0
+          ELSE null
+     END AS m_score
+SET r1.is_mutual = mutual, r1.mutual_score = m_score
+WITH r2, mutual, m_score WHERE r2 IS NOT NULL
+SET r2.is_mutual = mutual, r2.mutual_score = m_score
+RETURN count(*) AS updated
+"""
+
+# ---------------------------------------------------------------------------
+# Cypher: Stage 6 — Structural priors
+# ---------------------------------------------------------------------------
+
+CYPHER_PRIOR_REFERENCE = """
+MATCH (src:Document {id: $source_id})-[:HAS_CHUNK]->(c:Chunk)-[ref:REFERENCES]->(t:Document {id: $target_id})
+RETURN max(ref.confidence) AS prior_reference
+"""
+
+CYPHER_PRIOR_ENTITY = """
+MATCH (src:Document {id: $source_id})-[:HAS_CHUNK]->(:Chunk)-[:MENTIONS]->(e:Entity)
+WITH collect(DISTINCT e) AS src_entities_raw
+UNWIND src_entities_raw AS e
+OPTIONAL MATCH (d:Document)-[:HAS_CHUNK]->(:Chunk)-[:MENTIONS]->(e)
+WITH e, count(DISTINCT d) AS doc_freq
+WHERE doc_freq <= $hub_threshold
+WITH collect(DISTINCT e.id) AS src_entities
+MATCH (tgt:Document {id: $target_id})-[:HAS_CHUNK]->(:Chunk)-[:MENTIONS]->(e2:Entity)
+WHERE e2.id IN src_entities
+WITH src_entities, count(DISTINCT e2.id) AS shared
+RETURN CASE WHEN size(src_entities) > 0
+       THEN toFloat(shared) / toFloat(size(src_entities))
+       ELSE 0.0 END AS prior_entity
+"""
+
+CYPHER_PRIOR_TAXONOMY = """
+MATCH (s:Document {id: $source_id}), (t:Document {id: $target_id})
+RETURN CASE
+    WHEN s.doc_tag IS NOT NULL AND s.doc_tag = t.doc_tag THEN 1.0
+    WHEN s.doc_category IS NOT NULL AND s.doc_category = t.doc_category THEN 0.5
+    ELSE 0.0
+END AS prior_taxonomy
+"""
+
 
 # ---------------------------------------------------------------------------
 # Result types
@@ -73,6 +136,7 @@ class LinkingResult:
     edges_updated: int = 0
     edges_pruned: int = 0  # ColBERT-pruned edges (Phase 4)
     candidates_found: int = 0
+    reciprocity_updated: int = 0  # Edges updated with is_mutual/mutual_score
     method: str = "rrf"
     duration_ms: int = 0
     skipped: bool = False
@@ -86,6 +150,7 @@ class LinkingResult:
             "edges_updated": self.edges_updated,
             "edges_pruned": self.edges_pruned,
             "candidates_found": self.candidates_found,
+            "reciprocity_updated": self.reciprocity_updated,
             "method": self.method,
             "duration_ms": self.duration_ms,
             "skipped": self.skipped,
@@ -223,6 +288,11 @@ def aggregate_chunks_to_documents(
     """
     Aggregate chunk-level search results to document-level scores.
 
+    .. deprecated::
+        Use ``aggregate_chunks_to_candidates()`` from ``cross_doc_edge_model``
+        which returns ``List[CandidateSignals]`` with per-signal scores.
+        Kept for backward compatibility with ``batch_crossdoc_link.py``.
+
     Strategy: Max-Score Wins
     - Group chunks by document_id
     - Take the highest chunk score as the document's score
@@ -235,6 +305,8 @@ def aggregate_chunks_to_documents(
     Returns:
         List of (document_id, max_score) tuples, sorted by score descending
     """
+    # DEPRECATED: Use aggregate_chunks_to_candidates() from cross_doc_edge_model.
+    # Kept for backward compatibility with batch_crossdoc_link.py.
     doc_scores: Dict[str, float] = defaultdict(float)
 
     for hit in chunk_hits:
@@ -256,6 +328,11 @@ def reciprocal_rank_fusion(
     """
     Combine document rankings using Reciprocal Rank Fusion.
 
+    .. deprecated::
+        Use ``reciprocal_rank_fusion_v2()`` from ``cross_doc_edge_model``
+        which preserves per-signal component scores on ``CandidateSignals``.
+        Kept for backward compatibility with ``batch_crossdoc_link.py``.
+
     RRF formula: score(d) = sum(1/(k + rank_i(d)))
 
     Why RRF works well:
@@ -272,6 +349,8 @@ def reciprocal_rank_fusion(
     Returns:
         List of (doc_id, rrf_score) tuples, sorted by RRF score descending
     """
+    # DEPRECATED: Use reciprocal_rank_fusion_v2() from cross_doc_edge_model.
+    # Kept for backward compatibility with batch_crossdoc_link.py.
     rrf_scores: Dict[str, float] = defaultdict(float)
 
     # Add dense contributions
@@ -739,23 +818,20 @@ class CrossDocLinker:
         self,
         source_id: str,
         target_id: str,
-        score: float,
-        method: str,
-        phase: str,
+        payload: EdgePayload,
         dry_run: bool = False,
     ) -> Tuple[bool, bool]:
         """
-        Create a RELATED_TO edge between two documents.
+        Create or update a RELATED_TO edge between two documents.
 
         Uses MERGE for idempotency - re-running updates scores
-        rather than creating duplicate edges.
+        rather than creating duplicate edges. Edge properties are
+        supplied via an ``EdgePayload`` instance (v2 edge model).
 
         Args:
             source_id: Source document ID
             target_id: Target document ID
-            score: Similarity score
-            method: Method used ('dense_similarity', 'rrf_fusion', 'title_mention')
-            phase: Phase identifier for rollback targeting
+            payload: EdgePayload with all v2 properties to write
             dry_run: If True, don't actually create the edge
 
         Returns:
@@ -765,30 +841,21 @@ class CrossDocLinker:
             return True, False
 
         try:
+            cypher = """
+                MATCH (source:Document {id: $source_id})
+                MATCH (target:Document {id: $target_id})
+                MERGE (source)-[r:RELATED_TO]->(target)
+                ON CREATE SET r += $props, r.created_at = datetime(), r.last_seen_at = datetime()
+                ON MATCH SET r += $props, r.updated_at = datetime(), r.last_seen_at = datetime()
+                RETURN r.updated_at IS NULL AS was_created
+            """
+            params = payload.to_neo4j_params()
             with self.neo4j_driver.session() as session:
                 result = session.run(
-                    """
-                    MATCH (source:Document {id: $source_id})
-                    MATCH (target:Document {id: $target_id})
-                    MERGE (source)-[r:RELATED_TO]->(target)
-                    ON CREATE SET
-                        r.score = $score,
-                        r.method = $method,
-                        r.phase = $phase,
-                        r.created_at = datetime()
-                    ON MATCH SET
-                        r.score = $score,
-                        r.method = $method,
-                        r.phase = $phase,
-                        r.updated_at = datetime()
-                    RETURN
-                        r.created_at = r.updated_at AS was_created
-                    """,
+                    cypher,
                     source_id=source_id,
                     target_id=target_id,
-                    score=score,
-                    method=method,
-                    phase=phase,
+                    props=params,
                 )
                 record = result.single()
                 if record:
@@ -805,210 +872,232 @@ class CrossDocLinker:
             return False, False
 
     # -----------------------------------------------------------------------
-    # ColBERT Reranking Methods (Phase 4)
+    # Stage 5: Reciprocity reconciliation
     # -----------------------------------------------------------------------
 
-    def _update_edge_colbert_score(
-        self,
-        source_id: str,
-        target_id: str,
-        colbert_score: float,
-    ) -> bool:
+    def _reconcile_reciprocity(self, doc_id: str) -> int:
+        """Update is_mutual and mutual_score for all edges involving this document.
+
+        Called after link_document() completes edge creation. Failures are logged
+        but never fail ingestion.
+
+        Returns count of edges updated.
         """
-        Update an existing edge with ColBERT score.
-
-        Sets the colbert_score property and updates the method to indicate
-        ColBERT reranking was applied.
-
-        Args:
-            source_id: Source document ID
-            target_id: Target document ID
-            colbert_score: MaxSim score from ColBERT comparison
-
-        Returns:
-            True if update succeeded, False otherwise
-        """
+        if not getattr(self.config, "compute_reciprocity", True):
+            return 0
         try:
             with self.neo4j_driver.session() as session:
-                session.run(
-                    """
-                    MATCH (s:Document {id: $source_id})-[r:RELATED_TO]->(t:Document {id: $target_id})
-                    SET r.colbert_score = $colbert_score,
-                        r.method = 'rrf_fusion+colbert',
-                        r.reranked_at = datetime()
-                    """,
-                    source_id=source_id,
-                    target_id=target_id,
-                    colbert_score=colbert_score,
-                )
-            return True
-        except Exception as e:
+                result = session.run(CYPHER_RECIPROCITY, doc_id=doc_id)
+                record = result.single()
+                count = record["updated"] if record else 0
+                if count > 0:
+                    logger.debug(
+                        "reciprocity_reconciled", doc_id=doc_id[:12], updated=count
+                    )
+                return count
+        except Exception as exc:
             logger.warning(
-                "colbert_update_edge_failed",
-                source_id=source_id[:12] if source_id else "unknown",
-                target_id=target_id[:12] if target_id else "unknown",
-                error=str(e),
+                "reciprocity_reconcile_failed", doc_id=doc_id[:12], error=str(exc)
             )
-            return False
+            return 0
 
-    def _prune_edge(self, source_id: str, target_id: str) -> bool:
+    # -----------------------------------------------------------------------
+    # Stage 6: Structural priors materialization
+    # -----------------------------------------------------------------------
+
+    def _compute_structural_priors(
+        self, source_id: str, target_id: str
+    ) -> StructuralPriors:
+        """Compute structural prior signals from the graph.
+
+        Each prior is computed independently. Failures in one prior
+        do not affect others. Returns StructuralPriors with None for
+        any priors that could not be computed.
         """
-        Delete an edge that failed the ColBERT threshold.
+        if not getattr(self.config, "compute_priors", True):
+            return StructuralPriors()
 
-        Called when ColBERT MaxSim score is below the configured threshold,
-        indicating the edge was a false positive from RRF fusion.
+        priors = StructuralPriors()
+        hub_threshold = getattr(self.config, "entity_hub_threshold", 20)
 
-        Args:
-            source_id: Source document ID
-            target_id: Target document ID
-
-        Returns:
-            True if deletion succeeded, False otherwise
-        """
+        # Prior: REFERENCES edges
         try:
             with self.neo4j_driver.session() as session:
-                session.run(
-                    """
-                    MATCH (s:Document {id: $source_id})-[r:RELATED_TO]->(t:Document {id: $target_id})
-                    DELETE r
-                    """,
+                result = session.run(
+                    CYPHER_PRIOR_REFERENCE,
                     source_id=source_id,
                     target_id=target_id,
                 )
-            logger.debug(
-                "colbert_edge_pruned",
-                source_id=source_id[:12] if source_id else "unknown",
-                target_id=target_id[:12] if target_id else "unknown",
-            )
-            return True
-        except Exception as e:
-            logger.warning(
-                "colbert_prune_edge_failed",
-                source_id=source_id[:12] if source_id else "unknown",
-                target_id=target_id[:12] if target_id else "unknown",
-                error=str(e),
-            )
-            return False
+                record = result.single()
+                if record and record["prior_reference"] is not None:
+                    priors.prior_reference = float(record["prior_reference"])
+        except Exception:
+            pass
 
-    def _rerank_edges_colbert(
+        # Prior: Shared entities (hub-suppressed by document frequency)
+        try:
+            with self.neo4j_driver.session() as session:
+                result = session.run(
+                    CYPHER_PRIOR_ENTITY,
+                    source_id=source_id,
+                    target_id=target_id,
+                    hub_threshold=hub_threshold,
+                )
+                record = result.single()
+                if record and record["prior_entity"] is not None:
+                    priors.prior_entity = float(record["prior_entity"])
+        except Exception:
+            pass
+
+        # Prior: Taxonomy alignment
+        try:
+            with self.neo4j_driver.session() as session:
+                result = session.run(
+                    CYPHER_PRIOR_TAXONOMY,
+                    source_id=source_id,
+                    target_id=target_id,
+                )
+                record = result.single()
+                if record and record["prior_taxonomy"] is not None:
+                    priors.prior_taxonomy = float(record["prior_taxonomy"])
+        except Exception:
+            pass
+
+        return priors
+
+    # -----------------------------------------------------------------------
+    # ColBERT Reranking (v2: rerank-before-write)
+    # -----------------------------------------------------------------------
+
+    def _rerank_candidates_colbert(
         self,
-        source_document_id: str,
-        edges_created: List[Tuple[str, float]],
-        source_colbert: Optional[np.ndarray] = None,
-    ) -> Tuple[int, int]:
+        source_doc_id: str,
+        candidates: List[CandidateSignals],
+    ) -> List[CandidateSignals]:
         """
-        Rerank newly-created edges using ColBERT MaxSim.
+        ColBERT MaxSim reranking of candidates BEFORE edge creation.
 
-        For each edge:
-        1. Fetch target document's ColBERT vectors
-        2. Compute MaxSim score against source vectors
-        3. If score >= threshold: update edge with colbert_score
-        4. If score < threshold: delete edge (prune false positive)
+        Sets ``score_colbert`` on each candidate. Returns only candidates
+        that survive the ``colbert_threshold`` filter.
+
+        Steps:
+            1. Fetch source ColBERT vectors (reuse existing helper)
+            2. For each candidate: fetch target ColBERT vectors, compute MaxSim
+            3. Set ``candidate.score_colbert = maxsim_score``
+            4. Filter: only keep candidates where
+               ``score_colbert >= self.config.colbert_threshold``
+            5. Return survivors
 
         Args:
-            source_document_id: Source document ID
-            edges_created: List of (target_id, rrf_score) tuples
-            source_colbert: Pre-fetched source ColBERT vectors (optional optimization)
+            source_doc_id: Source document ID
+            candidates: List of CandidateSignals to rerank
 
         Returns:
-            Tuple of (edges_kept, edges_pruned)
+            Filtered list of CandidateSignals with score_colbert populated
         """
-        if not edges_created:
-            return 0, 0
+        if not candidates:
+            return []
 
         threshold = self.config.colbert_threshold
-        edges_kept = 0
-        edges_pruned = 0
 
-        # Fetch source ColBERT vectors if not provided
-        if source_colbert is None:
-            source_colbert = get_document_colbert_vectors(
-                self.qdrant_client,
-                source_document_id,
-                self.config.collection_name,
-                self.config.colbert_max_chunks,
-                self.config.colbert_max_tokens,
-            )
+        # Fetch source ColBERT vectors
+        source_colbert = get_document_colbert_vectors(
+            self.qdrant_client,
+            source_doc_id,
+            self.config.collection_name,
+            self.config.colbert_max_chunks,
+            self.config.colbert_max_tokens,
+        )
 
         if source_colbert is None:
-            # Can't rerank without source vectors - keep all edges
+            # Can't rerank without source vectors - keep all candidates
             logger.warning(
                 "colbert_rerank_skipped_no_source",
-                document_id=(
-                    source_document_id[:12] if source_document_id else "unknown"
-                ),
-                edges_count=len(edges_created),
+                document_id=(source_doc_id[:12] if source_doc_id else "unknown"),
+                candidates_count=len(candidates),
             )
-            return len(edges_created), 0
+            return candidates
 
-        for target_id, rrf_score in edges_created:
-            # Fetch target ColBERT vectors
-            target_colbert = get_document_colbert_vectors(
-                self.qdrant_client,
-                target_id,
-                self.config.collection_name,
-                self.config.colbert_max_chunks,
-                self.config.colbert_max_tokens,
-            )
+        survivors: List[CandidateSignals] = []
 
-            if target_colbert is None:
-                # Can't compute score - keep edge (don't punish missing data)
-                logger.debug(
-                    "colbert_rerank_no_target_vectors",
-                    source_id=(
-                        source_document_id[:12] if source_document_id else "unknown"
-                    ),
-                    target_id=target_id[:12] if target_id else "unknown",
+        for candidate in candidates:
+            try:
+                # Fetch target ColBERT vectors
+                target_colbert = get_document_colbert_vectors(
+                    self.qdrant_client,
+                    candidate.target_doc_id,
+                    self.config.collection_name,
+                    self.config.colbert_max_chunks,
+                    self.config.colbert_max_tokens,
                 )
-                edges_kept += 1
-                continue
 
-            # Compute ColBERT MaxSim score
-            colbert_score = compute_maxsim(source_colbert, target_colbert)
-
-            if colbert_score >= threshold:
-                # Keep edge and update with ColBERT score
-                if self._update_edge_colbert_score(
-                    source_document_id, target_id, colbert_score
-                ):
-                    edges_kept += 1
+                if target_colbert is None:
+                    # Can't compute score - keep candidate (don't punish missing data)
                     logger.debug(
-                        "colbert_edge_kept",
-                        source_id=(
-                            source_document_id[:12] if source_document_id else "unknown"
+                        "colbert_rerank_no_target_vectors",
+                        source_id=(source_doc_id[:12] if source_doc_id else "unknown"),
+                        target_id=(
+                            candidate.target_doc_id[:12]
+                            if candidate.target_doc_id
+                            else "unknown"
                         ),
-                        target_id=target_id[:12] if target_id else "unknown",
-                        rrf_score=round(rrf_score, 4),
+                    )
+                    survivors.append(candidate)
+                    continue
+
+                # Compute ColBERT MaxSim score
+                colbert_score = compute_maxsim(source_colbert, target_colbert)
+                candidate.score_colbert = colbert_score
+
+                if colbert_score >= threshold:
+                    survivors.append(candidate)
+                    logger.debug(
+                        "colbert_candidate_kept",
+                        source_id=(source_doc_id[:12] if source_doc_id else "unknown"),
+                        target_id=(
+                            candidate.target_doc_id[:12]
+                            if candidate.target_doc_id
+                            else "unknown"
+                        ),
                         colbert_score=round(colbert_score, 4),
                     )
                 else:
-                    edges_kept += 1  # Update failed but edge still exists
-            else:
-                # Prune edge below threshold
-                if self._prune_edge(source_document_id, target_id):
-                    edges_pruned += 1
                     logger.debug(
-                        "colbert_edge_filtered",
-                        source_id=(
-                            source_document_id[:12] if source_document_id else "unknown"
+                        "colbert_candidate_filtered",
+                        source_id=(source_doc_id[:12] if source_doc_id else "unknown"),
+                        target_id=(
+                            candidate.target_doc_id[:12]
+                            if candidate.target_doc_id
+                            else "unknown"
                         ),
-                        target_id=target_id[:12] if target_id else "unknown",
-                        rrf_score=round(rrf_score, 4),
                         colbert_score=round(colbert_score, 4),
                         threshold=threshold,
                     )
-                else:
-                    edges_kept += 1  # Prune failed, edge still exists
+            except Exception as e:
+                # Never fail ingestion due to reranking errors
+                logger.warning(
+                    "colbert_rerank_candidate_error",
+                    source_id=(source_doc_id[:12] if source_doc_id else "unknown"),
+                    target_id=(
+                        candidate.target_doc_id[:12]
+                        if candidate.target_doc_id
+                        else "unknown"
+                    ),
+                    error=str(e),
+                )
+                survivors.append(candidate)
 
+        pruned_count = len(candidates) - len(survivors)
         logger.info(
             "colbert_rerank_complete",
-            document_id=source_document_id[:12] if source_document_id else "unknown",
-            edges_kept=edges_kept,
-            edges_pruned=edges_pruned,
+            document_id=source_doc_id[:12] if source_doc_id else "unknown",
+            candidates_in=len(candidates),
+            candidates_out=len(survivors),
+            pruned=pruned_count,
             threshold=threshold,
         )
 
-        return edges_kept, edges_pruned
+        return survivors
 
     # -----------------------------------------------------------------------
     # Main linking methods
@@ -1026,8 +1115,11 @@ class CrossDocLinker:
         Link a single document to semantically similar documents.
 
         This is the main entry point for incremental mode during ingestion.
-        If ColBERT reranking is enabled, edges will be reranked after creation
-        and weak edges will be pruned.
+
+        v2 flow (``colbert_rerank_before_write=True``):
+            1. Retrieve candidates as ``List[CandidateSignals]``
+            2. ColBERT rerank candidates (filters before write)
+            3. Build ``EdgePayload`` per candidate, write to Neo4j
 
         Args:
             doc_id: Document ID
@@ -1058,7 +1150,7 @@ class CrossDocLinker:
             result.duration_ms = int((time.time() - start_time) * 1000)
             return result
 
-        # Route to appropriate method
+        # Route to appropriate method — all return List[CandidateSignals]
         if self.config.method == "dense":
             candidates = self._link_dense_only(doc_id, doc_title_vector)
             threshold = self.config.dense_threshold
@@ -1070,9 +1162,14 @@ class CrossDocLinker:
             method_name = "rrf_fusion"
             phase = "3.5b"
         elif self.config.method == "title_ft":
-            candidates = self._search_title_mentions(
+            # title_ft still returns List[Tuple[str, float]] — adapt
+            raw_title = self._search_title_mentions(
                 doc_id, doc_title, min_score=self.config.rrf_threshold
             )
+            candidates = [
+                CandidateSignals(target_doc_id=tid, score_title_ft=sc)
+                for tid, sc in raw_title
+            ]
             threshold = DEFAULT_THRESHOLDS["title_ft"]
             method_name = "title_mention"
             phase = "3.5c"
@@ -1090,63 +1187,77 @@ class CrossDocLinker:
             result.duration_ms = int((time.time() - start_time) * 1000)
             return result
 
-        # Create edges for candidates above threshold
+        # ColBERT rerank-before-write (v2)
+        if (
+            self.config.colbert_rerank_before_write
+            and self.config.colbert_rerank
+            and not dry_run
+        ):
+            pre_count = len(candidates)
+            candidates = self._rerank_candidates_colbert(doc_id, candidates)
+            result.edges_pruned = pre_count - len(candidates)
+            if candidates:
+                method_name = method_name + "+colbert"
+
+        # Build quality thresholds from config
+        quality_thresholds = {
+            "high": self.config.quality_tier_high,
+            "medium": self.config.quality_tier_medium,
+        }
+
+        # Create edges for candidates above threshold (up to max_edges_per_doc)
         edges_created = 0
         edges_updated = 0
-        created_edges: List[Tuple[str, float]] = []  # Track for ColBERT reranking
 
-        for target_id, score in candidates:
-            if score < threshold:
+        for candidate in candidates:
+            if candidate.score_final < threshold:
+                continue
+            if edges_created + edges_updated >= self.config.max_edges_per_doc:
                 break
-            if edges_created >= self.config.max_edges_per_doc:
-                break
 
-            created, updated = self._create_edge(
-                source_id=doc_id,
-                target_id=target_id,
-                score=score,
-                method=method_name,
-                phase=phase,
-                dry_run=dry_run,
-            )
+            try:
+                # Compute structural priors for this candidate (Stage 6)
+                priors = self._compute_structural_priors(
+                    doc_id, candidate.target_doc_id
+                )
 
-            if created:
-                edges_created += 1
-                created_edges.append((target_id, score))
-            if updated:
-                edges_updated += 1
-                created_edges.append((target_id, score))
+                payload = EdgePayload.from_candidate(
+                    signals=candidate,
+                    method=method_name,
+                    phase=phase,
+                    priors=priors,
+                    quality_thresholds=quality_thresholds,
+                )
+
+                created, updated = self._create_edge(
+                    source_id=doc_id,
+                    target_id=candidate.target_doc_id,
+                    payload=payload,
+                    dry_run=dry_run,
+                )
+
+                if created:
+                    edges_created += 1
+                if updated:
+                    edges_updated += 1
+            except Exception as e:
+                # Never fail ingestion due to edge creation errors
+                logger.warning(
+                    "cross_doc_edge_write_error",
+                    source=doc_id[:8] if doc_id else "?",
+                    target=(
+                        candidate.target_doc_id[:8] if candidate.target_doc_id else "?"
+                    ),
+                    error=str(e),
+                )
 
         result.edges_created = edges_created
         result.edges_updated = edges_updated
+        if edges_created > 0 or edges_updated > 0:
+            result.method = method_name
 
-        # ColBERT reranking (Phase 4)
-        if self.config.colbert_rerank and created_edges and not dry_run:
-            # Fetch source ColBERT vectors once
-            source_colbert = get_document_colbert_vectors(
-                self.qdrant_client,
-                doc_id,
-                self.config.collection_name,
-                self.config.colbert_max_chunks,
-                self.config.colbert_max_tokens,
-            )
-
-            if source_colbert is not None:
-                edges_kept, edges_pruned = self._rerank_edges_colbert(
-                    doc_id,
-                    created_edges,
-                    source_colbert,
-                )
-                result.edges_created = edges_kept
-                result.edges_pruned = edges_pruned
-                if edges_kept > 0:
-                    result.method = "rrf_fusion+colbert"
-            else:
-                logger.warning(
-                    "colbert_rerank_skipped",
-                    document_id=doc_id[:12] if doc_id else "unknown",
-                    reason="no_source_vectors",
-                )
+        # Reciprocity reconciliation (Stage 5)
+        result.reciprocity_updated = self._reconcile_reciprocity(doc_id)
 
         result.duration_ms = int((time.time() - start_time) * 1000)
 
@@ -1156,29 +1267,44 @@ class CrossDocLinker:
         self,
         doc_id: str,
         dense_vector: List[float],
-    ) -> List[Tuple[str, float]]:
-        """Link using dense vectors only (Phase 3.5a)."""
+    ) -> List[CandidateSignals]:
+        """Link using dense vectors only (Phase 3.5a).
+
+        Returns:
+            List[CandidateSignals] with ``score_dense`` populated.
+        """
         chunk_hits = self._search_similar_chunks_dense(dense_vector, doc_id)
-        return aggregate_chunks_to_documents(chunk_hits, doc_id)
+        return aggregate_chunks_to_candidates(
+            chunk_hits, exclude_doc_id=doc_id, score_field="score_dense"
+        )
 
     def _link_rrf(
         self,
         doc_id: str,
         dense_vector: List[float],
         sparse_vector: Optional[Union[models.SparseVector, Dict]],
-    ) -> List[Tuple[str, float]]:
-        """Link using RRF fusion of dense + sparse (Phase 3.5b)."""
+    ) -> List[CandidateSignals]:
+        """Link using RRF fusion of dense + sparse (Phase 3.5b).
+
+        Returns:
+            List[CandidateSignals] with ``score_rrf``, ``score_dense``,
+            and ``score_sparse`` populated.
+        """
         # Dense search
         dense_hits = self._search_similar_chunks_dense(dense_vector, doc_id)
-        dense_docs = aggregate_chunks_to_documents(dense_hits, doc_id)
+        dense_candidates = aggregate_chunks_to_candidates(
+            dense_hits, exclude_doc_id=doc_id, score_field="score_dense"
+        )
 
         # Sparse search (if vector available)
-        sparse_docs: List[Tuple[str, float]] = []
+        sparse_candidates: List[CandidateSignals] = []
         if sparse_vector is not None:
             # Handle both SparseVector model and dict formats
             if hasattr(sparse_vector, "indices") and sparse_vector.indices:
                 sparse_hits = self._search_similar_chunks_sparse(sparse_vector, doc_id)
-                sparse_docs = aggregate_chunks_to_documents(sparse_hits, doc_id)
+                sparse_candidates = aggregate_chunks_to_candidates(
+                    sparse_hits, exclude_doc_id=doc_id, score_field="score_sparse"
+                )
             elif isinstance(sparse_vector, dict) and sparse_vector.get("indices"):
                 # Convert dict to SparseVector model
                 sv = models.SparseVector(
@@ -1186,14 +1312,18 @@ class CrossDocLinker:
                     values=sparse_vector["values"],
                 )
                 sparse_hits = self._search_similar_chunks_sparse(sv, doc_id)
-                sparse_docs = aggregate_chunks_to_documents(sparse_hits, doc_id)
+                sparse_candidates = aggregate_chunks_to_candidates(
+                    sparse_hits, exclude_doc_id=doc_id, score_field="score_sparse"
+                )
 
-        # If no sparse results, fall back to dense-only
-        if not sparse_docs:
-            return dense_docs
+        # If no sparse results, fall back to dense-only candidates
+        if not sparse_candidates:
+            return dense_candidates
 
-        # RRF fusion
-        return reciprocal_rank_fusion(dense_docs, sparse_docs, k=self.config.rrf_k)
+        # RRF fusion (v2: preserves per-signal component scores)
+        return reciprocal_rank_fusion_v2(
+            dense_candidates, sparse_candidates, k=self.config.rrf_k
+        )
 
     def link_all_documents(
         self,
@@ -1271,10 +1401,16 @@ __all__ = [
     "BatchLinkingStats",
     # Pure functions
     "escape_lucene_query",
-    "aggregate_chunks_to_documents",
-    "reciprocal_rank_fusion",
+    "aggregate_chunks_to_documents",  # deprecated
+    "reciprocal_rank_fusion",  # deprecated
     "compute_maxsim",
     "get_document_colbert_vectors",
+    # v2 edge model (re-exports from cross_doc_edge_model)
+    "CandidateSignals",
+    "EdgePayload",
+    "aggregate_chunks_to_candidates",
+    "reciprocal_rank_fusion_v2",
+    "EDGE_MODEL_VERSION",
     # Constants
     "DENSE_VECTOR_NAME",
     "SPARSE_VECTOR_NAME",

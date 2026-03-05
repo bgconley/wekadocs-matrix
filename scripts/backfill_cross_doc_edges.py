@@ -46,7 +46,6 @@ import argparse
 import os
 import sys
 import time
-from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -57,6 +56,16 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from qdrant_client import QdrantClient, models
+
+from src.services.cross_doc_edge_model import (  # noqa: F401 - available for ad-hoc usage
+    DEFAULT_RRF_K,
+    EDGE_MODEL_VERSION,
+    CandidateSignals,
+    EdgePayload,
+    aggregate_chunks_to_candidates,
+    build_edge_merge_cypher,
+    reciprocal_rank_fusion_v2,
+)
 
 # Import shared functions from cross_doc_linking module (Phase 4)
 from src.services.cross_doc_linking import (
@@ -100,6 +109,7 @@ THRESHOLDS = {
     "title_ft": 2.0,  # Lucene full-text score threshold
     "colbert": 0.40,  # ColBERT MaxSim threshold (filters weak matches)
     "full": 0.025,  # Placeholder - full pipeline uses individual thresholds per phase
+    "reciprocity": 0.0,  # No threshold needed for reciprocity reconciliation
 }
 
 # Full-text index name for chunk content
@@ -114,8 +124,7 @@ DISCOVERY_THRESHOLDS = {
     "sparse": 0.0,  # Sparse scores can be low but still meaningful
 }
 
-# RRF constant (standard value from literature)
-RRF_K = 60
+# RRF constant imported from shared module as DEFAULT_RRF_K
 
 
 # ---------------------------------------------------------------------------
@@ -575,38 +584,6 @@ def get_existing_edges(neo4j_driver) -> List[Dict]:
         return [dict(r) for r in result]
 
 
-def update_edge_colbert_score(
-    neo4j_driver,
-    source_id: str,
-    target_id: str,
-    colbert_score: float,
-    dry_run: bool = False,
-) -> bool:
-    """
-    Update an existing edge with ColBERT score and mark as phase 3.5d.
-    """
-    if dry_run:
-        return True
-
-    try:
-        with neo4j_driver.session() as session:
-            session.run(
-                """
-                MATCH (s:Document {id: $source_id})-[r:RELATED_TO]->(t:Document {id: $target_id})
-                SET r.colbert_score = $colbert_score,
-                    r.phase = '3.5d',
-                    r.reranked_at = datetime()
-            """,
-                source_id=source_id,
-                target_id=target_id,
-                colbert_score=colbert_score,
-            )
-            return True
-    except Exception as e:
-        print(f"  [ERROR] Failed to update edge: {e}")
-        return False
-
-
 def delete_edge(
     neo4j_driver,
     source_id: str,
@@ -640,66 +617,9 @@ def delete_edge(
 # ---------------------------------------------------------------------------
 
 
-def aggregate_chunks_to_documents(
-    chunk_hits: List[models.ScoredPoint], exclude_doc_id: str
-) -> List[Tuple[str, float]]:
-    """
-    Aggregate chunk-level search results to document-level scores.
-
-    Strategy: Max-Score Wins
-    - Group chunks by document_id
-    - Take the highest chunk score as the document's score
-    - This captures the "best match" semantic from any chunk
-
-    Returns:
-        List of (document_id, max_score) tuples, sorted by score descending
-    """
-    doc_scores: Dict[str, float] = defaultdict(float)
-
-    for hit in chunk_hits:
-        doc_id = hit.payload.get("document_id")
-        if not doc_id or doc_id == exclude_doc_id:
-            continue
-        doc_scores[doc_id] = max(doc_scores[doc_id], hit.score)
-
-    return sorted(doc_scores.items(), key=lambda x: -x[1])
-
-
-def reciprocal_rank_fusion(
-    dense_docs: List[Tuple[str, float]],
-    sparse_docs: List[Tuple[str, float]],
-    k: int = RRF_K,
-) -> List[Tuple[str, float]]:
-    """
-    Combine document rankings using Reciprocal Rank Fusion.
-
-    RRF formula: score(d) = Σ 1/(k + rank_i(d))
-
-    Why RRF works well:
-    - Rank-based, not score-based (handles different score scales)
-    - Documents appearing in BOTH lists get boosted
-    - Robust to outliers in either retrieval method
-    - Standard k=60 from literature works well empirically
-
-    Args:
-        dense_docs: List of (doc_id, score) from dense search, sorted by score desc
-        sparse_docs: List of (doc_id, score) from sparse search, sorted by score desc
-        k: RRF constant (default 60)
-
-    Returns:
-        List of (doc_id, rrf_score) tuples, sorted by RRF score descending
-    """
-    rrf_scores: Dict[str, float] = defaultdict(float)
-
-    # Add dense contributions
-    for rank, (doc_id, _) in enumerate(dense_docs):
-        rrf_scores[doc_id] += 1.0 / (k + rank + 1)
-
-    # Add sparse contributions
-    for rank, (doc_id, _) in enumerate(sparse_docs):
-        rrf_scores[doc_id] += 1.0 / (k + rank + 1)
-
-    return sorted(rrf_scores.items(), key=lambda x: -x[1])
+# aggregate_chunks_to_documents() and reciprocal_rank_fusion() have been
+# replaced by aggregate_chunks_to_candidates() and reciprocal_rank_fusion_v2()
+# from src.services.cross_doc_edge_model.
 
 
 # ---------------------------------------------------------------------------
@@ -711,22 +631,15 @@ def create_related_to_edge(
     neo4j_driver,
     source_id: str,
     target_id: str,
-    score: float,
-    method: str,
-    phase: str,
+    payload: EdgePayload,
     dry_run: bool = False,
 ) -> bool:
     """
     Create a RELATED_TO edge between two documents.
 
     Uses MERGE for idempotency - re-running the script updates scores
-    rather than creating duplicate edges.
-
-    Edge properties:
-    - score: Similarity score (cosine for dense, RRF score for fusion)
-    - method: 'dense_similarity' or 'rrf_fusion'
-    - phase: '3.5a' or '3.5b' (for rollback targeting)
-    - created_at: Timestamp
+    rather than creating duplicate edges.  ON CREATE sets ``created_at``
+    while ON MATCH preserves it and sets ``updated_at``.
     """
     if dry_run:
         return True
@@ -738,19 +651,16 @@ def create_related_to_edge(
                 MATCH (source:Document {id: $source_id})
                 MATCH (target:Document {id: $target_id})
                 MERGE (source)-[r:RELATED_TO]->(target)
-                SET r.score = $score,
-                    r.method = $method,
-                    r.phase = $phase,
-                    r.created_at = datetime()
-                RETURN count(r) AS created
-            """,
+                ON CREATE SET r += $props, r.created_at = datetime(), r.last_seen_at = datetime()
+                ON MATCH SET r += $props, r.updated_at = datetime(), r.last_seen_at = datetime()
+                RETURN r.updated_at IS NULL AS was_created
+                """,
                 source_id=source_id,
                 target_id=target_id,
-                score=score,
-                method=method,
-                phase=phase,
+                props=payload.to_neo4j_params(),
             )
-            return result.single()["created"] > 0
+            record = result.single()
+            return record is not None and record.get("was_created", False)
     except Exception as e:
         print(f"  [ERROR] Failed to create edge {source_id[:8]}→{target_id[:8]}: {e}")
         return False
@@ -795,32 +705,37 @@ def process_document_dense(
             print(f"  [SKIP] No candidates: {source_title}")
         return 0
 
-    # Aggregate to documents
-    doc_candidates = aggregate_chunks_to_documents(chunk_hits, source_id)
-    stats.total_candidates_found += len(doc_candidates)
+    # Aggregate to documents using shared model
+    candidates = aggregate_chunks_to_candidates(
+        chunk_hits, source_id, score_field="score_dense"
+    )
+    stats.total_candidates_found += len(candidates)
 
     # Filter and create edges
     edges_created = 0
-    for target_id, score in doc_candidates:
+    for candidate in candidates:
+        score = candidate.score_final
         if score < threshold:
             break
         if edges_created >= max_edges:
             break
 
+        payload = EdgePayload.from_candidate(
+            candidate, method="dense_similarity", phase="3.5a"
+        )
+
         if create_related_to_edge(
             neo4j_driver,
             source_id,
-            target_id,
-            score,
-            method="dense_similarity",
-            phase="3.5a",
+            candidate.target_doc_id,
+            payload,
             dry_run=dry_run,
         ):
             edges_created += 1
             stats.record_edge(score)
 
             if verbose or dry_run:
-                target_title = get_document_title(neo4j_driver, target_id)
+                target_title = get_document_title(neo4j_driver, candidate.target_doc_id)
                 target_title = (target_title or "Unknown")[:40]
                 mode = "[DRY-RUN]" if dry_run else "[CREATED]"
                 print(
@@ -859,54 +774,63 @@ def process_document_rrf(
             print(f"  [SKIP] No dense vector: {source_title}")
         return 0
 
-    # Search with dense vectors
+    # Search with dense vectors and aggregate via shared model
     dense_hits = search_similar_chunks_dense(
         qdrant, dense_vector, source_id, limit=chunk_limit
     )
-    dense_docs = aggregate_chunks_to_documents(dense_hits, source_id)
-    stats.dense_candidates += len(dense_docs)
+    dense_candidates = aggregate_chunks_to_candidates(
+        dense_hits, source_id, score_field="score_dense"
+    )
+    stats.dense_candidates += len(dense_candidates)
 
     # Search with sparse vectors (if available)
-    sparse_docs = []
+    sparse_candidates: List[CandidateSignals] = []
     if sparse_vector and hasattr(sparse_vector, "indices") and sparse_vector.indices:
         sparse_hits = search_similar_chunks_sparse(
             qdrant, sparse_vector, source_id, limit=chunk_limit
         )
-        sparse_docs = aggregate_chunks_to_documents(sparse_hits, source_id)
-        stats.sparse_candidates += len(sparse_docs)
+        sparse_candidates = aggregate_chunks_to_candidates(
+            sparse_hits, source_id, score_field="score_sparse"
+        )
+        stats.sparse_candidates += len(sparse_candidates)
 
-    if not dense_docs and not sparse_docs:
+    if not dense_candidates and not sparse_candidates:
         stats.docs_skipped_no_candidates += 1
         if verbose:
             print(f"  [SKIP] No candidates: {source_title}")
         return 0
 
-    # RRF Fusion
-    fused_candidates = reciprocal_rank_fusion(dense_docs, sparse_docs)
+    # RRF Fusion via shared model
+    fused_candidates = reciprocal_rank_fusion_v2(
+        dense_candidates, sparse_candidates, k=DEFAULT_RRF_K
+    )
     stats.total_candidates_found += len(fused_candidates)
 
     # Filter and create edges
     edges_created = 0
-    for target_id, rrf_score in fused_candidates:
+    for candidate in fused_candidates:
+        rrf_score = candidate.score_final
         if rrf_score < threshold:
             break
         if edges_created >= max_edges:
             break
 
+        payload = EdgePayload.from_candidate(
+            candidate, method="rrf_fusion", phase="3.5b"
+        )
+
         if create_related_to_edge(
             neo4j_driver,
             source_id,
-            target_id,
-            rrf_score,
-            method="rrf_fusion",
-            phase="3.5b",
+            candidate.target_doc_id,
+            payload,
             dry_run=dry_run,
         ):
             edges_created += 1
             stats.record_edge(rrf_score)
 
             if verbose or dry_run:
-                target_title = get_document_title(neo4j_driver, target_id)
+                target_title = get_document_title(neo4j_driver, candidate.target_doc_id)
                 target_title = (target_title or "Unknown")[:40]
                 mode = "[DRY-RUN]" if dry_run else "[CREATED]"
                 # Show RRF score with more decimals since they're smaller
@@ -945,44 +869,53 @@ def process_document_title_ft(
         return 0
 
     # Search for chunks mentioning this title
-    doc_candidates = search_title_mentions(
+    doc_candidates_raw = search_title_mentions(
         neo4j_driver,
         source_id,
         source_title,
         min_score=threshold,
     )
 
-    stats.title_ft_candidates += len(doc_candidates)
-    stats.total_candidates_found += len(doc_candidates)
+    stats.title_ft_candidates += len(doc_candidates_raw)
+    stats.total_candidates_found += len(doc_candidates_raw)
 
-    if not doc_candidates:
+    if not doc_candidates_raw:
         stats.docs_skipped_no_candidates += 1
         if verbose:
             print(f"  [SKIP] No mentions found: {source_title[:50]}")
         return 0
 
+    # Convert raw (doc_id, score) tuples to CandidateSignals
+    candidates = [
+        CandidateSignals(target_doc_id=target_id, score_title_ft=score)
+        for target_id, score in doc_candidates_raw
+    ]
+
     # Create edges for matching documents
     edges_created = 0
-    for target_id, score in doc_candidates:
+    for candidate in candidates:
+        score = candidate.score_final
         if score < threshold:
             break
         if edges_created >= max_edges:
             break
 
+        payload = EdgePayload.from_candidate(
+            candidate, method="title_mention", phase="3.5c"
+        )
+
         if create_related_to_edge(
             neo4j_driver,
             source_id,
-            target_id,
-            score,
-            method="title_mention",
-            phase="3.5c",
+            candidate.target_doc_id,
+            payload,
             dry_run=dry_run,
         ):
             edges_created += 1
             stats.record_edge(score)
 
             if verbose or dry_run:
-                target_title = get_document_title(neo4j_driver, target_id)
+                target_title = get_document_title(neo4j_driver, candidate.target_doc_id)
                 target_title = (target_title or "Unknown")[:40]
                 mode = "[DRY-RUN]" if dry_run else "[CREATED]"
                 print(
@@ -1014,7 +947,7 @@ def process_colbert_rerank(
     For each edge:
     1. Fetch ColBERT vectors for source and target (first N chunks)
     2. Compute MaxSim score
-    3. If score >= threshold: update edge with colbert_score
+    3. If score >= threshold: rebuild edge with ColBERT score via EdgePayload
     4. If score < threshold: delete edge (it's a false positive)
     """
     print("\nFetching existing edges from Neo4j...")
@@ -1074,9 +1007,35 @@ def process_colbert_rerank(
             print(f"\n[{i + 1}/{len(edges)}] Processed...")
 
         if colbert_score >= threshold:
-            # Keep and update edge
-            if update_edge_colbert_score(
-                neo4j_driver, source_id, target_id, colbert_score, dry_run
+            # Build an updated EdgePayload incorporating existing edge props
+            # plus the new ColBERT score
+            candidate = CandidateSignals(
+                target_doc_id=target_id,
+                score_dense=(
+                    edge.get("original_score")
+                    if edge.get("method") == "dense_similarity"
+                    else None
+                ),
+                score_rrf=(
+                    edge.get("original_score")
+                    if edge.get("method") == "rrf_fusion"
+                    else None
+                ),
+                score_title_ft=(
+                    edge.get("original_score")
+                    if edge.get("method") == "title_mention"
+                    else None
+                ),
+                score_colbert=colbert_score,
+            )
+            payload = EdgePayload.from_candidate(
+                candidate,
+                method=edge.get("method", "rrf_fusion"),
+                phase="3.5d",
+            )
+
+            if create_related_to_edge(
+                neo4j_driver, source_id, target_id, payload, dry_run
             ):
                 # record_edge increments total_edges_created
                 stats.record_edge(colbert_score)
@@ -1117,10 +1076,11 @@ def main():
     # Method selection
     parser.add_argument(
         "--method",
-        choices=["dense", "rrf", "title_ft", "colbert", "full"],
+        choices=["dense", "rrf", "title_ft", "colbert", "full", "reciprocity"],
         default="rrf",
         help="Method: 'dense' (3.5a), 'rrf' (3.5b), 'title_ft' (3.5c), "
-        "'colbert' (3.5d rerank), 'full' (rrf + colbert pipeline)",
+        "'colbert' (3.5d rerank), 'full' (rrf + colbert pipeline), "
+        "'reciprocity' (bulk reconcile is_mutual/mutual_score on all edges)",
     )
 
     # Configuration options
@@ -1169,6 +1129,7 @@ def main():
         "title_ft": "3.5c",
         "colbert": "3.5d",
         "full": "full",
+        "reciprocity": "4.1",
     }
     method_desc = {
         "dense": "dense vectors only",
@@ -1176,6 +1137,7 @@ def main():
         "title_ft": "full-text title mentions",
         "colbert": "ColBERT MaxSim reranking",
         "full": "RRF + ColBERT pipeline (Phase 4)",
+        "reciprocity": "bulk is_mutual/mutual_score reconciliation",
     }
     phase = phase_map[method]
 
@@ -1204,11 +1166,11 @@ def main():
         neo4j_driver = get_neo4j_driver()
         print("  Neo4j: Connected")
         # Connect to Qdrant for vector-based methods (not title_ft)
-        if method not in ("title_ft",):
+        if method not in ("title_ft", "reciprocity"):
             qdrant = get_qdrant_client()
             print("  Qdrant: Connected")
         else:
-            print("  Qdrant: Skipped (not needed for title_ft)")
+            print(f"  Qdrant: Skipped (not needed for {method})")
     except Exception as e:
         print(f"[FATAL] Failed to connect: {e}")
         sys.exit(1)
@@ -1273,6 +1235,37 @@ def main():
         # Reset method for summary
         stats.method = "full"
         phase = "full"
+
+    # Reciprocity reconciliation: bulk update is_mutual/mutual_score
+    elif method == "reciprocity":
+        print("\nRunning bulk reciprocity reconciliation...")
+        try:
+            with neo4j_driver.session() as session:
+                result = session.run(
+                    """
+                    MATCH (a:Document)-[r1:RELATED_TO]->(b:Document)
+                    OPTIONAL MATCH (b)-[r2:RELATED_TO]->(a)
+                    WITH r1, r2,
+                         CASE WHEN r2 IS NOT NULL THEN true ELSE false END AS mutual,
+                         CASE WHEN r2 IS NOT NULL
+                              THEN (coalesce(r1.score_final, r1.score, 0.0)
+                                    + coalesce(r2.score_final, r2.score, 0.0)) / 2.0
+                              ELSE null
+                         END AS m_score
+                    WHERE r1.is_mutual IS NULL OR r1.is_mutual <> mutual
+                    SET r1.is_mutual = mutual, r1.mutual_score = m_score
+                    WITH r2, mutual, m_score
+                    WHERE r2 IS NOT NULL AND (r2.is_mutual IS NULL OR r2.is_mutual <> mutual)
+                    SET r2.is_mutual = mutual, r2.mutual_score = m_score
+                    RETURN count(*) AS updated
+                    """
+                )
+                record = result.single()
+                updated = record["updated"] if record else 0
+                stats.total_edges_created = updated
+                print(f"  Reciprocity reconciled: {updated} edges updated")
+        except Exception as e:
+            print(f"  [ERROR] Reciprocity reconciliation failed: {e}")
 
     # ColBERT reranking processes edges, not documents
     elif method == "colbert":

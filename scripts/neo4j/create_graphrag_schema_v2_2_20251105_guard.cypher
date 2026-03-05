@@ -323,6 +323,30 @@ FOR ()-[r:PARENT_HEADING]-() ON (r.level_delta);
 
 
 // ---------------------------------------------------------------------------
+// PART 1D: RELATED_TO RELATIONSHIP INDEXES (GDS prerequisites)
+// ---------------------------------------------------------------------------
+// Required for GDS community detection (Louvain, Label Propagation),
+// efficient RELATED_TO traversal during graph expansion, and
+// quality-filtered GDS projected subgraphs.
+
+// Index on score_final for threshold-based filtering and weighted GDS projections
+CREATE INDEX related_to_score_final_idx IF NOT EXISTS
+FOR ()-[r:RELATED_TO]-() ON (r.score_final);
+
+// Index on method for filtering by linking method
+CREATE INDEX related_to_method_idx IF NOT EXISTS
+FOR ()-[r:RELATED_TO]-() ON (r.method);
+
+// Index on quality_tier for GDS projected subgraph filtering
+CREATE INDEX related_to_quality_tier_idx IF NOT EXISTS
+FOR ()-[r:RELATED_TO]-() ON (r.quality_tier);
+
+// Index on is_mutual for reciprocity-based filtering
+CREATE INDEX related_to_is_mutual_idx IF NOT EXISTS
+FOR ()-[r:RELATED_TO]-() ON (r.is_mutual);
+
+
+// ---------------------------------------------------------------------------
 // PART 2: FULL-TEXT INDEXES (lexical tier for hybrid retrieval)
 // ---------------------------------------------------------------------------
 
@@ -404,10 +428,11 @@ SET c.document_id = c.doc_id;
 // Phase 3: Added PARENT_HEADING for heading hierarchy traversal
 // Phase 3.5: MENTIONS is now (Chunk → Entity) with confidence/source properties
 // Phase 3.5: MENTIONED_IN is inverse edge (Entity → Chunk) for bidirectional traversal
+// Phase 4.1: Added RELATED_TO for cross-document similarity (Document → Document)
 MERGE (m:RelationshipTypesMarker {id: 'chunk_rel_types_v1'})
-  ON CREATE SET m.types = ['NEXT','CHILD_OF','MENTIONS','MENTIONED_IN','PARENT_OF','PARENT_HEADING','REFERENCES','PENDING_REF'],
+  ON CREATE SET m.types = ['NEXT','CHILD_OF','MENTIONS','MENTIONED_IN','PARENT_OF','PARENT_HEADING','REFERENCES','PENDING_REF','RELATED_TO'],
                 m.created_at = datetime()
-  ON MATCH SET m.types = ['NEXT','CHILD_OF','MENTIONS','MENTIONED_IN','PARENT_OF','PARENT_HEADING','REFERENCES','PENDING_REF'],
+  ON MATCH SET m.types = ['NEXT','CHILD_OF','MENTIONS','MENTIONED_IN','PARENT_OF','PARENT_HEADING','REFERENCES','PENDING_REF','RELATED_TO'],
                m.updated_at = datetime();
 
 
@@ -416,19 +441,20 @@ MERGE (m:RelationshipTypesMarker {id: 'chunk_rel_types_v1'})
 // ---------------------------------------------------------------------------
 
 MERGE (sv:SchemaVersion {id: 'singleton'})
-SET sv.version = 'v4.0',
+SET sv.version = 'v4.1',
     sv.edition = 'community',
     sv.vector_dimensions = 1024,
     sv.embedding_provider = 'bge-m3',
     sv.embedding_model = 'BAAI/bge-m3',
     sv.updated_at = datetime(),
-    sv.description = 'Phase 4: :Section deprecated - all content nodes are now :Chunk only',
+    sv.description = 'Phase 4.1: RELATED_TO v2 edge model with signal provenance + GDS indexes',
     sv.validation_note = 'Property existence constraints enforced in application layer (Community Edition)',
     sv.backup_source = 'v3.0 upgraded to v4.0 Section deprecation on 2025-12-12',
     sv.reform_note = 'MENTIONS: (Chunk)-[:MENTIONS {confidence, source}]->(Entity); :Section label deprecated',
     sv.compatibility = 'Legacy :Section indexes kept for migration; run migrate_section_to_chunk.py to complete',
     sv.phase3_features = 'Source line mapping, parent_path hierarchy, structural flags (has_code, has_table, code_ratio)',
-    sv.phase4_features = ':Section deprecated, all queries use :Chunk, migration script provided';
+    sv.phase4_features = ':Section deprecated, all queries use :Chunk, migration script provided',
+    sv.phase41_features = 'RELATED_TO v2 edge model: score_final, quality_tier, is_mutual, structural priors; 4 relationship indexes';
 
 
 // ---------------------------------------------------------------------------

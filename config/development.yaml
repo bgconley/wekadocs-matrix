@@ -315,6 +315,14 @@ ingestion:
     colbert_threshold: 0.30       # Minimum score to keep edge
     colbert_max_chunks: 3         # Chunks to fetch per document
     colbert_max_tokens: 200       # Token budget for comparison
+    # RELATED_TO v2 edge model
+    edge_model_version: "2.0"
+    colbert_rerank_before_write: true
+    compute_reciprocity: true
+    compute_priors: true
+    entity_hub_threshold: 20
+    quality_tier_high: 0.040
+    quality_tier_medium: 0.028
 
 # References feature (Phase 3)
 references:
@@ -361,7 +369,7 @@ ranking:
 
 # Schema configuration
 schema:
-  version: "v4.0"  # Phase 4+: Chunk-only schema, Section deprecated
+  version: "v4.1"  # Phase 4.1: RELATED_TO v2 edge model + GDS indexes
   auto_migrate: false
 
 # Rate limiting configuration

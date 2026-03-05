@@ -799,6 +799,47 @@ class CrossDocLinkingConfig(BaseModel):
         description="Maximum tokens for ColBERT comparison (truncate beyond)",
     )
 
+    # RELATED_TO v2 edge model settings
+    edge_model_version: str = Field(
+        default="2.0",
+        description="Edge property schema version written to method_version",
+    )
+    colbert_rerank_before_write: bool = Field(
+        default=True,
+        description="Run ColBERT reranking before edge creation (v2 mode)",
+    )
+
+    # Reciprocity settings
+    compute_reciprocity: bool = Field(
+        default=True,
+        description="Compute is_mutual and mutual_score after linking",
+    )
+
+    # Structural prior settings
+    compute_priors: bool = Field(
+        default=True,
+        description="Compute structural priors (REFERENCES, entities, taxonomy)",
+    )
+    entity_hub_threshold: int = Field(
+        default=20,
+        ge=1,
+        description="Suppress entities appearing in more than N documents",
+    )
+
+    # Quality tier thresholds (for RRF method)
+    quality_tier_high: float = Field(
+        default=0.040,
+        ge=0.0,
+        le=1.0,
+        description="score_final >= this is 'high' quality tier (RRF)",
+    )
+    quality_tier_medium: float = Field(
+        default=0.028,
+        ge=0.0,
+        le=1.0,
+        description="score_final >= this is 'medium' quality tier (RRF)",
+    )
+
 
 class ParserConfig(BaseModel):
     """Parser configuration for document ingestion."""
