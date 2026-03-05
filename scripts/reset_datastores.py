@@ -261,7 +261,7 @@ def clear_neo4j(
             session = driver.session()
         with session:
             before_constraints = session.run(
-                "SHOW CONSTRAINTS RETURN count(*) AS c"
+                "SHOW CONSTRAINTS YIELD name RETURN count(*) AS c"
             ).single()["c"]
             before_indexes = session.run(
                 "SHOW INDEXES YIELD type WHERE type <> 'LOOKUP' RETURN count(*) AS c"
@@ -330,7 +330,7 @@ def clear_neo4j(
             _ensure_relationship_types_marker(session)
 
             after_constraints = session.run(
-                "SHOW CONSTRAINTS RETURN count(*) AS c"
+                "SHOW CONSTRAINTS YIELD name RETURN count(*) AS c"
             ).single()["c"]
             after_indexes = session.run(
                 "SHOW INDEXES YIELD type WHERE type <> 'LOOKUP' RETURN count(*) AS c"
