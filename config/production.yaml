@@ -518,9 +518,9 @@ ner:
   threshold: 0.55  # Raised from 0.45: GLiNER docs use 0.5 default; Knowledgator uses 0.7 in production
   device: "auto"  # auto-detect: MPS → CUDA → CPU
   batch_size: 32  # Optimal for Apple Silicon (M1/M2/M3)
-  # GPU gateway on the same host as Docker (production deployment)
-  # Containers reach it via host.docker.internal (resolved by extra_hosts directive)
-  service_url: "http://host.docker.internal:8080"
+  # Direct GLiNER service (bypasses gateway health aggregation)
+  # Env var GLINER_SERVICE_URL overrides this (see config.py:1603)
+  service_url: "http://10.25.0.50:9002"
   # Entity exclusions: terms too common to be useful (filtered post-extraction)
   # Note: "WEKA" and variants are excluded in src/providers/ner/labels.py
   labels:
