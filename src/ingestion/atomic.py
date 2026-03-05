@@ -529,6 +529,11 @@ class AtomicIngestionCoordinator:
             references = prepared.get("references", [])  # Phase 3: Cross-doc refs
             document_id = document["id"]
 
+            # Structural entity quality gate: filter noisy regex-extracted entities
+            # at the merge point (upstream of entity-sparse vector generation and
+            # Neo4j MENTIONS creation).
+            from src.providers.ner.labels import is_excluded_structural_entity
+
             # Attach mentions to sections for entity-sparse embedding generation
             # Build section_id → mentions mapping (mirrors build_graph.py:454 logic)
             mentions_by_section: Dict[str, List[Dict]] = defaultdict(list)
@@ -570,9 +575,23 @@ class AtomicIngestionCoordinator:
                 # Then add structural mentions (regex-extracted)
                 for m in section_mentions:
                     eid = m.get("entity_id")
-                    if eid and eid not in seen_entity_ids:
-                        seen_entity_ids.add(eid)
-                        merged_mentions.append(m)
+                    if not eid or eid in seen_entity_ids:
+                        continue
+
+                    # Structural mention dicts do not carry a name; resolve via
+                    # the entities dict produced by structural extractors.
+                    entity_name = ""
+                    entity_data = (
+                        entities.get(eid) if isinstance(entities, dict) else None
+                    )
+                    if isinstance(entity_data, dict):
+                        entity_name = entity_data.get("name", "") or ""
+
+                    if is_excluded_structural_entity(entity_name):
+                        continue
+
+                    seen_entity_ids.add(eid)
+                    merged_mentions.append(m)
 
                 section["_mentions"] = merged_mentions
 
@@ -2069,6 +2088,42 @@ class AtomicIngestionCoordinator:
             chunk_count = self._neo4j_upsert_sections(neo4j_tx, document_id, sections)
             stats["sections_upserted"] = chunk_count
             written_neo4j_chunks = [s["id"] for s in sections if "id" in s]
+
+            # Prune structural entities that have no surviving mentions after
+            # the quality gate. This prevents orphan Entity nodes from being
+            # created in Neo4j.
+            if entities and isinstance(entities, dict):
+                mentioned_entity_ids = set()
+                for section in sections:
+                    for m in section.get("_mentions", []):
+                        eid = m.get("entity_id")
+                        if eid and eid in entities:
+                            mentioned_entity_ids.add(eid)
+
+                if mentioned_entity_ids:
+                    original_count = len(entities)
+                    entities = {
+                        eid: edata
+                        for eid, edata in entities.items()
+                        if eid in mentioned_entity_ids
+                    }
+                    pruned_count = original_count - len(entities)
+                    if pruned_count:
+                        logger.info(
+                            "structural_entities_pruned_zero_mentions",
+                            pruned_count=pruned_count,
+                            remaining=len(entities),
+                            document_id=document_id,
+                        )
+                else:
+                    # No entity IDs survived mention filtering.
+                    logger.info(
+                        "structural_entities_pruned_zero_mentions",
+                        pruned_count=len(entities),
+                        remaining=0,
+                        document_id=document_id,
+                    )
+                    entities = {}
 
             entity_count = self._neo4j_upsert_entities(neo4j_tx, entities)
             stats["entities_upserted"] = entity_count

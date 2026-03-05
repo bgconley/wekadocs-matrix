@@ -11,6 +11,7 @@ import hashlib
 import re
 from typing import Dict, List, Tuple
 
+from src.providers.ner.labels import normalize_entity_name
 from src.shared.observability import get_logger
 
 logger = get_logger(__name__)
@@ -246,13 +247,16 @@ def _create_command_entity(
     name: str, full_command: str, source_section_id: str
 ) -> Dict:
     """Create a Command entity."""
+    normalized_name = normalize_entity_name(name)
     # Deterministic ID based on canonical name
-    entity_id = hashlib.sha256(f"command:{name}".encode("utf-8")).hexdigest()
+    entity_id = hashlib.sha256(f"command:{normalized_name}".encode("utf-8")).hexdigest()
 
     return {
         "id": entity_id,
         "label": "Command",
-        "name": name,
+        "name": normalized_name,
+        "entity_type": "COMMAND",
+        "source": "structural",
         "description": full_command,
         "category": "cli",
         "introduced_in": None,

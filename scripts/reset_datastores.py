@@ -14,13 +14,18 @@ import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
-DEFAULT_QDRANT_VALIDATE_COLLECTION = "chunks_multi_voyage_context_3"
 ENV_FILES = [Path(".env.local"), Path(".env"), Path(".env.docker")]
-DEFAULT_SCHEMA_VERSION = "v2.2"
+DEFAULT_SCHEMA_VERSION = "v4.1"
+DEFAULT_QDRANT_SNAPSHOT_DIR = Path(
+    "scripts/qdrant_snapshots_20251206_canonical/qdrant_snapshots"
+)
+DEFAULT_NEO4J_GUARD_FILE = Path(
+    "scripts/neo4j/create_graphrag_schema_v2_2_20251105_guard.cypher"
+)
 
 # Neo4j metadata labels that must be preserved.
 PRESERVED_LABELS = {
-    "SchemaVersion",  # Required for health checks (v2.2)
+    "SchemaVersion",  # Required for health checks (v4.1)
     "SystemMetadata",
     "MigrationHistory",
     "RelationshipTypesMarker",
@@ -58,6 +63,13 @@ DATA_LABELS = {
     "GhostDocument",
     "Error",
     "QueryFeedback",
+    # Domain-specific entity labels
+    "CapacityMetric",
+    "CloudProvider",
+    "ProcedureStep",
+    "Protocol",
+    "StorageConcept",
+    "Version",
 }
 
 
@@ -108,6 +120,28 @@ def _print_header(title: str) -> None:
 def _run(cmd: List[str], env: Optional[Dict[str, str]] = None) -> None:
     print(f"$ {' '.join(cmd)}")
     subprocess.run(cmd, check=True, env=env)
+
+
+def _is_preserved_label(label: str) -> bool:
+    return (
+        label in PRESERVED_LABELS
+        or label.endswith("_metadata")
+        or label.endswith("_system")
+    )
+
+
+def _default_qdrant_validate_collections(
+    qdrant_collections: Iterable[str],
+    snapshot_dir: Path,
+) -> List[str]:
+    if not snapshot_dir.exists():
+        return []
+
+    snapshot_collections = {
+        path.name.removesuffix("_schema.json")
+        for path in snapshot_dir.glob("*_schema.json")
+    }
+    return sorted(name for name in qdrant_collections if name in snapshot_collections)
 
 
 def clear_qdrant(host: str, port: int, *, dry_run: bool = False) -> List[str]:
@@ -185,6 +219,26 @@ def _ensure_schema_version(session, schema_version: str) -> None:
     )
 
 
+def _ensure_relationship_types_marker(session) -> None:
+    session.run(
+        """
+        MERGE (m:RelationshipTypesMarker {id: 'chunk_rel_types_v1'})
+        SET m.types = [
+            'NEXT',
+            'CHILD_OF',
+            'MENTIONS',
+            'MENTIONED_IN',
+            'PARENT_OF',
+            'PARENT_HEADING',
+            'REFERENCES',
+            'PENDING_REF',
+            'RELATED_TO'
+        ],
+            m.updated_at = datetime()
+        """
+    )
+
+
 def clear_neo4j(
     uri: str,
     user: str,
@@ -206,6 +260,13 @@ def clear_neo4j(
         else:
             session = driver.session()
         with session:
+            before_constraints = session.run(
+                "SHOW CONSTRAINTS RETURN count(*) AS c"
+            ).single()["c"]
+            before_indexes = session.run(
+                "SHOW INDEXES YIELD type WHERE type <> 'LOOKUP' RETURN count(*) AS c"
+            ).single()["c"]
+
             label_counts = session.run(
                 """
                 MATCH (n)
@@ -217,19 +278,18 @@ def clear_neo4j(
 
             preserved_labels = {}
             deletable_labels = {}
+            unknown_deletable_labels = {}
             for row in label_counts:
                 label = row["label"]
                 count = row["count"]
-                if (
-                    label in PRESERVED_LABELS
-                    or label.endswith("_metadata")
-                    or label.endswith("_system")
-                ):
+                if _is_preserved_label(label):
                     preserved_labels[label] = count
                 elif label in DATA_LABELS:
                     deletable_labels[label] = count
                 else:
-                    preserved_labels[label] = count
+                    # Treat unknown labels as data so resets stay clean as schemas evolve.
+                    deletable_labels[label] = count
+                    unknown_deletable_labels[label] = count
 
             if dry_run:
                 # Just report what would be deleted
@@ -244,6 +304,10 @@ def clear_neo4j(
                 )
                 for label, count in sorted(preserved_labels.items()):
                     print(f"  - {label}: {count} nodes")
+                if unknown_deletable_labels:
+                    print("Unknown labels treated as data (keeps reset ingest-clean):")
+                    for label, count in sorted(unknown_deletable_labels.items()):
+                        print(f"  - {label}: {count} nodes")
                 return
 
             deleted_count = 0
@@ -263,9 +327,30 @@ def clear_neo4j(
                         break
 
             _ensure_schema_version(session, schema_version)
+            _ensure_relationship_types_marker(session)
+
+            after_constraints = session.run(
+                "SHOW CONSTRAINTS RETURN count(*) AS c"
+            ).single()["c"]
+            after_indexes = session.run(
+                "SHOW INDEXES YIELD type WHERE type <> 'LOOKUP' RETURN count(*) AS c"
+            ).single()["c"]
+            if (
+                before_constraints != after_constraints
+                or before_indexes != after_indexes
+            ):
+                raise RuntimeError(
+                    "Neo4j schema object count changed during reset: "
+                    f"constraints {before_constraints}->{after_constraints}, "
+                    f"indexes {before_indexes}->{after_indexes}"
+                )
 
             counts = session.run("MATCH (n) RETURN count(n) AS nodes").single()
             rels = session.run("MATCH ()-[r]->() RETURN count(r) AS rels").single()
+            print(
+                "schema_preserved="
+                f"constraints:{after_constraints} indexes:{after_indexes}"
+            )
         print(f"nodes={counts['nodes']} rels={rels['rels']}")
     finally:
         driver.close()
@@ -421,6 +506,8 @@ def validate_snapshots(
     neo4j_user: str,
     neo4j_password: str,
     neo4j_database: Optional[str],
+    neo4j_guard_file: Path,
+    validate_neo4j_snapshot: bool = False,
 ) -> None:
     _print_header("Schema validation")
     qdrant_script = Path(
@@ -453,9 +540,26 @@ def validate_snapshots(
         if neo4j_database:
             env["NEO4J_DATABASE"] = neo4j_database
         _run(
-            [sys.executable, str(neo4j_script), "validate", "--snapshot-name", "neo4j"],
+            [
+                sys.executable,
+                str(neo4j_script),
+                "validate-against-guard",
+                "--guard-file",
+                str(neo4j_guard_file),
+            ],
             env=env,
         )
+        if validate_neo4j_snapshot:
+            _run(
+                [
+                    sys.executable,
+                    str(neo4j_script),
+                    "validate",
+                    "--snapshot-name",
+                    "neo4j",
+                ],
+                env=env,
+            )
     else:
         print(f"Neo4j snapshot script not found: {neo4j_script}")
 
@@ -485,6 +589,11 @@ def main() -> int:
         action="append",
         dest="qdrant_validate_collections",
     )
+    parser.add_argument(
+        "--qdrant-snapshot-dir",
+        default=str(DEFAULT_QDRANT_SNAPSHOT_DIR),
+        help=f"Qdrant snapshot directory (default: {DEFAULT_QDRANT_SNAPSHOT_DIR})",
+    )
 
     parser.add_argument(
         "--neo4j-uri", default=os.environ.get("NEO4J_URI", "bolt://localhost:7687")
@@ -492,6 +601,16 @@ def main() -> int:
     parser.add_argument("--neo4j-user", default=os.environ.get("NEO4J_USER", "neo4j"))
     parser.add_argument("--neo4j-password")
     parser.add_argument("--neo4j-database", default=os.environ.get("NEO4J_DATABASE"))
+    parser.add_argument(
+        "--neo4j-guard-file",
+        default=str(DEFAULT_NEO4J_GUARD_FILE),
+        help=f"Neo4j guard DDL to validate against (default: {DEFAULT_NEO4J_GUARD_FILE})",
+    )
+    parser.add_argument(
+        "--validate-neo4j-snapshot",
+        action="store_true",
+        help="Also validate Neo4j against local JSON snapshot (in addition to guard DDL).",
+    )
 
     parser.add_argument("--redis-uri")
     parser.add_argument(
@@ -541,15 +660,22 @@ def main() -> int:
         )
 
     if not args.skip_validate:
-        validate_collections = args.qdrant_validate_collections or [
-            DEFAULT_QDRANT_VALIDATE_COLLECTION
-        ]
-        if qdrant_collections:
+        if args.qdrant_validate_collections:
+            validate_collections = args.qdrant_validate_collections
+        else:
+            validate_collections = _default_qdrant_validate_collections(
+                qdrant_collections, Path(args.qdrant_snapshot_dir)
+            )
+
+        if qdrant_collections and validate_collections:
             validate_collections = [
                 name for name in validate_collections if name in qdrant_collections
             ]
         if not validate_collections:
-            print("No Qdrant collections selected for validation.")
+            print(
+                "No Qdrant collections selected for validation "
+                "(pass --qdrant-validate-collection or add matching *_schema.json files)."
+            )
         if not neo4j_password:
             raise RuntimeError(
                 "NEO4J_PASSWORD is required for Neo4j schema validation."
@@ -562,6 +688,8 @@ def main() -> int:
             args.neo4j_user,
             neo4j_password,
             args.neo4j_database,
+            Path(args.neo4j_guard_file),
+            args.validate_neo4j_snapshot,
         )
 
     return 0

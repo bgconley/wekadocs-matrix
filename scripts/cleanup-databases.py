@@ -56,8 +56,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Set
 
-# Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Add project root and src to path for imports.
+_PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT))
+sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 try:
     import redis
@@ -261,7 +263,7 @@ class DatabaseCleaner:
             self._log("SchemaVersion node missing - restoring...", "warning")
 
             # Get schema version from config
-            schema_version = self.config.graph_schema.version if self.config else "v2.1"
+            schema_version = self.config.graph_schema.version if self.config else "v4.1"
 
             session.run(
                 """
@@ -275,7 +277,7 @@ class DatabaseCleaner:
                 RETURN sv
             """,
                 version=schema_version,
-                description="Phase 7E schema - restored by cleanup script",
+                description="Phase 4.1 schema - restored by cleanup script",
             )
 
             restored.append("SchemaVersion")
@@ -336,6 +338,7 @@ class DatabaseCleaner:
                 preserved_labels = {}
                 deletable_labels = {}
 
+                unknown_deletable_labels = {}
                 for label, count in label_counts.items():
                     if (
                         label in self.PRESERVED_LABELS
@@ -346,8 +349,9 @@ class DatabaseCleaner:
                     elif label in self.DATA_LABELS:
                         deletable_labels[label] = count
                     else:
-                        # Unknown labels are preserved by default for safety
-                        preserved_labels[label] = count
+                        # Treat unknown labels as data so resets stay ingest-clean.
+                        deletable_labels[label] = count
+                        unknown_deletable_labels[label] = count
 
                 # Get total counts
                 total_nodes_result = session.run("MATCH (n) RETURN count(n) as count")
@@ -390,6 +394,13 @@ class DatabaseCleaner:
                             f"  ... and {len(deletable_labels) - 10} more labels",
                             "warning",
                         )
+                    if unknown_deletable_labels:
+                        self._log(
+                            "  Unknown labels treated as data for clean reset:",
+                            "warning",
+                        )
+                        for label, count in list(unknown_deletable_labels.items())[:10]:
+                            self._log(f"    {label}: {count} nodes", "warning")
 
                 self._log("", "header")
                 self._log(

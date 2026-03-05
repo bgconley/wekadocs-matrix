@@ -11,6 +11,7 @@ import hashlib
 import re
 from typing import Dict, List, Tuple
 
+from src.providers.ner.labels import normalize_entity_name
 from src.shared.observability import get_logger
 
 logger = get_logger(__name__)
@@ -93,7 +94,9 @@ def extract_procedures(section: Dict) -> Tuple[List, List, List]:
         procedure = {
             "id": proc_id,
             "label": "Procedure",
-            "name": title or "Procedure",
+            "name": normalize_entity_name(title or "Procedure"),
+            "entity_type": "PROCEDURE",
+            "source": "structural",
             "title": title or "Procedure",
             "description": content[:400] if content else "",
             "type": "operational",
@@ -126,7 +129,11 @@ def extract_procedures(section: Dict) -> Tuple[List, List, List]:
         step = {
             "id": step_info["id"],
             "label": "Step",
-            "name": step_name,  # Required for entity-sparse embedding lookup
+            "name": normalize_entity_name(
+                step_name
+            ),  # Required for entity-sparse embedding lookup
+            "entity_type": "STEP",
+            "source": "structural",
             "order": step_info["order"],
             "instruction": step_info["instruction"],
             "procedure_id": procedure_id,  # Link to procedure if exists

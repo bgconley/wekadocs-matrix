@@ -10,11 +10,16 @@ Tests verify:
 
 import pytest
 
+from src.ingestion.extract.commands import extract_commands
+from src.ingestion.extract.configs import extract_configurations
+from src.ingestion.extract.procedures import extract_procedures
 from src.providers.ner.labels import (
     DEFAULT_RETRIEVAL_FLOOR,
     RETRIEVAL_CONFIDENCE_FLOORS,
     extract_label_name,
     is_excluded_entity,
+    is_excluded_structural_entity,
+    normalize_entity_name,
 )
 
 
@@ -150,3 +155,92 @@ class TestExtractLabelName:
 
     def test_label_with_spaces(self):
         assert extract_label_name("CLOUD_PROVIDER (e.g. AWS)") == "CLOUD_PROVIDER"
+
+
+class TestStructuralEntityQualityGate:
+    def test_normalize_strips_markdown_bold(self):
+        assert normalize_entity_name("**Before you begin**") == "Before you begin"
+
+    def test_normalize_strips_backticks(self):
+        assert normalize_entity_name("`weka fs`") == "weka fs"
+
+    def test_normalize_collapses_whitespace(self):
+        assert normalize_entity_name("  foo   bar \n baz ") == "foo bar baz"
+
+    def test_normalize_preserves_underscores_and_hyphens(self):
+        assert normalize_entity_name("memory_mb") == "memory_mb"
+        assert normalize_entity_name("filter-color") == "filter-color"
+
+    @pytest.mark.parametrize(
+        "term",
+        [
+            "color",
+            "profile",
+            "output",
+            "format",
+            "filter",
+            "sort",
+            "**Procedure**",
+            "`json`",
+        ],
+    )
+    def test_structural_noise_terms_excluded(self, term: str):
+        assert is_excluded_structural_entity(term), f"Expected '{term}' to be excluded"
+
+    @pytest.mark.parametrize(
+        "term",
+        [
+            "inode",
+            "metadata",
+            "S3",
+            "s3",
+            "NFS",
+            "stripe-width",
+        ],
+    )
+    def test_discriminative_terms_not_excluded(self, term: str):
+        assert not is_excluded_structural_entity(
+            term
+        ), f"Expected '{term}' to NOT be excluded"
+
+
+class TestStructuralExtractorQuality:
+    def test_flag_exclusion_scoped_to_flag_pattern(self):
+        section = {
+            "id": "s1",
+            "text": '--color auto\n`color`: "blue"\n',
+            "code_blocks": ['{"color": "blue"}'],
+        }
+        configs, _ = extract_configurations(section)
+        names = {c["name"] for c in configs}
+        color_entities = [c for c in configs if c["name"] == "color"]
+
+        # --color should be blocked by flag-specific gate
+        assert "color" in names, "YAML/JSON key extraction should remain intact"
+        assert color_entities
+        assert all(c.get("category") != "flag" for c in color_entities)
+
+    def test_structural_entities_have_type_and_source(self):
+        cmd_section = {
+            "id": "s2",
+            "text": "`weka fs status`",
+            "code_blocks": ["weka fs status"],
+        }
+        cmds, _ = extract_commands(cmd_section)
+        assert cmds, "Expected at least one command entity"
+        assert cmds[0]["entity_type"] == "COMMAND"
+        assert cmds[0]["source"] == "structural"
+
+        proc_section = {
+            "id": "s3",
+            "title": "How to configure",
+            "text": "1. Run command\n2. Verify output",
+            "code_blocks": [],
+        }
+        procedures, steps, _ = extract_procedures(proc_section)
+        assert procedures, "Expected procedure extraction"
+        assert steps, "Expected step extraction"
+        assert procedures[0]["entity_type"] == "PROCEDURE"
+        assert procedures[0]["source"] == "structural"
+        assert steps[0]["entity_type"] == "STEP"
+        assert steps[0]["source"] == "structural"

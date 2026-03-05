@@ -14,6 +14,7 @@ This module provides:
 - Utility functions to retrieve labels from config or defaults
 """
 
+import re
 from typing import Dict, List
 
 from src.shared.config import get_config
@@ -176,3 +177,113 @@ def is_excluded_entity(entity_text: str) -> bool:
     return normalized in ENTITY_EXCLUSIONS or normalized.lower() in {
         e.lower() for e in ENTITY_EXCLUSIONS
     }
+
+
+# Structural (regex-extracted) entity noise terms.
+# These entities bypass GLiNER gates and can become high-DF hubs that dilute
+# entity-sparse vectors and graph priors.
+_STRUCTURAL_NOISE_TERMS: frozenset[str] = frozenset(
+    {
+        # CLI output formatting flags (belt-and-suspenders with extractor gating)
+        "color",
+        "filter-color",
+        "output",
+        "format",
+        "filter",
+        "sort",
+        "profile",
+        "raw-units",
+        "verbose",
+        "no-header",
+        "json",
+        "csv",
+        "utf8",
+        # Generic procedure/step boilerplate
+        "procedure",
+        "step",
+        "note",
+        "example",
+        "overview",
+        "prerequisites",
+        "before you begin",
+        "related topics",
+        "optional",
+        "required",
+        # Generic computing terms that leak from structural extractors
+        "new-name",
+        "path",
+        "port",
+        "hostname",
+        "timeout",
+        "password",
+        "username",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "none",
+        "default",
+    }
+)
+
+
+def normalize_entity_name(name: str) -> str:
+    """
+    Normalize an entity name for dedupe + filtering.
+
+    Strips common Markdown artifacts (bold/italic markers, backticks),
+    collapses whitespace, and trims edge punctuation without mutating
+    meaningful internal characters like underscores/hyphens.
+    """
+    if not name:
+        return ""
+
+    s = str(name).strip()
+
+    # Strip Markdown bold/italic wrappers.
+    # Do bold/underline first to avoid leaving stray markers behind.
+    # Examples: "**Procedure**" -> "Procedure", "__Note__" -> "Note".
+    s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+    s = re.sub(r"__(.+?)__", r"\1", s)
+
+    # Remove inline code fences/backticks.
+    s = s.replace("`", "")
+
+    # Strip remaining emphasis markers at edges only (avoid nuking underscores
+    # inside config keys like memory_mb).
+    s = s.strip("*_")
+
+    # Collapse whitespace.
+    s = re.sub(r"\s+", " ", s).strip()
+
+    # Trim edge punctuation (keep hyphens/underscores inside names).
+    s = s.strip(" \t\r\n\"'“”‘’()[]{}<>.,:;!?")
+
+    return s
+
+
+def is_excluded_structural_entity(name: str) -> bool:
+    """Unified quality gate for structural (regex-extracted) entities."""
+    normalized = normalize_entity_name(name)
+    if not normalized:
+        return True
+
+    # Very short lowercase tokens are usually noise (e.g., "of", "to", "it").
+    # Preserve short alnum tokens when they contain digits (e.g., "s3", "v4")
+    # or are ALLCAPS (e.g., "IP"). Everything else <=2 chars is filtered.
+    if len(normalized) <= 2:
+        if normalized.isalnum() and any(ch.isdigit() for ch in normalized):
+            pass
+        elif normalized.isalnum() and normalized.upper() == normalized:
+            pass
+        else:
+            return True
+
+    if is_excluded_entity(normalized):
+        return True
+
+    lowered = normalized.lower()
+    if lowered in _STRUCTURAL_NOISE_TERMS:
+        return True
+
+    return False
