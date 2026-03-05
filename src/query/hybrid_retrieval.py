@@ -57,6 +57,9 @@ from src.query.structural_retrieval import StructuralRetrievalConfig as Structur
 from src.query.structural_retrieval import (
     apply_structural_boost as _apply_structural_boost_pure,
 )
+from src.query.structural_retrieval import (
+    get_query_type_rrf_weights,
+)
 from src.shared.config import (
     get_config,
     get_embedding_plan,
@@ -159,6 +162,7 @@ class ChunkResult:
     doc_title_sparse_score: Optional[float] = (
         None  # Document-level title sparse/BM25 score
     )
+    title_sparse_score: Optional[float] = None  # Section heading sparse/SPLADE score
     entity_vec_score: Optional[float] = None
     lexical_vec_score: Optional[float] = None
     fused_score: Optional[float] = None  # Final fused score
@@ -1005,6 +1009,7 @@ class QdrantMultiVectorRetriever:
                 doc_title_sparse_score=vec_score_by_id.get(
                     (pid, "doc_title-sparse"), 0.0
                 ),
+                title_sparse_score=vec_score_by_id.get((pid, "title-sparse"), 0.0),
                 entity_vec_score=vec_score_by_id.get((pid, "entity-sparse"), 0.0),
                 lexical_vec_score=(
                     vec_score_by_id.get((pid, self.sparse_field_name), 0.0)
@@ -1200,6 +1205,7 @@ class QdrantMultiVectorRetriever:
         title_vec_score: Optional[float] = None,
         doc_title_vec_score: Optional[float] = None,
         doc_title_sparse_score: Optional[float] = None,
+        title_sparse_score: Optional[float] = None,
         entity_vec_score: Optional[float] = None,
         lexical_vec_score: Optional[float] = None,
     ) -> ChunkResult:
@@ -1233,6 +1239,7 @@ class QdrantMultiVectorRetriever:
             title_vec_score=title_vec_score,
             doc_title_vec_score=doc_title_vec_score,
             doc_title_sparse_score=doc_title_sparse_score,
+            title_sparse_score=title_sparse_score,
             entity_vec_score=entity_vec_score,
             lexical_vec_score=lexical_vec_score,
             citation_labels=payload.get("citation_labels") or [],
@@ -1610,6 +1617,7 @@ class QdrantMultiVectorRetriever:
                 doc_title_sparse_score=vec_score_by_id.get(
                     (pid, "doc_title-sparse"), 0.0
                 ),
+                title_sparse_score=vec_score_by_id.get((pid, "title-sparse"), 0.0),
                 entity_vec_score=vec_score_by_id.get((pid, "entity-sparse"), 0.0),
                 lexical_vec_score=(
                     vec_score_by_id.get((pid, self.sparse_query_name), 0.0)
@@ -1713,7 +1721,7 @@ class QdrantMultiVectorRetriever:
                     Prefetch(
                         query=sparse_query,
                         using="doc_title-sparse",
-                        limit=50,  # Smaller limit for title matching
+                        limit=100,  # Raised from 50: eliminates truncation bias at k=30
                         filter=qdrant_filter,
                     )
                 )
@@ -1723,7 +1731,7 @@ class QdrantMultiVectorRetriever:
                     Prefetch(
                         query=sparse_query,
                         using="title-sparse",
-                        limit=50,  # Smaller limit for heading term matching
+                        limit=100,  # Raised from 50: eliminates truncation bias at k=30
                         filter=qdrant_filter,
                     )
                 )
@@ -1733,7 +1741,7 @@ class QdrantMultiVectorRetriever:
                     Prefetch(
                         query=sparse_query,
                         using="entity-sparse",
-                        limit=50,  # Smaller limit for entity term matching
+                        limit=100,  # Raised from 50: eliminates truncation bias at k=30
                         filter=qdrant_filter,
                     )
                 )
@@ -3135,13 +3143,28 @@ class HybridRetriever:
             metrics["bm25_count"] = 0
 
         # Vector search (always)
-        vec_start = time.time()
-        vec_results = self.vector_retriever.search(
-            query,
-            candidate_k,
-            normalized_filters,
-            lexical_query=lexical_query if lexical_query != query else None,
+        # Apply query-type-specific RRF field weights if adaptive weighting is enabled.
+        # The query classifier determines the query type (conceptual, cli, config, etc.)
+        # and get_query_type_rrf_weights() returns per-field weights tuned for that type.
+        query_type = self._classify_query_type(query)
+        metrics["query_type"] = query_type
+        base_rrf_weights = dict(self.vector_retriever.rrf_field_weights)
+        adaptive_weights = get_query_type_rrf_weights(
+            query_type, base_weights=base_rrf_weights
         )
+        # Temporarily override the vector retriever's RRF weights for this search call.
+        # try/finally ensures base weights are restored even if search throws.
+        self.vector_retriever.rrf_field_weights = adaptive_weights
+        vec_start = time.time()
+        try:
+            vec_results = self.vector_retriever.search(
+                query,
+                candidate_k,
+                normalized_filters,
+                lexical_query=lexical_query if lexical_query != query else None,
+            )
+        finally:
+            self.vector_retriever.rrf_field_weights = base_rrf_weights
         vector_stats = getattr(self.vector_retriever, "last_stats", {}) or {}
         metrics["vector_path"] = vector_stats.get("path", "legacy")
         metrics["vec_time_ms"] = vector_stats.get(

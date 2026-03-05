@@ -46,59 +46,65 @@ logger = structlog.get_logger(__name__)
 # These define how different query types should weight fields and filter results
 
 DEFAULT_QUERY_TYPE_RRF_WEIGHTS: Dict[str, Dict[str, float]] = {
-    # Conceptual queries: boost semantic understanding, hierarchy context
+    # SPLADE-dominant weights for 0.6B dense model (2026-03-04 rebalance)
+    # Rationale: Dense content/title/doc_title are correlated signals from the same
+    # 0.6B model — de-weighted to prevent triple-voting for generic content.
+    # SPLADE (text-sparse) is the primary independent signal for domain specificity.
+    #
+    # Conceptual queries: SPLADE captures domain concepts (metadata, tiering, etc.)
+    # that the 0.6B dense model conflates with generic "cluster" content
     "conceptual": {
-        "content": 2.5,  # Strong semantic signal
-        "title": 1.0,  # Section titles less important
-        "text-sparse": 0.3,  # Lexical less important
-        "doc_title-sparse": 0.8,
-        "title-sparse": 0.8,
-        "entity-sparse": 0.6,  # Concepts may not be named entities
+        "content": 1.0,  # 0.6B lacks specificity for conceptual queries
+        "title": 0.3,  # Correlated with content — tiebreaker only
+        "text-sparse": 2.5,  # SPLADE term expansion captures domain concepts
+        "doc_title-sparse": 0.3,
+        "title-sparse": 0.5,
+        "entity-sparse": 0.8,  # Named concepts are entities
     },
-    # CLI/command queries: boost entity matching, code-containing chunks
+    # CLI/command queries: commands are both lexical AND entity matches
     "cli": {
-        "content": 1.5,  # Semantic still matters
-        "title": 1.5,  # CLI often under clear headings
-        "text-sparse": 0.8,  # Commands are lexical
-        "doc_title-sparse": 0.8,
-        "title-sparse": 1.0,
-        "entity-sparse": 1.8,  # Commands are entities
-    },
-    # Configuration queries: balance semantic and lexical
-    "config": {
-        "content": 1.8,
-        "title": 1.2,
-        "text-sparse": 0.7,
-        "doc_title-sparse": 0.8,
-        "title-sparse": 1.0,
-        "entity-sparse": 1.5,  # Config params are entities
-    },
-    # Procedural/how-to queries: boost step-by-step content
-    "procedural": {
-        "content": 2.0,
-        "title": 1.2,  # Procedure titles important
-        "text-sparse": 0.5,
-        "doc_title-sparse": 0.8,
-        "title-sparse": 1.0,
-        "entity-sparse": 0.8,
-    },
-    # Troubleshooting: boost error entities and diagnostic content
-    "troubleshooting": {
-        "content": 2.0,
-        "title": 1.0,
-        "text-sparse": 0.6,
-        "doc_title-sparse": 0.8,
+        "content": 1.0,
+        "title": 0.5,  # CLI headings somewhat useful
+        "text-sparse": 2.0,  # Commands are lexical — SPLADE handles well
+        "doc_title-sparse": 0.3,
         "title-sparse": 0.8,
-        "entity-sparse": 1.5,  # Error codes are entities
+        "entity-sparse": 1.5,  # Commands ARE entities — high value
     },
-    # Reference/lookup: balanced, slightly boost titles
+    # Configuration queries: config params are lexical terms with entity overlap
+    "config": {
+        "content": 1.2,
+        "title": 0.4,
+        "text-sparse": 2.0,
+        "doc_title-sparse": 0.3,
+        "title-sparse": 0.8,
+        "entity-sparse": 1.2,  # Config params are entities
+    },
+    # Procedural/how-to queries: step-by-step content is lexical
+    "procedural": {
+        "content": 1.2,
+        "title": 0.4,
+        "text-sparse": 2.0,
+        "doc_title-sparse": 0.3,
+        "title-sparse": 0.8,
+        "entity-sparse": 0.5,
+    },
+    # Troubleshooting: error codes/messages are both lexical and entity signals
+    "troubleshooting": {
+        "content": 1.2,
+        "title": 0.3,
+        "text-sparse": 2.0,
+        "doc_title-sparse": 0.3,
+        "title-sparse": 0.5,
+        "entity-sparse": 1.2,  # Error codes are entities
+    },
+    # Reference/lookup: headings matter more for navigation
     "reference": {
-        "content": 1.8,
-        "title": 1.5,
-        "text-sparse": 0.6,
-        "doc_title-sparse": 1.0,
-        "title-sparse": 1.2,
-        "entity-sparse": 1.0,
+        "content": 1.0,
+        "title": 0.5,
+        "text-sparse": 2.0,
+        "doc_title-sparse": 0.5,
+        "title-sparse": 1.0,  # Headings matter for reference lookups
+        "entity-sparse": 0.8,
     },
 }
 

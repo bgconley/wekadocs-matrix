@@ -189,7 +189,7 @@ def _fill_per_field_slots(
             config.entity_sparse_slots,
         ),
         (
-            lambda c: c.doc_title_sparse_score or 0,
+            lambda c: c.title_sparse_score or 0,
             "title_sparse",
             config.title_sparse_slots,
         ),

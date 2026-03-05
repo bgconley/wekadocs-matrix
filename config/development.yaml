@@ -84,19 +84,20 @@ search:
     multi_vector_fusion_method: "rrf"  # Python-side RRF for multi-vector (Dense+Sparse+Title+Entity)
 
     # RRF (Reciprocal Rank Fusion) settings
-    rrf_k: 60  # Phase 7E: RRF constant (default: 60)
+    rrf_k: 30  # Lowered from 60: amplifies early-rank contributions ~1.9x (Cormack 2009: MAP flat k=20-100)
     rrf_debug_logging: true  # NEW: Log per-field RRF contributions for debugging
 
-    # RRF field weights: multiply each field's RRF contribution by its weight
-    # Higher weight = more influence on final ranking
-    # Dense boosted, sparse de-rated for semantic > lexical balance
+    # RRF field weights: SPLADE-dominant for 0.6B dense model
+    # Research basis: Zhang et al. 2024, Weinberg 2026 — equal-to-sparse-dominant weighting
+    # optimal for small dense models on domain-specific corpora.
+    # Dense content/title/doc_title are correlated (same 0.6B model) — de-weighted to prevent triple-voting.
     rrf_field_weights:
-      content: 2.0           # Dense semantic content similarity - BOOSTED
-      title: 1.5             # Dense semantic title similarity - BOOSTED
-      text-sparse: 0.5       # Lexical content matching - heavily de-rated
-      doc_title-sparse: 0.8  # Lexical document title matching - de-rated
-      title-sparse: 0.8      # Lexical section heading matching - de-rated
-      entity-sparse: 0.8     # Lexical entity name matching - de-rated
+      content: 1.2           # Dense semantic — moderate for 0.6B model limitations
+      title: 0.3             # Dense title — correlated with content, tiebreaker only
+      text-sparse: 2.0       # SPLADE — primary discriminative signal for domain content
+      doc_title-sparse: 0.3  # Auxiliary tiebreaker — noisy, favors generic docs
+      title-sparse: 0.5      # Section headings — useful but secondary
+      entity-sparse: 0.5     # Reduced until entity quality is improved (Phase B)
 
     # Weighted fusion settings (alternative to RRF)
     fusion_alpha: 0.6  # Phase 7E: Vector weight (0.0-1.0), BM25 weight = 1-alpha
@@ -140,16 +141,31 @@ search:
       enabled: true  # Cross-encoder enabled - eliminates length bias in final ranking
       provider: "local-reranker-service"
       model: "Qwen/Qwen3-Reranker-4B"  # 8K context window
-      top_n: 20           # Final results after reranking
+      top_n: 60           # Reranker pool size (raised from 20 — 6-field RRF produces 180+ candidates)
       max_pairs: 50       # Candidates to send to reranker (unused — never referenced by code)
       max_tokens_per_pair: 4096  # Unused — actual limits in local_reranker_service.py
-      instruction: "Judge whether the document is relevant to the search query about WEKA distributed file system. Consider configuration procedures, CLI commands, parameter references, and step-by-step instructions as highly relevant. Introductory overviews and general summaries are less relevant than specific technical procedures and settings. Answer only yes or no."
+      instruction: "Judge whether the document is relevant to the search query about WEKA distributed file system. Match the specificity of the query — if the query asks about a specific subsystem (metadata, filesystem internals, tiering, snapshots), prioritize documentation about that subsystem over general overviews. Consider system architecture, filesystem internals, data management concepts, metadata handling, configuration procedures, CLI commands, parameter references, and step-by-step instructions as highly relevant. Introductory overviews and general summaries are less relevant than specific technical content. Answer only yes or no."
+
+    # Signal-diverse rerank pool: ensures reranker sees candidates from every signal source
+    # Requires feature_flags.signal_diverse_rerank_pool: true AND this section enabled
+    signal_pool:
+      enabled: true
+      pool_size: 200
+      consensus_slots: 40       # Top by fused_score (multi-signal agreement)
+      content_dense_slots: 15   # Unique to content-dense (reduced — 0.6B is noisy)
+      title_dense_slots: 10     # Unique to title-dense (reduced — correlated with content)
+      doc_title_dense_slots: 10 # Unique to doc_title-dense (reduced — correlated)
+      text_sparse_slots: 30     # SPLADE unique — BOOSTED (primary discriminative signal)
+      entity_sparse_slots: 15   # Entity unique
+      title_sparse_slots: 15    # Title-sparse unique
+      structural_slots: 25      # Graph expansion (NEXT_CHUNK + sibling)
+      per_doc_depth_slots: 40   # Per-document depth coverage
 
     top_k: 20  # Number of candidates to retrieve
 
     # BM25/keyword retrieval settings
     bm25:
-      enabled: true
+      enabled: false  # Disabled: SPLADE (text-sparse) provides better learned lexical matching
       index_name: "chunk_text_index_v3_bge_m3"
       top_k: 50  # Retrieve more candidates for fusion
       weight: 0.15  # Lower weight while sparse is primary lexical channel
@@ -249,7 +265,7 @@ ingestion:
     semantic_chunking:
       enabled: true
       similarity_threshold: 0.35   # Tuned: split when similarity < 35%
-      embedding_adapter: "qwen3_4b"
+      embedding_adapter: "qwen3_0_6b"
       target_tokens: 400          # Research optimal (Chroma/Firecrawl)
       min_tokens: 100             # Allow naturally small chunks
       max_tokens: 512             # NVIDIA recommendation ceiling
@@ -418,6 +434,7 @@ feature_flags:
   graph_as_reranker: true          # ENABLED: Graph-based candidate reordering
   entity_embedding_fallback: false
   structure_aware_expansion: true # ENABLED: structure-aware expansion
+  signal_diverse_rerank_pool: true  # ENABLED: Signal-diverse rerank pool for cross-encoder input
 
 # Phase 7E-4: Monitoring and observability configuration
 # Reference: Canonical Spec L4916-4976, L3513-3528
@@ -482,7 +499,7 @@ connectors:
 ner:
   enabled: true  # Master switch - GLiNER enrichment ENABLED for testing
   model_name: "urchade/gliner_medium-v2.1"  # Balanced accuracy/speed
-  threshold: 0.45  # Minimum confidence (0.0-1.0)
+  threshold: 0.55  # Raised from 0.45: GLiNER docs use 0.5 default; Knowledgator uses 0.7 in production
   device: "auto"  # auto-detect: MPS → CUDA → CPU
   batch_size: 32  # Optimal for Apple Silicon (M1/M2/M3)
   # External GLiNER service with MPS acceleration (5-10x faster than CPU)

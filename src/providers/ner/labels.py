@@ -14,7 +14,7 @@ This module provides:
 - Utility functions to retrieve labels from config or defaults
 """
 
-from typing import List
+from typing import Dict, List
 
 from src.shared.config import get_config
 from src.shared.observability import get_logger
@@ -50,14 +50,66 @@ DEFAULT_LABELS: List[str] = [
 ]
 
 # Entities to exclude from enrichment (too common, pollutes queries)
-# These are filtered out AFTER extraction to avoid noisy embeddings
+# These are filtered out AFTER extraction to avoid noisy embeddings.
+# Case-insensitive matching via is_excluded_entity() — lowercase entries suffice.
 ENTITY_EXCLUSIONS: set[str] = {
+    # Brand terms
     "weka",
     "WEKA",
     "Weka",
     "WekaFS",
     "wekafs",
+    # Generic domain vocabulary — high document frequency, low discriminative value
+    "system",
+    "server",
+    "cluster",
+    "node",
+    "service",
+    "data",
+    "file",
+    "process",
+    "configuration",
+    "management",
+    "user",
+    "group",
+    "host",
+    "client",
+    "network",
+    "storage",
+    "volume",
+    "drive",
+    # Over-generic measurement terms
+    "performance",
+    "capacity",
+    "size",
+    "time",
+    "number",
+    # Over-generic procedure words
+    "step",
+    "click",
+    "select",
+    "run",
+    "enter",
 }
+
+# Per-label confidence floors for retrieval signals (entity-sparse, _embedding_text).
+# Entities below these thresholds are still recorded in entity_metadata (informational)
+# but excluded from retrieval-critical paths (_mentions, _embedding_text).
+# Rationale: GLiNER's confidence varies by label type. Abstract/ambiguous labels
+# (STORAGE_CONCEPT, CAPACITY_METRIC) need higher thresholds to avoid noise.
+RETRIEVAL_CONFIDENCE_FLOORS: Dict[str, float] = {
+    "COMMAND": 0.55,
+    "PARAMETER": 0.55,
+    "PROTOCOL": 0.60,
+    "CLOUD_PROVIDER": 0.65,
+    "VERSION": 0.55,
+    "ERROR": 0.55,
+    "COMPONENT": 0.60,
+    "PROCEDURE_STEP": 0.70,
+    "STORAGE_CONCEPT": 0.70,
+    "CAPACITY_METRIC": 0.70,
+}
+DEFAULT_RETRIEVAL_FLOOR: float = 0.60
 
 
 def get_default_labels() -> List[str]:

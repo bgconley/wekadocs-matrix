@@ -1686,10 +1686,17 @@ class AtomicIngestionCoordinator:
                         # Get mentions attached to section (from ingest_document_atomic)
                         section_mentions = section.get("_mentions", [])
                         if section_mentions:
-                            # Collect entity names from mentions
+                            # Sort by confidence (desc), cap at 8 to prevent noisy tails
+                            # from diluting the SPLADE encoding of entity-sparse vectors
+                            sorted_mentions = sorted(
+                                section_mentions,
+                                key=lambda m: m.get("confidence", 0.0),
+                                reverse=True,
+                            )[:8]
+                            # Collect entity names from top mentions
                             # GLiNER mentions have 'name' directly; structural use lookup
                             entity_names = []
-                            for m in section_mentions:
+                            for m in sorted_mentions:
                                 # First: check for direct 'name' field (GLiNER mentions)
                                 if m.get("name"):
                                     entity_names.append(m["name"])
@@ -3593,8 +3600,18 @@ class AtomicIngestionCoordinator:
                 "title": builder.embedding_settings.dims,
                 "doc_title": builder.embedding_settings.dims,
             }
-            # REMOVED: Dense entity vector - replaced by entity-sparse
-            # (see build_graph.py for entity-sparse implementation)
+            # ColBERT late-interaction uses a different dimension (128 for ColBERTv2)
+            if hasattr(builder, "colbert_settings") and builder.colbert_settings:
+                expected_dim["late-interaction"] = builder.colbert_settings.dims
+            elif hasattr(builder, "colbert_dims"):
+                expected_dim["late-interaction"] = builder.colbert_dims
+            else:
+                # Fallback: read from embedding plan
+                from src.shared.config import get_embedding_plan
+
+                plan = get_embedding_plan()
+                if plan and plan.colbert and plan.colbert.enabled:
+                    expected_dim["late-interaction"] = plan.colbert.profile.dims
 
             # Phase 7F: Batch Qdrant upserts to prevent timeout on large ColBERT
             # Large docs can produce 30MB+ JSON payloads exceeding 30s timeout.
