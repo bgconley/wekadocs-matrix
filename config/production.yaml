@@ -77,7 +77,7 @@ search:
     graph_channel_enabled: false  # DISABLED: Phase 1 vector-only hardening
     graph_enrichment_enabled: false  # DISABLED: Post-retrieval graph neighbor expansion
     graph_adaptive_enabled: true  # ENABLED: Use query-type specific relationship sets
-    colbert_rerank_enabled: false  # TESTING: Disabled to test cross-encoder alone
+    colbert_rerank_enabled: true  # Precision: enable ColBERT pre-rerank before cross-encoder
     colbert_candidate_limit: 50  # Min candidates for ColBERT reranking
     colbert_candidate_multiplier: 3  # top_k multiplier
     method: "rrf"  # RRF fusion: rank-based, robust to score scale differences
@@ -342,16 +342,16 @@ references:
     min_hint_length: 3
     use_fulltext_index: true
   query:
-    enable_cross_doc_signals: true
-    cross_doc_weight_ratio: 0.3
+    enable_cross_doc_signals: false
+    cross_doc_weight_ratio: 0.15
     max_referencing_docs: 3
     # RELATED_TO retrieval integration
     enable_related_to_signals: true
-    related_to_weight_ratio: 0.15
-    related_to_seed_docs: 5
-    related_to_max_docs: 3
-    related_to_chunks_per_doc: 3
-    related_to_min_edge_score: 0.025
+    related_to_weight_ratio: 0.05
+    related_to_seed_docs: 3
+    related_to_max_docs: 2
+    related_to_chunks_per_doc: 2
+    related_to_min_edge_score: 0.08
 
 # Ranking configuration
 ranking:
@@ -447,7 +447,7 @@ feature_flags:
   graph_rel_types_wired: true      # ENABLED: Query-type specific relationship sets
   dedup_best_score: true           # C.0.3: Keep highest score in dedup (enabled 2025-11-26)
   graph_score_normalized: true     # ENABLED: Normalize graph scores for fusion
-  graph_as_reranker: true          # ENABLED: Graph-based candidate reordering
+  graph_as_reranker: false         # Precision mode: disable graph reranker override
   entity_embedding_fallback: false
   structure_aware_expansion: true # ENABLED: structure-aware expansion
   signal_diverse_rerank_pool: true  # ENABLED: Signal-diverse rerank pool for cross-encoder input

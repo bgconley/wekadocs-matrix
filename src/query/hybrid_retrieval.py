@@ -3190,15 +3190,18 @@ class HybridRetriever:
             # Combined graph score (for metrics/debugging)
             r.graph_score = entity_score + cross_doc_score
 
-            # Three-way fusion: vector + entity_graph + cross_doc_graph
+            # Preserve prior fused ranking (which already encodes sparse + dense RRF),
+            # then apply graph as a bounded blend. Do NOT fall back to vector-only.
+            base_fused = (
+                r.fused_score if r.fused_score is not None else (r.vector_score or 0.0)
+            )
             if entity_sig or cross_doc_sig:
-                r.fused_score = (
-                    w_vec * (r.vector_score or 0.0)
-                    + w_entity * entity_score
-                    + w_cross_doc * cross_doc_score
+                graph_component = (w_entity * entity_score) + (
+                    w_cross_doc * cross_doc_score
                 )
+                r.fused_score = ((1.0 - w_graph) * base_fused) + graph_component
             else:
-                r.fused_score = r.vector_score
+                r.fused_score = base_fused
 
             # RELATED_TO blending: boost chunks from related documents
             related = r.related_to_score or 0.0
