@@ -160,6 +160,8 @@ class GLiNERService:
         # Mode tracking
         self._http_available: Optional[bool] = None  # None = not checked yet
         self._mode: str = "unknown"  # http, local, or disabled
+        self._http_last_check: float = 0.0  # monotonic timestamp of last health check
+        self._HTTP_RETRY_INTERVAL: float = 60.0  # seconds between retry attempts
 
         # Local model state (lazy loaded)
         self._device: Optional[str] = None
@@ -209,19 +211,31 @@ class GLiNERService:
         return self._http_client
 
     def _check_http_health(self) -> bool:
-        """Check if external GLiNER service is healthy."""
+        """Check if external GLiNER service is healthy.
+
+        Handles two response formats:
+        - Standalone GLiNER: {"status": "ok", "device": "cuda", ...}
+        - Gateway aggregate: {"status": "degraded", "backends": {"gliner": "ok", ...}}
+          Gateway may report "degraded" overall (e.g. reranker down) while GLiNER
+          backend is perfectly healthy.
+        """
         if not self._service_url:
             return False
 
+        self._http_last_check = time.monotonic()
+
         try:
             client = self._get_http_client()
-            # Try /health (unified gateway) then /healthz (standalone service)
+            # Try /health (unified gateway or standalone) then /healthz (standalone)
             for path in ("/health", "/healthz"):
                 try:
                     response = client.get(f"{self._service_url}{path}")
                     if response.status_code == 200:
                         data = response.json()
-                        if data.get("status") in ("ok", "healthy"):
+                        top_status = data.get("status", "")
+
+                        # Direct match: standalone service reports "ok" or "healthy"
+                        if top_status in ("ok", "healthy"):
                             device = data.get("device", "unknown")
                             logger.info(
                                 f"GLiNER HTTP service healthy (device={device})",
@@ -229,6 +243,22 @@ class GLiNERService:
                                     "service_url": self._service_url,
                                     "path": path,
                                     "device": device,
+                                },
+                            )
+                            return True
+
+                        # Gateway aggregate: top-level may be "degraded" but
+                        # check if the gliner backend specifically is healthy
+                        backends = data.get("backends", {})
+                        gliner_status = backends.get("gliner", "")
+                        if gliner_status in ("ok", "healthy"):
+                            logger.info(
+                                "GLiNER HTTP service healthy (via gateway)",
+                                extra={
+                                    "service_url": self._service_url,
+                                    "path": path,
+                                    "gateway_status": top_status,
+                                    "gliner_backend_status": gliner_status,
                                 },
                             )
                             return True
@@ -461,13 +491,24 @@ class GLiNERService:
     # Public API
     # ========================================================================
 
+    def _should_retry_http(self) -> bool:
+        """Check if enough time has passed to retry HTTP health check."""
+        if self._http_available is not False:
+            return False
+        elapsed = time.monotonic() - self._http_last_check
+        return elapsed >= self._HTTP_RETRY_INTERVAL
+
     @property
     def is_available(self) -> bool:
         """Check if GLiNER service is available (HTTP or local)."""
         # Check HTTP first
         if self._service_url:
-            if self._http_available is None:
+            if self._http_available is None or self._should_retry_http():
                 self._http_available = self._check_http_health()
+                if self._http_available:
+                    logger.info(
+                        "GLiNER HTTP service recovered, switching from local to HTTP mode"
+                    )
             if self._http_available:
                 return True
 
@@ -561,9 +602,14 @@ class GLiNERService:
 
         # Try HTTP service first if configured
         if self._service_url:
-            # Check health on first call
-            if self._http_available is None:
+            # Check health on first call, or retry after interval if previously failed
+            if self._http_available is None or self._should_retry_http():
+                was_down = self._http_available is False
                 self._http_available = self._check_http_health()
+                if was_down and self._http_available:
+                    logger.info(
+                        "GLiNER HTTP service recovered, switching from local to HTTP mode"
+                    )
 
             if self._http_available:
                 with GLINER_EXTRACTION_DURATION.labels(
