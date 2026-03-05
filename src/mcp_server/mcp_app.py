@@ -2315,6 +2315,16 @@ async def kb_retrieve_evidence(
     passage_ids.extend(graph_passage_ids)
     graph_expansion_applied = len(graph_passage_ids) > 0
 
+    # Trace: record RELATED_TO expansion
+    trace.record_related_to_expansion(
+        seed_docs=int(search_metrics.get("related_to_seed_docs", 0)),
+        related_docs_found=int(search_metrics.get("related_to_docs_found", 0)),
+        chunks_added=int(search_metrics.get("related_to_chunks_added", 0)),
+        avg_edge_score=float(search_metrics.get("related_to_avg_edge_score", 0)),
+        blended_count=int(search_metrics.get("related_to_blended", 0)),
+        blend_lambda=float(search_metrics.get("related_to_lambda", 0)),
+    )
+
     # Trace: record graph enrichment
     trace.record_graph_enrichment(
         seeds=min(10, len(section_ids)),

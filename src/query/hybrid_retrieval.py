@@ -165,6 +165,16 @@ class ChunkResult:
     title_sparse_score: Optional[float] = None  # Section heading sparse/SPLADE score
     entity_vec_score: Optional[float] = None
     lexical_vec_score: Optional[float] = None
+
+    # RELATED_TO graph signal scores (separate from entity graph_score)
+    related_to_score: Optional[float] = None  # Blended RELATED_TO contribution
+    related_to_edge_score: Optional[float] = (
+        None  # Raw edge score (score_final/colbert/score)
+    )
+    related_to_prior_score: Optional[float] = None  # Combined prior signal
+    related_to_source_doc: Optional[str] = (
+        None  # Which related doc this chunk came from
+    )
     fused_score: Optional[float] = None  # Final fused score
     rerank_score: Optional[float] = None
     rerank_rank: Optional[int] = None
@@ -2632,6 +2642,13 @@ class HybridRetriever:
     def _relationships_for_query(self, query: str) -> Tuple[List[str], int]:
         """Select relationship set and neighbor cap based on query type."""
         qtype = self._classify_query_type(query)
+        return self._relationships_for_query_type(qtype)
+
+    def _relationships_for_query_type(self, query_type: str) -> Tuple[List[str], int]:
+        """Type-safe variant that accepts a pre-classified query type directly.
+
+        Avoids re-classifying an already-classified type string as raw query text.
+        """
         rels = list(self.graph_relationships)
         cap = self.graph_max_related
         if not self.graph_adaptive_enabled:
@@ -2642,7 +2659,7 @@ class HybridRetriever:
             getattr(self.config.search, "hybrid", None), "query_type_relationships", {}
         )
         if rels_cfg:
-            rels_override = rels_cfg.get(qtype)
+            rels_override = rels_cfg.get(query_type)
             if rels_override:
                 return rels_override, cap
 
@@ -2653,15 +2670,15 @@ class HybridRetriever:
         # Phase 3.5: MENTIONS replaces MENTIONED_IN (single canonical direction)
         # Direction-agnostic queries work with either direction
         # Weight allocation (70/30 split) keeps entity signals primary.
-        if qtype == "conceptual":
+        if query_type == "conceptual":
             return ["MENTIONS", "DEFINES", "IN_SECTION", "REFERENCES"], cap
-        if qtype == "cli":
+        if query_type == "cli":
             # L4: CLI queries excluded from REFERENCES - CLI commands are self-contained
             # and cross-document references provide minimal value for command lookups
             return ["MENTIONS", "CONTAINS_STEP", "HAS_PARAMETER"], cap
-        if qtype == "config":
+        if query_type == "config":
             return ["MENTIONS", "HAS_PARAMETER", "DEFINES", "REFERENCES"], cap
-        if qtype == "procedural":
+        if query_type == "procedural":
             return [
                 "MENTIONS",
                 "CONTAINS_STEP",
@@ -2670,9 +2687,9 @@ class HybridRetriever:
                 "REFERENCES",
             ], min(cap, 10)
         # Phase 2 Cleanup: Removed AFFECTS, CAUSED_BY (never materialized)
-        if qtype == "troubleshooting":
+        if query_type == "troubleshooting":
             return ["MENTIONS", "RESOLVES", "NEXT_CHUNK", "REFERENCES"], min(cap, 15)
-        if qtype == "reference":
+        if query_type == "reference":
             return ["MENTIONS", "NEXT_CHUNK", "REFERENCES"], min(cap, 5)
         return rels, cap
 
@@ -2699,7 +2716,7 @@ class HybridRetriever:
         # PHASE 1 VECTOR-ONLY: Skip graph signals when neo4j_disabled
         if not entity_names or not candidate_chunk_ids or self.neo4j_disabled:
             return {}
-        rels, _ = self._relationships_for_query(query_type)
+        rels, _ = self._relationships_for_query_type(query_type)
         cypher = """
         UNWIND $entity_names AS ename
         MATCH (e:Entity)
@@ -2782,7 +2799,7 @@ class HybridRetriever:
             return {}
 
         # Check if REFERENCES is enabled for this query type
-        rels, _ = self._relationships_for_query(query_type)
+        rels, _ = self._relationships_for_query_type(query_type)
         if "REFERENCES" not in rels:
             return {}
 
@@ -2832,6 +2849,209 @@ class HybridRetriever:
         except Exception as exc:
             logger.warning("Cross-doc signal computation failed", error=str(exc))
         return signals
+
+    def _compute_related_to_doc_signals(
+        self,
+        seed_doc_ids: List[str],
+        doc_tag: Optional[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        """Compute RELATED_TO signals at document level.
+
+        Uses coalesce(score_final, colbert_score, score) for backward compatibility
+        with both current (v1) and v2 RELATED_TO edges.
+
+        Args:
+            seed_doc_ids: Document IDs from top fused results to use as seeds.
+            doc_tag: Optional doc_tag filter for target documents.
+
+        Returns:
+            Dict mapping target_doc_id to {edge_score, prior_ref, prior_ent,
+            prior_tax, is_mutual, quality_tier, seed_sources}.
+        """
+        if not seed_doc_ids or self.neo4j_disabled:
+            return {}
+
+        refs_cfg = getattr(self.config, "references", None)
+        refs_query_cfg = getattr(refs_cfg, "query", None) if refs_cfg else None
+        if refs_query_cfg and not getattr(
+            refs_query_cfg, "enable_related_to_signals", True
+        ):
+            return {}
+
+        min_edge_score = (
+            getattr(refs_query_cfg, "related_to_min_edge_score", 0.025)
+            if refs_query_cfg
+            else 0.025
+        )
+        max_docs = (
+            getattr(refs_query_cfg, "related_to_max_docs", 3) if refs_query_cfg else 3
+        )
+
+        cypher = """
+        UNWIND $seed_doc_ids AS seed_id
+        MATCH (seed:Document {id: seed_id})-[r:RELATED_TO]->(target:Document)
+        WHERE ($doc_tag IS NULL OR target.doc_tag = $doc_tag)
+          AND coalesce(r.score_final, r.colbert_score, r.score, 0.0) >= $min_edge_score
+        WITH target,
+             max(coalesce(r.score_final, r.colbert_score, r.score, 0.0)) AS edge_score,
+             max(coalesce(r.prior_reference, 0.0)) AS prior_ref,
+             max(coalesce(r.prior_entity, 0.0)) AS prior_ent,
+             max(coalesce(r.prior_taxonomy, 0.0)) AS prior_tax,
+             any(x IN collect(r.is_mutual) WHERE x = true) AS is_mutual,
+             head(collect(r.quality_tier)) AS quality_tier,
+             collect(DISTINCT seed_id) AS seed_sources
+        RETURN target.id AS target_doc_id,
+               edge_score, prior_ref, prior_ent, prior_tax,
+               is_mutual, quality_tier, seed_sources
+        ORDER BY edge_score DESC
+        LIMIT $max_docs
+        """
+        signals: Dict[str, Dict[str, Any]] = {}
+        try:
+            with self.neo4j_driver.session() as session:
+                result = session.run(
+                    cypher,
+                    seed_doc_ids=list(set(seed_doc_ids)),
+                    doc_tag=doc_tag,
+                    min_edge_score=min_edge_score,
+                    max_docs=max_docs,
+                )
+                for record in result:
+                    target_doc_id = str(record["target_doc_id"])
+                    signals[target_doc_id] = {
+                        "edge_score": float(record.get("edge_score") or 0.0),
+                        "prior_ref": float(record.get("prior_ref") or 0.0),
+                        "prior_ent": float(record.get("prior_ent") or 0.0),
+                        "prior_tax": float(record.get("prior_tax") or 0.0),
+                        "is_mutual": bool(record.get("is_mutual")),
+                        "quality_tier": record.get("quality_tier") or "medium",
+                        "seed_sources": record.get("seed_sources") or [],
+                    }
+                if signals:
+                    logger.debug(
+                        "related_to_doc_signals_computed",
+                        doc_count=len(signals),
+                        seed_count=len(seed_doc_ids),
+                    )
+        except Exception as exc:
+            logger.warning("RELATED_TO doc signal computation failed", error=str(exc))
+        return signals
+
+    def _expand_from_related_docs(
+        self,
+        fused_results: List[ChunkResult],
+        query: str,
+        lexical_query: Optional[str],
+        filters: Optional[Dict[str, Any]],
+        doc_tag: Optional[str],
+        metrics: Dict[str, Any],
+    ) -> List[ChunkResult]:
+        """Expand candidates with chunks from RELATED_TO documents.
+
+        1. Pick top N seed docs from fused_results
+        2. Fetch related docs via _compute_related_to_doc_signals()
+        3. Run vector search constrained to related doc_ids
+        4. Annotate each chunk with related_to_* scores
+        5. Merge + dedup into fused_results
+        """
+        refs_cfg = getattr(self.config, "references", None)
+        refs_query_cfg = getattr(refs_cfg, "query", None) if refs_cfg else None
+        if refs_query_cfg and not getattr(
+            refs_query_cfg, "enable_related_to_signals", True
+        ):
+            return fused_results
+
+        seed_docs_limit = (
+            getattr(refs_query_cfg, "related_to_seed_docs", 5) if refs_query_cfg else 5
+        )
+        max_docs = (
+            getattr(refs_query_cfg, "related_to_max_docs", 3) if refs_query_cfg else 3
+        )
+        chunks_per_doc = (
+            getattr(refs_query_cfg, "related_to_chunks_per_doc", 3)
+            if refs_query_cfg
+            else 3
+        )
+
+        # 1. Extract unique doc_ids from top fused results
+        seed_doc_ids: List[str] = []
+        seen_doc_ids: set = set()
+        for r in fused_results[:20]:
+            if r.document_id and r.document_id not in seen_doc_ids:
+                seen_doc_ids.add(r.document_id)
+                seed_doc_ids.append(r.document_id)
+                if len(seed_doc_ids) >= seed_docs_limit:
+                    break
+
+        if not seed_doc_ids:
+            return fused_results
+
+        # 2. Fetch related docs from Neo4j
+        related_docs = self._compute_related_to_doc_signals(seed_doc_ids, doc_tag)
+        metrics["related_to_seed_docs"] = len(seed_doc_ids)
+        metrics["related_to_docs_found"] = len(related_docs)
+
+        if not related_docs:
+            metrics["related_to_chunks_added"] = 0
+            return fused_results
+
+        # 3. Vector search constrained to related doc_ids
+        related_doc_ids = list(related_docs.keys())[:max_docs]
+        doc_filter = dict(filters or {})
+        doc_filter["document_id"] = related_doc_ids
+        fetch_limit = chunks_per_doc * len(related_doc_ids)
+
+        try:
+            related_chunks = self.vector_retriever.search(
+                query,
+                fetch_limit,
+                doc_filter,
+                lexical_query=lexical_query if lexical_query != query else None,
+            )
+        except Exception as exc:
+            logger.warning("RELATED_TO chunk expansion failed", error=str(exc))
+            metrics["related_to_chunks_added"] = 0
+            return fused_results
+
+        # 4. Annotate each chunk with RELATED_TO scores
+        for chunk in related_chunks:
+            doc_signal = related_docs.get(chunk.document_id, {})
+            chunk.related_to_edge_score = doc_signal.get("edge_score", 0.0)
+            prior = 0.35 * max(
+                doc_signal.get("prior_ref", 0.0),
+                doc_signal.get("prior_ent", 0.0),
+                doc_signal.get("prior_tax", 0.0),
+            )
+            chunk.related_to_prior_score = prior
+            mutual_bonus = 1.1 if doc_signal.get("is_mutual") else 1.0
+            quality_bonus = {"high": 1.15, "medium": 1.0, "low": 0.85}.get(
+                doc_signal.get("quality_tier", "medium"), 1.0
+            )
+            chunk.related_to_score = (
+                chunk.related_to_edge_score * (1 + prior) * mutual_bonus * quality_bonus
+            )
+            chunk.related_to_source_doc = chunk.document_id
+
+        # 5. Merge + dedup (existing chunk_ids take priority)
+        existing_ids = {r.chunk_id for r in fused_results}
+        new_chunks = [c for c in related_chunks if c.chunk_id not in existing_ids]
+        fused_results.extend(new_chunks)
+        metrics["related_to_chunks_added"] = len(new_chunks)
+
+        if new_chunks:
+            avg_edge = sum(c.related_to_edge_score or 0.0 for c in new_chunks) / len(
+                new_chunks
+            )
+            metrics["related_to_avg_edge_score"] = round(avg_edge, 4)
+            logger.info(
+                "related_to_expansion_complete",
+                seed_docs=len(seed_doc_ids),
+                related_docs=len(related_doc_ids),
+                chunks_added=len(new_chunks),
+                avg_edge_score=round(avg_edge, 4),
+            )
+
+        return fused_results
 
     def _apply_graph_reranker(
         self,
@@ -2921,18 +3141,41 @@ class HybridRetriever:
             )
         stats["graph_channel_candidates"] = len(graph_signals)
 
-        # Fix #4: If neither entity signals nor cross-doc signals exist, skip reranking
-        if not graph_signals and not cross_doc_signals:
+        # Fix #4: If neither entity signals nor cross-doc signals exist, check RELATED_TO
+        has_related_to = any((r.related_to_score or 0.0) > 0 for r in vector_results)
+        if not graph_signals and not cross_doc_signals and not has_related_to:
             return stats
 
         w_vec, w_graph = self._get_query_type_weights(qtype)
 
-        # Fix #4: Weight allocation for graph signals
-        # - Entity signals get 70% of graph weight (primary semantic signal)
-        # - Cross-doc signals get 30% of graph weight (structural signal)
-        CROSS_DOC_WEIGHT_RATIO = 0.3
-        w_entity = w_graph * (1.0 - CROSS_DOC_WEIGHT_RATIO)
-        w_cross_doc = w_graph * CROSS_DOC_WEIGHT_RATIO
+        # Config-driven weight allocation for graph signals
+        refs_cfg = getattr(self.config, "references", None)
+        refs_query_cfg = getattr(refs_cfg, "query", None) if refs_cfg else None
+        cross_doc_ratio = (
+            getattr(refs_query_cfg, "cross_doc_weight_ratio", 0.3)
+            if refs_query_cfg
+            else 0.3
+        )
+        w_entity = w_graph * (1.0 - cross_doc_ratio)
+        w_cross_doc = w_graph * cross_doc_ratio
+
+        # RELATED_TO blending: config-driven base λ scaled per query type
+        base_lambda = (
+            getattr(refs_query_cfg, "related_to_weight_ratio", 0.15)
+            if refs_query_cfg
+            else 0.15
+        )
+        # Per-type scaling factors (1.0 = full base_lambda, 0.0 = disabled)
+        RELATED_TO_SCALE = {
+            "conceptual": 1.0,
+            "config": 1.0,
+            "procedural": 0.67,
+            "troubleshooting": 0.67,
+            "reference": 0.67,
+            "cli": 0.0,  # CLI queries unaffected
+        }
+        related_to_lambda = base_lambda * RELATED_TO_SCALE.get(qtype, 0.67)
+        related_to_blended = 0
 
         # Track pre-rerank positions to compute delta
         pre_ranks = {str(r.chunk_id): idx for idx, r in enumerate(vector_results)}
@@ -2947,7 +3190,7 @@ class HybridRetriever:
             # Combined graph score (for metrics/debugging)
             r.graph_score = entity_score + cross_doc_score
 
-            # Fix #4: Three-way fusion: vector + entity_graph + cross_doc_graph
+            # Three-way fusion: vector + entity_graph + cross_doc_graph
             if entity_sig or cross_doc_sig:
                 r.fused_score = (
                     w_vec * (r.vector_score or 0.0)
@@ -2956,6 +3199,15 @@ class HybridRetriever:
                 )
             else:
                 r.fused_score = r.vector_score
+
+            # RELATED_TO blending: boost chunks from related documents
+            related = r.related_to_score or 0.0
+            if related > 0 and related_to_lambda > 0:
+                base_fused = r.fused_score or 0.0
+                r.fused_score = (
+                    1 - related_to_lambda
+                ) * base_fused + related_to_lambda * related
+                related_to_blended += 1
 
         vector_results.sort(key=lambda x: x.fused_score or 0.0, reverse=True)
 
@@ -2971,6 +3223,8 @@ class HybridRetriever:
             avg_delta = 0.0
         stats["graph_reranker_applied"] = True
         stats["graph_rerank_avg_delta"] = avg_delta
+        stats["related_to_blended"] = related_to_blended
+        stats["related_to_lambda"] = related_to_lambda
         logger.info(
             "graph_reranker_applied",
             extra={
@@ -2979,6 +3233,8 @@ class HybridRetriever:
                 "entities": len(entities),
                 "graph_candidates": len(graph_signals),
                 "cross_doc_candidates": len(cross_doc_signals),
+                "related_to_blended": related_to_blended,
+                "related_to_lambda": related_to_lambda,
                 "avg_rank_delta": avg_delta,
             },
         )
@@ -3290,6 +3546,17 @@ class HybridRetriever:
 
         metrics["structural_boost_query_type"] = query_type
         metrics["structural_boosted_chunks"] = structural_boosted_count
+
+        # RELATED_TO expansion: fetch chunks from related documents
+        if not self.neo4j_disabled and fused_results:
+            fused_results = self._expand_from_related_docs(
+                fused_results=fused_results,
+                query=query,
+                lexical_query=lexical_query,
+                filters=normalized_filters,
+                doc_tag=doc_tag,
+                metrics=metrics,
+            )
 
         # Optional graph retrieval channel (entity-anchored, cross-doc allowed)
         graph_channel_stats: Dict[str, Any] = {}

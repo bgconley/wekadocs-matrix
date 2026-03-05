@@ -80,6 +80,7 @@ class RetrievalTraceBuilder:
         self._candidates: Dict[str, List[TraceCandidate]] = {}
         self._signal_pool: Optional[Dict[str, Any]] = None
         self._reranker: Optional[Dict[str, Any]] = None
+        self._related_to: Optional[Dict[str, Any]] = None
         self._graph_enrichment: Optional[Dict[str, Any]] = None
         self._evidence_pack: Optional[Dict[str, Any]] = None
         self._followups: List[TraceFollowup] = []
@@ -140,6 +141,24 @@ class RetrievalTraceBuilder:
             "output_count": output_count,
             "latency_ms": round(latency_ms, 1),
             "top_results": top_results,
+        }
+
+    def record_related_to_expansion(
+        self,
+        seed_docs: int,
+        related_docs_found: int,
+        chunks_added: int,
+        avg_edge_score: float,
+        blended_count: int,
+        blend_lambda: float,
+    ) -> None:
+        self._related_to = {
+            "seed_docs": seed_docs,
+            "related_docs_found": related_docs_found,
+            "chunks_added": chunks_added,
+            "avg_edge_score": round(avg_edge_score, 4),
+            "blended_count": blended_count,
+            "blend_lambda": blend_lambda,
         }
 
     def record_graph_enrichment(
@@ -268,9 +287,26 @@ class RetrievalTraceBuilder:
         else:
             lines.append("  (reranker not applied)")
 
-        # Section 5: Graph enrichment
+        # Section 5: RELATED_TO expansion
         lines.append("")
-        lines.append(f"-- 5. GRAPH ENRICHMENT {_SECTION}")
+        lines.append(f"-- 5. RELATED_TO EXPANSION {_SECTION}")
+        if self._related_to:
+            rt = self._related_to
+            lines.append(
+                f"  Seed docs: {rt['seed_docs']}    Related docs found: {rt['related_docs_found']}"
+            )
+            lines.append(
+                f"  Chunks added: {rt['chunks_added']}    Avg edge score: {rt['avg_edge_score']}"
+            )
+            lines.append(
+                f"  Blended: {rt['blended_count']} chunks    Lambda: {rt['blend_lambda']}"
+            )
+        else:
+            lines.append("  (RELATED_TO expansion not applied)")
+
+        # Section 6: Graph enrichment
+        lines.append("")
+        lines.append(f"-- 6. GRAPH ENRICHMENT {_SECTION}")
         if self._graph_enrichment:
             g = self._graph_enrichment
             lines.append(
@@ -283,9 +319,9 @@ class RetrievalTraceBuilder:
         else:
             lines.append("  (graph enrichment not applied)")
 
-        # Section 6: Evidence pack
+        # Section 7: Evidence pack
         lines.append("")
-        lines.append(f"-- 6. EVIDENCE PACK {_SECTION}")
+        lines.append(f"-- 7. EVIDENCE PACK {_SECTION}")
         if self._evidence_pack:
             ep = self._evidence_pack
             cov = ep["coverage"]
@@ -316,8 +352,8 @@ class RetrievalTraceBuilder:
         else:
             lines.append("  (not recorded)")
 
-        # Section 7: Follow-up calls
-        lines.append(f"-- 7. FOLLOW-UP CALLS {_SECTION}")
+        # Section 8: Follow-up calls
+        lines.append(f"-- 8. FOLLOW-UP CALLS {_SECTION}")
         if self._followups:
             for fu in self._followups:
                 lines.append(f"  [{fu.timestamp}] {fu.tool_name}")
@@ -326,11 +362,11 @@ class RetrievalTraceBuilder:
         else:
             lines.append("  (none)")
 
-        # Section 8: Full text appendix
+        # Section 9: Full text appendix
         if self._appendix_chunks:
             lines.append("")
             lines.append(
-                f"-- 8. FULL TEXT APPENDIX (top {len(self._appendix_chunks)} reranked) {_SECTION}"
+                f"-- 9. FULL TEXT APPENDIX (top {len(self._appendix_chunks)} reranked) {_SECTION}"
             )
             for idx, chunk in enumerate(self._appendix_chunks):
                 lines.append("")
@@ -373,6 +409,7 @@ class RetrievalTraceBuilder:
             },
             "signal_pool": self._signal_pool,
             "reranker": self._reranker,
+            "related_to": self._related_to,
             "graph_enrichment": self._graph_enrichment,
             "evidence_pack": {
                 "quotes": (

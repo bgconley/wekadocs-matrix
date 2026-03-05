@@ -438,6 +438,7 @@ class SignalPoolConfig(BaseModel):
     entity_sparse_slots: int = 15  # Unique to entity-sparse
     title_sparse_slots: int = 15  # Unique to title-sparse
     structural_slots: int = 20  # NEXT_CHUNK + sibling graph expansion
+    related_to_slots: int = 10  # RELATED_TO expanded chunks
     per_doc_depth_slots: int = 30  # Per-document depth coverage
 
     # Per-document depth parameters
@@ -1094,6 +1095,14 @@ class ReferencesQueryConfig(BaseModel):
     enable_cross_doc_signals: bool = True
     cross_doc_weight_ratio: float = 0.3
     max_referencing_docs: int = 3
+
+    # RELATED_TO retrieval integration
+    enable_related_to_signals: bool = True
+    related_to_weight_ratio: float = 0.15
+    related_to_seed_docs: int = 5
+    related_to_max_docs: int = 3
+    related_to_chunks_per_doc: int = 3
+    related_to_min_edge_score: float = 0.025
 
 
 class ReferencesConfig(BaseModel):

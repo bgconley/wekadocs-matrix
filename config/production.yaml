@@ -159,7 +159,8 @@ search:
       entity_sparse_slots: 15   # Entity unique
       title_sparse_slots: 15    # Title-sparse unique
       structural_slots: 25      # Graph expansion (NEXT_CHUNK + sibling)
-      per_doc_depth_slots: 40   # Per-document depth coverage
+      related_to_slots: 10      # RELATED_TO expanded chunks
+      per_doc_depth_slots: 30   # Per-document depth coverage (reduced from 40 for related_to)
 
     top_k: 20  # Number of candidates to retrieve
 
@@ -344,6 +345,13 @@ references:
     enable_cross_doc_signals: true
     cross_doc_weight_ratio: 0.3
     max_referencing_docs: 3
+    # RELATED_TO retrieval integration
+    enable_related_to_signals: true
+    related_to_weight_ratio: 0.15
+    related_to_seed_docs: 5
+    related_to_max_docs: 3
+    related_to_chunks_per_doc: 3
+    related_to_min_edge_score: 0.025
 
 # Ranking configuration
 ranking:

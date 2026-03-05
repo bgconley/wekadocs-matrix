@@ -193,6 +193,11 @@ def _fill_per_field_slots(
             "title_sparse",
             config.title_sparse_slots,
         ),
+        (
+            lambda c: c.related_to_score or 0,
+            "related_to",
+            config.related_to_slots,
+        ),
     ]
 
     for score_fn, slot_name, limit in signal_slots:
