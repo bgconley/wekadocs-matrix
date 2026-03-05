@@ -1582,6 +1582,22 @@ class AtomicIngestionCoordinator:
                 )
 
         # =====================================================================
+        # Sparse sub-batching: SPLADE OOMs on >10 sequences per call.
+        # Sub-batch to cap GPU memory usage per inference call.
+        # =====================================================================
+        sparse_max_items = int(os.getenv("SPARSE_BATCH_MAX_ITEMS", "10"))
+
+        def _embed_sparse_safe(texts: List[str]) -> List:
+            """Sub-batch sparse embedding to avoid SPLADE OOM on large batches."""
+            if len(texts) <= sparse_max_items:
+                return sparse_embedder.embed_sparse(texts)
+            results = []
+            for i in range(0, len(texts), sparse_max_items):
+                sub = texts[i : i + sparse_max_items]
+                results.extend(sparse_embedder.embed_sparse(sub))
+            return results
+
+        # =====================================================================
         # PHASE 1+2: Process batches with error isolation
         # =====================================================================
         for batch_idx, batch_indices in enumerate(batches):
@@ -1629,9 +1645,7 @@ class AtomicIngestionCoordinator:
                 sparse_embedder, "embed_sparse"
             ):
                 try:
-                    sparse_embeddings.extend(
-                        sparse_embedder.embed_sparse(batch_content)
-                    )
+                    sparse_embeddings.extend(_embed_sparse_safe(batch_content))
                 except Exception as exc:
                     stats["sparse_failures"] += 1
 
@@ -1662,7 +1676,7 @@ class AtomicIngestionCoordinator:
             ):
                 try:
                     doc_title_sparse_embeddings.extend(
-                        sparse_embedder.embed_sparse(batch_doc_title)
+                        _embed_sparse_safe(batch_doc_title)
                     )
                 except Exception as exc:
                     logger.warning(
@@ -1679,9 +1693,7 @@ class AtomicIngestionCoordinator:
                 sparse_embedder, "embed_sparse"
             ):
                 try:
-                    title_sparse_embeddings.extend(
-                        sparse_embedder.embed_sparse(batch_title)
-                    )
+                    title_sparse_embeddings.extend(_embed_sparse_safe(batch_title))
                 except Exception as exc:
                     logger.warning(
                         "title_sparse_embedding_batch_failed_inserting_placeholders",
@@ -1741,9 +1753,7 @@ class AtomicIngestionCoordinator:
                                 non_empty_indices.append(idx)
 
                         if non_empty_texts:
-                            sparse_results = sparse_embedder.embed_sparse(
-                                non_empty_texts
-                            )
+                            sparse_results = _embed_sparse_safe(non_empty_texts)
                             result_iter = iter(sparse_results)
                             for idx in range(len(batch_entity_texts)):
                                 if idx in non_empty_indices:
