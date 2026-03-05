@@ -163,9 +163,9 @@ services:
       - HF_CACHE=/opt/hf-cache
       - HF_HOME=/opt/hf-cache
       - HF_HUB_CACHE=/opt/hf-cache/hub
-      - HF_HUB_OFFLINE=1
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
       - HF_HUB_DISABLE_TELEMETRY=1
-      - TRANSFORMERS_OFFLINE=true
+      - TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-false}
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000
@@ -266,9 +266,9 @@ services:
       - HF_CACHE=/opt/hf-cache
       - HF_HOME=/opt/hf-cache
       - HF_HUB_CACHE=/opt/hf-cache/hub
-      - HF_HUB_OFFLINE=1
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
       - HF_HUB_DISABLE_TELEMETRY=1
-      - TRANSFORMERS_OFFLINE=true
+      - TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-false}
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000
@@ -363,6 +363,7 @@ services:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest
       - INGEST_WATCH_DIR=/app/data/ingest
+      - INGEST_WATCH_MODE=${INGEST_WATCH_MODE:-auto}
       - INGEST_PORT=8081
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
@@ -383,9 +384,9 @@ services:
       - HF_CACHE=/opt/hf-cache
       - HF_HOME=/opt/hf-cache
       - HF_HUB_CACHE=/opt/hf-cache/hub
-      - HF_HUB_OFFLINE=1
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
       - HF_HUB_DISABLE_TELEMETRY=1
-      - TRANSFORMERS_OFFLINE=true
+      - TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-false}
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000

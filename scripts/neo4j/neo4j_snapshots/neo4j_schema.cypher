@@ -1,6 +1,6 @@
 // Auto-generated Neo4j schema DDL
 // Snapshot: neo4j
-// Generated at: 2025-12-29T03:55:46.288503+00:00
+// Generated at: 2026-03-04T08:16:31.265140+00:00
 
 // Constraints
 CREATE CONSTRAINT `answer_id_unique` FOR (n:`Answer`) REQUIRE (n.`answer_id`) IS UNIQUE;
@@ -11,6 +11,7 @@ CREATE CONSTRAINT `command_id_unique` FOR (n:`Command`) REQUIRE (n.`id`) IS UNIQ
 CREATE CONSTRAINT `component_id_unique` FOR (n:`Component`) REQUIRE (n.`id`) IS UNIQUE;
 CREATE CONSTRAINT `concept_id_unique` FOR (n:`Concept`) REQUIRE (n.`id`) IS UNIQUE;
 CREATE CONSTRAINT `configuration_id_unique` FOR (n:`Configuration`) REQUIRE (n.`id`) IS UNIQUE;
+CREATE CONSTRAINT `constraint_ee9b683e` FOR (n:`Section`) REQUIRE (n.`id`) IS UNIQUE;
 CREATE CONSTRAINT `document_id_unique` FOR (n:`Document`) REQUIRE (n.`id`) IS UNIQUE;
 CREATE CONSTRAINT `document_source_uri_unique` FOR (n:`Document`) REQUIRE (n.`source_uri`) IS UNIQUE;
 CREATE CONSTRAINT `error_id_unique` FOR (n:`Error`) REQUIRE (n.`id`) IS UNIQUE;
@@ -33,6 +34,8 @@ CREATE CONSTRAINT `version_id_unique` FOR (n:`Version`) REQUIRE (n.`id`) IS UNIQ
 CREATE RANGE INDEX `answer_created_at` FOR (n:`Answer`) ON (n.`created_at`);
 CREATE RANGE INDEX `answer_user_feedback` FOR (n:`Answer`) ON (n.`user_feedback`);
 CREATE RANGE INDEX `chunk_doc_id` FOR (n:`Chunk`) ON (n.`doc_id`);
+CREATE RANGE INDEX `chunk_doc_order` FOR (n:`Chunk`) ON (n.`document_id`, n.`order`);
+CREATE RANGE INDEX `chunk_doc_parent_path_norm` FOR (n:`Chunk`) ON (n.`document_id`, n.`parent_path_norm`);
 CREATE RANGE INDEX `chunk_doc_tag` FOR (n:`Chunk`) ON (n.`doc_tag`);
 CREATE RANGE INDEX `chunk_document_id` FOR (n:`Chunk`) ON (n.`document_id`);
 CREATE RANGE INDEX `chunk_embedding_dimensions` FOR (n:`Chunk`) ON (n.`embedding_dimensions`);
@@ -48,6 +51,7 @@ CREATE RANGE INDEX `chunk_lang` FOR (n:`Chunk`) ON (n.`lang`);
 CREATE RANGE INDEX `chunk_level` FOR (n:`Chunk`) ON (n.`level`);
 CREATE RANGE INDEX `chunk_line_start_idx` FOR (n:`Chunk`) ON (n.`line_start`);
 CREATE RANGE INDEX `chunk_order` FOR (n:`Chunk`) ON (n.`order`);
+CREATE RANGE INDEX `chunk_parent_chunk_id` FOR (n:`Chunk`) ON (n.`parent_chunk_id`);
 CREATE RANGE INDEX `chunk_parent_path_idx` FOR (n:`Chunk`) ON (n.`parent_path`);
 CREATE RANGE INDEX `chunk_shingle_hash` FOR (n:`Chunk`) ON (n.`shingle_hash`);
 CREATE RANGE INDEX `chunk_source_path` FOR (n:`Chunk`) ON (n.`source_path`);
@@ -77,9 +81,11 @@ CREATE RANGE INDEX `entity_name` FOR (n:`Entity`) ON (n.`name`);
 CREATE RANGE INDEX `entity_source` FOR (n:`Entity`) ON (n.`source`);
 CREATE RANGE INDEX `entity_source_section_idx` FOR (n:`Entity`) ON (n.`source_section_id`);
 CREATE RANGE INDEX `entity_type` FOR (n:`Entity`) ON (n.`entity_type`);
+CREATE RANGE INDEX `entity_type_normalized_name` FOR (n:`Entity`) ON (n.`entity_type`, n.`normalized_name`);
 CREATE RANGE INDEX `error_code` FOR (n:`Error`) ON (n.`code`);
 CREATE RANGE INDEX `index_293dec54` FOR (n:`Configuration`) ON (n.`name`);
 CREATE RANGE INDEX `index_8323cd1d` FOR (n:`Command`) ON (n.`name`);
+CREATE RANGE INDEX `index_d7e8d6e` FOR (n:`Section`) ON (n.`document_id`);
 CREATE RANGE INDEX `mentioned_in_confidence_idx` FOR ()-[r:`MENTIONED_IN`]-() ON (r.`confidence`);
 CREATE RANGE INDEX `mentioned_in_source_idx` FOR ()-[r:`MENTIONED_IN`]-() ON (r.`source`);
 CREATE RANGE INDEX `mentions_confidence_idx` FOR ()-[r:`MENTIONS`]-() ON (r.`confidence`);

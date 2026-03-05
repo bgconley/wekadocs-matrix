@@ -215,21 +215,29 @@ class GLiNERService:
 
         try:
             client = self._get_http_client()
-            response = client.get(f"{self._service_url}/healthz")
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("status") == "ok":
-                    device = data.get("device", "unknown")
-                    logger.info(
-                        f"GLiNER HTTP service healthy (device={device})",
-                        extra={"service_url": self._service_url, "device": device},
-                    )
-                    return True
-        except httpx.ConnectError:
-            logger.debug(f"GLiNER HTTP service not reachable: {self._service_url}")
+            # Try /health (unified gateway) then /healthz (standalone service)
+            for path in ("/health", "/healthz"):
+                try:
+                    response = client.get(f"{self._service_url}{path}")
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get("status") in ("ok", "healthy"):
+                            device = data.get("device", "unknown")
+                            logger.info(
+                                f"GLiNER HTTP service healthy (device={device})",
+                                extra={
+                                    "service_url": self._service_url,
+                                    "path": path,
+                                    "device": device,
+                                },
+                            )
+                            return True
+                except httpx.ConnectError:
+                    continue
         except Exception as e:
             logger.warning(f"GLiNER HTTP health check failed: {e}")
 
+        logger.debug(f"GLiNER HTTP service not reachable: {self._service_url}")
         return False
 
     def _http_batch_extract(

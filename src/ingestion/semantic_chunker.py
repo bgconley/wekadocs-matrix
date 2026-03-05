@@ -236,20 +236,33 @@ class SemanticChunkerAssembler:
         adapter_name = (self.config.embedding_adapter or "bge_m3").lower()
 
         adapter = None
-        if adapter_name in {"bge_m3", "bge-m3", "bge_m3_service", "bge-m3-service"}:
+        if adapter_name in {
+            "bge_m3",
+            "bge-m3",
+            "bge_m3_service",
+            "bge-m3-service",
+            "qwen3_0_6b",
+            "qwen3-0-6b",
+            "embedding-service",
+        }:
             from src.providers.embeddings.chonkie_adapter import BgeM3ChonkieAdapter
 
+            service_url = os.getenv("BGE_M3_API_URL") or os.getenv("EMBEDDING_BASE_URL")
             if not BgeM3ChonkieAdapter.is_available():
                 log.warning(
-                    "BGE-M3 service unavailable; semantic chunking disabled",
-                    extra={
-                        "service_url": os.getenv(
-                            "BGE_M3_API_URL", "http://127.0.0.1:9000"
-                        )
-                    },
+                    "Embedding service unavailable; semantic chunking disabled",
+                    extra={"service_url": service_url or "http://127.0.0.1:9000"},
                 )
                 return
-            adapter = BgeM3ChonkieAdapter()
+            # Model name is informational — the gateway serves whichever model is loaded
+            model_name = (
+                "Qwen/Qwen3-Embedding-0.6B"
+                if "qwen3" in adapter_name
+                else "BAAI/bge-m3"
+            )
+            adapter = BgeM3ChonkieAdapter(
+                service_url=service_url, model_name=model_name
+            )
         elif adapter_name in {
             "snowflake_arctic_v2l",
             "snowflake-arctic-v2l",

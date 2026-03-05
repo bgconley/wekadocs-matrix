@@ -1,6 +1,6 @@
 {
   "_database": "",
-  "_generated_at": "2025-12-29T03:55:46.288503+00:00",
+  "_generated_at": "2026-03-04T08:16:31.265140+00:00",
   "_schema_version": "1.0",
   "_source": "live_neo4j_db",
   "constraints": [
@@ -123,6 +123,22 @@
         "Configuration"
       ],
       "name": "configuration_id_unique",
+      "options": {
+        "indexConfig": {},
+        "indexProvider": "range-1.0"
+      },
+      "properties": [
+        "id"
+      ],
+      "type": "UNIQUENESS"
+    },
+    {
+      "createStatement": "CREATE CONSTRAINT `constraint_ee9b683e` FOR (n:`Section`) REQUIRE (n.`id`) IS UNIQUE;",
+      "entityType": "NODE",
+      "labelsOrTypes": [
+        "Section"
+      ],
+      "name": "constraint_ee9b683e",
       "options": {
         "indexConfig": {},
         "indexProvider": "range-1.0"
@@ -455,6 +471,40 @@
       "type": "RANGE"
     },
     {
+      "createStatement": "CREATE RANGE INDEX `chunk_doc_order` FOR (n:`Chunk`) ON (n.`document_id`, n.`order`);",
+      "entityType": "NODE",
+      "labelsOrTypes": [
+        "Chunk"
+      ],
+      "name": "chunk_doc_order",
+      "options": {
+        "indexConfig": {},
+        "indexProvider": "range-1.0"
+      },
+      "properties": [
+        "document_id",
+        "order"
+      ],
+      "type": "RANGE"
+    },
+    {
+      "createStatement": "CREATE RANGE INDEX `chunk_doc_parent_path_norm` FOR (n:`Chunk`) ON (n.`document_id`, n.`parent_path_norm`);",
+      "entityType": "NODE",
+      "labelsOrTypes": [
+        "Chunk"
+      ],
+      "name": "chunk_doc_parent_path_norm",
+      "options": {
+        "indexConfig": {},
+        "indexProvider": "range-1.0"
+      },
+      "properties": [
+        "document_id",
+        "parent_path_norm"
+      ],
+      "type": "RANGE"
+    },
+    {
       "createStatement": "CREATE RANGE INDEX `chunk_doc_tag` FOR (n:`Chunk`) ON (n.`doc_tag`);",
       "entityType": "NODE",
       "labelsOrTypes": [
@@ -703,6 +753,22 @@
       },
       "properties": [
         "order"
+      ],
+      "type": "RANGE"
+    },
+    {
+      "createStatement": "CREATE RANGE INDEX `chunk_parent_chunk_id` FOR (n:`Chunk`) ON (n.`parent_chunk_id`);",
+      "entityType": "NODE",
+      "labelsOrTypes": [
+        "Chunk"
+      ],
+      "name": "chunk_parent_chunk_id",
+      "options": {
+        "indexConfig": {},
+        "indexProvider": "range-1.0"
+      },
+      "properties": [
+        "parent_chunk_id"
       ],
       "type": "RANGE"
     },
@@ -1189,6 +1255,23 @@
       "type": "RANGE"
     },
     {
+      "createStatement": "CREATE RANGE INDEX `entity_type_normalized_name` FOR (n:`Entity`) ON (n.`entity_type`, n.`normalized_name`);",
+      "entityType": "NODE",
+      "labelsOrTypes": [
+        "Entity"
+      ],
+      "name": "entity_type_normalized_name",
+      "options": {
+        "indexConfig": {},
+        "indexProvider": "range-1.0"
+      },
+      "properties": [
+        "entity_type",
+        "normalized_name"
+      ],
+      "type": "RANGE"
+    },
+    {
       "createStatement": "CREATE RANGE INDEX `error_code` FOR (n:`Error`) ON (n.`code`);",
       "entityType": "NODE",
       "labelsOrTypes": [
@@ -1233,6 +1316,22 @@
       },
       "properties": [
         "name"
+      ],
+      "type": "RANGE"
+    },
+    {
+      "createStatement": "CREATE RANGE INDEX `index_d7e8d6e` FOR (n:`Section`) ON (n.`document_id`);",
+      "entityType": "NODE",
+      "labelsOrTypes": [
+        "Section"
+      ],
+      "name": "index_d7e8d6e",
+      "options": {
+        "indexConfig": {},
+        "indexProvider": "range-1.0"
+      },
+      "properties": [
+        "document_id"
       ],
       "type": "RANGE"
     },

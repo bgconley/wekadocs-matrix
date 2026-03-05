@@ -730,35 +730,42 @@ class BgeM3ChonkieAdapter(BaseEmbeddings if CHONKIE_AVAILABLE else object):
     @classmethod
     def is_available(cls) -> bool:
         """
-        Check if BGE-M3 service is reachable.
+        Check if the embedding service is reachable.
 
-        This is used to determine whether to use semantic chunking
-        or fall back to simpler approaches.
+        Tries /health (unified gateway) then /healthz (legacy BGE-M3 service).
 
         Returns:
-            True if chonkie is installed AND BGE-M3 service is healthy
+            True if chonkie is installed AND embedding service is healthy
         """
         if not CHONKIE_AVAILABLE:
             log.debug("Chonkie not available - CHONKIE_AVAILABLE=False")
             return False
 
-        service_url = os.getenv("BGE_M3_API_URL") or "http://127.0.0.1:9000"
+        service_url = (
+            os.getenv("BGE_M3_API_URL")
+            or os.getenv("EMBEDDING_BASE_URL")
+            or "http://127.0.0.1:9000"
+        )
         try:
             with httpx.Client(timeout=5.0) as client:
-                r = client.get(f"{service_url}/healthz")
-                if r.status_code == 200:
-                    health = r.json()
-                    is_healthy = health.get("status") == "ok"
-                    if is_healthy:
-                        log.debug(
-                            "BGE-M3 service healthy",
-                            extra={"service_url": service_url},
-                        )
-                    return is_healthy
+                # Try unified gateway /health first, then legacy /healthz
+                for path in ("/health", "/healthz"):
+                    try:
+                        r = client.get(f"{service_url}{path}")
+                        if r.status_code == 200:
+                            health = r.json()
+                            if health.get("status") in ("ok", "healthy"):
+                                log.debug(
+                                    "Embedding service healthy",
+                                    extra={"service_url": service_url, "path": path},
+                                )
+                                return True
+                    except Exception:
+                        continue
                 return False
         except Exception as e:
             log.debug(
-                "BGE-M3 service unavailable",
+                "Embedding service unavailable",
                 extra={"service_url": service_url, "error": str(e)},
             )
             return False

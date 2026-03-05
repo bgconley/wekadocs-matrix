@@ -121,7 +121,7 @@ profiles:
     dims: 1024
     similarity: "cosine"
     task: "retrieval.passage"
-    query_instruction: "Instruct: Given a technical query about WEKA distributed file system, retrieve relevant documentation passages covering configuration, administration, troubleshooting, and CLI commands\nQuery: "
+    query_instruction: "Instruct: Given a technical query about WEKA distributed file system, retrieve relevant documentation passages covering system architecture, data management, filesystem internals, configuration, administration, troubleshooting, performance, and CLI commands\nQuery: "
     tokenizer:
       backend: "hf"
       model_id: "Qwen/Qwen3-Embedding-0.6B"
