@@ -231,6 +231,170 @@ class TestEvidenceExtractionScoring:
         assert len(quotes) == 3
 
     @pytest.mark.asyncio
+    async def test_max_quotes_supports_more_than_12(self, scratch, deps):
+        """Evidence extraction should not hard-clamp to 12 quotes."""
+        for i in range(15):
+            await scratch.put(
+                "s",
+                f"p{i}",
+                _make_scratch_entry(
+                    section_id=f"chunk_{i}",
+                    rerank_score=0.99 - (i * 0.01),
+                    source="reranked",
+                ),
+            )
+
+        quotes = await _extract_evidence_from_passages(
+            question="weka metadata architecture",
+            passage_ids=[f"p{i}" for i in range(15)],
+            max_quotes=20,
+            max_quote_tokens=80,
+            include_context_tokens=10,
+            deps=deps,
+            effective_session="s",
+        )
+
+        assert len(quotes) == 15
+
+    @pytest.mark.asyncio
+    async def test_graph_expanded_only_backfills_after_primary(self, scratch, deps):
+        """Graph-expanded passages should never displace strong primary hits."""
+        await scratch.put(
+            "s",
+            "p_primary_1",
+            _make_scratch_entry(
+                section_id="primary_1",
+                title="WEKA metadata architecture overview",
+                text="Metadata services coordinate inode updates across the cluster.",
+                rerank_score=0.91,
+                fused_score=0.88,
+                source="reranked",
+            ),
+        )
+        await scratch.put(
+            "s",
+            "p_primary_2",
+            _make_scratch_entry(
+                section_id="primary_2",
+                title="Cluster architecture internals",
+                text="Control-plane metadata components synchronize allocation state.",
+                rerank_score=None,
+                fused_score=0.44,
+                source="rrf_fusion",
+            ),
+        )
+        await scratch.put(
+            "s",
+            "p_graph_1",
+            _make_scratch_entry(
+                section_id="graph_1",
+                title="Neighbor chunk from graph",
+                text="Sibling content that should only appear as backfill.",
+                rerank_score=None,
+                fused_score=0.95,
+                source="graph_expanded",
+            ),
+        )
+        await scratch.put(
+            "s",
+            "p_graph_2",
+            _make_scratch_entry(
+                section_id="graph_2",
+                title="Another graph neighbor",
+                text="Additional structural context candidate.",
+                rerank_score=None,
+                fused_score=0.80,
+                source="graph_expanded",
+            ),
+        )
+
+        quotes = await _extract_evidence_from_passages(
+            question="how is metadata managed and architected on a weka cluster",
+            passage_ids=["p_graph_1", "p_primary_2", "p_graph_2", "p_primary_1"],
+            max_quotes=4,
+            max_quote_tokens=80,
+            include_context_tokens=10,
+            deps=deps,
+            effective_session="s",
+        )
+
+        assert len(quotes) == 4
+        assert quotes[0]["source"] != "graph_expanded"
+        assert quotes[1]["source"] != "graph_expanded"
+
+    @pytest.mark.asyncio
+    async def test_metadata_limitations_forced_before_graph_backfill(
+        self, scratch, deps
+    ):
+        """Metadata-limitations reranked evidence should be force-kept for the known failure query."""
+        await scratch.put(
+            "s",
+            "p_overview_1",
+            _make_scratch_entry(
+                section_id="overview_1",
+                title="WEKA cluster architecture overview",
+                text="General architecture overview of the cluster.",
+                rerank_score=0.95,
+                source="reranked",
+            ),
+        )
+        await scratch.put(
+            "s",
+            "p_overview_2",
+            _make_scratch_entry(
+                section_id="overview_2",
+                title="Cluster metadata services summary",
+                text="General summary content without deep metadata detail.",
+                rerank_score=0.85,
+                source="reranked",
+            ),
+        )
+        await scratch.put(
+            "s",
+            "p_metadata_limits",
+            _make_scratch_entry(
+                section_id="metadata_limits",
+                title="Metadata limitations in WEKA filesystems",
+                text="Metadata limitations and inode management constraints are documented here.",
+                rerank_score=0.20,
+                source="reranked",
+            ),
+        )
+        await scratch.put(
+            "s",
+            "p_graph",
+            _make_scratch_entry(
+                section_id="graph_neighbor",
+                title="Graph-expanded neighboring chunk",
+                text="Neighbor context that should only backfill.",
+                rerank_score=None,
+                fused_score=0.30,
+                source="graph_expanded",
+            ),
+        )
+
+        quotes = await _extract_evidence_from_passages(
+            question="how is metadata managed and architected on a weka cluster",
+            passage_ids=[
+                "p_overview_1",
+                "p_overview_2",
+                "p_metadata_limits",
+                "p_graph",
+            ],
+            max_quotes=2,
+            max_quote_tokens=80,
+            include_context_tokens=10,
+            deps=deps,
+            effective_session="s",
+        )
+
+        assert len(quotes) == 2
+        assert any(
+            "metadata limitations" in (q.get("title") or "").lower() for q in quotes
+        )
+        assert all(q["source"] != "graph_expanded" for q in quotes[:2])
+
+    @pytest.mark.asyncio
     async def test_empty_passage_ids_returns_empty(self, scratch, deps):
         quotes = await _extract_evidence_from_passages(
             question="test",

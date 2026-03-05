@@ -3294,6 +3294,14 @@ class HybridRetriever:
                 "collection_name",
                 getattr(self, "qdrant_collection_name", None),
             ),
+            "signal_pool_configured": bool(
+                self._signal_pool_enabled and self._signal_pool_config
+            ),
+            "signal_pool_enabled": False,
+            "signal_pool_used": False,
+            "signal_pool_size": 0,
+            "signal_pool_slot_fills": {},
+            "signal_pool_degraded": False,
         }
         metrics["dual_query_active"] = lexical_query != query
         if self.embedding_settings:
@@ -3679,6 +3687,7 @@ class HybridRetriever:
                 rerank_candidates = pool_result.pool
 
                 metrics["signal_pool_enabled"] = True
+                metrics["signal_pool_used"] = True
                 metrics["signal_pool_size"] = len(rerank_candidates)
                 metrics["signal_pool_slot_fills"] = pool_result.slot_fills
                 metrics["signal_pool_degraded"] = pool_result.degraded
@@ -3688,6 +3697,7 @@ class HybridRetriever:
                 rerank_pool_size = min(pool_cap, len(fused_results))
                 rerank_candidates = fused_results[:rerank_pool_size]
                 metrics["signal_pool_enabled"] = False
+                metrics["signal_pool_used"] = False
 
             # Hydrate parent_path_norm for reranker context enrichment
             # Runs for all rerank candidates (standalone improvement, not signal-pool-gated)
@@ -4416,6 +4426,8 @@ class HybridRetriever:
         self, query: str, seeds: List[ChunkResult], metrics: Dict[str, Any]
     ) -> List[ChunkResult]:
         cfg = self.reranker_config
+        metrics.setdefault("reranker_input_count", 0)
+        metrics.setdefault("reranker_output_count", 0)
         if not cfg or not getattr(cfg, "enabled", False):
             metrics["reranker_applied"] = False
             metrics["reranker_reason"] = "disabled"
@@ -4473,7 +4485,11 @@ class HybridRetriever:
         if not candidates:
             metrics["reranker_applied"] = False
             metrics["reranker_reason"] = "no_text"
+            metrics["reranker_input_count"] = 0
+            metrics["reranker_output_count"] = 0
             return seeds
+
+        metrics["reranker_input_count"] = len(candidates)
 
         top_n = getattr(cfg, "top_n", None)
         if not top_n or top_n <= 0:
@@ -4570,6 +4586,7 @@ class HybridRetriever:
         if not reranked_chunks:
             metrics["reranker_applied"] = False
             metrics["reranker_reason"] = "no_results"
+            metrics["reranker_output_count"] = 0
             return seeds
 
         reranked_chunks.sort(
@@ -4583,6 +4600,7 @@ class HybridRetriever:
         metrics["reranker_reason"] = "ok"
         metrics["reranker_model"] = reranker.model_id
         metrics["reranker_time_ms"] = latency_ms
+        metrics["reranker_output_count"] = len(reranked_chunks)
         return reranked_chunks
 
     def _get_reranker(self) -> Optional[RerankProvider]:

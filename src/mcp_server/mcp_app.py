@@ -78,6 +78,19 @@ KB_SEARCH_DEFAULT_SNIPPET_CHARS = 280
 KB_SEARCH_MAX_SNIPPET_CHARS = 500
 KB_EVIDENCE_INTERNAL_FETCH_K = 60  # How deep the evidence pack searches internally
 KB_EVIDENCE_MAX_FETCH_K = 150  # Hard cap on internal retrieval depth
+KB_EVIDENCE_MAX_QUOTES = int(os.getenv("MCP_EVIDENCE_MAX_QUOTES", "50"))
+KB_EVIDENCE_GRAPH_EXPANSION_ENABLED = os.getenv(
+    "MCP_EVIDENCE_GRAPH_EXPANSION_ENABLED", "false"
+).lower() in {"1", "true", "yes", "on"}
+KB_EVIDENCE_GRAPH_SYNTHETIC_FUSED_SCORE = float(
+    os.getenv("MCP_EVIDENCE_GRAPH_SYNTHETIC_FUSED_SCORE", "0.08")
+)
+KB_EVIDENCE_FORCE_METADATA_LIMITATIONS = os.getenv(
+    "MCP_EVIDENCE_FORCE_METADATA_LIMITATIONS", "true"
+).lower() in {"1", "true", "yes", "on"}
+KB_EVIDENCE_METADATA_LIMITATIONS_MIN_SCORE = float(
+    os.getenv("MCP_EVIDENCE_METADATA_LIMITATIONS_MIN_SCORE", "0.15")
+)
 SCRATCH_TTL_SECONDS = int(os.getenv("MCP_SCRATCH_TTL_SECONDS", "1800"))
 SCRATCH_MAX_BYTES = int(os.getenv("MCP_SCRATCH_MAX_BYTES", str(256 * 1024 * 1024)))
 # _SESSION_IDS removed - now using single _GLOBAL_SESSION_ID for stable scratch storage
@@ -101,6 +114,22 @@ def _decode_cursor(cursor: Optional[str]) -> int:
         return int(base64.urlsafe_b64decode(cursor.encode("utf-8")).decode("utf-8"))
     except Exception:
         return 0
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    return default
 
 
 def _new_budget(
@@ -388,6 +417,69 @@ def _split_plain_spans_with_offsets(
     return spans
 
 
+def _is_graph_expanded_source(source: Any) -> bool:
+    return str(source or "").strip().lower() == "graph_expanded"
+
+
+def _is_metadata_limitations_candidate(
+    entry: dict[str, Any], query_tokens: list[str]
+) -> bool:
+    if "metadata" not in query_tokens:
+        return False
+    haystack = f"{entry.get('title') or ''}\n{entry.get('text') or ''}".lower()
+    return "metadata" in haystack and "limitation" in haystack
+
+
+def _quote_from_passage(
+    *,
+    passage: dict[str, Any],
+    query_tokens: list[str],
+    max_quote_chars: int,
+    context_chars: int,
+    effective_session: str,
+) -> Optional[dict[str, Any]]:
+    entry = passage["entry"]
+    text = entry.get("text") or ""
+    if not text:
+        return None
+
+    # Score each span with blended retrieval + lexical
+    retrieval_score = passage["retrieval_score"]
+    retrieval_weight = 0.7
+    lexical_weight = 0.3
+    best_span = None
+    best_blended = -1.0
+    for span, start, end in _split_spans_with_offsets(text):
+        lowered = span.lower()
+        hits = sum(1 for t in query_tokens if t in lowered)
+        lexical = hits / max(1, len(query_tokens)) if query_tokens else 0.0
+        blended = (retrieval_weight * retrieval_score) + (lexical_weight * lexical)
+        if blended > best_blended:
+            best_blended = blended
+            best_span = (start, end, blended)
+
+    if best_span is None:
+        return None
+
+    start, end, blended_score = best_span
+    start = max(0, start - context_chars)
+    end = min(len(text), end + context_chars)
+    quote = text[start:end].strip()[:max_quote_chars]
+
+    return {
+        "quote": quote,
+        "passage_id": passage["passage_id"],
+        "section_id": entry.get("section_id"),
+        "doc_tag": entry.get("doc_tag"),
+        "title": entry.get("title"),
+        "parent_path": entry.get("parent_path_norm"),
+        "uri": ScratchStore.build_uri(effective_session, passage["passage_id"]),
+        "confidence": round(blended_score, 3),
+        "source": entry.get("source", "hybrid"),
+        "rank": passage["rank"],
+    }
+
+
 def _format_bullets(text: str) -> str:
     spans = _split_spans(text)
     if not spans:
@@ -608,7 +700,7 @@ async def _extract_evidence_from_passages(
     if not passage_ids:
         return []
 
-    # Stage 1: Load passages with their retrieval scores
+    # Stage 1: Load passages with retrieval scores and source metadata.
     passages = []
     for rank, passage_id in enumerate(passage_ids):
         entry = await deps.scratch.get(effective_session, passage_id)
@@ -621,81 +713,126 @@ async def _extract_evidence_from_passages(
             or entry.get("bm25_score")
             or 0.0
         )
+        source = entry.get("source", "hybrid")
         passages.append(
             {
                 "passage_id": passage_id,
                 "entry": entry,
                 "retrieval_score": float(retrieval_score),
                 "rank": rank + 1,
+                "source": source,
+                "is_graph_expanded": _is_graph_expanded_source(source),
             }
         )
 
     if not passages:
         return []
 
-    # Sort passages by retrieval score descending
-    passages.sort(key=lambda p: -p["retrieval_score"])
+    # Primary candidates first (reranked/rrf/vector/bm25/hybrid), graph-expanded as backfill.
+    passages.sort(
+        key=lambda p: (
+            1 if p["is_graph_expanded"] else 0,
+            -p["retrieval_score"],
+            p["rank"],
+        )
+    )
+    primary_passages = [p for p in passages if not p["is_graph_expanded"]]
+    backfill_passages = [p for p in passages if p["is_graph_expanded"]]
 
-    max_quotes = max(1, min(int(max_quotes or 6), 12))
+    max_quotes = max(1, min(int(max_quotes or 6), KB_EVIDENCE_MAX_QUOTES))
     max_quote_tokens = max(1, min(int(max_quote_tokens or 80), 200))
     include_context_tokens = max(0, min(int(include_context_tokens or 20), 200))
     context_chars = include_context_tokens * 4
     max_quote_chars = min(max_quote_tokens * 4, 500)
 
-    # Stage 2: For each passage (by retrieval score), extract best span
-    retrieval_weight = 0.7
-    lexical_weight = 0.3
-    quotes = []
+    quotes: list[dict[str, Any]] = []
     seen_passage_ids: set[str] = set()
 
-    for passage in passages:
+    def _append_quote(passage: dict[str, Any]) -> bool:
         if len(quotes) >= max_quotes:
-            break
+            return False
         pid = passage["passage_id"]
         if pid in seen_passage_ids:
-            continue
-        seen_passage_ids.add(pid)
-
-        entry = passage["entry"]
-        text = entry.get("text") or ""
-        section_id = entry.get("section_id")
-        title = entry.get("title")
-        retrieval_score = passage["retrieval_score"]
-
-        # Score each span with blended retrieval + lexical
-        best_span = None
-        best_blended = -1.0
-        for idx, (span, start, end) in enumerate(_split_spans_with_offsets(text)):
-            lowered = span.lower()
-            hits = sum(1 for t in query_tokens if t in lowered)
-            lexical = hits / max(1, len(query_tokens)) if query_tokens else 0.0
-            blended = (retrieval_weight * retrieval_score) + (lexical_weight * lexical)
-            if blended > best_blended:
-                best_blended = blended
-                best_span = (span, start, end, blended)
-
-        if best_span is None:
-            continue
-
-        _, start, end, blended_score = best_span
-        start = max(0, start - context_chars)
-        end = min(len(text), end + context_chars)
-        quote = text[start:end].strip()[:max_quote_chars]
-
-        quotes.append(
-            {
-                "quote": quote,
-                "passage_id": pid,
-                "section_id": section_id,
-                "doc_tag": entry.get("doc_tag"),
-                "title": title,
-                "parent_path": entry.get("parent_path_norm"),
-                "uri": ScratchStore.build_uri(effective_session, pid),
-                "confidence": round(blended_score, 3),
-                "source": entry.get("source", "hybrid"),
-                "rank": passage["rank"],
-            }
+            return False
+        quote = _quote_from_passage(
+            passage=passage,
+            query_tokens=query_tokens,
+            max_quote_chars=max_quote_chars,
+            context_chars=context_chars,
+            effective_session=effective_session,
         )
+        if quote is None:
+            return False
+        seen_passage_ids.add(pid)
+        quotes.append(quote)
+        return True
+
+    # Primary evidence always wins first-pass selection.
+    for passage in primary_passages:
+        if len(quotes) >= max_quotes:
+            break
+        _append_quote(passage)
+
+    # Safety guard: retain at least one strong reranked "metadata limitations" quote
+    # before any graph-expanded backfill is considered.
+    if KB_EVIDENCE_FORCE_METADATA_LIMITATIONS and "metadata" in query_tokens:
+        has_metadata_limitations_quote = any(
+            "metadata" in (q.get("title") or "").lower()
+            and "limitation" in (q.get("title") or "").lower()
+            for q in quotes
+        )
+        if not has_metadata_limitations_quote:
+            candidate = next(
+                (
+                    p
+                    for p in primary_passages
+                    if p["source"] == "reranked"
+                    and p["retrieval_score"]
+                    >= KB_EVIDENCE_METADATA_LIMITATIONS_MIN_SCORE
+                    and _is_metadata_limitations_candidate(p["entry"], query_tokens)
+                ),
+                None,
+            )
+            if candidate:
+                forced_quote = _quote_from_passage(
+                    passage=candidate,
+                    query_tokens=query_tokens,
+                    max_quote_chars=max_quote_chars,
+                    context_chars=context_chars,
+                    effective_session=effective_session,
+                )
+                if forced_quote:
+                    forced_pid = forced_quote["passage_id"]
+                    if forced_pid not in seen_passage_ids:
+                        # Replace weakest selected primary quote only if we are full.
+                        replace_idx = None
+                        if len(quotes) >= max_quotes and quotes:
+                            retrieval_by_pid = {
+                                p["passage_id"]: float(p["retrieval_score"])
+                                for p in primary_passages
+                            }
+                            replace_idx = min(
+                                range(len(quotes)),
+                                key=lambda idx: retrieval_by_pid.get(
+                                    quotes[idx].get("passage_id"), float("inf")
+                                ),
+                            )
+                        if replace_idx is not None and len(quotes) >= max_quotes:
+                            old_pid = quotes[replace_idx].get("passage_id")
+                            if old_pid:
+                                seen_passage_ids.discard(old_pid)
+                            quotes[replace_idx] = forced_quote
+                            seen_passage_ids.add(forced_pid)
+                        elif len(quotes) < max_quotes:
+                            quotes.append(forced_quote)
+                            seen_passage_ids.add(forced_pid)
+
+    # Backfill only from graph-expanded passages if slots remain.
+    if len(quotes) < max_quotes:
+        for passage in backfill_passages:
+            if len(quotes) >= max_quotes:
+                break
+            _append_quote(passage)
 
     return quotes
 
@@ -709,9 +846,9 @@ async def _expand_evidence_with_structure(
 ) -> list[str]:
     """Fetch structural neighbors (NEXT_CHUNK, siblings) and store in scratch.
 
-    Always-on graph enrichment: adds sequential and sibling chunks to the
-    evidence extraction candidate pool. Returns new passage_ids for the
-    expanded neighbors. Skips gracefully if Neo4j is unavailable.
+    Adds sequential and sibling chunks to the evidence extraction candidate
+    pool. Returns new passage_ids for expanded neighbors. Skips gracefully
+    if Neo4j is unavailable.
     """
     if _neo4j_disabled or not deps.graph or not section_ids:
         return []
@@ -768,10 +905,10 @@ async def _expand_evidence_with_structure(
             "text": record["text"] or "",
             "source_uri": None,
             "created_at": datetime.utcnow().isoformat() + "Z",
-            # Structural neighbors get a moderate synthetic score
-            # so they can compete in the blended ranking
+            # Structural neighbors get a low synthetic score so they only
+            # backfill evidence slots after primary retrieval candidates.
             "rerank_score": None,
-            "fused_score": 0.3,  # synthetic: below typical reranked scores
+            "fused_score": KB_EVIDENCE_GRAPH_SYNTHETIC_FUSED_SCORE,
             "vector_score": None,
             "bm25_score": None,
             "graph_score": 0.5,
@@ -1376,7 +1513,7 @@ KB_RETRIEVE_INPUT_SCHEMA = {
         "max_quotes": {
             "type": "integer",
             "default": 6,
-            "description": "Max evidence quotes to return (1-12)",
+            "description": f"Max evidence quotes to return (1-{KB_EVIDENCE_MAX_QUOTES})",
         },
         "max_quote_tokens": {
             "type": "integer",
@@ -1392,6 +1529,10 @@ KB_RETRIEVE_INPUT_SCHEMA = {
             "type": "integer",
             "default": KB_EVIDENCE_INTERNAL_FETCH_K,
             "description": "Internal search depth (default 60, max 150). Searches this many candidates to find the best quotes.",
+        },
+        "graph_enrichment": {
+            "type": "boolean",
+            "description": "Enable evidence-only structural graph expansion (default false for precision mode).",
         },
         "top_k": {
             "type": "integer",
@@ -2175,6 +2316,7 @@ async def kb_retrieve_evidence(
     max_quote_tokens: int = 80,
     include_context_tokens: int = 20,
     retrieval_depth: int = KB_EVIDENCE_INTERNAL_FETCH_K,
+    graph_enrichment: Optional[bool] = None,
     scope: Optional[dict[str, Any]] = None,
     filters: Optional[dict[str, Any]] = None,
     options: Optional[dict[str, Any]] = None,
@@ -2218,6 +2360,14 @@ async def kb_retrieve_evidence(
     evidence_options = dict(options or {})
     evidence_options.setdefault("max_per_doc", 5)  # allow depth within documents
 
+    if graph_enrichment is None:
+        graph_enrichment_enabled = _coerce_bool(
+            evidence_options.get("graph_enrichment"),
+            default=KB_EVIDENCE_GRAPH_EXPANSION_ENABLED,
+        )
+    else:
+        graph_enrichment_enabled = _coerce_bool(graph_enrichment, default=False)
+
     # ── Retrieval trace (always-on) ──────────────────────────────────
     trace = RetrievalTraceBuilder(trace_id=uuid4().hex, session_id=effective_session)
 
@@ -2249,8 +2399,13 @@ async def kb_retrieve_evidence(
     )
 
     # Trace: record signal pool state
+    signal_pool_active = bool(
+        search_metrics.get(
+            "signal_pool_used", search_metrics.get("signal_pool_enabled", False)
+        )
+    )
     trace.record_signal_pool(
-        enabled=bool(search_metrics.get("signal_pool_enabled")),
+        enabled=signal_pool_active,
         pool_size=int(search_metrics.get("signal_pool_size", 0)),
         slot_fills=search_metrics.get("signal_pool_slot_fills", {}),
         degraded=bool(search_metrics.get("signal_pool_degraded")),
@@ -2262,7 +2417,9 @@ async def kb_retrieve_evidence(
         instruction=search_metrics.get("reranker_instruction"),
         input_count=int(search_metrics.get("reranker_input_count", 0)),
         output_count=len(search_payload.get("results", [])),
-        latency_ms=search_metrics.get("rerank_time_ms", 0),
+        latency_ms=search_metrics.get(
+            "reranker_time_ms", search_metrics.get("rerank_time_ms", 0)
+        ),
         top_results=[
             {
                 "chunk_id": r.get("section_id", ""),
@@ -2301,19 +2458,21 @@ async def kb_retrieve_evidence(
                 "parent_path_norm"
             )
 
-    # Always-on graph enrichment: expand top passages with structural neighbors
+    # Optional graph enrichment: expand top passages with structural neighbors
     section_ids = [
         item["section_id"]
         for item in search_payload["results"]
         if item.get("section_id")
     ]
-    graph_passage_ids = await _expand_evidence_with_structure(
-        section_ids=section_ids,
-        deps=deps,
-        effective_session=effective_session,
-    )
+    graph_passage_ids: list[str] = []
+    if graph_enrichment_enabled:
+        graph_passage_ids = await _expand_evidence_with_structure(
+            section_ids=section_ids,
+            deps=deps,
+            effective_session=effective_session,
+        )
     passage_ids.extend(graph_passage_ids)
-    graph_expansion_applied = len(graph_passage_ids) > 0
+    graph_expansion_applied = graph_enrichment_enabled and len(graph_passage_ids) > 0
 
     # Trace: record RELATED_TO expansion
     trace.record_related_to_expansion(
@@ -2327,7 +2486,7 @@ async def kb_retrieve_evidence(
 
     # Trace: record graph enrichment
     trace.record_graph_enrichment(
-        seeds=min(10, len(section_ids)),
+        seeds=min(10, len(section_ids)) if graph_enrichment_enabled else 0,
         neighbors_added=len(graph_passage_ids),
         neighbor_details=[],  # detail populated if we add tracking to _expand_evidence
     )
@@ -2351,7 +2510,7 @@ async def kb_retrieve_evidence(
         "documents_with_evidence": len(docs_with_evidence),
         "retrieval_depth": len(search_results),
         "reranker_applied": bool(search_metrics.get("reranker_applied")),
-        "signal_pool_active": bool(search_metrics.get("signal_pool_enabled")),
+        "signal_pool_active": signal_pool_active,
         "graph_expansion_applied": graph_expansion_applied,
     }
 
