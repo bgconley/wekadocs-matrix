@@ -2,7 +2,13 @@
 
 import pytest
 
-from src.query.query_intent import classify_query_intent
+from src.query.query_intent import (
+    SIZING_ANCHORS,
+    SIZING_MODIFIERS,
+    SUBSYSTEM_ANCHORS,
+    SUBSYSTEM_MODIFIERS,
+    classify_query_intent,
+)
 
 
 class TestSubsystemArchitecture:
@@ -168,3 +174,107 @@ class TestRegressionQueries:
         assert "size" in intent.sizing_terms or "sizing" in intent.sizing_terms
         assert "drives" in intent.sizing_terms
         assert "compute" in intent.sizing_terms
+
+
+class TestAnchorModifierSplit:
+    """Phase A2: Anchor/modifier partitioning for precision intents."""
+
+    def test_metadata_managed_split(self):
+        intent = classify_query_intent("how is metadata managed")
+        assert intent.primary_anchors == ("metadata",)
+        assert intent.generic_modifiers == ("managed",)
+
+    def test_drives_compute_frontend_sizing(self):
+        intent = classify_query_intent("WEKA drives compute frontend sizing")
+        assert "drives" in intent.primary_anchors
+        assert "compute" in intent.primary_anchors
+        assert "frontend" in intent.primary_anchors
+        assert "sizing" in intent.generic_modifiers
+
+    def test_subsystem_anchors_are_subset_of_terms(self):
+        intent = classify_query_intent(
+            "how is metadata managed and architected on a weka cluster"
+        )
+        for a in intent.primary_anchors:
+            assert a in intent.subsystem_terms
+        for m in intent.generic_modifiers:
+            assert m in intent.subsystem_terms
+
+    def test_sizing_anchors_are_subset_of_terms(self):
+        intent = classify_query_intent(
+            "How do I appropriately size the weka drives, compute, and frontends containers?"
+        )
+        for a in intent.primary_anchors:
+            assert a in intent.sizing_terms
+        for m in intent.generic_modifiers:
+            assert m in intent.sizing_terms
+
+    def test_empty_anchors_for_modifiers_only(self):
+        """A query with only modifier terms still classifies but has empty anchors."""
+        intent = classify_query_intent("WEKA architecture internals backend")
+        assert intent.query_type == "subsystem_architecture"
+        # "architecture", "internals", "backend" are all modifiers
+        assert len(intent.generic_modifiers) >= 1
+        # Some terms are modifiers, but primary_anchors may still be empty
+
+    def test_non_precision_query_has_empty_anchors(self):
+        intent = classify_query_intent("how to install WEKA cluster")
+        assert intent.primary_anchors == ()
+        assert intent.generic_modifiers == ()
+
+    def test_anchor_modifier_sets_disjoint(self):
+        """Anchor and modifier sets should not overlap."""
+        assert not (SUBSYSTEM_ANCHORS & SUBSYSTEM_MODIFIERS)
+        assert not (SIZING_ANCHORS & SIZING_MODIFIERS)
+
+    def test_tiering_is_anchor_not_modifier(self):
+        intent = classify_query_intent("WEKA tiering architecture")
+        assert "tiering" in intent.primary_anchors
+        assert "architecture" in intent.generic_modifiers
+
+    def test_snapshots_limitations(self):
+        intent = classify_query_intent("WEKA snapshots limitations")
+        assert "snapshots" in intent.primary_anchors
+        assert "limitations" in intent.generic_modifiers
+
+    def test_ram_cpu_cores_are_sizing_anchors(self):
+        intent = classify_query_intent("WEKA ram cpu cores capacity")
+        assert "ram" in intent.primary_anchors
+        assert "cpu" in intent.primary_anchors
+        assert "cores" in intent.primary_anchors
+        assert "capacity" in intent.generic_modifiers
+
+
+class TestWordBoundaryMatching:
+    """Regression: short terms like 'ram', 'cpu', 'size' must not match
+    inside unrelated words like 'program', 'diagram', 'resize'."""
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "program overview",
+            "How to program WEKA",
+            "diagram of system",
+            "dramatic changes to WEKA",
+            "resize the window",
+        ],
+    )
+    def test_short_terms_no_false_positive(self, query):
+        intent = classify_query_intent(query)
+        assert (
+            intent.query_type != "resource_sizing"
+        ), f"{query!r} falsely classified as resource_sizing"
+        assert len(intent.sizing_terms) == 0
+
+    @pytest.mark.parametrize(
+        "query,expected_term",
+        [
+            ("WEKA ram requirements", "ram"),
+            ("how much cpu for containers", "cpu"),
+            ("appropriately size the weka drives", "size"),
+        ],
+    )
+    def test_short_terms_true_positive(self, query, expected_term):
+        intent = classify_query_intent(query)
+        assert intent.query_type == "resource_sizing"
+        assert expected_term in intent.sizing_terms

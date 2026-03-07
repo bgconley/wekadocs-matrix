@@ -272,3 +272,79 @@ class TestBackfill:
         result = build_signal_pool(chunks, [], config)
         assert len(result.pool) == 10
         assert result.slot_fills.get("backfill", 0) > 0
+
+
+class TestSignalPoolOrdering:
+    """Phase A1: Signal pool from full fusion output preserves sparse/title diversity."""
+
+    def test_sparse_slots_filled_from_full_input(self):
+        """When signal pool sees full fusion (200+ candidates), sparse-strong
+        chunks that ColBERT would have dropped are preserved."""
+        config = SignalPoolConfig(
+            enabled=True,
+            pool_size=60,
+            consensus_slots=10,
+            text_sparse_slots=10,
+            title_sparse_slots=5,
+        )
+        # Simulate: 200 candidates, first 60 have high fused scores,
+        # candidates 100-110 have high sparse scores but low fused
+        chunks = []
+        for i in range(200):
+            chunks.append(
+                _make_chunk(
+                    f"c{i}",
+                    fused_score=max(0.01, 1.0 - i * 0.005),
+                    vector_score=0.3,
+                    title_vec_score=0.1,
+                    lexical_vec_score=(
+                        (0.95 - (i - 100) * 0.01) if 100 <= i < 110 else 0.05
+                    ),
+                )
+            )
+        result = build_signal_pool(chunks, [], config)
+        pool_ids = {c.chunk_id for c in result.pool}
+        # Sparse-strong chunks from positions 100-109 should be pulled into pool
+        sparse_rescued = sum(1 for i in range(100, 110) if f"c{i}" in pool_ids)
+        assert (
+            sparse_rescued > 0
+        ), "Sparse-strong chunks should be rescued by signal pool"
+        assert result.slot_fills.get("text_sparse", 0) > 0
+
+    def test_colbert_truncated_input_loses_sparse(self):
+        """Demonstrates the problem: if signal pool sees only top 60 (ColBERT-truncated),
+        sparse-strong chunks at positions 100+ are lost."""
+        config = SignalPoolConfig(
+            enabled=True,
+            pool_size=60,
+            consensus_slots=10,
+            text_sparse_slots=10,
+        )
+        # Only the top 60 by fused_score (simulating ColBERT truncation)
+        chunks = []
+        for i in range(60):
+            chunks.append(
+                _make_chunk(
+                    f"c{i}",
+                    fused_score=1.0 - i * 0.005,
+                    vector_score=0.3,
+                    title_vec_score=0.1,
+                    lexical_vec_score=0.05,  # All low sparse
+                )
+            )
+        result = build_signal_pool(chunks, [], config)
+        # With no high-sparse candidates in the truncated pool, text_sparse fills should be minimal
+        # (only chunks with lexical_vec_score > 0 fill, but all are 0.05)
+        assert (
+            result.slot_fills.get("text_sparse", 0) <= 10
+        )  # Can fill but with weak candidates
+
+    def test_pool_size_matches_full_input(self):
+        """Pool built from full fusion should have same size as configured."""
+        config = SignalPoolConfig(enabled=True, pool_size=60, consensus_slots=20)
+        chunks = [
+            _make_chunk(f"c{i}", fused_score=0.5, title_vec_score=0.1)
+            for i in range(200)
+        ]
+        result = build_signal_pool(chunks, [], config)
+        assert len(result.pool) == 60

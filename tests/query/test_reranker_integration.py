@@ -1,6 +1,8 @@
 import types
 
-from src.query.hybrid_retrieval import ChunkResult, HybridRetriever
+from src.query.hybrid_retrieval import ChunkResult, FusionMethod, HybridRetriever
+from src.query.query_intent import QueryIntent
+from src.shared.config import SignalPoolConfig
 
 
 class FakeRerankProvider:
@@ -31,7 +33,7 @@ class DummyTokenizer:
         return len(text.split())
 
 
-def _bootstrap_retriever(reranker_enabled=True):
+def _bootstrap_retriever(reranker_enabled=True, focused_rerank_text=False):
     hr = object.__new__(HybridRetriever)
     hr.tokenizer = DummyTokenizer()
     hr.reranker_config = types.SimpleNamespace(enabled=reranker_enabled, top_n=2)
@@ -39,6 +41,11 @@ def _bootstrap_retriever(reranker_enabled=True):
     hr.rerank_top_n = 2 if reranker_enabled else 0
     hr._reranker = None
     hr._reranker_available = True
+    hr.config = types.SimpleNamespace(
+        feature_flags=types.SimpleNamespace(
+            precision_focused_rerank_text=focused_rerank_text,
+        )
+    )
     return hr
 
 
@@ -386,3 +393,404 @@ def test_health_check_returns_false_on_connection_error(monkeypatch):
 
     monkeypatch.setattr(provider._client, "get", fake_get)
     assert provider.health_check() is False
+
+
+# ---------------------------------------------------------------------------
+# Phase A3: Focused reranker text tests
+# ---------------------------------------------------------------------------
+
+
+def _precision_intent(anchors=("metadata",)):
+    """Create a precision QueryIntent for testing."""
+    return QueryIntent(
+        query_type="subsystem_architecture",
+        precision_mode=True,
+        subsystem_terms=anchors,
+        primary_anchors=anchors,
+        generic_modifiers=("managed",),
+    )
+
+
+def test_focused_text_extracts_anchor_lines(monkeypatch):
+    """Focused text should only include lines with anchor terms + ±1 context."""
+    hr = _bootstrap_retriever(reranker_enabled=True, focused_rerank_text=True)
+    fake = FakeRerankProvider()
+    monkeypatch.setattr(hr, "_reranker", fake)
+
+    body = (
+        "Line 0: general overview\n"
+        "Line 1: cluster architecture\n"
+        "Line 2: metadata management details\n"
+        "Line 3: more metadata info\n"
+        "Line 4: unrelated content\n"
+        "Line 5: deployment guide"
+    )
+    chunk = _chunk("a", body, 0.5)
+    chunk.heading = "Architecture Overview"
+    chunk.parent_path_norm = "Internals > WEKA"
+    metrics = {}
+
+    hr._apply_reranker(
+        "metadata query",
+        [chunk],
+        metrics,
+        query_type="subsystem_architecture",
+        intent=_precision_intent(("metadata",)),
+    )
+
+    text = fake.last_candidates[0]["text"]
+    # Should include lines 1-4 (lines 2,3 match + ±1 context) but not line 0 or 5
+    assert "metadata management details" in text
+    assert "more metadata info" in text
+    assert "cluster architecture" in text  # ±1 context for line 2
+    assert "unrelated content" in text  # ±1 context for line 3
+    assert "deployment guide" not in text  # line 5, outside window
+    # Structural context preserved
+    assert "Internals > WEKA" in text
+    assert "Architecture Overview" in text
+    assert metrics["precision_focused_rerank_text"] is True
+
+
+def test_focused_text_fallback_when_no_anchor_match(monkeypatch):
+    """When no anchor matches in body, fallback to heading + first 500 chars."""
+    hr = _bootstrap_retriever(reranker_enabled=True, focused_rerank_text=True)
+    fake = FakeRerankProvider()
+    monkeypatch.setattr(hr, "_reranker", fake)
+
+    body = "No relevant terms here. Just general content about clusters and deployment."
+    chunk = _chunk("a", body, 0.5)
+    chunk.heading = "Generic Heading"
+    chunk.parent_path_norm = "Path > To > Section"
+    metrics = {}
+
+    hr._apply_reranker(
+        "metadata query",
+        [chunk],
+        metrics,
+        query_type="subsystem_architecture",
+        intent=_precision_intent(("metadata",)),
+    )
+
+    text = fake.last_candidates[0]["text"]
+    assert "Generic Heading" in text
+    assert "No relevant terms here" in text
+    assert metrics["focused_rerank_text_fallback_count"] == 1
+
+
+def test_non_precision_intent_gets_full_text(monkeypatch):
+    """Non-precision intents should get the full text, not focused windows."""
+    hr = _bootstrap_retriever(reranker_enabled=True, focused_rerank_text=True)
+    fake = FakeRerankProvider()
+    monkeypatch.setattr(hr, "_reranker", fake)
+
+    body = (
+        "Line 0: general overview\n"
+        "Line 1: cluster architecture\n"
+        "Line 2: deployment guide"
+    )
+    chunk = _chunk("a", body, 0.5)
+    chunk.heading = "Heading"
+    chunk.parent_path_norm = "Path"
+    metrics = {}
+
+    # Non-precision intent
+    non_precision = QueryIntent(query_type="conceptual")
+    hr._apply_reranker(
+        "query",
+        [chunk],
+        metrics,
+        query_type="conceptual",
+        intent=non_precision,
+    )
+
+    text = fake.last_candidates[0]["text"]
+    # All lines should be present (full text mode)
+    assert "general overview" in text
+    assert "cluster architecture" in text
+    assert "deployment guide" in text
+    assert metrics["precision_focused_rerank_text"] is False
+
+
+def test_focused_text_flag_off_uses_full_text(monkeypatch):
+    """When flag is False, precision intents still get full text."""
+    hr = _bootstrap_retriever(reranker_enabled=True, focused_rerank_text=False)
+    fake = FakeRerankProvider()
+    monkeypatch.setattr(hr, "_reranker", fake)
+
+    body = (
+        "Line 0: general overview\n"
+        "Line 1: metadata content\n"
+        "Line 2: deployment guide"
+    )
+    chunk = _chunk("a", body, 0.5)
+    chunk.heading = "Heading"
+    chunk.parent_path_norm = "Path"
+    metrics = {}
+
+    hr._apply_reranker(
+        "metadata query",
+        [chunk],
+        metrics,
+        query_type="subsystem_architecture",
+        intent=_precision_intent(("metadata",)),
+    )
+
+    text = fake.last_candidates[0]["text"]
+    # Full text should be present because flag is off
+    assert "general overview" in text
+    assert "metadata content" in text
+    assert "deployment guide" in text
+    assert metrics["precision_focused_rerank_text"] is False
+
+
+def test_focused_text_preserves_table_lines(monkeypatch):
+    """Table lines (with pipes) should be preserved unchanged in focused windows."""
+    hr = _bootstrap_retriever(reranker_enabled=True, focused_rerank_text=True)
+    fake = FakeRerankProvider()
+    monkeypatch.setattr(hr, "_reranker", fake)
+
+    body = (
+        "| Column A | Column B |\n"
+        "|----------|----------|\n"
+        "| metadata | 128 KB   |\n"
+        "| other    | 256 KB   |\n"
+        "Unrelated paragraph."
+    )
+    chunk = _chunk("a", body, 0.5)
+    chunk.heading = "Resource Table"
+    chunk.parent_path_norm = ""
+    metrics = {}
+
+    hr._apply_reranker(
+        "metadata query",
+        [chunk],
+        metrics,
+        query_type="subsystem_architecture",
+        intent=_precision_intent(("metadata",)),
+    )
+
+    text = fake.last_candidates[0]["text"]
+    # _clean_text collapses whitespace, so extra spaces in table cells are reduced
+    assert "| metadata | 128 KB |" in text
+    assert "|----------|----------|" in text  # context line
+
+
+def test_focused_text_no_anchors_uses_full_text(monkeypatch):
+    """When intent has no primary_anchors, full text is used even with flag on."""
+    hr = _bootstrap_retriever(reranker_enabled=True, focused_rerank_text=True)
+    fake = FakeRerankProvider()
+    monkeypatch.setattr(hr, "_reranker", fake)
+
+    body = "Some content about architecture and internals."
+    chunk = _chunk("a", body, 0.5)
+    chunk.heading = "Heading"
+    chunk.parent_path_norm = "Path"
+    metrics = {}
+
+    no_anchor_intent = QueryIntent(
+        query_type="subsystem_architecture",
+        precision_mode=True,
+        subsystem_terms=("architecture", "internals"),
+        primary_anchors=(),  # No anchors
+        generic_modifiers=("architecture", "internals"),
+    )
+
+    hr._apply_reranker(
+        "query",
+        [chunk],
+        metrics,
+        query_type="subsystem_architecture",
+        intent=no_anchor_intent,
+    )
+
+    text = fake.last_candidates[0]["text"]
+    assert "Some content about architecture and internals" in text
+    assert (
+        metrics["precision_focused_rerank_text"] is False
+    )  # Disabled due to empty anchors
+
+
+# ---------------------------------------------------------------------------
+# Fix 2 regression: pool_before_colbert + reranker disabled must use pool output
+# ---------------------------------------------------------------------------
+
+
+def test_pool_before_colbert_reranker_disabled_uses_pool_output(monkeypatch):
+    """When signal_pool_before_colbert=True and the cross-encoder reranker is
+    disabled, the final seeds must come from the signal-pool output (via
+    best_available), not from raw fused_results.
+
+    Before the fix, retrieve() discarded pool + ColBERT work and fell back
+    to fused_results[:top_k].
+    """
+    hr = object.__new__(HybridRetriever)
+
+    # --- Config ---
+    hr.config = types.SimpleNamespace(
+        feature_flags=types.SimpleNamespace(
+            signal_pool_before_colbert=True,
+            precision_focused_rerank_text=False,
+            structure_aware_expansion=False,
+            graph_as_reranker=False,
+            query_api_weighted_fusion=False,
+            dedup_best_score=False,
+            signal_diverse_rerank_pool=True,
+        ),
+        ner=types.SimpleNamespace(enabled=False),
+        monitoring=types.SimpleNamespace(
+            metrics_aggregation_enabled=False,
+            slo_monitoring_enabled=False,
+        ),
+    )
+    hr.embedding_settings = None
+
+    # --- Signal pool: consensus_slots=3 + text_sparse_slots=2 ---
+    # The pool will pick 3 by fused_score + 2 by sparse score,
+    # creating output that DIFFERS from raw fused_results[:5].
+    # All other slot types zeroed to prevent them filling before sparse.
+    hr._signal_pool_enabled = True
+    hr._signal_pool_config = SignalPoolConfig(
+        enabled=True,
+        pool_size=5,
+        consensus_slots=3,
+        content_dense_slots=0,
+        title_dense_slots=0,
+        doc_title_dense_slots=0,
+        text_sparse_slots=2,
+        entity_sparse_slots=0,
+        title_sparse_slots=0,
+        structural_slots=0,
+        related_to_slots=0,
+        per_doc_depth_slots=0,
+    )
+
+    # --- Reranker: DISABLED (the scenario under test) ---
+    hr._reranker_enabled = False
+    hr.reranker_config = types.SimpleNamespace(enabled=False, top_n=0)
+    hr._reranker = None
+    hr._reranker_available = False
+    hr.rerank_top_n = 0
+
+    # --- ColBERT: disabled (simplifies path; pool alone is enough) ---
+    hr.colbert_rerank_enabled = False
+
+    # --- Skip everything we don't need ---
+    hr.hybrid_mode = "bge_reranker"  # skip BM25
+    hr.bm25_retriever = None
+    hr.fusion_method = FusionMethod.RRF
+    hr.rrf_k = 60
+    hr.fusion_alpha = 0.6
+    hr.graph_channel_enabled = False
+    hr.neo4j_disabled = True
+    hr.expansion_enabled = False
+    hr.expansion_query_min_tokens = 12
+    hr.expansion_score_delta_max = 0.02
+    hr.expansion_max_neighbors = 1
+    hr.expansion_sparse_threshold = 0.0
+    hr.expansion_rescoring_enabled = False
+    hr.max_sources_to_expand = 5
+    hr.microdoc_enabled = False
+    hr.namespace_mode = "none"
+    hr.context_max_tokens = 4000
+    hr.context_group_cap = 3
+    hr.graph_enabled = False
+    hr.graph_enrichment_enabled = False
+    hr._last_query_text = ""
+
+    # Create 10 chunks. Chunks 7 and 8 have HIGH sparse scores but LOW
+    # fused scores. The signal pool (consensus=3, text_sparse=2) will
+    # rescue them, producing a pool that differs from raw fused[:5].
+    #
+    # Pool output:  fused_0, fused_1, fused_2 (consensus) + fused_7, fused_8 (sparse)
+    # Raw fused[:5]: fused_0, fused_1, fused_2, fused_3, fused_4
+    #
+    # If the fix works, seeds contain fused_7/fused_8.
+    # If the fix is reverted, seeds contain fused_3/fused_4 instead.
+    fused_chunks = []
+    for i in range(10):
+        c = ChunkResult(
+            chunk_id=f"fused_{i}",
+            document_id="doc",
+            parent_section_id="sec",
+            order=i,
+            level=1,
+            heading=f"Heading {i}",
+            text=f"Body text for chunk {i}",
+            token_count=20,
+            fused_score=1.0 - i * 0.05,
+            vector_score=1.0 - i * 0.05,
+            title_vec_score=0.1,  # needed for per-field detection
+            lexical_vec_score=0.95 if i in (7, 8) else 0.01,
+        )
+        fused_chunks.append(c)
+
+    # --- Mock vector retriever ---
+    class FakeVecRetriever:
+        supports_colbert = False
+        schema_supports_colbert = False
+        rrf_field_weights = {"content": 1.0}
+        last_stats = {"path": "test", "duration_ms": 1.0}
+
+        def search(self, query, k, filters, **kwargs):
+            return list(fused_chunks)
+
+        def get_queried_vector_fields(self):
+            return ["content"]
+
+    hr.vector_retriever = FakeVecRetriever()
+
+    # --- Mock internal methods that we don't need ---
+    hr._normalize_filters = lambda filters, caller=None: filters or {}
+    hr._apply_structural_boost = lambda results, qt: 0
+    hr._hydrate_missing_citations = lambda results: None
+    hr._hydrate_parent_paths = lambda results: None
+    hr._dedup_results = lambda results: results
+    hr._annotate_coverage = lambda results: None
+    hr._apply_doc_continuity_boost = lambda results, alpha=0.12: results
+    hr._log_stage_snapshot = lambda label, results: None
+    hr._expand_with_structure = lambda q, seeds, tag, force=False: []
+    hr.tokenizer = DummyTokenizer()
+
+    def _passthrough_budget(results, starting_tokens=0):
+        tokens = starting_tokens + sum(c.token_count or 0 for c in results)
+        return results, tokens
+
+    hr._enforce_context_budget = _passthrough_budget
+
+    # --- Call retrieve() ---
+    results, metrics = hr.retrieve("general overview query", top_k=5)
+
+    # --- Assertions ---
+    # The signal pool was used
+    assert metrics.get("signal_pool_used") is True
+    assert metrics.get("signal_pool_before_colbert") is True
+    assert metrics.get("colbert_input_from_pool") is True
+
+    # Reranker was NOT applied
+    assert metrics.get("final_reranker_applied") is False
+
+    # The key regression check: seeds should come from the pool output,
+    # NOT from raw fused_results[:5].
+    #
+    # Pool output: fused_0-2 (consensus) + fused_7, fused_8 (sparse rescue)
+    # Raw fused[:5]: fused_0-4
+    #
+    # If fix works: fused_7 and/or fused_8 appear in results
+    # If fix reverted: only fused_0-4 appear (sparse chunks discarded)
+    result_ids = [r.chunk_id for r in results]
+    assert len(result_ids) == 5
+
+    # Consensus chunks should always be present
+    for i in range(3):
+        assert (
+            f"fused_{i}" in result_ids
+        ), f"fused_{i} should be in results (consensus slot)"
+
+    # THE CRITICAL CHECK: sparse-rescued chunks must survive into seeds.
+    # This fails if the fix is reverted (seeds would be fused_0-4, no fused_7/8).
+    sparse_rescued = [cid for cid in result_ids if cid in ("fused_7", "fused_8")]
+    assert len(sparse_rescued) > 0, (
+        f"Sparse-rescued chunks (fused_7, fused_8) missing from seeds. "
+        f"Got: {result_ids}. This indicates the pool output was discarded "
+        f"and raw fused_results were used instead."
+    )
