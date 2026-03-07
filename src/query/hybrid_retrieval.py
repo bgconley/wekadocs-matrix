@@ -2274,6 +2274,24 @@ class HybridRetriever:
         self.max_sources_to_expand = getattr(
             getattr(hybrid_config, "expansion", {}), "max_sources", 5
         )
+
+        # ── Resolve retrieval plan EARLY (before retriever construction) ──
+        # The plan owns use_weighted_fusion which feeds into the retriever.
+        from src.query.retrieval_plan import resolve_retrieval_plan
+
+        _profile_name = getattr(hybrid_config, "profile", None)
+        _ff = getattr(config, "feature_flags", None)
+        self._plan = resolve_retrieval_plan(_profile_name, hybrid_config, _ff)
+        logger.info(
+            "retrieval_plan_resolved",
+            profile=self._plan.profile.value,
+            plan={
+                f.name: getattr(self._plan, f.name)
+                for f in self._plan.__dataclass_fields__.values()
+                if f.name != "profile"
+            },
+        )
+
         self.vector_retriever = QdrantMultiVectorRetriever(
             qdrant_client,
             embedder,
@@ -2284,13 +2302,7 @@ class HybridRetriever:
             embedding_settings=self.embedding_settings,
             embedding_plan=self.embedding_plan,
             use_query_api=getattr(qdrant_vector_cfg, "use_query_api", False),
-            query_api_weighted_fusion=bool(
-                getattr(
-                    getattr(config, "feature_flags", None),
-                    "query_api_weighted_fusion",
-                    False,
-                )
-            ),
+            query_api_weighted_fusion=self._plan.use_weighted_fusion,
             multi_vector_fusion_method=getattr(
                 hybrid_config, "multi_vector_fusion_method", "weighted"
             ),
@@ -2720,11 +2732,7 @@ class HybridRetriever:
                 for record in result:
                     chunk_id = str(record["chunk_id"])
                     entity_count = float(record.get("entity_count") or 0.0)
-                    if getattr(
-                        getattr(self.config, "feature_flags", None),
-                        "graph_score_normalized",
-                        False,
-                    ):
+                    if self._plan.graph_score_normalized_on:
                         score = 1.0 - math.exp(-entity_count / 3.0)
                     else:
                         score = max(1.0, entity_count)
@@ -2849,12 +2857,9 @@ class HybridRetriever:
         if not seed_doc_ids or self.neo4j_disabled:
             return {}
 
+        # Gate absorbed by plan (use_related_to_expansion). Caller checks plan.
         refs_cfg = getattr(self.config, "references", None)
         refs_query_cfg = getattr(refs_cfg, "query", None) if refs_cfg else None
-        if refs_query_cfg and not getattr(
-            refs_query_cfg, "enable_related_to_signals", True
-        ):
-            return {}
 
         min_edge_score = (
             getattr(refs_query_cfg, "related_to_min_edge_score", 0.025)
@@ -2932,12 +2937,9 @@ class HybridRetriever:
         4. Annotate each chunk with related_to_* scores
         5. Merge + dedup into fused_results
         """
+        # Gate absorbed by plan (use_related_to_expansion). Caller checks plan.
         refs_cfg = getattr(self.config, "references", None)
         refs_query_cfg = getattr(refs_cfg, "query", None) if refs_cfg else None
-        if refs_query_cfg and not getattr(
-            refs_query_cfg, "enable_related_to_signals", True
-        ):
-            return fused_results
 
         seed_docs_limit = (
             getattr(refs_query_cfg, "related_to_seed_docs", 5) if refs_query_cfg else 5
@@ -3031,6 +3033,68 @@ class HybridRetriever:
 
         return fused_results
 
+    # ── Standalone RELATED_TO blending (extracted from _apply_graph_reranker) ──
+
+    # Per-type scaling factors for RELATED_TO blending lambda.
+    # 1.0 = full base_lambda, 0.0 = disabled.
+    _RELATED_TO_SCALE = {
+        "conceptual": 1.0,
+        "config": 1.0,
+        "procedural": 0.67,
+        "troubleshooting": 0.67,
+        "reference": 0.67,
+        "cli": 0.0,  # CLI queries unaffected
+    }
+
+    def _blend_related_to_scores(
+        self,
+        fused_results: List[ChunkResult],
+        query_type: str,
+        metrics: Dict[str, Any],
+    ) -> None:
+        """Blend RELATED_TO scores into fused_score for related-doc chunks.
+
+        Standalone step extracted from _apply_graph_reranker to decouple
+        RELATED_TO blending from the entity graph channel gate.
+
+        Modifies fused_results in-place.
+        """
+        refs_cfg = getattr(self.config, "references", None)
+        refs_query_cfg = getattr(refs_cfg, "query", None) if refs_cfg else None
+
+        base_lambda = (
+            getattr(refs_query_cfg, "related_to_weight_ratio", 0.15)
+            if refs_query_cfg
+            else 0.15
+        )
+        related_to_lambda = base_lambda * self._RELATED_TO_SCALE.get(query_type, 0.67)
+
+        if related_to_lambda <= 0:
+            metrics["related_to_blend_lambda"] = 0.0
+            metrics["related_to_blend_count"] = 0
+            return
+
+        related_to_blended = 0
+        for r in fused_results:
+            related = r.related_to_score or 0.0
+            if related > 0:
+                base_fused = r.fused_score or 0.0
+                r.fused_score = (
+                    1 - related_to_lambda
+                ) * base_fused + related_to_lambda * related
+                related_to_blended += 1
+
+        metrics["related_to_blend_lambda"] = related_to_lambda
+        metrics["related_to_blend_count"] = related_to_blended
+
+        if related_to_blended > 0:
+            logger.info(
+                "related_to_blending_applied",
+                query_type=query_type,
+                blend_lambda=round(related_to_lambda, 4),
+                chunks_blended=related_to_blended,
+            )
+
     def _apply_graph_reranker(
         self,
         query: str,
@@ -3077,9 +3141,7 @@ class HybridRetriever:
             # Extract entities for traditional entity-based graph signals
             extractor = self._get_entity_extractor()
             entities = extractor.extract_entities(query)
-        if getattr(
-            getattr(self.config, "feature_flags", None), "graph_garbage_filter", False
-        ):
+        if self._plan.graph_garbage_filter_on:
             entities = [
                 e
                 for e in entities
@@ -3119,9 +3181,8 @@ class HybridRetriever:
             )
         stats["graph_channel_candidates"] = len(graph_signals)
 
-        # Fix #4: If neither entity signals nor cross-doc signals exist, check RELATED_TO
-        has_related_to = any((r.related_to_score or 0.0) > 0 for r in vector_results)
-        if not graph_signals and not cross_doc_signals and not has_related_to:
+        # If neither entity signals nor cross-doc signals exist, nothing to blend
+        if not graph_signals and not cross_doc_signals:
             return stats
 
         w_vec, w_graph = self._get_query_type_weights(qtype)
@@ -3136,24 +3197,6 @@ class HybridRetriever:
         )
         w_entity = w_graph * (1.0 - cross_doc_ratio)
         w_cross_doc = w_graph * cross_doc_ratio
-
-        # RELATED_TO blending: config-driven base λ scaled per query type
-        base_lambda = (
-            getattr(refs_query_cfg, "related_to_weight_ratio", 0.15)
-            if refs_query_cfg
-            else 0.15
-        )
-        # Per-type scaling factors (1.0 = full base_lambda, 0.0 = disabled)
-        RELATED_TO_SCALE = {
-            "conceptual": 1.0,
-            "config": 1.0,
-            "procedural": 0.67,
-            "troubleshooting": 0.67,
-            "reference": 0.67,
-            "cli": 0.0,  # CLI queries unaffected
-        }
-        related_to_lambda = base_lambda * RELATED_TO_SCALE.get(qtype, 0.67)
-        related_to_blended = 0
 
         # Track pre-rerank positions to compute delta
         pre_ranks = {str(r.chunk_id): idx for idx, r in enumerate(vector_results)}
@@ -3181,14 +3224,8 @@ class HybridRetriever:
             else:
                 r.fused_score = base_fused
 
-            # RELATED_TO blending: boost chunks from related documents
-            related = r.related_to_score or 0.0
-            if related > 0 and related_to_lambda > 0:
-                base_fused = r.fused_score or 0.0
-                r.fused_score = (
-                    1 - related_to_lambda
-                ) * base_fused + related_to_lambda * related
-                related_to_blended += 1
+            # NOTE: RELATED_TO blending removed — now a standalone step
+            # in _blend_related_to_scores(), called before signal pool.
 
         vector_results.sort(key=lambda x: x.fused_score or 0.0, reverse=True)
 
@@ -3204,8 +3241,6 @@ class HybridRetriever:
             avg_delta = 0.0
         stats["graph_reranker_applied"] = True
         stats["graph_rerank_avg_delta"] = avg_delta
-        stats["related_to_blended"] = related_to_blended
-        stats["related_to_lambda"] = related_to_lambda
         logger.info(
             "graph_reranker_applied",
             extra={
@@ -3214,8 +3249,6 @@ class HybridRetriever:
                 "entities": len(entities),
                 "graph_candidates": len(graph_signals),
                 "cross_doc_candidates": len(cross_doc_signals),
-                "related_to_blended": related_to_blended,
-                "related_to_lambda": related_to_lambda,
                 "avg_rank_delta": avg_delta,
             },
         )
@@ -3285,6 +3318,7 @@ class HybridRetriever:
             "signal_pool_degraded": False,
         }
         metrics["dual_query_active"] = lexical_query != query
+        metrics["retrieval_profile"] = self._plan.profile.value
         if self.embedding_settings:
             metrics["embedding_profile"] = self.embedding_settings.profile
             metrics["embedding_provider"] = self.embedding_settings.provider
@@ -3544,25 +3578,26 @@ class HybridRetriever:
         metrics["structural_boost_query_type"] = query_type
         metrics["structural_boosted_chunks"] = structural_boosted_count
 
-        # RELATED_TO expansion: fetch chunks from related documents
+        # RELATED_TO expansion + standalone blending (plan-gated)
         if not self.neo4j_disabled and fused_results:
-            fused_results = self._expand_from_related_docs(
-                fused_results=fused_results,
-                query=query,
-                lexical_query=lexical_query,
-                filters=normalized_filters,
-                doc_tag=doc_tag,
-                metrics=metrics,
-            )
+            if self._plan.use_related_to_expansion:
+                fused_results = self._expand_from_related_docs(
+                    fused_results=fused_results,
+                    query=query,
+                    lexical_query=lexical_query,
+                    filters=normalized_filters,
+                    doc_tag=doc_tag,
+                    metrics=metrics,
+                )
+            if self._plan.use_related_to_blending:
+                self._blend_related_to_scores(fused_results, query_type, metrics)
 
         # Optional graph retrieval channel (entity-anchored, cross-doc allowed)
         graph_channel_stats: Dict[str, Any] = {}
         graph_candidates: List[ChunkResult] = []  # Initialize for logging safety
-        graph_as_reranker_flag = getattr(
-            getattr(self.config, "feature_flags", None), "graph_as_reranker", False
-        )
-        # PHASE 1 VECTOR-ONLY: Skip ALL graph operations when neo4j_disabled
-        if self.graph_channel_enabled and not self.neo4j_disabled:
+        graph_as_reranker_flag = self._plan.use_graph_score_override
+        # Graph channel dispatch — plan-driven
+        if self._plan.use_entity_graph_channel and not self.neo4j_disabled:
             if graph_as_reranker_flag:
                 graph_channel_stats = self._apply_graph_reranker(
                     query, doc_tag, fused_results, metrics
@@ -3593,11 +3628,8 @@ class HybridRetriever:
             )
         metrics.update(graph_channel_stats)
 
-        # ── Feature flag: signal_pool_before_colbert ─────────────────
-        # When True, signal pool runs first (full fusion diversity), then
-        # ColBERT reorders the pool without truncation.
-        ff = getattr(self.config, "feature_flags", None)
-        pool_before_colbert = getattr(ff, "signal_pool_before_colbert", False)
+        # ── Signal pool ordering (plan-driven) ────────────────────
+        pool_before_colbert = self._plan.signal_pool_before_colbert
         metrics["signal_pool_before_colbert"] = pool_before_colbert
 
         # Helper: run ColBERT rerank on a candidate list
@@ -3653,14 +3685,14 @@ class HybridRetriever:
                 return candidates
 
         colbert_available = (
-            self.colbert_rerank_enabled
+            self._plan.use_colbert
             and self.vector_retriever.supports_colbert
             and bool(fused_results)
         )
 
         if (
             pool_before_colbert
-            and self._signal_pool_enabled
+            and self._plan.use_signal_pool
             and self._signal_pool_config
         ):
             # ── A1 path: signal pool FIRST, then ColBERT reorders pool ──
@@ -3723,7 +3755,7 @@ class HybridRetriever:
 
             if (
                 self._reranker_enabled
-                and self._signal_pool_enabled
+                and self._plan.use_signal_pool
                 and self._signal_pool_config
             ):
                 if not intent.precision_mode:
@@ -3795,9 +3827,7 @@ class HybridRetriever:
                 )
 
                 # Phase B1: post-rerank specificity adjustment
-                specificity_flag = getattr(
-                    ff, "precision_specificity_adjustment", False
-                )
+                specificity_flag = self._plan.use_specificity_adjustment
                 specificity_applied = False
                 specificity_adjustments = 0
                 if (
@@ -4576,10 +4606,9 @@ class HybridRetriever:
             instructions_by_type = getattr(cfg, "instructions_by_type", None) or {}
             per_call_instruction = instructions_by_type.get(query_type)
 
-        # Phase A3: Focused reranker text feature flag
-        ff = getattr(self.config, "feature_flags", None)
+        # Focused reranker text (plan-driven)
         use_focused_text = (
-            getattr(ff, "precision_focused_rerank_text", False)
+            self._plan.use_focused_rerank_text
             and intent is not None
             and intent.precision_mode
             and len(intent.primary_anchors) > 0
@@ -5227,12 +5256,8 @@ class HybridRetriever:
         if not seeds or self.neo4j_disabled:
             return []
 
-        # Check feature flag (bypass if force=True for signal pool pre-rerank)
-        if not force and not getattr(
-            getattr(self.config, "feature_flags", None),
-            "structure_aware_expansion",
-            False,
-        ):
+        # Check plan (bypass if force=True for signal pool pre-rerank)
+        if not force and not self._plan.use_structure_expansion:
             return []
 
         # Get config limits
@@ -5771,7 +5796,7 @@ class HybridRetriever:
             "graph_neighbors_added": 0,
         }
         # PHASE 1 VECTOR-ONLY: Skip graph enrichment when neo4j_disabled
-        if not self.graph_enabled or not seeds or self.neo4j_disabled:
+        if not self._plan.use_graph_enrichment or not seeds or self.neo4j_disabled:
             return [], stats
 
         neighbors = self._fetch_graph_neighbors(seeds, doc_tag=doc_tag)
@@ -5942,17 +5967,13 @@ class HybridRetriever:
             "graph_channel_candidates": 0,
             "graph_channel_entities": 0,
         }
-        # PHASE 1 VECTOR-ONLY: Skip graph channel when neo4j_disabled
-        if (
-            not (self.graph_channel_enabled and self.graph_enabled)
-            or self.neo4j_disabled
-        ):
+        # Decoupled: graph channel only requires its own plan flag + neo4j.
+        # No longer coupled to graph_enabled (enrichment).
+        if not self._plan.use_entity_graph_channel or self.neo4j_disabled:
             return [], stats
         extractor = self._get_entity_extractor()
         entities = extractor.extract_entities(query)
-        if getattr(
-            getattr(self.config, "feature_flags", None), "graph_garbage_filter", False
-        ):
+        if self._plan.graph_garbage_filter_on:
             entities = [
                 e
                 for e in entities
@@ -6017,23 +6038,14 @@ class HybridRetriever:
                     doc_tag=doc_tag,
                     limit=limit_per_entity,
                     rel_types=rels,
-                    use_rel_types=bool(
-                        getattr(
-                            getattr(self.config, "feature_flags", None),
-                            "graph_rel_types_wired",
-                            False,
-                        )
-                    ),
+                    # Always use query-type relationship sets when graph channel is active
+                    use_rel_types=self._plan.use_entity_graph_channel,
                 )
                 for record in result:
                     props = record["props"] or {}
                     chunk = self._chunk_from_props(props)
                     raw_matches = float(record.get("match_count") or 0.0)
-                    if getattr(
-                        getattr(self.config, "feature_flags", None),
-                        "graph_score_normalized",
-                        False,
-                    ):
+                    if self._plan.graph_score_normalized_on:
                         chunk.graph_score = 1.0 - math.exp(-raw_matches / 3.0)
                     else:
                         chunk.graph_score = max(1.0, raw_matches)
@@ -6085,7 +6097,7 @@ class HybridRetriever:
     ) -> List[ChunkResult]:
         """Fetch graph neighbors for the given seed chunks."""
         # PHASE 1 VECTOR-ONLY: Skip graph neighbors when neo4j_disabled
-        if not self.graph_enabled or self.neo4j_disabled:
+        if not self._plan.use_graph_enrichment or self.neo4j_disabled:
             return []
 
         seed_lookup = {seed.chunk_id: seed for seed in seeds if seed.chunk_id}

@@ -15,7 +15,7 @@ import re
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError, validator
@@ -521,6 +521,15 @@ class StructuralRetrievalConfig(BaseModel):
 
 
 class HybridSearchConfig(BaseModel):
+    # Retrieval profile: coherent preset replacing individual feature flags.
+    # None = legacy flag inference (exact current behavior).
+    profile: Optional[
+        Literal["vector_only", "precision_vector", "graph_assisted", "graph_full"]
+    ] = None
+    # Restricted overrides for specific plan fields when profile is set.
+    # Only "use_specificity_adjustment" and "use_graph_score_override" are allowed.
+    profile_overrides: Dict[str, bool] = Field(default_factory=dict)
+
     enabled: bool = True
     # Master switch: completely disable ALL Neo4j queries in retrieval path
     neo4j_disabled: bool = True  # PHASE 1 VECTOR-ONLY: bypass citation, coverage, graph
