@@ -1,5 +1,7 @@
 import types
 
+import pytest
+
 from src.query.hybrid_retrieval import ChunkResult, FusionMethod, HybridRetriever
 from src.query.query_intent import QueryIntent
 from src.shared.config import SignalPoolConfig
@@ -794,3 +796,120 @@ def test_pool_before_colbert_reranker_disabled_uses_pool_output(monkeypatch):
         f"Got: {result_ids}. This indicates the pool output was discarded "
         f"and raw fused_results were used instead."
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase B1: Post-rerank specificity adjustment tests
+# ---------------------------------------------------------------------------
+
+
+def test_specificity_anchor_bonus_breaks_tie():
+    """Chunks with anchor in heading should get a score bump."""
+    hr = _bootstrap_retriever(reranker_enabled=True)
+
+    # Two chunks tied at 9.375
+    c1 = _chunk("generic", "cluster architecture overview", 0.5)
+    c1.heading = "Converged configuration"
+    c1.parent_path_norm = "WEKA system overview"
+    c1.rerank_score = 9.375
+
+    c2 = _chunk("specific", "metadata management details", 0.4)
+    c2.heading = "Metadata management"
+    c2.parent_path_norm = "WEKA client and mount modes"
+    c2.rerank_score = 9.375
+
+    intent = _precision_intent(("metadata",))
+    metrics: dict = {}
+
+    applied, count = hr._apply_specificity_adjustment([c1, c2], intent, metrics)
+
+    assert applied is True
+    assert count >= 1
+    # c2 should now score higher than c1
+    assert c2.rerank_score > c1.rerank_score
+    # c1 unchanged (no anchor, no deploy cue)
+    assert c1.rerank_score == 9.375
+
+
+def test_specificity_deploy_penalty():
+    """Chunks with cloud/deploy cues in heading/path get penalized."""
+    hr = _bootstrap_retriever(reranker_enabled=True)
+
+    c1 = _chunk("cloud", "AWS deployment guide", 0.5)
+    c1.heading = "Slurm based architecture"
+    c1.parent_path_norm = "AWS ParallelCluster and WEKA"
+    c1.rerank_score = 9.375
+
+    c2 = _chunk("local", "metadata internals", 0.4)
+    c2.heading = "Metadata management"
+    c2.parent_path_norm = "WEKA system overview"
+    c2.rerank_score = 9.375
+
+    intent = _precision_intent(("metadata",))
+    metrics: dict = {}
+
+    hr._apply_specificity_adjustment([c1, c2], intent, metrics)
+
+    # c1 penalized (deploy cues: aws, parallelcluster, slurm)
+    assert c1.rerank_score < 9.375
+    # c2 boosted (anchor match)
+    assert c2.rerank_score > 9.375
+    # Gap should be anchor_bonus + deploy_penalty = 0.25
+    assert c2.rerank_score - c1.rerank_score == pytest.approx(0.25)
+
+
+def test_specificity_skipped_for_non_precision():
+    """Adjustment does nothing without precision_mode."""
+    hr = _bootstrap_retriever(reranker_enabled=True)
+
+    c1 = _chunk("a", "text", 0.5)
+    c1.heading = "Metadata stuff"
+    c1.rerank_score = 9.0
+
+    non_precision = QueryIntent(query_type="conceptual")
+    metrics: dict = {}
+
+    applied, count = hr._apply_specificity_adjustment([c1], non_precision, metrics)
+
+    # No anchors in non-precision intent → no adjustment
+    assert applied is False
+    assert c1.rerank_score == 9.0
+
+
+def test_specificity_skipped_when_no_anchors():
+    """No adjustment when intent has empty primary_anchors."""
+    hr = _bootstrap_retriever(reranker_enabled=True)
+
+    c1 = _chunk("a", "text", 0.5)
+    c1.heading = "Architecture overview"
+    c1.rerank_score = 9.0
+
+    intent = QueryIntent(
+        query_type="subsystem_architecture",
+        precision_mode=True,
+        primary_anchors=(),
+    )
+    metrics: dict = {}
+
+    applied, _ = hr._apply_specificity_adjustment([c1], intent, metrics)
+    assert applied is False
+    assert c1.rerank_score == 9.0
+
+
+def test_specificity_bounded_adjustment():
+    """Adjustment should be bounded — not flip scores by more than ±0.25."""
+    hr = _bootstrap_retriever(reranker_enabled=True)
+
+    # Chunk with both anchor match AND deploy cue (net: +0.15 - 0.10 = +0.05)
+    c1 = _chunk("mixed", "metadata on AWS", 0.5)
+    c1.heading = "Metadata on AWS deployment"
+    c1.parent_path_norm = ""
+    c1.rerank_score = 9.5
+
+    intent = _precision_intent(("metadata",))
+    metrics: dict = {}
+
+    hr._apply_specificity_adjustment([c1], intent, metrics)
+
+    # Net adjustment = +0.15 (anchor) - 0.10 (deploy) = +0.05
+    assert c1.rerank_score == pytest.approx(9.55)

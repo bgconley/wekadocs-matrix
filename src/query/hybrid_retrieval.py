@@ -3793,6 +3793,36 @@ class HybridRetriever:
                     ),
                     reverse=True,
                 )
+
+                # Phase B1: post-rerank specificity adjustment
+                specificity_flag = getattr(
+                    ff, "precision_specificity_adjustment", False
+                )
+                specificity_applied = False
+                specificity_adjustments = 0
+                if (
+                    specificity_flag
+                    and intent is not None
+                    and intent.precision_mode
+                    and not intent.has_cloud_cues
+                    and intent.primary_anchors
+                ):
+                    specificity_applied, specificity_adjustments = (
+                        self._apply_specificity_adjustment(
+                            ordered_candidates, intent, metrics
+                        )
+                    )
+                    if specificity_applied:
+                        ordered_candidates.sort(
+                            key=lambda chunk: (
+                                chunk.rerank_score or float("-inf"),
+                                chunk.fused_score or 0.0,
+                            ),
+                            reverse=True,
+                        )
+                metrics["precision_specificity_applied"] = specificity_applied
+                metrics["precision_specificity_adjustments"] = specificity_adjustments
+
                 seeds = ordered_candidates[:top_k]
 
                 # LGTM Phase 4: Verbose log event 7 - rerank_complete
@@ -3802,6 +3832,8 @@ class HybridRetriever:
                     output_count=len(seeds),
                     reranker_model=metrics.get("reranker_model", "unknown"),
                     rerank_time_ms=round(metrics.get("reranker_time_ms", 0), 2),
+                    specificity_applied=specificity_applied,
+                    specificity_adjustments=specificity_adjustments,
                     rerank_details=[
                         {
                             "chunk_id": r.chunk_id[:8],
@@ -4794,6 +4826,94 @@ class HybridRetriever:
             cfg, "instruction", None
         )
         return reranked_chunks
+
+    # ── Phase B1: Post-rerank specificity adjustment ──────────────
+
+    # Cloud/deploy cues to detect in heading + parent_path (not doc_tag).
+    # Broader than CLOUD_CUES — includes deployment-workflow terms that
+    # indicate the chunk is about cloud setup, not the subsystem itself.
+    _DEPLOY_CUES = frozenset(
+        {
+            "aws",
+            "azure",
+            "gcp",
+            "slurm",
+            "kubernetes",
+            "k8s",
+            "eks",
+            "aks",
+            "gke",
+            "terraform",
+            "cloudformation",
+            "parallelcluster",
+            "cyclecloud",
+            "sagemaker",
+            "deploy",
+            "deployment",
+            "installation",
+        }
+    )
+
+    def _apply_specificity_adjustment(
+        self,
+        candidates: List[ChunkResult],
+        intent: "QueryIntent",
+        metrics: Dict[str, Any],
+        *,
+        anchor_bonus: float = 0.15,
+        deploy_penalty: float = 0.10,
+    ) -> Tuple[bool, int]:
+        """Small tie-break adjustment after cross-encoder reranking.
+
+        For precision intents, nudges scores based on:
+        - Bonus: primary anchor term appears in heading or parent_path
+        - Penalty: cloud/deploy cue in heading or parent_path
+
+        Bounded to ±0.15 on a 9-10 scale: enough to break ties within
+        the reranker's score plateau, not enough to override a genuinely
+        higher-ranked chunk.
+
+        Returns (applied, adjustment_count).
+        """
+        if not intent.primary_anchors:
+            return False, 0
+
+        anchors_lower = [a.lower() for a in intent.primary_anchors]
+        adjustments = 0
+
+        for chunk in candidates:
+            if chunk.rerank_score is None:
+                continue
+
+            heading_lower = (chunk.heading or "").lower()
+            path_lower = (chunk.parent_path_norm or "").lower()
+            surface = heading_lower + " " + path_lower
+
+            delta = 0.0
+
+            # Anchor bonus: heading or path contains a primary anchor
+            if any(a in surface for a in anchors_lower):
+                delta += anchor_bonus
+
+            # Deploy penalty: heading or path contains cloud/deploy cues
+            if any(cue in surface for cue in self._DEPLOY_CUES):
+                delta -= deploy_penalty
+
+            if delta != 0.0:
+                chunk.rerank_score = chunk.rerank_score + delta
+                adjustments += 1
+
+        if adjustments > 0:
+            logger.info(
+                "specificity_adjustment_applied",
+                anchors=list(intent.primary_anchors),
+                adjustments=adjustments,
+                anchor_bonus=anchor_bonus,
+                deploy_penalty=deploy_penalty,
+                total_candidates=len(candidates),
+            )
+
+        return adjustments > 0, adjustments
 
     def _get_reranker(self) -> Optional[RerankProvider]:
         if not self.reranker_config or not getattr(
