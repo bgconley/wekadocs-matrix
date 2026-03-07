@@ -464,6 +464,14 @@ class RerankerConfig(BaseModel):
             "When set, prepended to the query for each (query, document) rerank pair."
         ),
     )
+    instructions_by_type: Optional[Dict[str, str]] = Field(
+        default=None,
+        description=(
+            "Per-query-type reranker instructions. Maps query_type string "
+            "to an instruction that overrides the default instruction field. "
+            "Used to give the cross-encoder type-specific relevance guidance."
+        ),
+    )
 
 
 class StructuralRetrievalConfig(BaseModel):

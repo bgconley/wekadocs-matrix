@@ -10,7 +10,7 @@ Reranking is applied post-ANN to refine candidate ordering using
 cross-attention or other sophisticated scoring mechanisms.
 """
 
-from typing import Dict, List, Protocol, runtime_checkable
+from typing import Dict, List, Optional, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -42,7 +42,14 @@ class RerankProvider(Protocol):
         """
         ...
 
-    def rerank(self, query: str, candidates: List[Dict], top_k: int = 10) -> List[Dict]:
+    def rerank(
+        self,
+        query: str,
+        candidates: List[Dict],
+        top_k: int = 10,
+        *,
+        instruction: Optional[str] = None
+    ) -> List[Dict]:
         """
         Rerank candidates based on relevance to query.
 
@@ -54,6 +61,9 @@ class RerankProvider(Protocol):
                 - 'id': Unique identifier
                 Additional fields are preserved.
             top_k: Number of top results to return after reranking
+            instruction: Optional per-call instruction that overrides the
+                provider's default instruction. Used for query-type-specific
+                relevance guidance.
 
         Returns:
             List of reranked candidates (top_k items), each with added fields:

@@ -106,6 +106,25 @@ DEFAULT_QUERY_TYPE_RRF_WEIGHTS: Dict[str, Dict[str, float]] = {
         "title-sparse": 1.0,  # Headings matter for reference lookups
         "entity-sparse": 0.8,
     },
+    # Subsystem architecture: SPLADE strongly captures internal terms;
+    # entity-sparse conservative until entity quality re-verified
+    "subsystem_architecture": {
+        "content": 1.0,
+        "title": 0.3,
+        "text-sparse": 2.5,
+        "doc_title-sparse": 0.3,
+        "title-sparse": 0.5,
+        "entity-sparse": 0.8,
+    },
+    # Resource sizing: sizing tables often in body text; doc titles useful
+    "resource_sizing": {
+        "content": 1.2,
+        "title": 0.4,
+        "text-sparse": 2.0,
+        "doc_title-sparse": 0.5,
+        "title-sparse": 0.8,
+        "entity-sparse": 0.8,
+    },
 }
 
 # Structural boost factors by query type
@@ -151,6 +170,22 @@ DEFAULT_STRUCTURAL_BOOSTS: Dict[str, Dict[str, float]] = {
         "has_table_boost": 1.05,
         "deep_nesting_penalty": 0.95,
         "max_depth_for_penalty": 3,
+    },
+    # Subsystem architecture: NO depth penalty — subsystem docs live deep in hierarchy.
+    # This is the critical fix: conceptual's 0.85 penalty at depth > 2 was suppressing
+    # the exact content we need for metadata/inode/tiering queries.
+    "subsystem_architecture": {
+        "has_code_boost": 1.05,
+        "has_table_boost": 1.10,
+        "deep_nesting_penalty": 1.0,  # NO PENALTY
+        "max_depth_for_penalty": 99,
+    },
+    # Resource sizing: tables are critical (sizing matrices, requirement tables)
+    "resource_sizing": {
+        "has_code_boost": 1.0,
+        "has_table_boost": 1.25,  # 25% boost for sizing tables
+        "deep_nesting_penalty": 1.0,  # NO PENALTY
+        "max_depth_for_penalty": 99,
     },
 }
 

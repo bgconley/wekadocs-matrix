@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, List, Optional
 from uuid import uuid4
 
 import mcp.types as types
@@ -945,6 +945,24 @@ def _infer_source(chunk: ChunkResult) -> str:
     return source
 
 
+def _infer_source_tags(chunk: ChunkResult) -> List[str]:
+    """Return all applicable source tags for diagnostics (non-exclusive)."""
+    tags: List[str] = []
+    graph_distance = getattr(chunk, "graph_distance", 0) or 0
+    graph_score = getattr(chunk, "graph_score", 0.0) or 0.0
+    if chunk.rerank_score is not None:
+        tags.append("reranked")
+    if graph_distance > 0 or graph_score > 0:
+        tags.append("graph_expanded")
+    if chunk.fusion_method == "rrf":
+        tags.append("rrf_fusion")
+    if chunk.vector_score is not None:
+        tags.append("vector")
+    if chunk.bm25_score is not None:
+        tags.append("bm25")
+    return tags if tags else ["hybrid"]
+
+
 def _diagnostic_results_from_chunks(chunks: list[ChunkResult]) -> list[dict[str, Any]]:
     results = []
     for idx, chunk in enumerate(chunks):
@@ -955,6 +973,7 @@ def _diagnostic_results_from_chunks(chunks: list[ChunkResult]) -> list[dict[str,
                 "doc_tag": chunk.doc_tag,
                 "token_count": chunk.token_count,
                 "source": _infer_source(chunk),
+                "source_tags": _infer_source_tags(chunk),
                 "scores": {
                     "bm25": float(chunk.bm25_score or 0.0),
                     "vector": float(chunk.vector_score or 0.0),
@@ -2491,6 +2510,33 @@ async def kb_retrieve_evidence(
         neighbor_details=[],  # detail populated if we add tracking to _expand_evidence
     )
 
+    # Trace: stage snapshots (pipeline observability)
+    stage_snapshots = {}
+    for key in (
+        "snapshot_post_fusion",
+        "snapshot_post_entity_boost",
+        "snapshot_post_structural_boost",
+        "snapshot_post_colbert",
+        "snapshot_post_reranker",
+    ):
+        if key in search_metrics:
+            stage_snapshots[key.replace("snapshot_", "")] = search_metrics[key]
+    if stage_snapshots:
+        trace.record_stage_snapshots(stage_snapshots)
+
+    # Trace: ColBERT observability
+    trace.record_colbert(
+        applied=bool(search_metrics.get("colbert_rerank_applied")),
+        runtime_available=bool(search_metrics.get("colbert_runtime_available", False)),
+        query_embedding_ok=bool(
+            search_metrics.get("colbert_query_embedding_ok", False)
+        ),
+        rank_deltas=search_metrics.get("colbert_rank_delta_top10"),
+        candidates=int(search_metrics.get("colbert_candidates", 0)),
+        hydrated=int(search_metrics.get("colbert_hydrated", 0)),
+        latency_ms=search_metrics.get("colbert_rerank_time_ms", 0),
+    )
+
     quotes = await _extract_evidence_from_passages(
         question=question,
         passage_ids=passage_ids,
@@ -2647,6 +2693,7 @@ async def search_sections(
                 "score": float(score),
                 "rank": offset + idx + 1,
                 "source": source,
+                "source_tags": _infer_source_tags(chunk),
                 # RRF fusion metadata - enables Agent to understand retrieval method
                 "fusion_method": chunk.fusion_method,
                 "fused_score": (

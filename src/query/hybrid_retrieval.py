@@ -52,6 +52,7 @@ from src.providers.settings import EmbeddingSettings
 from src.providers.tokenizer_service import TokenizerService
 from src.query.entity_extraction import EntityExtractor
 from src.query.processing.disambiguation import QueryAnalysis, QueryDisambiguator
+from src.query.query_intent import classify_query_intent
 from src.query.signal_pool import SignalPoolResult, build_signal_pool
 from src.query.structural_retrieval import StructuralRetrievalConfig as StructuralConfig
 from src.query.structural_retrieval import (
@@ -218,6 +219,19 @@ class ChunkResult:
         """Ensure required fields are populated."""
         if self.original_section_ids is None:
             self.original_section_ids = []
+
+
+def _snapshot_top(chunks: List["ChunkResult"], n: int = 20) -> List[Dict[str, Any]]:
+    """Capture a lightweight snapshot of the top N candidates for diagnostics."""
+    return [
+        {
+            "chunk_id": c.chunk_id,
+            "fused_score": round(c.fused_score or 0.0, 5),
+            "rerank_score": round(c.rerank_score or 0.0, 5) if c.rerank_score else None,
+            "doc_tag": c.doc_tag,
+        }
+        for c in chunks[:n]
+    ]
 
 
 def _deduplicate_entity_metadata(
@@ -2591,53 +2605,13 @@ class HybridRetriever:
         return normalized
 
     def _classify_query_type(self, query: str) -> str:
-        """Unified query classifier for adaptive retrieval behavior."""
-        q = (query or "").lower()
+        """Unified query classifier for adaptive retrieval behavior.
 
-        # CLI indicators (require multiple signals)
-        cli_signals = 0
-        cli_patterns = [
-            r"\bweka\s+\w+",
-            r"--[a-z][\w-]+",
-            r"\s-[a-z]\b",
-            r"\bcli\b",
-            r"\bcommand\b",
-            r"\brun\b.*\bcommand",
-        ]
-        for pat in cli_patterns:
-            if re.search(pat, q):
-                cli_signals += 1
-        if cli_signals >= 2:
-            return "cli"
-
-        # Config indicators
-        config_patterns = [
-            r"\w+\s*=\s*\w+",
-            r"\.ya?ml\b",
-            r"\.json\b",
-            r"\.conf\b",
-            r"\bconfig(ure|uration)?\b",
-            r"\bsetting\b",
-            r"\bparameter\b",
-            r"\benvironment\s+variable",
-        ]
-        if any(re.search(pat, q) for pat in config_patterns):
-            return "config"
-
-        # Procedural
-        if ("how to" in q) or ("steps to" in q) or ("configure" in q):
-            return "procedural"
-
-        # Troubleshooting
-        if ("error" in q) or ("failed" in q) or ("not working" in q):
-            return "troubleshooting"
-
-        # Reference
-        if ("what is" in q) or ("definition" in q) or ("meaning" in q):
-            return "reference"
-
-        # Default to conceptual
-        return "conceptual"
+        Delegates to query_intent.classify_query_intent() for the actual
+        classification logic. Returns just the string type for backward
+        compatibility with callers that only need the type string.
+        """
+        return classify_query_intent(query).query_type
 
     def _relationships_for_query(self, query: str) -> Tuple[List[str], int]:
         """Select relationship set and neighbor cap based on query type."""
@@ -3413,8 +3387,13 @@ class HybridRetriever:
         # Apply query-type-specific RRF field weights if adaptive weighting is enabled.
         # The query classifier determines the query type (conceptual, cli, config, etc.)
         # and get_query_type_rrf_weights() returns per-field weights tuned for that type.
-        query_type = self._classify_query_type(query)
+        intent = classify_query_intent(query)
+        query_type = intent.query_type
         metrics["query_type"] = query_type
+        metrics["query_intent_precision_mode"] = intent.precision_mode
+        metrics["query_intent_has_cloud_cues"] = intent.has_cloud_cues
+        metrics["query_intent_subsystem_terms"] = list(intent.subsystem_terms)
+        metrics["query_intent_sizing_terms"] = list(intent.sizing_terms)
         base_rrf_weights = dict(self.vector_retriever.rrf_field_weights)
         adaptive_weights = get_query_type_rrf_weights(
             query_type, base_weights=base_rrf_weights
@@ -3512,6 +3491,7 @@ class HybridRetriever:
         # Step 3: Take fused results as seeds and optionally rerank
         fused_results.sort(key=lambda x: x.fused_score or 0, reverse=True)
         self._log_stage_snapshot("post-fusion", fused_results)
+        metrics["snapshot_post_fusion"] = _snapshot_top(fused_results)
 
         # Phase 4: Apply GLiNER entity boosting (post-retrieval soft filtering)
         entity_boosted_count = 0
@@ -3521,6 +3501,7 @@ class HybridRetriever:
                 # Re-sort after boosting to reflect new scores
                 fused_results.sort(key=lambda x: x.fused_score or 0, reverse=True)
                 self._log_stage_snapshot("post-entity-boost", fused_results)
+                metrics["snapshot_post_entity_boost"] = _snapshot_top(fused_results)
 
             logger.info(
                 "entity_boost_complete",
@@ -3537,7 +3518,7 @@ class HybridRetriever:
         # Phase 5: Apply structural boosting based on query type
         # Uses markdown-it-py metadata (has_code, has_table, parent_path_depth)
         structural_boosted_count = 0
-        query_type = self._classify_query_type(query)
+        # query_type already computed above via classify_query_intent()
         if fused_results:
             structural_boosted_count = self._apply_structural_boost(
                 fused_results, query_type
@@ -3546,6 +3527,7 @@ class HybridRetriever:
                 # Re-sort after boosting to reflect new scores
                 fused_results.sort(key=lambda x: x.fused_score or 0, reverse=True)
                 self._log_stage_snapshot("post-structural-boost", fused_results)
+                metrics["snapshot_post_structural_boost"] = _snapshot_top(fused_results)
 
             logger.info(
                 "structural_boost_complete",
@@ -3643,6 +3625,13 @@ class HybridRetriever:
                 metrics["colbert_rerank_applied"] = True
                 metrics["colbert_candidates"] = len(fused_results)
                 metrics["colbert_rerank_time_ms"] = (time.time() - colbert_start) * 1000
+                metrics["colbert_runtime_available"] = True
+                metrics["colbert_query_embedding_ok"] = True
+                # Rank deltas: positive = moved up, negative = moved down
+                metrics["colbert_rank_delta_top10"] = [
+                    pre_rerank_order.get(r.chunk_id, idx) - idx
+                    for idx, r in enumerate(fused_results[:10])
+                ]
 
                 # LGTM Phase 4: Verbose log event 6 - colbert_rerank_complete
                 logger.info(
@@ -3663,25 +3652,43 @@ class HybridRetriever:
                         for idx, r in enumerate(fused_results[:10])
                     ],
                 )
+                metrics["snapshot_post_colbert"] = _snapshot_top(fused_results)
             else:
                 metrics["colbert_rerank_applied"] = False
+                metrics["colbert_runtime_available"] = (
+                    self.vector_retriever.supports_colbert
+                )
+                metrics["colbert_query_embedding_ok"] = (
+                    query_bundle is not None and query_bundle.multivector is not None
+                )
 
         reranker_active = False
         seeds: List[ChunkResult]
+        pre_rerank_structural: List[ChunkResult] = []
 
         if self._reranker_enabled and fused_results:
             # Build the rerank candidate pool
             if self._signal_pool_enabled and self._signal_pool_config:
-                # Signal-diverse pool: pre-rerank structural expansion + signal-aware selection
-                pre_rerank_structural: List[ChunkResult] = []
-                try:
-                    pre_rerank_structural = self._expand_with_structure(
-                        query, fused_results[:10], doc_tag, force=True
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "pre_rerank_structural_expansion_failed",
-                        extra={"error": str(e)},
+                # Signal-diverse pool: pre-rerank structural expansion + signal-aware selection.
+                # Precision-mode queries (subsystem_architecture, resource_sizing) skip
+                # structural expansion to avoid diluting the rerank pool with noisy
+                # neighbors. The cross-encoder is most effective when candidates are
+                # all semantically close to the query.
+                if not intent.precision_mode:
+                    try:
+                        pre_rerank_structural = self._expand_with_structure(
+                            query, fused_results[:10], doc_tag, force=True
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "pre_rerank_structural_expansion_failed",
+                            extra={"error": str(e)},
+                        )
+                else:
+                    logger.info(
+                        "pre_rerank_structural_expansion_skipped",
+                        query_type=intent.query_type,
+                        reason="precision_mode",
                     )
 
                 pool_result: SignalPoolResult = build_signal_pool(
@@ -3708,7 +3715,9 @@ class HybridRetriever:
 
             # Track pre-rerank order for rank change calculation
             pre_bge_order = {r.chunk_id: idx for idx, r in enumerate(rerank_candidates)}
-            ordered_candidates = self._apply_reranker(query, rerank_candidates, metrics)
+            ordered_candidates = self._apply_reranker(
+                query, rerank_candidates, metrics, query_type=query_type
+            )
             reranker_active = bool(metrics.get("reranker_applied"))
             if reranker_active:
                 ordered_candidates.sort(
@@ -3737,10 +3746,16 @@ class HybridRetriever:
                         for idx, r in enumerate(seeds[:10])
                     ],
                 )
+                metrics["snapshot_post_reranker"] = _snapshot_top(seeds)
             else:
                 seeds = fused_results[:top_k]
         else:
             seeds = fused_results[:top_k]
+
+        metrics["pre_rerank_structural_expansion_applied"] = (
+            len(pre_rerank_structural) > 0
+        )
+        metrics["final_reranker_applied"] = reranker_active
 
         # Hydrate vector-only winners with citation labels
         self._hydrate_missing_citations(seeds)
@@ -4426,7 +4441,12 @@ class HybridRetriever:
         chunk.citation_labels = final_labels
 
     def _apply_reranker(
-        self, query: str, seeds: List[ChunkResult], metrics: Dict[str, Any]
+        self,
+        query: str,
+        seeds: List[ChunkResult],
+        metrics: Dict[str, Any],
+        *,
+        query_type: Optional[str] = None,
     ) -> List[ChunkResult]:
         cfg = self.reranker_config
         metrics.setdefault("reranker_input_count", 0)
@@ -4441,6 +4461,12 @@ class HybridRetriever:
             metrics["reranker_applied"] = False
             metrics["reranker_reason"] = "not_available"
             return seeds
+
+        # Select per-query-type instruction if available
+        per_call_instruction: Optional[str] = None
+        if query_type and cfg:
+            instructions_by_type = getattr(cfg, "instructions_by_type", None) or {}
+            per_call_instruction = instructions_by_type.get(query_type)
 
         def _clean_text(text: str) -> str:
             # Remove simple HTML tags and known markup artifacts, collapse whitespace.
@@ -4533,7 +4559,10 @@ class HybridRetriever:
             for batch in batches:
                 batch_top_k = min(top_k, len(batch))
                 reranked_batch = reranker.rerank(
-                    query=query, candidates=batch, top_k=batch_top_k
+                    query=query,
+                    candidates=batch,
+                    top_k=batch_top_k,
+                    instruction=per_call_instruction,
                 )
                 reranked_payload.extend(reranked_batch)
             latency_ms = (time.time() - start_time) * 1000
@@ -4602,6 +4631,9 @@ class HybridRetriever:
         metrics["reranker_applied"] = True
         metrics["reranker_reason"] = "ok"
         metrics["reranker_model"] = reranker.model_id
+        metrics["reranker_instruction"] = per_call_instruction or getattr(
+            cfg, "instruction", None
+        )
         metrics["reranker_time_ms"] = latency_ms
         metrics["reranker_output_count"] = len(reranked_chunks)
         return reranked_chunks

@@ -9,7 +9,7 @@ class FakeRerankProvider:
         self.provider_name = "fake"
         self.last_candidates = None  # Capture for test inspection
 
-    def rerank(self, query, candidates, top_k=10):
+    def rerank(self, query, candidates, top_k=10, *, instruction=None):
         self.last_candidates = list(candidates)  # Capture input
         sliced = list(candidates[:top_k])
         for idx, cand in enumerate(sliced, start=1):
@@ -22,7 +22,7 @@ class FakeRerankProvider:
 
 
 class ErrorRerankProvider(FakeRerankProvider):
-    def rerank(self, query, candidates, top_k=10):
+    def rerank(self, query, candidates, top_k=10, *, instruction=None):
         raise RuntimeError("provider down")
 
 
@@ -164,3 +164,71 @@ def test_apply_reranker_without_parent_path_norm(monkeypatch):
     assert text.startswith("Bucket Settings")
     assert "Body content here" in text
     assert ">" not in text.split("\n")[0]  # No breadcrumb path
+
+
+def test_apply_reranker_passes_per_type_instruction(monkeypatch):
+    """Per-query-type instruction is passed to reranker.rerank()."""
+    import types
+
+    hr = _bootstrap_retriever(reranker_enabled=True)
+    hr.reranker_config = types.SimpleNamespace(
+        enabled=True,
+        top_n=2,
+        instruction="default instruction",
+        instructions_by_type={
+            "subsystem_architecture": "Special subsystem instruction"
+        },
+    )
+    fake = FakeRerankProvider()
+    captured = {}
+    _orig_rerank = fake.rerank
+
+    def capturing_rerank(query, candidates, top_k=10, *, instruction=None):
+        captured["instruction"] = instruction
+        return _orig_rerank(query, candidates, top_k)
+
+    fake.rerank = capturing_rerank
+    monkeypatch.setattr(hr, "_reranker", fake)
+
+    metrics = {}
+    hr._apply_reranker(
+        "query",
+        [_chunk("a", "text", 0.5)],
+        metrics,
+        query_type="subsystem_architecture",
+    )
+    assert captured["instruction"] == "Special subsystem instruction"
+    assert metrics["reranker_instruction"] == "Special subsystem instruction"
+
+
+def test_apply_reranker_falls_back_to_default_instruction(monkeypatch):
+    """When no per-type instruction, falls back to default config instruction."""
+    import types
+
+    hr = _bootstrap_retriever(reranker_enabled=True)
+    hr.reranker_config = types.SimpleNamespace(
+        enabled=True,
+        top_n=2,
+        instruction="default instruction",
+        instructions_by_type={"subsystem_architecture": "Special instruction"},
+    )
+    fake = FakeRerankProvider()
+    captured = {}
+    _orig_rerank = fake.rerank
+
+    def capturing_rerank(query, candidates, top_k=10, *, instruction=None):
+        captured["instruction"] = instruction
+        return _orig_rerank(query, candidates, top_k)
+
+    fake.rerank = capturing_rerank
+    monkeypatch.setattr(hr, "_reranker", fake)
+
+    metrics = {}
+    hr._apply_reranker(
+        "query",
+        [_chunk("a", "text", 0.5)],
+        metrics,
+        query_type="procedural",  # No per-type instruction for this type
+    )
+    assert captured["instruction"] is None  # No per-call override
+    assert metrics["reranker_instruction"] == "default instruction"  # Falls back

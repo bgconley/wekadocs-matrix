@@ -85,6 +85,8 @@ class RetrievalTraceBuilder:
         self._evidence_pack: Optional[Dict[str, Any]] = None
         self._followups: List[TraceFollowup] = []
         self._appendix_chunks: List[Dict[str, Any]] = []
+        self._stage_snapshots: Optional[Dict[str, List[Dict[str, Any]]]] = None
+        self._colbert: Optional[Dict[str, Any]] = None
 
     # ── Record methods ────────────────────────────────────────────────
 
@@ -201,6 +203,32 @@ class RetrievalTraceBuilder:
                 result_summary=result_summary,
             )
         )
+
+    def record_stage_snapshots(
+        self, snapshots: Dict[str, List[Dict[str, Any]]]
+    ) -> None:
+        """Record per-stage candidate snapshots for pipeline observability."""
+        self._stage_snapshots = snapshots
+
+    def record_colbert(
+        self,
+        applied: bool,
+        runtime_available: bool,
+        query_embedding_ok: bool,
+        rank_deltas: Optional[List[int]] = None,
+        candidates: int = 0,
+        hydrated: int = 0,
+        latency_ms: float = 0.0,
+    ) -> None:
+        self._colbert = {
+            "applied": applied,
+            "runtime_available": runtime_available,
+            "query_embedding_ok": query_embedding_ok,
+            "rank_deltas_top10": rank_deltas or [],
+            "candidates": candidates,
+            "hydrated": hydrated,
+            "latency_ms": round(latency_ms, 1),
+        }
 
     # ── Format: Human-readable text ──────────────────────────────────
 
@@ -362,11 +390,44 @@ class RetrievalTraceBuilder:
         else:
             lines.append("  (none)")
 
-        # Section 9: Full text appendix
+        # Section 9: Stage snapshots
+        lines.append("")
+        lines.append(f"-- 9. STAGE SNAPSHOTS {_SECTION}")
+        if self._stage_snapshots:
+            for stage_name, entries in self._stage_snapshots.items():
+                shown = entries[:10]
+                lines.append(f"  {stage_name} (top {len(shown)} of {len(entries)}):")
+                for entry in shown:
+                    rs = entry.get("rerank_score")
+                    rs_str = f"  rerank={rs:.5f}" if rs is not None else ""
+                    lines.append(
+                        f"    {entry.get('fused_score', 0):9.5f}{rs_str}  "
+                        f"{entry.get('chunk_id', '')[:16]}  {entry.get('doc_tag', '') or ''}"
+                    )
+        else:
+            lines.append("  (no stage snapshots recorded)")
+
+        # Section 10: ColBERT
+        lines.append("")
+        lines.append(f"-- 10. COLBERT {_SECTION}")
+        if self._colbert:
+            cb = self._colbert
+            lines.append(f"  Applied:            {cb['applied']}")
+            lines.append(f"  Runtime available:  {cb['runtime_available']}")
+            lines.append(f"  Query embedding OK: {cb['query_embedding_ok']}")
+            lines.append(f"  Candidates:         {cb['candidates']}")
+            lines.append(f"  Hydrated:           {cb['hydrated']}")
+            lines.append(f"  Latency:            {cb['latency_ms']}ms")
+            if cb["rank_deltas_top10"]:
+                lines.append(f"  Rank deltas (top10): {cb['rank_deltas_top10']}")
+        else:
+            lines.append("  (ColBERT not recorded)")
+
+        # Section 11: Full text appendix
         if self._appendix_chunks:
             lines.append("")
             lines.append(
-                f"-- 9. FULL TEXT APPENDIX (top {len(self._appendix_chunks)} reranked) {_SECTION}"
+                f"-- 11. FULL TEXT APPENDIX (top {len(self._appendix_chunks)} reranked) {_SECTION}"
             )
             for idx, chunk in enumerate(self._appendix_chunks):
                 lines.append("")
@@ -441,6 +502,8 @@ class RetrievalTraceBuilder:
                 for f in self._followups
             ],
             "appendix_chunk_count": len(self._appendix_chunks),
+            "stage_snapshots": self._stage_snapshots or {},
+            "colbert": self._colbert,
         }
 
 

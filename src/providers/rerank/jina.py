@@ -105,7 +105,14 @@ class JinaRerankProvider:
         """Get provider name."""
         return self._provider_name
 
-    def rerank(self, query: str, candidates: List[Dict], top_k: int = 10) -> List[Dict]:
+    def rerank(
+        self,
+        query: str,
+        candidates: List[Dict],
+        top_k: int = 10,
+        *,
+        instruction: Optional[str] = None,
+    ) -> List[Dict]:
         """
         Rerank candidates using Jina reranker.
 

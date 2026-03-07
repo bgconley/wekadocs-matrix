@@ -145,6 +145,9 @@ search:
       max_pairs: 50       # Candidates to send to reranker (unused — never referenced by code)
       max_tokens_per_pair: 4096  # Unused — actual limits in local_reranker_service.py
       instruction: "Judge whether the document is relevant to the search query about WEKA distributed file system. Match the specificity of the query — if the query asks about a specific subsystem (metadata, filesystem internals, tiering, snapshots), prioritize documentation about that subsystem over general overviews. Consider system architecture, filesystem internals, data management concepts, metadata handling, configuration procedures, CLI commands, parameter references, and step-by-step instructions as highly relevant. Introductory overviews and general summaries are less relevant than specific technical content. Answer only yes or no."
+      instructions_by_type:
+        subsystem_architecture: "Judge whether the document is relevant to the query about WEKA internal subsystem architecture (metadata, inodes, tiering, data protection, filesystem internals). Prioritize deep technical documentation about the specific subsystem over general overviews or cloud deployment guides. Cloud deployment workflows (AWS, Azure, GCP, Terraform, CycleCloud) are NOT relevant unless the query explicitly mentions those platforms. Answer only yes or no."
+        resource_sizing: "Judge whether the document is relevant to the query about WEKA resource sizing and capacity planning (containers, drives, compute, frontend, CPU, memory requirements). Prioritize sizing tables, minimum/maximum requirements, capacity formulas, and container composition details. Cloud deployment workflows are NOT relevant unless the query explicitly mentions cloud platforms. Answer only yes or no."
 
     # Signal-diverse rerank pool: ensures reranker sees candidates from every signal source
     # Requires feature_flags.signal_diverse_rerank_pool: true AND this section enabled

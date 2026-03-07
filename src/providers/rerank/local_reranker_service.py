@@ -342,7 +342,14 @@ class LocalRerankerServiceProvider(RerankProvider):
         score = results[0].get("score", 0.0)
         return (original_index, score)
 
-    def rerank(self, query: str, candidates: List[Dict], top_k: int = 10) -> List[Dict]:
+    def rerank(
+        self,
+        query: str,
+        candidates: List[Dict],
+        top_k: int = 10,
+        *,
+        instruction: Optional[str] = None,
+    ) -> List[Dict]:
         """
         Rerank candidates based on relevance to query.
 
@@ -379,10 +386,12 @@ class LocalRerankerServiceProvider(RerankProvider):
             ]
 
         # Prepend domain-tuned instruction if configured.
-        # Qwen3-Reranker-4B interprets the instruction as guidance for
-        # relevance judgment (e.g., prefer procedures over introductions).
-        if self._instruction:
-            query = f"{self._instruction}\n\n{query}"
+        # Per-call instruction overrides the instance default.
+        effective_instruction = (
+            instruction if instruction is not None else self._instruction
+        )
+        if effective_instruction:
+            query = f"{effective_instruction}\n\n{query}"
 
         query_tokens = self._count_tokens(query)
 
