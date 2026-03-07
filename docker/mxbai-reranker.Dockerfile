@@ -4,7 +4,7 @@
 # Build:  docker build -f docker/mxbai-reranker.Dockerfile -t mxbai-reranker .
 # Run:    docker run --gpus all -p 9006:9006 -v ./hf-cache:/opt/hf-cache mxbai-reranker
 
-FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+FROM pytorch/pytorch:2.6.0-cuda12.6-cudnn9-runtime
 
 WORKDIR /app
 
