@@ -52,7 +52,7 @@ from src.providers.settings import EmbeddingSettings
 from src.providers.tokenizer_service import TokenizerService
 from src.query.entity_extraction import EntityExtractor
 from src.query.processing.disambiguation import QueryAnalysis, QueryDisambiguator
-from src.query.query_intent import classify_query_intent
+from src.query.query_intent import QueryIntent, classify_query_intent
 from src.query.signal_pool import SignalPoolResult, build_signal_pool
 from src.query.structural_retrieval import StructuralRetrievalConfig as StructuralConfig
 from src.query.structural_retrieval import (
@@ -3593,12 +3593,17 @@ class HybridRetriever:
             )
         metrics.update(graph_channel_stats)
 
-        # Optional ColBERT rerank between fusion and cross-encoder
-        if (
-            self.colbert_rerank_enabled
-            and self.vector_retriever.supports_colbert
-            and fused_results
-        ):
+        # ── Feature flag: signal_pool_before_colbert ─────────────────
+        # When True, signal pool runs first (full fusion diversity), then
+        # ColBERT reorders the pool without truncation.
+        ff = getattr(self.config, "feature_flags", None)
+        pool_before_colbert = getattr(ff, "signal_pool_before_colbert", False)
+        metrics["signal_pool_before_colbert"] = pool_before_colbert
+
+        # Helper: run ColBERT rerank on a candidate list
+        def _run_colbert(
+            candidates: List[ChunkResult], limit: int
+        ) -> List[ChunkResult]:
             colbert_start = time.time()
             query_bundle = None
             try:
@@ -3606,57 +3611,37 @@ class HybridRetriever:
             except Exception as exc:
                 logger.warning("ColBERT query embedding failed", error=str(exc))
             if query_bundle and query_bundle.multivector:
-                # Calculate limit FIRST to avoid fetching unnecessary vectors
-                # Reduces payload: 50 candidates ≈ 3.8 MB vs 120 ≈ 9.2 MB
-                colbert_limit = min(
-                    len(fused_results),
-                    max(
-                        top_k * self.colbert_candidate_multiplier,
-                        self.colbert_candidate_limit,
-                    ),
-                )
-                # Only hydrate the top candidates we actually need
-                colbert_candidates = fused_results[:colbert_limit]
-                # Track pre-rerank order for rank change calculation
-                pre_rerank_order = {
-                    r.chunk_id: idx for idx, r in enumerate(colbert_candidates)
-                }
-                hydrated = self._hydrate_colbert_vectors(colbert_candidates)
-                fused_results = self._colbert_rerank(
-                    colbert_candidates, query_bundle, colbert_limit
-                )
+                pre_rerank_order = {r.chunk_id: idx for idx, r in enumerate(candidates)}
+                hydrated = self._hydrate_colbert_vectors(candidates)
+                reranked = self._colbert_rerank(candidates, query_bundle, limit)
                 metrics["colbert_hydrated"] = len(hydrated)
                 metrics["colbert_rerank_applied"] = True
-                metrics["colbert_candidates"] = len(fused_results)
+                metrics["colbert_candidates"] = len(reranked)
                 metrics["colbert_rerank_time_ms"] = (time.time() - colbert_start) * 1000
                 metrics["colbert_runtime_available"] = True
                 metrics["colbert_query_embedding_ok"] = True
-                # Rank deltas: positive = moved up, negative = moved down
                 metrics["colbert_rank_delta_top10"] = [
                     pre_rerank_order.get(r.chunk_id, idx) - idx
-                    for idx, r in enumerate(fused_results[:10])
+                    for idx, r in enumerate(reranked[:10])
                 ]
-
-                # LGTM Phase 4: Verbose log event 6 - colbert_rerank_complete
                 logger.info(
                     "colbert_rerank_complete",
-                    input_count=colbert_limit,
-                    output_count=len(fused_results),
+                    input_count=limit,
+                    output_count=len(reranked),
                     hydrated_count=len(hydrated),
                     rerank_time_ms=round(metrics["colbert_rerank_time_ms"], 2),
                     rerank_details=[
                         {
                             "chunk_id": r.chunk_id[:8],
                             "original_score": round(r.fused_score or 0, 4),
-                            "colbert_score": round(
-                                r.rerank_score or 0, 4
-                            ),  # rerank_score holds ColBERT MaxSim
+                            "colbert_score": round(r.rerank_score or 0, 4),
                             "rank_change": pre_rerank_order.get(r.chunk_id, 0) - idx,
                         }
-                        for idx, r in enumerate(fused_results[:10])
+                        for idx, r in enumerate(reranked[:10])
                     ],
                 )
-                metrics["snapshot_post_colbert"] = _snapshot_top(fused_results)
+                metrics["snapshot_post_colbert"] = _snapshot_top(reranked)
+                return reranked
             else:
                 metrics["colbert_rerank_applied"] = False
                 metrics["colbert_runtime_available"] = (
@@ -3665,19 +3650,82 @@ class HybridRetriever:
                 metrics["colbert_query_embedding_ok"] = (
                     query_bundle is not None and query_bundle.multivector is not None
                 )
+                return candidates
 
-        reranker_active = False
-        seeds: List[ChunkResult]
-        pre_rerank_structural: List[ChunkResult] = []
+        colbert_available = (
+            self.colbert_rerank_enabled
+            and self.vector_retriever.supports_colbert
+            and bool(fused_results)
+        )
 
-        if self._reranker_enabled and fused_results:
-            # Build the rerank candidate pool
-            if self._signal_pool_enabled and self._signal_pool_config:
-                # Signal-diverse pool: pre-rerank structural expansion + signal-aware selection.
-                # Precision-mode queries (subsystem_architecture, resource_sizing) skip
-                # structural expansion to avoid diluting the rerank pool with noisy
-                # neighbors. The cross-encoder is most effective when candidates are
-                # all semantically close to the query.
+        if (
+            pool_before_colbert
+            and self._signal_pool_enabled
+            and self._signal_pool_config
+        ):
+            # ── A1 path: signal pool FIRST, then ColBERT reorders pool ──
+            # Signal pool sees full fusion output (200+ candidates, full diversity).
+            # ColBERT then reorders the entire pool without dropping candidates.
+            metrics["colbert_input_from_pool"] = True
+
+            pre_rerank_structural: List[ChunkResult] = []
+            if not intent.precision_mode:
+                try:
+                    pre_rerank_structural = self._expand_with_structure(
+                        query, fused_results[:10], doc_tag, force=True
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "pre_rerank_structural_expansion_failed",
+                        extra={"error": str(e)},
+                    )
+            else:
+                logger.info(
+                    "pre_rerank_structural_expansion_skipped",
+                    query_type=intent.query_type,
+                    reason="precision_mode",
+                )
+
+            pool_result: SignalPoolResult = build_signal_pool(
+                fused_results, pre_rerank_structural, self._signal_pool_config
+            )
+
+            metrics["signal_pool_enabled"] = True
+            metrics["signal_pool_used"] = True
+            metrics["signal_pool_size"] = len(pool_result.pool)
+            metrics["signal_pool_slot_fills"] = pool_result.slot_fills
+            metrics["signal_pool_degraded"] = pool_result.degraded
+
+            # ColBERT reorders the entire pool — limit = pool size (no truncation)
+            if colbert_available:
+                rerank_candidates = _run_colbert(
+                    pool_result.pool, len(pool_result.pool)
+                )
+            else:
+                rerank_candidates = pool_result.pool
+        else:
+            # ── Legacy path: ColBERT first (truncates), then signal pool ──
+            metrics["colbert_input_from_pool"] = False
+
+            # Optional ColBERT rerank between fusion and cross-encoder
+            if colbert_available:
+                colbert_limit = min(
+                    len(fused_results),
+                    max(
+                        top_k * self.colbert_candidate_multiplier,
+                        self.colbert_candidate_limit,
+                    ),
+                )
+                colbert_candidates = fused_results[:colbert_limit]
+                fused_results = _run_colbert(colbert_candidates, colbert_limit)
+
+            pre_rerank_structural = []
+
+            if (
+                self._reranker_enabled
+                and self._signal_pool_enabled
+                and self._signal_pool_config
+            ):
                 if not intent.precision_mode:
                     try:
                         pre_rerank_structural = self._expand_with_structure(
@@ -3695,7 +3743,7 @@ class HybridRetriever:
                         reason="precision_mode",
                     )
 
-                pool_result: SignalPoolResult = build_signal_pool(
+                pool_result = build_signal_pool(
                     fused_results, pre_rerank_structural, self._signal_pool_config
                 )
                 rerank_candidates = pool_result.pool
@@ -3705,22 +3753,36 @@ class HybridRetriever:
                 metrics["signal_pool_size"] = len(rerank_candidates)
                 metrics["signal_pool_slot_fills"] = pool_result.slot_fills
                 metrics["signal_pool_degraded"] = pool_result.degraded
-            else:
-                # Legacy behavior: flat top-N by fused score
+            elif self._reranker_enabled:
                 pool_cap = self.rerank_top_n or top_k
                 rerank_pool_size = min(pool_cap, len(fused_results))
                 rerank_candidates = fused_results[:rerank_pool_size]
                 metrics["signal_pool_enabled"] = False
                 metrics["signal_pool_used"] = False
+            else:
+                rerank_candidates = fused_results
 
+        # ── Cross-encoder reranker ─────────────────────────────────
+        reranker_active = False
+        seeds: List[ChunkResult]
+
+        # Best-available ordering: if signal pool + ColBERT produced
+        # rerank_candidates, those are strictly better than raw fused_results.
+        # Use them as the fallback source instead of discarding the work.
+        best_available = rerank_candidates if rerank_candidates else fused_results
+
+        if self._reranker_enabled and rerank_candidates:
             # Hydrate parent_path_norm for reranker context enrichment
-            # Runs for all rerank candidates (standalone improvement, not signal-pool-gated)
             self._hydrate_parent_paths(rerank_candidates)
 
             # Track pre-rerank order for rank change calculation
             pre_bge_order = {r.chunk_id: idx for idx, r in enumerate(rerank_candidates)}
             ordered_candidates = self._apply_reranker(
-                query, rerank_candidates, metrics, query_type=query_type
+                query,
+                rerank_candidates,
+                metrics,
+                query_type=query_type,
+                intent=intent,
             )
             reranker_active = bool(metrics.get("reranker_applied"))
             if reranker_active:
@@ -3752,9 +3814,9 @@ class HybridRetriever:
                 )
                 metrics["snapshot_post_reranker"] = _snapshot_top(seeds)
             else:
-                seeds = fused_results[:top_k]
+                seeds = best_available[:top_k]
         else:
-            seeds = fused_results[:top_k]
+            seeds = best_available[:top_k]
 
         metrics["pre_rerank_structural_expansion_applied"] = (
             len(pre_rerank_structural) > 0
@@ -4460,6 +4522,7 @@ class HybridRetriever:
         metrics: Dict[str, Any],
         *,
         query_type: Optional[str] = None,
+        intent: Optional["QueryIntent"] = None,
     ) -> List[ChunkResult]:
         cfg = self.reranker_config
         metrics.setdefault("reranker_input_count", 0)
@@ -4481,6 +4544,17 @@ class HybridRetriever:
             instructions_by_type = getattr(cfg, "instructions_by_type", None) or {}
             per_call_instruction = instructions_by_type.get(query_type)
 
+        # Phase A3: Focused reranker text feature flag
+        ff = getattr(self.config, "feature_flags", None)
+        use_focused_text = (
+            getattr(ff, "precision_focused_rerank_text", False)
+            and intent is not None
+            and intent.precision_mode
+            and len(intent.primary_anchors) > 0
+        )
+        metrics["precision_focused_rerank_text"] = use_focused_text
+        focused_fallback_count = 0
+
         def _clean_text(text: str) -> str:
             # Remove simple HTML tags and known markup artifacts, collapse whitespace.
             text = re.sub(r"<[^>]+>", " ", text)
@@ -4495,20 +4569,61 @@ class HybridRetriever:
             text = re.sub(r"\s+", " ", text)
             return text.strip()
 
+        def _build_focused_text(
+            body: str,
+            heading: str,
+            parent_path: str,
+            anchors: Tuple[str, ...],
+        ) -> Tuple[str, bool]:
+            """Extract lines containing anchor terms with ±1 context.
+
+            Returns (focused_text, used_fallback).
+            """
+            lines = body.split("\n")
+            matched_indices: set = set()
+            anchors_lower = [a.lower() for a in anchors]
+            for idx, line in enumerate(lines):
+                line_lower = line.lower()
+                if any(a in line_lower for a in anchors_lower):
+                    matched_indices.add(idx)
+            if not matched_indices:
+                # Fallback: heading + first 500 chars of body
+                fallback_body = body[:500]
+                parts = [p for p in [parent_path, heading, fallback_body] if p]
+                return "\n\n".join(parts), True
+            # Expand ±1 context window
+            expanded: set = set()
+            for idx in matched_indices:
+                expanded.add(max(0, idx - 1))
+                expanded.add(idx)
+                expanded.add(min(len(lines) - 1, idx + 1))
+            selected = [lines[i] for i in sorted(expanded)]
+            focused = "\n".join(selected)
+            parts = [p for p in [parent_path, heading, focused] if p]
+            return "\n\n".join(parts), False
+
         candidates: List[Dict[str, Any]] = []
         for chunk in seeds:
             text_body = (chunk.text or "").strip()
             heading = (chunk.heading or "").strip()
             parent_path = (chunk.parent_path_norm or "").strip()
 
-            # Build reranker text with structural context:
-            # "path > to > section\n\nHeading\n\nbody text"
-            if parent_path and heading and text_body:
-                text = f"{parent_path}\n\n{heading}\n\n{text_body}"
-            elif heading and text_body:
-                text = f"{heading}\n\n{text_body}"
+            # Phase A3: Build focused text for precision intents
+            if use_focused_text and text_body:
+                text, used_fallback = _build_focused_text(
+                    text_body, heading, parent_path, intent.primary_anchors
+                )
+                if used_fallback:
+                    focused_fallback_count += 1
             else:
-                text = text_body or heading
+                # Default: full structural context
+                # "path > to > section\n\nHeading\n\nbody text"
+                if parent_path and heading and text_body:
+                    text = f"{parent_path}\n\n{heading}\n\n{text_body}"
+                elif heading and text_body:
+                    text = f"{heading}\n\n{text_body}"
+                else:
+                    text = text_body or heading
 
             text = _clean_text(text)
             if not text:
@@ -4523,6 +4638,8 @@ class HybridRetriever:
                     "original_result": chunk,
                 }
             )
+
+        metrics["focused_rerank_text_fallback_count"] = focused_fallback_count
 
         if not candidates:
             metrics["reranker_applied"] = False

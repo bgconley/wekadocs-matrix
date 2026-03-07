@@ -1071,6 +1071,24 @@ class FeatureFlagsConfig(BaseModel):
         description="Enable signal-diverse rerank pool with 200-candidate budget",
     )
 
+    # Phase A1: Signal pool ordering — run signal pool before ColBERT
+    signal_pool_before_colbert: bool = Field(
+        default=False,
+        description="Build signal pool from full fusion output before ColBERT truncation",
+    )
+
+    # Phase A3: Focused reranker text for precision intents
+    precision_focused_rerank_text: bool = Field(
+        default=False,
+        description="Use anchor-focused evidence windows for precision reranker input",
+    )
+
+    # Phase B1: Post-rerank specificity adjustment (deferred)
+    precision_specificity_adjustment: bool = Field(
+        default=False,
+        description="Post-rerank tie-break bonus for anchor matches in heading/path",
+    )
+
 
 class GitHubConnectorSettings(BaseModel):
     enabled: bool = False
