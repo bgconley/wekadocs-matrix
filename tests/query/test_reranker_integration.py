@@ -4,6 +4,7 @@ import pytest
 
 from src.query.hybrid_retrieval import ChunkResult, FusionMethod, HybridRetriever
 from src.query.query_intent import QueryIntent
+from src.query.retrieval_plan import ResolvedRetrievalPlan, RetrievalProfile
 from src.shared.config import SignalPoolConfig
 
 
@@ -47,6 +48,14 @@ def _bootstrap_retriever(reranker_enabled=True, focused_rerank_text=False):
         feature_flags=types.SimpleNamespace(
             precision_focused_rerank_text=focused_rerank_text,
         )
+    )
+    hr._plan = ResolvedRetrievalPlan(
+        profile=RetrievalProfile.PRECISION_VECTOR,
+        use_focused_rerank_text=focused_rerank_text,
+        use_specificity_adjustment=False,
+        use_structure_expansion=True,
+        graph_garbage_filter_on=False,
+        graph_score_normalized_on=False,
     )
     return hr
 
@@ -646,6 +655,24 @@ def test_pool_before_colbert_reranker_disabled_uses_pool_output(monkeypatch):
     )
     hr.embedding_settings = None
 
+    # --- Retrieval plan ---
+    hr._plan = ResolvedRetrievalPlan(
+        profile=RetrievalProfile.PRECISION_VECTOR,
+        use_signal_pool=True,
+        signal_pool_before_colbert=True,
+        use_colbert=False,
+        use_weighted_fusion=False,
+        use_related_to_expansion=False,
+        use_related_to_blending=False,
+        use_focused_rerank_text=False,
+        use_specificity_adjustment=False,
+        use_structure_expansion=False,
+        use_entity_graph_channel=False,
+        use_graph_enrichment=False,
+        graph_garbage_filter_on=False,
+        graph_score_normalized_on=False,
+    )
+
     # --- Signal pool: consensus_slots=3 + text_sparse_slots=2 ---
     # The pool will pick 3 by fused_score + 2 by sparse score,
     # creating output that DIFFERS from raw fused_results[:5].
@@ -913,3 +940,55 @@ def test_specificity_bounded_adjustment():
 
     # Net adjustment = +0.15 (anchor) - 0.10 (deploy) = +0.05
     assert c1.rerank_score == pytest.approx(9.55)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: RELATED_TO blending tests
+# ---------------------------------------------------------------------------
+
+
+def test_blend_related_to_scores_standalone():
+    """Chunks with related_to_score get blended into fused_score."""
+    hr = _bootstrap_retriever(reranker_enabled=False)
+    hr.config = types.SimpleNamespace(
+        references=types.SimpleNamespace(
+            query=types.SimpleNamespace(related_to_weight_ratio=0.15)
+        ),
+        feature_flags=types.SimpleNamespace(),
+    )
+
+    c1 = _chunk("a", "text a", 0.8)
+    c1.related_to_score = 0.5
+    c2 = _chunk("b", "text b", 0.6)
+    c2.related_to_score = None  # No RELATED_TO signal
+    metrics: dict = {}
+
+    hr._blend_related_to_scores([c1, c2], "conceptual", metrics)
+
+    # c1 should be blended: (1-0.15)*0.8 + 0.15*0.5 = 0.68 + 0.075 = 0.755
+    assert c1.fused_score == pytest.approx(0.755)
+    # c2 unchanged
+    assert c2.fused_score == 0.6
+    assert metrics["related_to_blend_count"] == 1
+    assert metrics["related_to_blend_lambda"] == pytest.approx(0.15)
+
+
+def test_blend_cli_disabled():
+    """CLI query type gets lambda=0.0, no blending."""
+    hr = _bootstrap_retriever(reranker_enabled=False)
+    hr.config = types.SimpleNamespace(
+        references=types.SimpleNamespace(
+            query=types.SimpleNamespace(related_to_weight_ratio=0.15)
+        ),
+        feature_flags=types.SimpleNamespace(),
+    )
+
+    c1 = _chunk("a", "text", 0.8)
+    c1.related_to_score = 0.5
+    metrics: dict = {}
+
+    hr._blend_related_to_scores([c1], "cli", metrics)
+
+    assert c1.fused_score == 0.8  # Unchanged
+    assert metrics["related_to_blend_count"] == 0
+    assert metrics["related_to_blend_lambda"] == 0.0
