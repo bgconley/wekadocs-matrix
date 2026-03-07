@@ -456,9 +456,9 @@ feature_flags:
   entity_embedding_fallback: false
   structure_aware_expansion: true # ENABLED: structure-aware expansion
   signal_diverse_rerank_pool: true  # ENABLED: Signal-diverse rerank pool for cross-encoder input
-  signal_pool_before_colbert: false  # A1: Signal pool before ColBERT (off until validated)
-  precision_focused_rerank_text: false  # A3: Focused evidence windows for precision reranker
-  precision_specificity_adjustment: false  # B1: Post-rerank tie-break (deferred)
+  signal_pool_before_colbert: true   # A1: Signal pool before ColBERT — validated live 2026-03-07
+  precision_focused_rerank_text: true  # A3: Focused evidence windows for precision reranker — validated live 2026-03-07
+  precision_specificity_adjustment: true  # B1: Post-rerank tie-break — validated live 2026-03-07
 
 # Phase 7E-4: Monitoring and observability configuration
 # Reference: Canonical Spec L4916-4976, L3513-3528
