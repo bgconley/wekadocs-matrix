@@ -992,3 +992,74 @@ def test_blend_cli_disabled():
     assert c1.fused_score == 0.8  # Unchanged
     assert metrics["related_to_blend_count"] == 0
     assert metrics["related_to_blend_lambda"] == 0.0
+
+
+def test_graph_channel_decoupled_from_enrichment():
+    """Graph channel should run when use_entity_graph_channel=True,
+    even when use_graph_enrichment=False. Before decoupling,
+    _graph_retrieval_channel() required both graph_channel_enabled
+    AND graph_enabled (derived from enrichment)."""
+    hr = _bootstrap_retriever(reranker_enabled=False)
+    hr._plan = ResolvedRetrievalPlan(
+        profile=RetrievalProfile.GRAPH_ASSISTED,
+        use_entity_graph_channel=True,
+        use_graph_enrichment=False,  # enrichment OFF
+        graph_garbage_filter_on=True,
+        graph_score_normalized_on=True,
+    )
+    hr.neo4j_disabled = False
+    hr.graph_channel_enabled = False  # legacy flag is OFF
+    hr.graph_enabled = False  # legacy derived flag is OFF
+    hr.graph_adaptive_enabled = True
+    hr.graph_relationships = ["MENTIONS"]
+    hr.graph_max_related = 20
+    hr.graph_max_depth = 3
+    hr.config = types.SimpleNamespace(
+        feature_flags=types.SimpleNamespace(),
+        ner=types.SimpleNamespace(enabled=False),
+        search=types.SimpleNamespace(
+            hybrid=types.SimpleNamespace(
+                query_type_relationships={
+                    "conceptual": ["MENTIONS"],
+                    "subsystem_architecture": ["MENTIONS"],
+                },
+            ),
+        ),
+    )
+
+    # Mock entity extractor to return entities
+    class FakeExtractor:
+        def extract_entities(self, query):
+            return ["metadata", "tiering"]
+
+    hr._entity_extractor = FakeExtractor()
+
+    # Mock neo4j driver to return empty results (we just need to verify
+    # the method doesn't short-circuit at the gate)
+    class FakeSession:
+        def run(self, cypher, **kwargs):
+            return []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    class FakeDriver:
+        def session(self):
+            return FakeSession()
+
+    hr.neo4j_driver = FakeDriver()
+
+    result_chunks, stats = hr._graph_retrieval_channel("metadata query", None)
+
+    # The key assertion: method did NOT short-circuit at the gate.
+    # It reached entity extraction and the Neo4j query (returning empty).
+    # With the old coupled gate (graph_channel_enabled AND graph_enabled),
+    # both were False, so it would have returned immediately with
+    # graph_channel_entities=0 before ever calling extract_entities().
+    #
+    # After decoupling, the gate only checks self._plan.use_entity_graph_channel
+    # (True) and self.neo4j_disabled (False), so it passes through.
+    assert stats["graph_channel_entities"] == 2  # "metadata" + "tiering"
