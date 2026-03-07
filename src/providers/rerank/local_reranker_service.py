@@ -443,6 +443,8 @@ class LocalRerankerServiceProvider(RerankProvider):
 
         # Collect all scores
         all_scores: Dict[int, float] = {}
+        batch_success_count = 0
+        batch_failure_count = 0
 
         if self._use_batching:
             # Phase 1.1: Batched processing for efficiency
@@ -454,8 +456,6 @@ class LocalRerankerServiceProvider(RerankProvider):
             )
 
             # Process each batch
-            batch_success_count = 0
-            batch_failure_count = 0
             for batch in indexed_batches:
                 try:
                     batch_results = self._rerank_batch(query, batch)
@@ -532,12 +532,40 @@ class LocalRerankerServiceProvider(RerankProvider):
                     }
                 )
 
+        # Backfill candidates dropped by batch failures with explicit zero-score markers.
+        # Without this, partial batch failures silently lose candidates from the result set.
+        scored_indices = {r.get("original_rank") for r in all_results}
+        for orig_idx, _, cand in valid_candidates:
+            if orig_idx not in all_scores and orig_idx not in scored_indices:
+                all_results.append(
+                    {
+                        **cand,
+                        "rerank_score": 0.0,
+                        "original_rank": orig_idx,
+                        "reranker": "batch_failed",
+                    }
+                )
+
         # Sort by score descending and return top_k
         all_results = sorted(
             all_results,
             key=lambda c: (c.get("rerank_score") or float("-inf")),
             reverse=True,
         )
+
+        # Embed batch-level metrics in first payload for consumer detection
+        if all_results and (batch_failure_count > 0 or not all_scores):
+            fallback_mode = (
+                "partial"
+                if batch_failure_count > 0 and batch_success_count > 0
+                else "total" if batch_failure_count > 0 else None
+            )
+            all_results[0]["_reranker_meta"] = {
+                "batch_successes": batch_success_count,
+                "batch_failures": batch_failure_count,
+                "real_scores_count": len(all_scores),
+                "fallback_mode": fallback_mode,
+            }
 
         # Multi-model validation fix: Fallback when all batches fail
         # Prevents returning empty results when reranker service is down

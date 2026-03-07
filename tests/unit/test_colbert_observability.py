@@ -138,3 +138,43 @@ class TestRecordStageSnapshots:
         trace = RetrievalTraceBuilder(trace_id="test-007", session_id="sess-007")
         d = trace.to_dict()
         assert d["stage_snapshots"] == {}
+
+
+def test_snapshot_top_preserves_zero_rerank_score():
+    """_snapshot_top must show rerank_score=0.0, not hide it as None."""
+    from src.query.hybrid_retrieval import ChunkResult, _snapshot_top
+
+    chunk = ChunkResult(
+        chunk_id="c1",
+        document_id="d1",
+        parent_section_id="s1",
+        order=1,
+        level=1,
+        heading="H",
+        text="T",
+        token_count=5,
+    )
+    chunk.rerank_score = 0.0
+    chunk.reranker = "circuit_open"
+    snap = _snapshot_top([chunk])
+    assert snap[0]["rerank_score"] == 0.0  # Must be 0.0, not None
+    assert snap[0]["reranker"] == "circuit_open"
+    assert snap[0]["is_expanded"] is False
+
+
+def test_snapshot_top_none_rerank_score():
+    """When rerank_score was never set, snapshot shows None."""
+    from src.query.hybrid_retrieval import ChunkResult, _snapshot_top
+
+    chunk = ChunkResult(
+        chunk_id="c1",
+        document_id="d1",
+        parent_section_id="s1",
+        order=1,
+        level=1,
+        heading="H",
+        text="T",
+        token_count=5,
+    )
+    snap = _snapshot_top([chunk])
+    assert snap[0]["rerank_score"] is None

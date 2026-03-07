@@ -232,3 +232,60 @@ def test_apply_reranker_falls_back_to_default_instruction(monkeypatch):
     )
     assert captured["instruction"] is None  # No per-call override
     assert metrics["reranker_instruction"] == "default instruction"  # Falls back
+
+
+def test_apply_reranker_detects_circuit_open_fallback(monkeypatch):
+    """When reranker returns circuit_open markers, reranker_applied should be False."""
+    import types
+
+    hr = _bootstrap_retriever(reranker_enabled=True)
+    hr.reranker_config = types.SimpleNamespace(
+        enabled=True,
+        top_n=5,
+        instruction="default instruction",
+        instructions_by_type=None,
+    )
+
+    class CircuitOpenReranker:
+        model_id = "test-model"
+        provider_name = "test"
+
+        def rerank(self, query, candidates, top_k=10, *, instruction=None):
+            return [
+                {**c, "rerank_score": 0.0, "reranker": "circuit_open"}
+                for c in candidates[:top_k]
+            ]
+
+    monkeypatch.setattr(hr, "_reranker", CircuitOpenReranker())
+
+    seeds = [_chunk("a", "text a", 0.5), _chunk("b", "text b", 0.3)]
+    metrics = {}
+    hr._apply_reranker("query", seeds, metrics)
+
+    assert metrics["reranker_applied"] is False
+    assert metrics["reranker_reason"] == "fallback_zero_scores"
+    assert metrics["reranker_real_scores_count"] == 0
+
+
+def test_apply_reranker_detects_real_scores(monkeypatch):
+    """When reranker returns real scores, reranker_applied should be True."""
+    import types
+
+    hr = _bootstrap_retriever(reranker_enabled=True)
+    hr.reranker_config = types.SimpleNamespace(
+        enabled=True,
+        top_n=5,
+        instruction="default instruction",
+        instructions_by_type=None,
+    )
+
+    fake = FakeRerankProvider()
+    monkeypatch.setattr(hr, "_reranker", fake)
+
+    seeds = [_chunk("a", "text a", 0.5), _chunk("b", "text b", 0.3)]
+    metrics = {}
+    hr._apply_reranker("query", seeds, metrics)
+
+    assert metrics["reranker_applied"] is True
+    assert metrics["reranker_reason"] == "ok"
+    assert metrics["reranker_real_scores_count"] > 0

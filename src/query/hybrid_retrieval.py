@@ -227,7 +227,11 @@ def _snapshot_top(chunks: List["ChunkResult"], n: int = 20) -> List[Dict[str, An
         {
             "chunk_id": c.chunk_id,
             "fused_score": round(c.fused_score or 0.0, 5),
-            "rerank_score": round(c.rerank_score or 0.0, 5) if c.rerank_score else None,
+            "rerank_score": (
+                round(c.rerank_score, 5) if c.rerank_score is not None else None
+            ),
+            "reranker": getattr(c, "reranker", None),
+            "is_expanded": c.is_expanded,
             "doc_tag": c.doc_tag,
         }
         for c in chunks[:n]
@@ -3598,7 +3602,7 @@ class HybridRetriever:
             colbert_start = time.time()
             query_bundle = None
             try:
-                query_bundle = self.vector_retriever.embedder.embed_query_all(query)
+                query_bundle = self.vector_retriever._build_query_bundle(query)
             except Exception as exc:
                 logger.warning("ColBERT query embedding failed", error=str(exc))
             if query_bundle and query_bundle.multivector:
@@ -3807,7 +3811,12 @@ class HybridRetriever:
         # Step 6: Optional bounded adjacency expansion
         # Note: Expansion ADDS neighbors without re-limiting to top_k
         all_results = list(seeds)
-        if expand and triggered and self.expansion_enabled:
+        if (
+            expand
+            and triggered
+            and self.expansion_enabled
+            and not intent.precision_mode
+        ):
             expansion_start = time.time()
             expanded_results = self._bounded_expansion(query, seeds)
 
@@ -3842,7 +3851,11 @@ class HybridRetriever:
         # Step 6b: Structure-aware expansion (C.4)
         # Adds sibling, parent section, and shared-entity chunks
         structure_start = time.time()
-        structure_expanded = self._expand_with_structure(query, seeds, doc_tag)
+        structure_expanded = (
+            self._expand_with_structure(query, seeds, doc_tag)
+            if not intent.precision_mode
+            else []
+        )
         if structure_expanded:
             all_results.extend(structure_expanded)
             metrics["structure_expansion_time_ms"] = (
@@ -4628,14 +4641,41 @@ class HybridRetriever:
         for idx, chunk in enumerate(reranked_chunks, start=1):
             chunk.rerank_rank = idx
 
-        metrics["reranker_applied"] = True
-        metrics["reranker_reason"] = "ok"
+        # Detect reranker fallback mode from payload markers
+        fallback_markers = {"circuit_open", "rerank_failed", "batch_failed"}
+        reranker_names = {p.get("reranker") for p in reranked_payload}
+        is_fallback = bool(reranker_names & fallback_markers)
+        real_scores = sum(
+            1
+            for p in reranked_payload
+            if p.get("reranker") not in fallback_markers
+            and (p.get("rerank_score") or 0) > 0
+        )
+
+        # Extract batch-level meta from first payload if present
+        reranker_meta = {}
+        if reranked_payload:
+            reranker_meta = reranked_payload[0].pop("_reranker_meta", {})
+
+        if is_fallback and real_scores == 0:
+            # Total fallback — reranking did not produce meaningful scores
+            metrics["reranker_applied"] = False
+            metrics["reranker_reason"] = "fallback_zero_scores"
+        else:
+            metrics["reranker_applied"] = True
+            metrics["reranker_reason"] = "ok"
+
         metrics["reranker_model"] = reranker.model_id
+        metrics["reranker_time_ms"] = latency_ms
+        metrics["reranker_output_count"] = len(reranked_chunks)
+        metrics["reranker_real_scores_count"] = real_scores
+        metrics["reranker_zero_scores_count"] = len(reranked_payload) - real_scores
+        metrics["reranker_batch_successes"] = reranker_meta.get("batch_successes", 0)
+        metrics["reranker_batch_failures"] = reranker_meta.get("batch_failures", 0)
+        metrics["reranker_fallback_mode"] = reranker_meta.get("fallback_mode")
         metrics["reranker_instruction"] = per_call_instruction or getattr(
             cfg, "instruction", None
         )
-        metrics["reranker_time_ms"] = latency_ms
-        metrics["reranker_output_count"] = len(reranked_chunks)
         return reranked_chunks
 
     def _get_reranker(self) -> Optional[RerankProvider]:
