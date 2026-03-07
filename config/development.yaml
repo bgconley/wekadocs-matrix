@@ -66,6 +66,13 @@ search:
 
   # Hybrid search settings (Phase 7E: RRF + BM25)
   hybrid:
+    # Retrieval profile: coherent preset replacing individual feature flags.
+    # null = legacy flag inference (exact current behavior).
+    # Options: vector_only, precision_vector, graph_assisted, graph_full
+    # profile: "precision_vector"
+    # profile_overrides:
+    #   use_specificity_adjustment: true
+
     # Architecture mode: legacy (BM25+RRF) or bge_reranker (vector-only + cross-encoder)
     mode: "legacy"
     enabled: true  # Phase 7E: Enable hybrid retrieval
@@ -74,8 +81,9 @@ search:
     # When true, bypasses: citation hydration, coverage annotation, graph channels
     neo4j_disabled: false  # PHASE 2: Graph channels enabled (structural edges validated)
 
-    graph_channel_enabled: false  # DISABLED: Phase 1 vector-only hardening
-    graph_enrichment_enabled: false  # DISABLED: Post-retrieval graph neighbor expansion
+    # DEPRECATED: Use profile instead. Kept for legacy inference when profile is null.
+    graph_channel_enabled: false
+    graph_enrichment_enabled: false
     graph_adaptive_enabled: true  # ENABLED: Use query-type specific relationship sets
     colbert_rerank_enabled: true  # Precision: enable ColBERT pre-rerank before cross-encoder
     colbert_candidate_limit: 50  # Min candidates for ColBERT reranking
