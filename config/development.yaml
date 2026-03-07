@@ -69,9 +69,9 @@ search:
     # Retrieval profile: coherent preset replacing individual feature flags.
     # null = legacy flag inference (exact current behavior).
     # Options: vector_only, precision_vector, graph_assisted, graph_full
-    # profile: "precision_vector"
-    # profile_overrides:
-    #   use_specificity_adjustment: true
+    profile: "graph_assisted"
+    profile_overrides:
+      use_specificity_adjustment: true
 
     # Architecture mode: legacy (BM25+RRF) or bge_reranker (vector-only + cross-encoder)
     mode: "legacy"
