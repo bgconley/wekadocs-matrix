@@ -3376,8 +3376,11 @@ class HybridRetriever:
             filters=normalized_filters,
             doc_tag=doc_tag,
             feature_flags=feature_flags,
-            colbert_enabled=self.colbert_rerank_enabled,
-            graph_channel_enabled=self.graph_channel_enabled,
+            colbert_enabled=self._plan.use_colbert,
+            graph_channel_enabled=self._plan.use_entity_graph_channel,
+            graph_enrichment_enabled=self._plan.use_graph_enrichment,
+            related_to_expansion=self._plan.use_related_to_expansion,
+            related_to_blending=self._plan.use_related_to_blending,
             expansion_enabled=self.expansion_enabled,
             # Phase 4: Entity boosting info
             entity_boost_enabled=entity_boost_enabled,
