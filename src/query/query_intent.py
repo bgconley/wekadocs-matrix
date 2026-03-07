@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import FrozenSet, List, Tuple
+from typing import Dict, FrozenSet, List, Tuple
 
 # ── Term sets ──────────────────────────────────────────────────────────
 
@@ -81,6 +81,67 @@ SIZING_TERMS: FrozenSet[str] = frozenset(
     }
 )
 
+# ── Anchor / modifier split ───────────────────────────────────────────
+# Anchors name the specific WEKA subsystem or resource.
+# Modifiers describe what the user wants to know about them.
+
+SUBSYSTEM_ANCHORS: FrozenSet[str] = frozenset(
+    {
+        "metadata",
+        "inode",
+        "tiering",
+        "snapshots",
+        "prefetch",
+        "destage",
+        "rebuild",
+        "failure domain",
+        "stripe width",
+        "data placement",
+        "hot spare",
+        "protection scheme",
+    }
+)
+
+SUBSYSTEM_MODIFIERS: FrozenSet[str] = frozenset(
+    {
+        "architecture",
+        "architected",
+        "managed",
+        "internals",
+        "backend",
+        "limitations",
+        "filesystem internals",
+    }
+)
+
+SIZING_ANCHORS: FrozenSet[str] = frozenset(
+    {
+        "drives",
+        "compute",
+        "frontend",
+        "containers",
+        "drives0",
+        "compute0",
+        "frontend0",
+        "ram",
+        "cpu",
+        "cores",
+    }
+)
+
+SIZING_MODIFIERS: FrozenSet[str] = frozenset(
+    {
+        "size",
+        "sizing",
+        "capacity",
+        "memory",
+        "resource allocation",
+        "minimum requirements",
+        "maximum capacity",
+        "container composition",
+    }
+)
+
 # ── CLI patterns (migrated from hybrid_retrieval.py:2593) ────────────
 
 _CLI_PATTERNS = [
@@ -117,6 +178,47 @@ class QueryIntent:
     subsystem_terms: Tuple[str, ...] = ()  # matched subsystem terms
     sizing_terms: Tuple[str, ...] = ()  # matched sizing terms
     precision_mode: bool = False  # True for subsystem_architecture, resource_sizing
+    primary_anchors: Tuple[
+        str, ...
+    ] = ()  # Specific topic terms (metadata, drives, ...)
+    generic_modifiers: Tuple[str, ...] = ()  # Broad terms (managed, sizing, ...)
+
+
+def _partition_terms(
+    matched: List[str],
+    anchors: FrozenSet[str],
+    modifiers: FrozenSet[str],
+) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    """Split matched terms into (primary_anchors, generic_modifiers)."""
+    a: List[str] = []
+    m: List[str] = []
+    for t in matched:
+        if t in anchors:
+            a.append(t)
+        elif t in modifiers:
+            m.append(t)
+        # Terms in neither set are ignored (they still count for classification)
+    return tuple(a), tuple(m)
+
+
+# Pre-compiled word-boundary patterns for term matching.
+# Multi-word terms (e.g. "failure domain") use raw substring matching since
+# they span word boundaries naturally.  Single-word terms use \b anchors to
+# prevent "ram" matching inside "program".
+_TERM_PATTERNS: Dict[str, re.Pattern] = {}
+
+
+def _term_matches(term: str, text: str) -> bool:
+    """Check whether *term* appears in *text* with word-boundary safety."""
+    if " " in term:
+        # Multi-word: plain substring is safe ("failure domain" won't appear
+        # accidentally inside another word).
+        return term in text
+    pat = _TERM_PATTERNS.get(term)
+    if pat is None:
+        pat = re.compile(r"\b" + re.escape(term) + r"\b")
+        _TERM_PATTERNS[term] = pat
+    return pat.search(text) is not None
 
 
 def classify_query_intent(query: str) -> QueryIntent:
@@ -148,13 +250,21 @@ def classify_query_intent(query: str) -> QueryIntent:
     # ── Detect subsystem and sizing terms ─────────────────────
     matched_subsystem: List[str] = []
     for term in sorted(SUBSYSTEM_TERMS):  # sorted for deterministic output
-        if term in q:
+        if _term_matches(term, q):
             matched_subsystem.append(term)
 
     matched_sizing: List[str] = []
     for term in sorted(SIZING_TERMS):  # sorted for deterministic output
-        if term in q:
+        if _term_matches(term, q):
             matched_sizing.append(term)
+
+    # ── Partition into anchors and modifiers ──────────────────
+    sub_anchors, sub_modifiers = _partition_terms(
+        matched_subsystem, SUBSYSTEM_ANCHORS, SUBSYSTEM_MODIFIERS
+    )
+    siz_anchors, siz_modifiers = _partition_terms(
+        matched_sizing, SIZING_ANCHORS, SIZING_MODIFIERS
+    )
 
     # ── Build common kwargs ───────────────────────────────────
     common = dict(
@@ -168,21 +278,41 @@ def classify_query_intent(query: str) -> QueryIntent:
     # 1. CLI (requires >= 2 signals)
     cli_signals = sum(1 for pat in _CLI_PATTERNS if pat.search(q))
     if cli_signals >= 2:
-        return QueryIntent(query_type="cli", **common)
+        return QueryIntent(
+            query_type="cli",
+            primary_anchors=sub_anchors or siz_anchors,
+            generic_modifiers=sub_modifiers or siz_modifiers,
+            **common,
+        )
 
     # 2. Config
     if any(pat.search(q) for pat in _CONFIG_PATTERNS):
-        return QueryIntent(query_type="config", **common)
+        return QueryIntent(
+            query_type="config",
+            primary_anchors=sub_anchors or siz_anchors,
+            generic_modifiers=sub_modifiers or siz_modifiers,
+            **common,
+        )
 
     # 3. Subsystem architecture (NEW — regardless of cloud cues)
     if matched_subsystem:
         return QueryIntent(
-            query_type="subsystem_architecture", precision_mode=True, **common
+            query_type="subsystem_architecture",
+            precision_mode=True,
+            primary_anchors=sub_anchors,
+            generic_modifiers=sub_modifiers,
+            **common,
         )
 
     # 4. Resource sizing (NEW — regardless of cloud cues)
     if matched_sizing:
-        return QueryIntent(query_type="resource_sizing", precision_mode=True, **common)
+        return QueryIntent(
+            query_type="resource_sizing",
+            precision_mode=True,
+            primary_anchors=siz_anchors,
+            generic_modifiers=siz_modifiers,
+            **common,
+        )
 
     # 5. Procedural
     if "how to" in q or "steps to" in q or "configure" in q:
