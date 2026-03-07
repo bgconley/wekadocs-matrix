@@ -472,6 +472,26 @@ class RerankerConfig(BaseModel):
             "Used to give the cross-encoder type-specific relevance guidance."
         ),
     )
+    instruction_mode: str = Field(
+        default="prepend",
+        description=(
+            "How to send the instruction to the reranker service. "
+            "'prepend' prepends it to the query string (Qwen-compatible). "
+            "'native' sends it as a separate 'instruction' field in the JSON payload."
+        ),
+    )
+    batch_size: int = Field(
+        default=16,
+        description="Number of documents per reranker batch request.",
+    )
+    max_tokens_total: int = Field(
+        default=8192,
+        description="Maximum total tokens (query + instruction + document) per rerank pair.",
+    )
+    max_tokens_per_doc: int = Field(
+        default=7500,
+        description="Maximum tokens per document before truncation.",
+    )
 
 
 class StructuralRetrievalConfig(BaseModel):

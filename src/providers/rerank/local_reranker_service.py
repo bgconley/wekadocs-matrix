@@ -6,7 +6,12 @@
 Local reranker service provider.
 
 This provider calls an HTTP service exposing /v1/rerank for cross-encoder
-reranking. Currently deployed with Qwen3-Reranker-4B (8K context window).
+reranking. Supports any model behind a TEI-compatible /v1/rerank endpoint.
+
+Instruction modes:
+  - "prepend": instruction is prepended to the query string (Qwen-compatible).
+  - "native":  instruction is sent as a separate JSON field in the payload,
+               for models that accept an explicit instruction parameter.
 
 Phase 1.1 Enhancement: Batched HTTP requests for 8-10x latency improvement.
 """
@@ -25,20 +30,13 @@ from src.shared.resilience import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 
-# Configuration constants for batching
-DEFAULT_BATCH_SIZE = (
-    16  # Documents per batch (balance between latency and payload size)
-)
-# Token budgets for Qwen3-Reranker-4B (8K context window, max_length=8192)
-# Previous values (2048/4096) used only 25% of model capacity.
-# Raising to use full context: 7500 per doc leaves ~700 tokens for query + template.
-MAX_TOKENS_PER_DOC = 7500  # Token budget per document
-MAX_TOKENS_TOTAL = 8192  # Max tokens per request (query + doc)
+# Legacy default kept for the module-level batch_documents() helper only.
+_DEFAULT_BATCH_SIZE = 16
 
 
 def batch_documents(
     documents: List[Tuple[int, str]],
-    max_batch_size: int = DEFAULT_BATCH_SIZE,
+    max_batch_size: int = _DEFAULT_BATCH_SIZE,
 ) -> List[List[Tuple[int, str]]]:
     """
     Split indexed documents into batches for efficient HTTP requests.
@@ -77,12 +75,13 @@ def batch_documents(
 class LocalRerankerServiceProvider(RerankProvider):
     """HTTP client for a local cross-encoder reranker service.
 
-    Currently deployed with Qwen3-Reranker-4B (8K context, P(yes) scoring).
-    Communicates via standard /v1/rerank endpoint.
+    Communicates via a TEI-compatible /v1/rerank endpoint.
 
     Features:
     - Batched HTTP requests (configurable batch size)
     - Circuit breaker for resilience
+    - Configurable instruction mode (prepend vs. native)
+    - Configurable token budgets (max_tokens_per_doc, max_tokens_total)
     - Proper resource cleanup
     """
 
@@ -91,14 +90,21 @@ class LocalRerankerServiceProvider(RerankProvider):
         model: str = "Qwen/Qwen3-Reranker-4B",
         base_url: str = "",
         timeout: float = 60.0,
-        batch_size: int = DEFAULT_BATCH_SIZE,
+        batch_size: int = 16,
         instruction: Optional[str] = None,
+        instruction_mode: str = "prepend",
+        max_tokens_total: int = 8192,
+        max_tokens_per_doc: int = 7500,
     ) -> None:
         self._model_id = model
         self._provider_name = "local-reranker-service"
         self._client = httpx.Client(base_url=base_url, timeout=timeout)
         self._batch_size = batch_size
         self._instruction = instruction
+        self._instruction_mode = instruction_mode
+        self._max_tokens_total = max_tokens_total
+        self._max_tokens_per_doc = max_tokens_per_doc
+        self._effective_instruction: Optional[str] = None
         self._tokenizer = None
         self._tokenizer_loaded = False
         self._tokenizer_model_id = os.getenv("RERANKER_TOKENIZER_ID", self._model_id)
@@ -158,25 +164,25 @@ class LocalRerankerServiceProvider(RerankProvider):
         return self._provider_name
 
     def health_check(self) -> bool:
+        """Check if the reranker service is reachable."""
         try:
-            resp = self._client.get("/health")
-            # Some deployments may not expose /health; treat any response as available.
-            return resp.status_code >= 200 and resp.status_code < 500
+            resp = self._client.get("/health", timeout=5.0)
+            return resp.status_code == 200
         except Exception:
-            return True
+            return False
 
     def _truncate_text(self, text: str) -> str:
-        """Truncate text to fit within token budget."""
+        """Truncate text to fit within per-document token budget."""
         tokenizer = self._get_tokenizer()
         if tokenizer is None:
             tokens = text.split()
-            if len(tokens) > MAX_TOKENS_PER_DOC:
-                return " ".join(tokens[:MAX_TOKENS_PER_DOC])
+            if len(tokens) > self._max_tokens_per_doc:
+                return " ".join(tokens[: self._max_tokens_per_doc])
             return text
 
         token_ids = tokenizer.encode(text, add_special_tokens=False)
-        if len(token_ids) > MAX_TOKENS_PER_DOC:
-            token_ids = token_ids[:MAX_TOKENS_PER_DOC]
+        if len(token_ids) > self._max_tokens_per_doc:
+            token_ids = token_ids[: self._max_tokens_per_doc]
             return tokenizer.decode(token_ids, skip_special_tokens=True)
         return text
 
@@ -265,6 +271,9 @@ class LocalRerankerServiceProvider(RerankProvider):
             "documents": documents,
             "model": self._model_id,
         }
+        # In native mode, send instruction as a separate payload field
+        if self._instruction_mode == "native" and self._effective_instruction:
+            payload["instruction"] = self._effective_instruction
 
         response = self._client.post("/v1/rerank", json=payload)
         if response.status_code != 200:
@@ -324,6 +333,9 @@ class LocalRerankerServiceProvider(RerankProvider):
             "documents": [text],
             "model": self._model_id,
         }
+        # In native mode, send instruction as a separate payload field
+        if self._instruction_mode == "native" and self._effective_instruction:
+            payload["instruction"] = self._effective_instruction
 
         response = self._client.post("/v1/rerank", json=payload)
         if response.status_code != 200:
@@ -385,15 +397,25 @@ class LocalRerankerServiceProvider(RerankProvider):
                 for cand in candidates[:top_k]
             ]
 
-        # Prepend domain-tuned instruction if configured.
-        # Per-call instruction overrides the instance default.
+        # Determine effective instruction (per-call overrides instance default)
         effective_instruction = (
             instruction if instruction is not None else self._instruction
         )
-        if effective_instruction:
+        # Store for use by _rerank_batch / _rerank_single
+        self._effective_instruction = effective_instruction
+
+        # Handle instruction based on mode
+        if self._instruction_mode == "prepend" and effective_instruction:
+            # Qwen-compatible: prepend instruction to query string
             query = f"{effective_instruction}\n\n{query}"
+        # For "native" mode, instruction is sent as a separate payload field
+        # (handled in _rerank_batch and _rerank_single)
 
         query_tokens = self._count_tokens(query)
+        # In native mode, instruction tokens consume context budget too
+        instruction_tokens = 0
+        if self._instruction_mode == "native" and effective_instruction:
+            instruction_tokens = self._count_tokens(effective_instruction)
 
         # Prepare and truncate documents, filtering those that exceed budget
         valid_candidates: List[Tuple[int, str, Dict]] = []
@@ -405,10 +427,11 @@ class LocalRerankerServiceProvider(RerankProvider):
             text = self._truncate_text(cand["text"])
             doc_tokens = self._count_tokens(text)
 
-            if query_tokens + doc_tokens > MAX_TOKENS_TOTAL:
-                # Skip if even truncated doc exceeds budget with query
+            if query_tokens + instruction_tokens + doc_tokens > self._max_tokens_total:
+                # Skip if even truncated doc exceeds budget with query + instruction
                 logger.debug(
-                    f"Skipping candidate {i}: {query_tokens + doc_tokens} tokens exceeds {MAX_TOKENS_TOTAL}"
+                    f"Skipping candidate {i}: {query_tokens + instruction_tokens + doc_tokens} "
+                    f"tokens exceeds {self._max_tokens_total}"
                 )
                 skipped_count += 1
                 continue
@@ -424,7 +447,7 @@ class LocalRerankerServiceProvider(RerankProvider):
                     "total_candidates": len(candidates),
                     "skipped_count": skipped_count,
                     "query_tokens": query_tokens,
-                    "max_tokens_total": MAX_TOKENS_TOTAL,
+                    "max_tokens_total": self._max_tokens_total,
                     "reason": "all_candidates_exceed_token_budget",
                 },
             )

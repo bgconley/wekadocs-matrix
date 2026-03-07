@@ -140,10 +140,12 @@ search:
     reranker:
       enabled: true  # Cross-encoder enabled - eliminates length bias in final ranking
       provider: "local-reranker-service"
-      model: "Qwen/Qwen3-Reranker-4B"  # 8K context window
+      model: "mixedbread-ai/mxbai-rerank-large-v2"  # 1.5B params, 8K context, native instruction support
       top_n: 60           # Reranker pool size (raised from 20 — 6-field RRF produces 180+ candidates)
-      max_pairs: 50       # Candidates to send to reranker (unused — never referenced by code)
-      max_tokens_per_pair: 4096  # Unused — actual limits in local_reranker_service.py
+      instruction_mode: "native"  # Send instruction as separate payload field (mxbai-compatible)
+      batch_size: 2        # Conservative for shared 3090 VRAM
+      max_tokens_total: 8192
+      max_tokens_per_doc: 6000
       instruction: "Judge whether the document is relevant to the search query about WEKA distributed file system. Match the specificity of the query — if the query asks about a specific subsystem (metadata, filesystem internals, tiering, snapshots), prioritize documentation about that subsystem over general overviews. Consider system architecture, filesystem internals, data management concepts, metadata handling, configuration procedures, CLI commands, parameter references, and step-by-step instructions as highly relevant. Introductory overviews and general summaries are less relevant than specific technical content. Answer only yes or no."
       instructions_by_type:
         subsystem_architecture: "Judge whether the document is relevant to the query about WEKA internal subsystem architecture (metadata, inodes, tiering, data protection, filesystem internals). Prioritize deep technical documentation about the specific subsystem over general overviews or cloud deployment guides. Cloud deployment workflows (AWS, Azure, GCP, Terraform, CycleCloud) are NOT relevant unless the query explicitly mentions those platforms. Answer only yes or no."

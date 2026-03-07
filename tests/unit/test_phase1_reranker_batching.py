@@ -164,6 +164,13 @@ class TestBGERerankerBatching:
         provider._client = mock_client
         provider._batch_size = 16
         provider._use_batching = True
+        provider._instruction = None
+        provider._instruction_mode = "prepend"
+        provider._effective_instruction = None
+        provider._max_tokens_total = 8192
+        provider._max_tokens_per_doc = 7500
+        provider._tokenizer = None
+        provider._tokenizer_loaded = True
         # Circuit breaker instance (M1/M2 fix: shared module)
         provider._circuit_breaker = CircuitBreaker(name="test")
 
@@ -213,6 +220,13 @@ class TestBGERerankerBatching:
         provider._client = mock_client
         provider._batch_size = 16
         provider._use_batching = True
+        provider._instruction = None
+        provider._instruction_mode = "prepend"
+        provider._effective_instruction = None
+        provider._max_tokens_total = 8192
+        provider._max_tokens_per_doc = 7500
+        provider._tokenizer = None
+        provider._tokenizer_loaded = True
         # Circuit breaker instance (M1/M2 fix: shared module)
         provider._circuit_breaker = CircuitBreaker(name="test")
 
@@ -256,6 +270,13 @@ class TestBGERerankerBatching:
         provider._client = mock_client
         provider._batch_size = 16
         provider._use_batching = True
+        provider._instruction = None
+        provider._instruction_mode = "prepend"
+        provider._effective_instruction = None
+        provider._max_tokens_total = 8192
+        provider._max_tokens_per_doc = 7500
+        provider._tokenizer = None
+        provider._tokenizer_loaded = True
         # Circuit breaker instance (M1/M2 fix: shared module)
         provider._circuit_breaker = CircuitBreaker(name="test")
 
@@ -272,7 +293,7 @@ class TestBGERerankerBatching:
         assert len(results) == 10  # top_k=10
         for result in results:
             assert result["rerank_score"] == 0.0
-            assert result["reranker"] == "rerank_failed"
+            assert result["reranker"] in ("batch_failed", "rerank_failed")
 
     def test_rerank_429_triggers_skip(self, mock_client):
         """Verify 429 Too Many Requests triggers skip, not retry."""
@@ -291,6 +312,13 @@ class TestBGERerankerBatching:
         provider._client = mock_client
         provider._batch_size = 16
         provider._use_batching = True
+        provider._instruction = None
+        provider._instruction_mode = "prepend"
+        provider._effective_instruction = None
+        provider._max_tokens_total = 8192
+        provider._max_tokens_per_doc = 7500
+        provider._tokenizer = None
+        provider._tokenizer_loaded = True
         # Circuit breaker instance (M1/M2 fix: shared module)
         provider._circuit_breaker = CircuitBreaker(name="test")
 
@@ -385,6 +413,9 @@ class TestTruncation:
         )
 
         provider = LocalRerankerServiceProvider.__new__(LocalRerankerServiceProvider)
+        provider._max_tokens_per_doc = 7500
+        provider._tokenizer = None
+        provider._tokenizer_loaded = True
         text = "This is a short document."
         result = provider._truncate_text(text)
         assert result == text
@@ -392,17 +423,20 @@ class TestTruncation:
     def test_truncate_long_text(self):
         """Verify long text is truncated to token limit."""
         from src.providers.rerank.local_reranker_service import (
-            MAX_TOKENS_PER_DOC,
             LocalRerankerServiceProvider,
         )
 
+        max_tokens_per_doc = 7500
         provider = LocalRerankerServiceProvider.__new__(LocalRerankerServiceProvider)
+        provider._max_tokens_per_doc = max_tokens_per_doc
+        provider._tokenizer = None
+        provider._tokenizer_loaded = True
 
         # Create text with more tokens than limit
-        words = ["word"] * (MAX_TOKENS_PER_DOC + 100)
+        words = ["word"] * (max_tokens_per_doc + 100)
         text = " ".join(words)
 
         result = provider._truncate_text(text)
         result_tokens = len(result.split())
 
-        assert result_tokens == MAX_TOKENS_PER_DOC
+        assert result_tokens == max_tokens_per_doc

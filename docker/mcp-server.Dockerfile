@@ -36,6 +36,7 @@ import sys
 required = [
     "Qwen/Qwen3-Embedding-0.6B",
     "Qwen/Qwen3-Reranker-4B",
+    "mixedbread-ai/mxbai-rerank-large-v2",
     "BAAI/bge-m3",
 ]
 optional = [

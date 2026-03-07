@@ -412,11 +412,54 @@ class ProviderFactory:
                 os.getenv("RERANKER_TIMEOUT_SECONDS", "60")
             )
             instruction = kwargs.get("instruction")
+            instruction_mode = kwargs.get("instruction_mode") or os.getenv(
+                "RERANKER_INSTRUCTION_MODE",
+                (
+                    getattr(reranker_cfg, "instruction_mode", "prepend")
+                    if reranker_cfg
+                    else "prepend"
+                ),
+            )
+            batch_size = int(
+                kwargs.get("batch_size")
+                or os.getenv(
+                    "RERANKER_BATCH_SIZE",
+                    str(
+                        getattr(reranker_cfg, "batch_size", 16) if reranker_cfg else 16
+                    ),
+                )
+            )
+            max_tokens_total = int(
+                kwargs.get("max_tokens_total")
+                or os.getenv(
+                    "RERANKER_MAX_TOKENS_TOTAL",
+                    str(
+                        getattr(reranker_cfg, "max_tokens_total", 8192)
+                        if reranker_cfg
+                        else 8192
+                    ),
+                )
+            )
+            max_tokens_per_doc = int(
+                kwargs.get("max_tokens_per_doc")
+                or os.getenv(
+                    "RERANKER_MAX_TOKENS_PER_DOC",
+                    str(
+                        getattr(reranker_cfg, "max_tokens_per_doc", 7500)
+                        if reranker_cfg
+                        else 7500
+                    ),
+                )
+            )
             return LocalRerankerServiceProvider(
                 model=model,
                 base_url=base_url,
                 timeout=timeout,
                 instruction=instruction,
+                instruction_mode=instruction_mode,
+                batch_size=batch_size,
+                max_tokens_total=max_tokens_total,
+                max_tokens_per_doc=max_tokens_per_doc,
             )
 
         elif provider in {"noop", "none", "disabled"}:

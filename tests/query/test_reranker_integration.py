@@ -289,3 +289,100 @@ def test_apply_reranker_detects_real_scores(monkeypatch):
     assert metrics["reranker_applied"] is True
     assert metrics["reranker_reason"] == "ok"
     assert metrics["reranker_real_scores_count"] > 0
+
+
+# ---------------------------------------------------------------------------
+# Provider-level tests for instruction mode and health check
+# ---------------------------------------------------------------------------
+
+
+def test_native_instruction_mode_sends_separate_field(monkeypatch):
+    """In native mode, instruction should be a separate JSON field, not in query."""
+    from src.providers.rerank.local_reranker_service import LocalRerankerServiceProvider
+
+    provider = LocalRerankerServiceProvider(
+        model="test-model",
+        base_url="http://fake:9006",
+        instruction="Test instruction",
+        instruction_mode="native",
+        batch_size=2,
+    )
+
+    captured_payloads = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"results": [{"index": 0, "score": 0.9}]}
+
+        def raise_for_status(self):
+            pass
+
+    def fake_post(url, json=None, **kwargs):
+        captured_payloads.append(json)
+        return FakeResponse()
+
+    monkeypatch.setattr(provider._client, "post", fake_post)
+
+    provider.rerank("my query", [{"text": "doc text", "id": "1"}], top_k=1)
+
+    assert len(captured_payloads) == 1
+    payload = captured_payloads[0]
+    assert payload["instruction"] == "Test instruction"
+    assert "Test instruction" not in payload["query"]  # NOT prepended
+
+
+def test_prepend_instruction_mode_puts_in_query(monkeypatch):
+    """In prepend mode, instruction should be prepended to query, not a separate field."""
+    from src.providers.rerank.local_reranker_service import LocalRerankerServiceProvider
+
+    provider = LocalRerankerServiceProvider(
+        model="test-model",
+        base_url="http://fake:9006",
+        instruction="Test instruction",
+        instruction_mode="prepend",
+        batch_size=2,
+    )
+
+    captured_payloads = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"results": [{"index": 0, "score": 0.9}]}
+
+        def raise_for_status(self):
+            pass
+
+    def fake_post(url, json=None, **kwargs):
+        captured_payloads.append(json)
+        return FakeResponse()
+
+    monkeypatch.setattr(provider._client, "post", fake_post)
+
+    provider.rerank("my query", [{"text": "doc text", "id": "1"}], top_k=1)
+
+    assert len(captured_payloads) == 1
+    payload = captured_payloads[0]
+    assert "instruction" not in payload  # NOT a separate field
+    assert "Test instruction" in payload["query"]  # Prepended to query
+
+
+def test_health_check_returns_false_on_connection_error(monkeypatch):
+    """health_check() must return False when the service is unreachable."""
+    import httpx
+
+    from src.providers.rerank.local_reranker_service import LocalRerankerServiceProvider
+
+    provider = LocalRerankerServiceProvider(
+        model="test-model",
+        base_url="http://unreachable:9999",
+    )
+
+    def fake_get(*args, **kwargs):
+        raise httpx.ConnectError("Connection refused")
+
+    monkeypatch.setattr(provider._client, "get", fake_get)
+    assert provider.health_check() is False
