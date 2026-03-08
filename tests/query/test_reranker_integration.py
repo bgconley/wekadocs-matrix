@@ -1063,3 +1063,76 @@ def test_graph_channel_decoupled_from_enrichment():
     # After decoupling, the gate only checks self._plan.use_entity_graph_channel
     # (True) and self.neo4j_disabled (False), so it passes through.
     assert stats["graph_channel_entities"] == 2  # "metadata" + "tiering"
+
+
+def test_graph_channel_injects_precision_anchors():
+    """When GLiNER returns nothing useful, primary_anchors from QueryIntent
+    should still provide graph anchors so the channel has terms to query."""
+    hr = _bootstrap_retriever(reranker_enabled=False)
+    hr._plan = ResolvedRetrievalPlan(
+        profile=RetrievalProfile.GRAPH_ASSISTED,
+        use_entity_graph_channel=True,
+        use_graph_enrichment=False,
+        graph_garbage_filter_on=True,
+        graph_score_normalized_on=True,
+    )
+    hr.neo4j_disabled = False
+    hr.graph_channel_enabled = False
+    hr.graph_enabled = False
+    hr.graph_adaptive_enabled = True
+    hr.graph_relationships = ["MENTIONS"]
+    hr.graph_max_related = 20
+    hr.graph_max_depth = 3
+    hr.config = types.SimpleNamespace(
+        feature_flags=types.SimpleNamespace(),
+        ner=types.SimpleNamespace(enabled=False),
+        search=types.SimpleNamespace(
+            hybrid=types.SimpleNamespace(
+                query_type_relationships={
+                    "subsystem_architecture": ["MENTIONS"],
+                },
+            ),
+        ),
+    )
+
+    # GLiNER returns only "weka" (garbage-filtered away at len < 4)
+    class WeakExtractor:
+        def extract_entities(self, query):
+            return ["we"]  # too short, filtered by garbage filter
+
+    hr._entity_extractor = WeakExtractor()
+
+    class FakeSession:
+        def run(self, cypher, **kwargs):
+            return []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    class FakeDriver:
+        def session(self):
+            return FakeSession()
+
+    hr.neo4j_driver = FakeDriver()
+
+    # Intent with primary_anchors — these should be injected
+    intent = QueryIntent(
+        query_type="subsystem_architecture",
+        precision_mode=True,
+        subsystem_terms=("metadata",),
+        primary_anchors=("metadata",),
+        generic_modifiers=("managed",),
+    )
+
+    result_chunks, stats = hr._graph_retrieval_channel(
+        "how is metadata managed", None, intent=intent
+    )
+
+    # "we" filtered by garbage filter (< 4 chars), but "metadata" injected from anchors
+    assert stats["graph_channel_entities"] >= 1
+    sources = stats.get("graph_anchor_sources", {})
+    assert "metadata" in sources.get("precision_anchors", [])
+    assert sources["merged"] >= 1

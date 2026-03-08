@@ -3607,7 +3607,7 @@ class HybridRetriever:
                 )
             else:
                 graph_candidates, graph_channel_stats = self._graph_retrieval_channel(
-                    query, doc_tag
+                    query, doc_tag, intent=intent
                 )
                 if graph_candidates:
                     fused_results.extend(graph_candidates)
@@ -3628,6 +3628,9 @@ class HybridRetriever:
                 ),
                 graph_mode="reranker" if graph_as_reranker_flag else "channel",
                 entity_anchors_found=graph_channel_stats.get("entity_anchors_found", 0),
+                graph_anchor_sources=graph_channel_stats.get(
+                    "graph_anchor_sources", {}
+                ),
             )
         metrics.update(graph_channel_stats)
 
@@ -5963,19 +5966,50 @@ class HybridRetriever:
         return boosted_count
 
     def _graph_retrieval_channel(
-        self, query: str, doc_tag: Optional[str]
+        self,
+        query: str,
+        doc_tag: Optional[str],
+        *,
+        intent: Optional["QueryIntent"] = None,
     ) -> Tuple[List[ChunkResult], Dict[str, int]]:
         """Entity-anchored graph retrieval channel (flagged)."""
         stats = {
             "graph_channel_candidates": 0,
             "graph_channel_entities": 0,
+            "graph_anchor_sources": {},
         }
         # Decoupled: graph channel only requires its own plan flag + neo4j.
         # No longer coupled to graph_enabled (enrichment).
         if not self._plan.use_entity_graph_channel or self.neo4j_disabled:
             return [], stats
+
+        # Build graph anchors from two sources:
+        # 1. GLiNER entity extraction (NER-based)
+        # 2. QueryIntent.primary_anchors (precision terms like "metadata")
         extractor = self._get_entity_extractor()
-        entities = extractor.extract_entities(query)
+        extracted_entities = extractor.extract_entities(query)
+
+        # Inject precision anchors alongside extracted entities
+        precision_anchors: List[str] = []
+        if intent is not None and intent.primary_anchors:
+            precision_anchors = list(intent.primary_anchors)
+
+        # Union and deduplicate (case-insensitive)
+        seen_lower: set = set()
+        entities: List[str] = []
+        for e in list(extracted_entities) + precision_anchors:
+            if not isinstance(e, str):
+                continue
+            low = e.lower().strip()
+            if low and low not in seen_lower:
+                seen_lower.add(low)
+                entities.append(e)
+
+        stats["graph_anchor_sources"] = {
+            "extracted": len(extracted_entities),
+            "precision_anchors": precision_anchors,
+            "merged": len(entities),
+        }
         if self._plan.graph_garbage_filter_on:
             entities = [
                 e
