@@ -6048,7 +6048,7 @@ class HybridRetriever:
             $use_rel_types = false
             OR type(r) IN $rel_types
         )
-        WHERE $doc_tag IS NULL OR c.doc_tag = $doc_tag
+        AND ($doc_tag IS NULL OR c.doc_tag = $doc_tag)
         RETURN DISTINCT c {
             .id,
             .document_id,
