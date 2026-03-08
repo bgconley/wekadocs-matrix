@@ -3621,7 +3621,7 @@ class HybridRetriever:
                     if graph_candidates
                     else len(fused_results)
                 ),
-                nodes_retrieved=graph_channel_stats.get("graph_candidates", 0),
+                nodes_retrieved=graph_channel_stats.get("graph_channel_candidates", 0),
                 edges_traversed=graph_channel_stats.get("graph_edges_traversed", 0),
                 relationship_types_used=graph_channel_stats.get(
                     "graph_relationship_types", []
