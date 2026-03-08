@@ -986,6 +986,8 @@ def graph_retrieval_channel(
 
     # Sparse gating via kg_id if available
     sparse_query = owner.vector_retriever._build_sparse_query(query)
+    sparse_gate_debug = []
+    sparse_gate_hits = 0
     if (
         sparse_query
         and isinstance(sparse_query, dict)
@@ -999,10 +1001,22 @@ def graph_retrieval_channel(
             owner.expansion_sparse_threshold,
         )
         if gated is not None:
+            sparse_gate_hits = len(gated)
             allowed = {
                 pid for pid, s in gated.items() if s >= owner.expansion_sparse_threshold
             }
+            for chunk in chunks[:10]:
+                chunk_id = str(chunk.chunk_id) if chunk.chunk_id else None
+                score = gated.get(chunk_id) if chunk_id else None
+                sparse_gate_debug.append(
+                    {
+                        "chunk_id": chunk_id,
+                        "sparse_score": round(score, 4) if score is not None else None,
+                        "passed": bool(chunk_id and chunk_id in allowed),
+                    }
+                )
             chunks = [c for c in chunks if str(c.chunk_id) in allowed]
+    stats["graph_channel_sparse_hits"] = sparse_gate_hits
     stats["graph_channel_post_sparse_chunks"] = len(chunks)
     stats["graph_channel_candidates"] = len(chunks)
     logger.info(
@@ -1014,9 +1028,25 @@ def graph_retrieval_channel(
             "raw_rows": stats.get("graph_channel_raw_rows"),
             "post_support_chunks": stats.get("graph_channel_post_support_chunks"),
             "post_sparse_chunks": stats.get("graph_channel_post_sparse_chunks"),
+            "sparse_hits": stats.get("graph_channel_sparse_hits", 0),
             "rels": rels,
         },
     )
+    if stats.get("graph_channel_post_support_chunks", 0) and not stats.get(
+        "graph_channel_post_sparse_chunks", 0
+    ):
+        logger.warning(
+            "graph_channel_sparse_gate_zeroed",
+            extra={
+                "query_preview": query[:80],
+                "threshold": owner.expansion_sparse_threshold,
+                "post_support_chunks": stats.get(
+                    "graph_channel_post_support_chunks", 0
+                ),
+                "sparse_hits": stats.get("graph_channel_sparse_hits", 0),
+                "debug_candidates": sparse_gate_debug,
+            },
+        )
     return chunks, stats
 
 

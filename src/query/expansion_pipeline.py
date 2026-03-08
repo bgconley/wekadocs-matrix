@@ -756,7 +756,7 @@ def rescore_expansion_with_sparse(
         using=owner.vector_retriever.sparse_query_name,
         query_filter=q_filter,
         limit=len(neighbor_ids),
-        with_payload=False,
+        with_payload=True,
         with_vectors=False,
         score_threshold=threshold or None,
     )
@@ -764,9 +764,15 @@ def rescore_expansion_with_sparse(
     if not hits:
         return None
 
-    raw_scores = {
-        str(hit.id): float(hit.score) for hit in hits if hit.score is not None
-    }
+    raw_scores = {}
+    for hit in hits:
+        if hit.score is None:
+            continue
+        payload = getattr(hit, "payload", None) or {}
+        score_key = payload.get("kg_id") or hit.id
+        if score_key is None:
+            continue
+        raw_scores[str(score_key)] = float(hit.score)
     if not raw_scores:
         return None
 
