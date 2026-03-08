@@ -6089,7 +6089,12 @@ class HybridRetriever:
                     rel_types=rels,
                     use_rel_types=self._plan.use_entity_graph_channel,
                 )
-                for record in result:
+                records = list(result)
+                logger.info(
+                    "graph_channel_raw_results",
+                    record_count=len(records),
+                )
+                for record in records:
                     props = record["props"] or {}
                     chunk = self._chunk_from_props(props)
                     raw_matches = float(record.get("match_count") or 0.0)
