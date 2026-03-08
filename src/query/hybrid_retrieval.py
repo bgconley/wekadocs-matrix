@@ -6036,11 +6036,14 @@ class HybridRetriever:
             return [], stats
         rels, max_related = self._relationships_for_query(query)
         limit_per_entity = max(1, min(max_related, 50))
+        # Direction-agnostic: MENTIONS is stored as (Chunk)-[:MENTIONS]->(Entity),
+        # while DEFINES is (Entity)-[:DEFINES]->(Chunk). Using (e)-[r]-(c)
+        # matches both directions without duplicating the query.
         cypher = """
         UNWIND $entities AS name
         MATCH (e:Entity)
         WHERE toLower(e.name) CONTAINS toLower(name)
-        MATCH (e)-[r]->(c:Chunk)
+        MATCH (e)-[r]-(c:Chunk)
         WHERE (
             $use_rel_types = false
             OR type(r) IN $rel_types
