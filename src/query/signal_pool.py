@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Dict, List, Set
 
 if TYPE_CHECKING:
-    from src.query.hybrid_retrieval import ChunkResult
+    from src.query.retrieval_types import ChunkResult
     from src.shared.config import SignalPoolConfig
 
 logger = logging.getLogger(__name__)

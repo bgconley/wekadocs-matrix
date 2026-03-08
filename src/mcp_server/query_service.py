@@ -21,7 +21,7 @@ from src.providers.factory import ProviderFactory
 from src.providers.rerank.base import RerankProvider
 from src.providers.tokenizer_service import TokenizerService
 from src.query.context_assembly import ContextAssembler
-from src.query.hybrid_retrieval import ChunkResult, HybridRetriever
+from src.query.hybrid_retrieval import HybridRetriever
 from src.query.hybrid_search import HybridSearchEngine, QdrantVectorStore, SearchResult
 from src.query.planner import QueryPlanner
 from src.query.ranking import (  # Ranker bypassed - hybrid_retrieval handles ranking
@@ -33,6 +33,7 @@ from src.query.response_builder import (
     Verbosity,
     build_response,
 )
+from src.query.retrieval_types import ChunkResult
 from src.query.session_tracker import SessionTracker
 from src.shared.config import get_config, get_embedding_plan, get_embedding_settings
 from src.shared.connections import get_connection_manager

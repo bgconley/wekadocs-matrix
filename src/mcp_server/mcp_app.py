@@ -41,7 +41,7 @@ from src.mcp_server.retrieval_trace import (
     write_trace,
 )
 from src.mcp_server.scratch_store import ScratchStore
-from src.query.hybrid_retrieval import ChunkResult
+from src.query.retrieval_types import ChunkResult
 from src.query.traversal import TraversalService
 from src.services import ContextBudgetManager, GraphService, TextService
 from src.services.context_assembler import (
