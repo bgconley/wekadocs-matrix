@@ -789,6 +789,12 @@ def graph_retrieval_channel(
     stats = {
         "graph_channel_candidates": 0,
         "graph_channel_entities": 0,
+        "entity_anchors_found": 0,
+        "graph_edges_traversed": 0,
+        "graph_relationship_types": [],
+        "graph_channel_raw_rows": 0,
+        "graph_channel_post_support_chunks": 0,
+        "graph_channel_post_sparse_chunks": 0,
         "graph_anchor_sources": {},
     }
     # Decoupled: graph channel only requires its own plan flag + neo4j.
@@ -828,12 +834,7 @@ def graph_retrieval_channel(
             ):
                 entities.append(e)
 
-    stats["graph_anchor_sources"] = {
-        "extracted": len(extracted_entities),
-        "precision_anchors": precision_anchors,
-        "merged": len(entities),
-        "excluded_count": len(seen_lower) - len(entities),
-    }
+    pre_filter_count = len(entities)
     if owner._plan.graph_garbage_filter_on:
         entities = [
             e
@@ -855,6 +856,13 @@ def graph_retrieval_channel(
                 "it",
             }
         ]
+    stats["graph_anchor_sources"] = {
+        "extracted": len(extracted_entities),
+        "precision_anchors": precision_anchors,
+        "merged": len(entities),
+        "pre_garbage_filter": pre_filter_count,
+        "excluded_count": len(seen_lower) - len(entities),
+    }
     stats["graph_channel_entities"] = len(entities)
     if not entities:
         return [], stats
@@ -865,15 +873,24 @@ def graph_retrieval_channel(
     # matches both directions without duplicating the query.
     cypher = """
     UNWIND $entities AS name
+    WITH trim(toLower(name)) AS anchor
     MATCH (e:Entity)
-    WHERE toLower(e.name) CONTAINS toLower(name)
+    WITH anchor, e, toLower(coalesce(e.canonical_name, e.name, '')) AS entity_name
+    WHERE entity_name = anchor
+       OR (size(anchor) >= 6 AND entity_name CONTAINS anchor)
     MATCH (e)-[r]-(c:Chunk)
     WHERE (
         $use_rel_types = false
         OR type(r) IN $rel_types
     )
     AND ($doc_tag IS NULL OR c.doc_tag = $doc_tag)
-    RETURN DISTINCT c {
+    WITH c,
+         collect(DISTINCT anchor) AS matched_anchors,
+         count(DISTINCT e) AS entity_count,
+         count(DISTINCT r) AS edge_count,
+         collect(DISTINCT type(r)) AS rel_types_collected
+    WITH c, matched_anchors, entity_count, edge_count, rel_types_collected
+    RETURN c {
         .id,
         .document_id,
         .parent_section_id,
@@ -890,7 +907,13 @@ def graph_retrieval_channel(
         .is_microdoc_stub,
         .embedding_version,
         .tenant
-    } AS props, size(collect(e)) AS match_count
+    } AS props,
+    matched_anchors,
+    size(matched_anchors) AS anchor_count,
+    entity_count,
+    edge_count,
+    rel_types_collected AS rel_types
+    ORDER BY anchor_count DESC, entity_count DESC, edge_count DESC, c.id
     LIMIT $limit
     """
     chunks: List[ChunkResult] = []
@@ -914,26 +937,50 @@ def graph_retrieval_channel(
                 use_rel_types=owner._plan.use_entity_graph_channel,
             )
             records = list(result)
+            stats["graph_channel_raw_rows"] = len(records)
             logger.info(
                 "graph_channel_raw_results",
                 record_count=len(records),
             )
+            anchors_found: set = set()
+            rel_types_used: set = set()
+            edges_traversed = 0
+            support_threshold = 2 if owner._plan.graph_garbage_filter_on else 1
             for record in records:
+                matched_anchors = [
+                    str(anchor).strip().lower()
+                    for anchor in (record.get("matched_anchors") or [])
+                    if str(anchor).strip()
+                ]
+                anchors_found.update(matched_anchors)
+                anchor_count = int(record.get("anchor_count") or 0)
+                entity_count = int(record.get("entity_count") or 0)
+                support_count = max(anchor_count, entity_count)
+                if support_count < support_threshold:
+                    continue
                 props = record["props"] or {}
                 chunk = chunk_from_props(props)
-                raw_matches = float(record.get("match_count") or 0.0)
+                edge_count = int(record.get("edge_count") or 0)
+                rel_types = record.get("rel_types") or []
+                for rel_type in rel_types:
+                    if rel_type:
+                        rel_types_used.add(str(rel_type))
+                edges_traversed += max(0, edge_count)
                 if owner._plan.graph_score_normalized_on:
-                    chunk.graph_score = 1.0 - math.exp(-raw_matches / 3.0)
+                    chunk.graph_score = 1.0 - math.exp(-support_count / 3.0)
                 else:
-                    chunk.graph_score = max(1.0, raw_matches)
+                    chunk.graph_score = float(max(1, support_count))
                 # Do not overwrite vector_score; keep graph score separate
                 chunk.fused_score = chunk.graph_score
                 chunk.vector_score_kind = "graph_entity"
                 chunks.append(chunk)
+            stats["entity_anchors_found"] = len(anchors_found)
+            stats["graph_edges_traversed"] = edges_traversed
+            stats["graph_relationship_types"] = sorted(rel_types_used)
+            stats["graph_channel_post_support_chunks"] = len(chunks)
     except Exception as exc:
         logger.warning("Graph retrieval channel failed", error=str(exc))
         return [], stats
-    stats["graph_channel_candidates"] = len(chunks)
     if not chunks:
         return [], stats
 
@@ -951,17 +998,22 @@ def graph_retrieval_channel(
             chunks,
             owner.expansion_sparse_threshold,
         )
-        if gated:
+        if gated is not None:
             allowed = {
                 pid for pid, s in gated.items() if s >= owner.expansion_sparse_threshold
             }
-            chunks = [c for c in chunks if str(c.chunk_id) in allowed] or chunks
+            chunks = [c for c in chunks if str(c.chunk_id) in allowed]
+    stats["graph_channel_post_sparse_chunks"] = len(chunks)
+    stats["graph_channel_candidates"] = len(chunks)
     logger.info(
         "graph_channel_invoked",
         extra={
             "query_preview": query[:80],
             "entities": stats.get("graph_channel_entities"),
             "candidates": stats.get("graph_channel_candidates"),
+            "raw_rows": stats.get("graph_channel_raw_rows"),
+            "post_support_chunks": stats.get("graph_channel_post_support_chunks"),
+            "post_sparse_chunks": stats.get("graph_channel_post_sparse_chunks"),
             "rels": rels,
         },
     )

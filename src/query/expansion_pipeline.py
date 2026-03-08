@@ -183,8 +183,9 @@ def bounded_expansion(owner, query: str, seeds: List[ChunkResult]) -> List[Chunk
 
     Reference: Phase 7E Canonical Spec L1425-1434
     """
-    # PHASE 1 VECTOR-ONLY: Skip expansion when neo4j_disabled
-    if not seeds or owner.neo4j_disabled:
+    # PHASE 1 VECTOR-ONLY: Skip expansion when neo4j_disabled.
+    # Use getattr for test doubles that mock a minimal HybridRetriever surface.
+    if not seeds or getattr(owner, "neo4j_disabled", False):
         return []
 
     # Limit to first 5 seeds for expansion (bounded)
@@ -360,13 +361,23 @@ def expand_with_structure(
 
     Returns combined list of expanded chunks (no duplicates).
     """
-    # PHASE 1 VECTOR-ONLY: Skip structure expansion when neo4j_disabled
-    if not seeds or owner.neo4j_disabled:
+    # PHASE 1 VECTOR-ONLY: Skip structure expansion when neo4j_disabled.
+    # Use getattr for test doubles that mock a minimal HybridRetriever surface.
+    if not seeds or getattr(owner, "neo4j_disabled", False):
         return []
 
-    # Check plan (bypass if force=True for signal pool pre-rerank)
-    if not force and not owner._plan.use_structure_expansion:
-        return []
+    # Check plan (bypass if force=True for signal pool pre-rerank).
+    # Compatibility fallback for tests that mock a minimal HybridRetriever
+    # without the refactor-introduced _plan attribute.
+    if not force:
+        plan = getattr(owner, "_plan", None)
+        if plan is not None:
+            enabled = bool(getattr(plan, "use_structure_expansion", False))
+        else:
+            ff = getattr(getattr(owner, "config", None), "feature_flags", None)
+            enabled = bool(getattr(ff, "structure_aware_expansion", False))
+        if not enabled:
+            return []
 
     # Get config limits
     expansion_cfg = getattr(
@@ -837,8 +848,9 @@ def microdoc_from_directory(
     Applies tenant/doc_tag/snapshot_scope filters to prevent cross-scope
     data leakage when expanding micro-doc results.
     """
-    # PHASE 1 VECTOR-ONLY: Skip microdoc expansion when neo4j_disabled
-    if limit <= 0 or owner.neo4j_disabled:
+    # PHASE 1 VECTOR-ONLY: Skip microdoc expansion when neo4j_disabled.
+    # Use getattr for test doubles that mock a minimal HybridRetriever surface.
+    if limit <= 0 or getattr(owner, "neo4j_disabled", False):
         return []
     prefix = path_prefix(base.source_path, owner.micro_dir_depth)
     if not prefix:

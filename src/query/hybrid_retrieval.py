@@ -1095,6 +1095,7 @@ class HybridRetriever:
         graph_channel_stats: Dict[str, Any] = {}
         graph_candidates: List[ChunkResult] = []  # Initialize for logging safety
         graph_as_reranker_flag = self._plan.use_graph_score_override
+        graph_initial_count = len(fused_results)
         # Graph channel dispatch — plan-driven
         if self._plan.use_entity_graph_channel and not self.neo4j_disabled:
             if graph_as_reranker_flag:
@@ -1106,24 +1107,46 @@ class HybridRetriever:
                     query, doc_tag, intent=intent
                 )
                 if graph_candidates:
-                    fused_results.extend(graph_candidates)
-                    fused_results = self._dedup_results(fused_results)
+                    fused_results, merge_stats = self._merge_graph_channel_candidates(
+                        fused_results,
+                        graph_candidates,
+                        query_type=query_type,
+                    )
+                    graph_channel_stats.update(merge_stats)
 
             # LGTM Phase 4: Verbose log event 5 - graph_augmentation_complete
             logger.info(
                 "graph_augmentation_complete",
-                initial_chunks=(
-                    len(fused_results) - len(graph_candidates)
-                    if graph_candidates
-                    else len(fused_results)
-                ),
+                initial_chunks=graph_initial_count,
                 nodes_retrieved=graph_channel_stats.get("graph_channel_candidates", 0),
+                raw_rows=graph_channel_stats.get("graph_channel_raw_rows", 0),
+                post_support_chunks=graph_channel_stats.get(
+                    "graph_channel_post_support_chunks", 0
+                ),
+                post_sparse_chunks=graph_channel_stats.get(
+                    "graph_channel_post_sparse_chunks", 0
+                ),
                 edges_traversed=graph_channel_stats.get("graph_edges_traversed", 0),
                 relationship_types_used=graph_channel_stats.get(
                     "graph_relationship_types", []
                 ),
                 graph_mode="reranker" if graph_as_reranker_flag else "channel",
                 entity_anchors_found=graph_channel_stats.get("entity_anchors_found", 0),
+                merged_into_existing=graph_channel_stats.get(
+                    "graph_channel_merged_into_existing", 0
+                ),
+                new_graph_chunks_added=graph_channel_stats.get(
+                    "graph_channel_new_chunks_added", 0
+                ),
+                overlap_blended=graph_channel_stats.get(
+                    "graph_channel_overlap_blended", 0
+                ),
+                overlap_boost=graph_channel_stats.get(
+                    "graph_channel_overlap_boost", 0.0
+                ),
+                graph_channel_score_ceiling=graph_channel_stats.get(
+                    "graph_channel_score_ceiling", 0.0
+                ),
                 graph_anchor_sources=graph_channel_stats.get(
                     "graph_anchor_sources", {}
                 ),
@@ -2152,6 +2175,89 @@ class HybridRetriever:
         intent: Optional["QueryIntent"] = None,
     ) -> Tuple[List[ChunkResult], Dict[str, int]]:
         return _gp.graph_retrieval_channel(self, query, doc_tag, intent=intent)
+
+    def _merge_graph_channel_candidates(
+        self,
+        fused_results: List[ChunkResult],
+        graph_candidates: List[ChunkResult],
+        *,
+        query_type: str,
+    ) -> Tuple[List[ChunkResult], Dict[str, Any]]:
+        """Merge graph channel output with bounded influence.
+
+        Existing vector-ranked chunks get a small positive boost when graph
+        evidence overlaps by chunk identity. Novel graph-only chunks are kept
+        as recall candidates with a capped fused score so they can be reranked
+        without displacing strong vector results prematurely.
+        """
+        if not graph_candidates:
+            return fused_results, {
+                "graph_channel_merged_into_existing": 0,
+                "graph_channel_new_chunks_added": 0,
+                "graph_channel_overlap_blended": 0,
+                "graph_channel_score_ceiling": 0.0,
+                "graph_channel_overlap_boost": 0.0,
+            }
+
+        existing_by_id = {self._result_id(r): r for r in fused_results}
+        merged_count = 0
+        added_count = 0
+        overlap_blended = 0
+
+        score_ceiling = 1e-3
+        if fused_results:
+            fused_scores = sorted(
+                [float(r.fused_score or 0.0) for r in fused_results],
+                reverse=True,
+            )
+            if fused_scores:
+                ceiling_idx = min(len(fused_scores) - 1, 60)
+                score_ceiling = max(float(fused_scores[ceiling_idx]), 1e-3)
+
+        _, graph_weight = _gp.get_query_type_weights(self, query_type)
+        overlap_boost = max(0.05, min(0.15, float(graph_weight) * 0.4))
+
+        for candidate in graph_candidates:
+            rid = self._result_id(candidate)
+            current = existing_by_id.get(rid)
+            if current is not None:
+                current.graph_score = max(
+                    float(current.graph_score or 0.0),
+                    float(candidate.graph_score or 0.0),
+                )
+                if (
+                    current.vector_score_kind in (None, "", "dense")
+                    and candidate.vector_score_kind
+                ):
+                    current.vector_score_kind = candidate.vector_score_kind
+
+                base_fused = (
+                    current.fused_score
+                    if current.fused_score is not None
+                    else (current.vector_score or current.bm25_score or 0.0)
+                )
+                if base_fused > 0 and current.graph_score > 0:
+                    current.fused_score = float(base_fused) * (
+                        1.0 + (overlap_boost * float(current.graph_score))
+                    )
+                    overlap_blended += 1
+                merged_count += 1
+                continue
+
+            candidate.fused_score = min(
+                float(candidate.fused_score or 0.0), score_ceiling
+            )
+            fused_results.append(candidate)
+            existing_by_id[rid] = candidate
+            added_count += 1
+
+        return fused_results, {
+            "graph_channel_merged_into_existing": merged_count,
+            "graph_channel_new_chunks_added": added_count,
+            "graph_channel_overlap_blended": overlap_blended,
+            "graph_channel_score_ceiling": round(score_ceiling, 6),
+            "graph_channel_overlap_boost": round(overlap_boost, 4),
+        }
 
     def _fetch_graph_neighbors(
         self, seeds: List[ChunkResult], doc_tag: Optional[str]

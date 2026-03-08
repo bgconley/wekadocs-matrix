@@ -1136,3 +1136,157 @@ def test_graph_channel_injects_precision_anchors():
     sources = stats.get("graph_anchor_sources", {})
     assert "metadata" in sources.get("precision_anchors", [])
     assert sources["merged"] >= 1
+
+
+def test_graph_channel_aggregates_support_per_chunk_and_applies_hard_sparse_gate():
+    hr = _bootstrap_retriever(reranker_enabled=False)
+    hr._plan = ResolvedRetrievalPlan(
+        profile=RetrievalProfile.GRAPH_ASSISTED,
+        use_entity_graph_channel=True,
+        use_graph_enrichment=False,
+        graph_garbage_filter_on=True,
+        graph_score_normalized_on=True,
+    )
+    hr.neo4j_disabled = False
+    hr.graph_adaptive_enabled = True
+    hr.graph_relationships = ["MENTIONS", "DEFINES"]
+    hr.graph_max_related = 20
+    hr.graph_max_depth = 3
+    hr.expansion_sparse_threshold = 0.25
+    hr._classify_query_type = lambda query: "subsystem_architecture"
+    hr.config = types.SimpleNamespace(
+        feature_flags=types.SimpleNamespace(),
+        ner=types.SimpleNamespace(enabled=False),
+        search=types.SimpleNamespace(
+            hybrid=types.SimpleNamespace(
+                query_type_relationships={
+                    "subsystem_architecture": ["MENTIONS", "DEFINES"],
+                },
+            ),
+        ),
+    )
+
+    class WeakExtractor:
+        def extract_entities(self, query):
+            return []
+
+    hr._entity_extractor = WeakExtractor()
+    hr.vector_retriever = types.SimpleNamespace(
+        _build_sparse_query=lambda query: {"indices": [1], "values": [1.0]}
+    )
+    hr._rescore_expansion_with_sparse = lambda indices, values, chunks, threshold: {
+        "keep": 0.4
+    }
+
+    class FakeSession:
+        def run(self, cypher, **kwargs):
+            return [
+                {
+                    "props": {
+                        "id": "keep",
+                        "document_id": "doc-a",
+                        "parent_section_id": "p1",
+                        "order": 1,
+                        "level": 2,
+                        "heading": "Metadata management",
+                        "text": "metadata tiering details",
+                        "token_count": 10,
+                    },
+                    "matched_anchors": ["metadata", "tiering"],
+                    "anchor_count": 2,
+                    "entity_count": 2,
+                    "edge_count": 3,
+                    "rel_types": ["MENTIONS", "DEFINES"],
+                },
+                {
+                    "props": {
+                        "id": "drop",
+                        "document_id": "doc-b",
+                        "parent_section_id": "p2",
+                        "order": 2,
+                        "level": 2,
+                        "heading": "Single weak anchor",
+                        "text": "metadata only",
+                        "token_count": 8,
+                    },
+                    "matched_anchors": ["metadata"],
+                    "anchor_count": 1,
+                    "entity_count": 1,
+                    "edge_count": 1,
+                    "rel_types": ["MENTIONS"],
+                },
+            ]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    class FakeDriver:
+        def session(self):
+            return FakeSession()
+
+    hr.neo4j_driver = FakeDriver()
+
+    intent = QueryIntent(
+        query_type="subsystem_architecture",
+        precision_mode=True,
+        subsystem_terms=("metadata", "tiering"),
+        primary_anchors=("metadata", "tiering"),
+        generic_modifiers=(),
+    )
+
+    result_chunks, stats = hr._graph_retrieval_channel(
+        "metadata tiering", None, intent=intent
+    )
+
+    assert [chunk.chunk_id for chunk in result_chunks] == ["keep"]
+    assert stats["graph_channel_raw_rows"] == 2
+    assert stats["graph_channel_post_support_chunks"] == 1
+    assert stats["graph_channel_post_sparse_chunks"] == 1
+    assert stats["graph_channel_candidates"] == 1
+    assert stats["entity_anchors_found"] == 2
+    assert stats["graph_relationship_types"] == ["DEFINES", "MENTIONS"]
+
+
+def test_merge_graph_channel_candidates_blends_overlap_and_caps_new_chunks():
+    hr = _bootstrap_retriever(reranker_enabled=False)
+    hr.config = types.SimpleNamespace(
+        feature_flags=types.SimpleNamespace(),
+        search=types.SimpleNamespace(
+            hybrid=types.SimpleNamespace(
+                query_type_weights={
+                    "subsystem_architecture": {"vector": 0.7, "graph": 0.3}
+                }
+            ),
+        ),
+    )
+
+    existing = [
+        _chunk("a", "first", 0.03),
+        _chunk("b", "second", 0.02),
+        _chunk("c", "third", 0.01),
+    ]
+    overlap = _chunk("b", "second", 0.8)
+    overlap.graph_score = 0.8
+    overlap.vector_score_kind = "graph_entity"
+    novel = _chunk("g", "graph only", 0.9)
+    novel.graph_score = 0.9
+    novel.vector_score_kind = "graph_entity"
+
+    merged, stats = hr._merge_graph_channel_candidates(
+        existing,
+        [overlap, novel],
+        query_type="subsystem_architecture",
+    )
+
+    by_id = {chunk.chunk_id: chunk for chunk in merged}
+    assert len(merged) == 4
+    assert by_id["b"].fused_score == pytest.approx(0.02 * (1.0 + (0.12 * 0.8)))
+    assert by_id["b"].graph_score == pytest.approx(0.8)
+    assert by_id["g"].fused_score == pytest.approx(0.01)
+    assert stats["graph_channel_merged_into_existing"] == 1
+    assert stats["graph_channel_new_chunks_added"] == 1
+    assert stats["graph_channel_overlap_blended"] == 1
+    assert stats["graph_channel_score_ceiling"] == pytest.approx(0.01)
