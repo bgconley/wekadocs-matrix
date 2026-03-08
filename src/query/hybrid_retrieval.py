@@ -5994,7 +5994,11 @@ class HybridRetriever:
         if intent is not None and intent.primary_anchors:
             precision_anchors = list(intent.primary_anchors)
 
-        # Union and deduplicate (case-insensitive)
+        # Union and deduplicate (case-insensitive), then filter domain-generic
+        # entities that would match too broadly (e.g., "weka", "cluster",
+        # "weka cluster"). Uses the same exclusion list as ingestion.
+        from src.providers.ner.labels import is_excluded_entity
+
         seen_lower: set = set()
         entities: List[str] = []
         for e in list(extracted_entities) + precision_anchors:
@@ -6003,12 +6007,19 @@ class HybridRetriever:
             low = e.lower().strip()
             if low and low not in seen_lower:
                 seen_lower.add(low)
-                entities.append(e)
+                # Exclude domain-generic terms and their compounds
+                # Split compounds: "weka cluster" → check "weka" and "cluster"
+                words = low.split()
+                if not is_excluded_entity(e) and not any(
+                    is_excluded_entity(w) for w in words
+                ):
+                    entities.append(e)
 
         stats["graph_anchor_sources"] = {
             "extracted": len(extracted_entities),
             "precision_anchors": precision_anchors,
             "merged": len(entities),
+            "excluded_count": len(seen_lower) - len(entities),
         }
         if self._plan.graph_garbage_filter_on:
             entities = [
