@@ -6070,15 +6070,23 @@ class HybridRetriever:
         LIMIT $limit
         """
         chunks: List[ChunkResult] = []
+        entity_list = list(set(entities))
+        logger.info(
+            "graph_channel_query",
+            entities=entity_list,
+            rel_types=rels,
+            use_rel_types=self._plan.use_entity_graph_channel,
+            doc_tag=doc_tag,
+            limit=limit_per_entity,
+        )
         try:
             with self.neo4j_driver.session() as session:
                 result = session.run(
                     cypher,
-                    entities=list(set(entities)),
+                    entities=entity_list,
                     doc_tag=doc_tag,
                     limit=limit_per_entity,
                     rel_types=rels,
-                    # Always use query-type relationship sets when graph channel is active
                     use_rel_types=self._plan.use_entity_graph_channel,
                 )
                 for record in result:
