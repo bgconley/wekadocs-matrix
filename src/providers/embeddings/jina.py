@@ -742,10 +742,6 @@ class JinaEmbeddingProvider:
 
         raise RuntimeError("Retry loop exited unexpectedly")
 
-    def validate_dimensions(self, expected_dims: int) -> bool:
-        """Validate dimensions match expected."""
-        return self.dims == expected_dims
-
     def __del__(self):
         """Cleanup HTTP client."""
         if hasattr(self, "_client"):

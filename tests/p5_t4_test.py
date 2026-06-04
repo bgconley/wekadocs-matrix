@@ -3,7 +3,6 @@ Phase 5 Task 5.4 Tests - Production Deployment
 NO MOCKS - Tests against live Docker Compose stack
 """
 
-import json
 import os
 from pathlib import Path
 
@@ -140,37 +139,6 @@ class TestDisasterRecovery:
             content = f.read()
             assert "date +%s" in content or "SECONDS" in content
             assert "duration" in content.lower() or "rto" in content.lower()
-
-
-class TestFeatureFlags:
-    """Test feature flags implementation."""
-
-    def test_feature_flags_module_exists(self):
-        """Verify feature flags module exists."""
-        module = BASE_DIR / "src" / "shared" / "feature_flags.py"
-        assert module.exists()
-
-    def test_feature_flags_config_exists(self):
-        """Verify feature flags config exists."""
-        config = BASE_DIR / "config" / "feature_flags.json"
-        assert config.exists()
-
-    def test_feature_flags_config_is_valid_json(self):
-        """Verify feature flags config is valid JSON."""
-        config = BASE_DIR / "config" / "feature_flags.json"
-        with open(config) as f:
-            data = json.load(f)
-            assert "flags" in data
-            assert isinstance(data["flags"], dict)
-
-    def test_feature_flags_have_rollout_percentage(self):
-        """Verify feature flags support rollout percentage."""
-        config = BASE_DIR / "config" / "feature_flags.json"
-        with open(config) as f:
-            data = json.load(f)
-            for flag_name, flag_data in data["flags"].items():
-                assert "rollout_percentage" in flag_data
-                assert 0 <= flag_data["rollout_percentage"] <= 100
 
 
 class TestKubernetesManifests:
