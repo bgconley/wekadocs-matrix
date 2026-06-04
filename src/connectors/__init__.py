@@ -8,10 +8,10 @@ Connectors for Notion, GitHub, Confluence with queue-based ingestion and circuit
 """
 
 from src.connectors.base import BaseConnector, ConnectorConfig, ConnectorStatus
-from src.connectors.circuit_breaker import CircuitBreaker, CircuitBreakerState
 from src.connectors.github import GitHubConnector
 from src.connectors.manager import ConnectorManager
 from src.connectors.queue import IngestionQueue
+from src.shared.resilience import CircuitBreaker, CircuitBreakerState
 
 __all__ = [
     "BaseConnector",

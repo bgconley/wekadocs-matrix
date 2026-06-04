@@ -98,54 +98,9 @@ class RateLimiter:
         self.token_counts.append(estimated_tokens)
 
 
-class CircuitBreaker:
-    """Simple circuit breaker for API resilience."""
-
-    def __init__(self, failure_threshold: int = 5, timeout: int = 300):
-        """
-        Initialize circuit breaker.
-
-        Args:
-            failure_threshold: Consecutive failures before opening
-            timeout: Seconds to wait before trying half-open state
-        """
-        self.failure_threshold = failure_threshold
-        self.timeout = timeout
-        self.failures = 0
-        self.last_failure_time = None
-        self.state = "closed"  # closed, open, half-open
-
-    def record_success(self):
-        """Record successful call."""
-        self.failures = 0
-        self.state = "closed"
-
-    def record_failure(self):
-        """Record failed call."""
-        self.failures += 1
-        self.last_failure_time = time.time()
-
-        if self.failures >= self.failure_threshold:
-            self.state = "open"
-            logger.warning(
-                f"Circuit breaker OPEN after {self.failures} consecutive failures"
-            )
-
-    def can_attempt(self) -> bool:
-        """Check if call can be attempted."""
-        if self.state == "closed":
-            return True
-
-        if self.state == "open":
-            # Check if timeout elapsed
-            if time.time() - self.last_failure_time >= self.timeout:
-                self.state = "half-open"
-                logger.info("Circuit breaker entering HALF-OPEN state")
-                return True
-            return False
-
-        # half-open: allow one attempt
-        return True
+# Re-export shared CircuitBreaker for backward compatibility
+# (imported by src.providers.rerank.jina and tests)
+from src.shared.resilience import CircuitBreaker  # noqa: E402
 
 
 class JinaEmbeddingProvider:
@@ -235,7 +190,9 @@ class JinaEmbeddingProvider:
         )
 
         # Initialize circuit breaker
-        self._circuit_breaker = CircuitBreaker(failure_threshold=5, timeout=300)
+        self._circuit_breaker = CircuitBreaker(
+            name="jina-embeddings", failure_threshold=5, timeout=300
+        )
 
         # Initialize rate limiter
         self._rate_limiter = RateLimiter(

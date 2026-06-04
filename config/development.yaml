@@ -468,26 +468,6 @@ feature_flags:
   precision_focused_rerank_text: true  # A3: Focused evidence windows for precision reranker — validated live 2026-03-07
   precision_specificity_adjustment: true  # B1: Post-rerank tie-break — validated live 2026-03-07
 
-# Phase 7E-4: Monitoring and observability configuration
-# Reference: Canonical Spec L4916-4976, L3513-3528
-monitoring:
-  # Health checks
-  health_checks_enabled: true  # Run health checks at startup
-  health_check_fail_fast: true  # Fail startup if critical checks fail
-
-  # SLO monitoring
-  slo_monitoring_enabled: true  # Enable SLO tracking and alerting
-
-  # SLO thresholds (from canonical spec)
-  retrieval_p95_target_ms: 500  # Retrieval p95 latency target (ms)
-  ingestion_target_seconds: 10  # Ingestion duration target (seconds)
-  expansion_rate_min: 0.10  # Minimum expansion rate (10%)
-  expansion_rate_max: 0.40  # Maximum expansion rate (40%)
-
-  # Metrics collection
-  metrics_enabled: true  # Enable Prometheus metrics collection
-  metrics_aggregation_enabled: true  # Enable metrics aggregation for dashboards
-
 # Performance tuning
 performance:
   # Connection pools
@@ -560,6 +540,3 @@ deterministic_ids: true
 # Hot reload
 watch_config: true
 reload_on_change: false
-
-  # Testing helpers
-  # (moved to root; kept comment as reminder)

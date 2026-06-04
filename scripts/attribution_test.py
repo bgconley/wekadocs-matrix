@@ -19,7 +19,7 @@ QUERIES = [
 ]
 
 REPO = "/home/bgconley/wekadocs-matrix"
-YAML = REPO + "/config/production.yaml"
+YAML = REPO + "/config/development.yaml"
 OUT_DIR = REPO + "/reports/retrieval_diagnostics/2026-03-07-attribution"
 os.makedirs(OUT_DIR, exist_ok=True)
 

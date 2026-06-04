@@ -15,9 +15,9 @@ from typing import Dict, List, Optional
 from redis import Redis
 
 from src.connectors.base import BaseConnector, ConnectorConfig
-from src.connectors.circuit_breaker import CircuitBreaker
 from src.connectors.github import GitHubConnector
 from src.connectors.queue import IngestionQueue
+from src.shared.resilience import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,7 @@ class ConnectorManager:
             circuit_breaker = None
             if config.circuit_breaker_enabled:
                 circuit_breaker = CircuitBreaker(
+                    name=name,
                     failure_threshold=config.circuit_breaker_failure_threshold,
                     timeout_seconds=config.circuit_breaker_timeout_seconds,
                 )

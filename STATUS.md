@@ -192,31 +192,150 @@ $ python3 -m py_compile tests/integration/test_session_tracking.py  → PASS
 
 ---
 
-## Cumulative Progress (3 phases)
+## Phase 4: Simplify Code Structure ✅ (IN PROGRESS)
+
+**Status:** IN PROGRESS - Provider consolidation and analysis complete
+**Date:** 2026-06-03
+**Goal:** Chonkie adapter consolidation, feature flag cleanup, architecture analysis
+
+### Completed Tasks
+
+**1. Chonkie Adapter Consolidation (8bb9474)**
+- Created `BaseChonkieAdapter` base class with shared functionality
+- Refactored `ArcticChonkieAdapter` to inherit from base (279 → 50 LOC, -82%)
+- Refactored `Qwen3ChonkieAdapter` to inherit from base (250 → 50 LOC, -80%)
+- Eliminated 288 lines of duplicated code across both adapters
+- Net reduction: ~379 LOC
+
+**2. Dead Methods in Embedding Providers (19 LOC)**
+- Removed `validate_dimensions()` from JinaEmbeddingProvider (0 callers)
+- Removed `SparseEmbedding.is_empty()` and `MultiVectorEmbedding.is_empty()` (0 callers)
+- Removed `DocumentEmbeddingBundle` dataclass (0 references in codebase)
+
+**3. Feature Flag Cleanup (cd29526, 64 LOC)**
+- Deleted orphaned `config/feature_flags.json` (zero production references)
+- Deleted `TestFeatureFlags` test class from `tests/p5_t4_test.py` (testing nonexistent files)
+- Removed unused `import json` statement
+
+**4. Architecture Analysis Reports**
+- CircuitBreaker consolidation analysis: `reports/baseline/circuit_breaker_analysis.md`
+  - 3 CircuitBreaker classes identified with detailed comparison
+  - Consolidation strategy documented
+  - Estimated ~155 LOC savings, ~2-3 hours effort
+
+- Configuration simplification analysis: Identified multiple improvement opportunities
+  - `config/production.yaml` is identical to `development.yaml` (critical issue!)
+  - 60+ lines of orphaned YAML sections
+  - 3-4 dead feature flags with zero runtime usage
+  - Multiple redundant fields across config sections
+  - Estimated ~50-80 LOC savings with low-medium risk
+
+### Key Findings from Analysis
+
+**CircuitBreaker Duplication:**
+- Three separate classes: `src/shared/resilience/circuit_breaker.py` (331 LOC, production standard), `src/providers/rerank/base.py` (42 LOC, simple), `src/connectors/circuit_breaker.py` (167 LOC, HTTP-specific)
+- All three implement the same pattern but with minor variations
+- Consolidation would require updating ~12 caller files
+
+**Configuration Redundancy:**
+- `development.yaml` and `production.yaml` are byte-for-byte identical (565 LOC duplication!)
+- Orphaned sections: `legacy_ingest`, `graph_enhancement`, `cross_doc_linking`, `auto_ingest`, `evaluation`, `monitoring`
+- Dead feature flags: `enable_legacy_ingest`, `enable_graph_enhancement`, `enable_cross_doc_linking`, `enable_auto_ingest`
+- Zero runtime references in production code
+
+**Large Functions Identified:**
+- `src/ingestion/worker.py:process_document()` - 347 lines
+- `src/mcp_server/mcp_app.py:mcp_endpoint()` - 312 lines
+- These candidates need decomposition but are complex refactoring work
+
+**Provider Architecture Assessment:**
+- 3 CircuitBreaker implementations (consolidation opportunity)
+- 3 Chonkie adapters (2 now consolidated via base class)
+- 4 Reranker implementations (appropriate for their purposes)
+- Overall: 3 of 4 are well-designed, CircuitBreaker is the main duplication issue
+
+### Metrics Impact
+
+| Metric | Before (Phase 3) | After (Phase 4) | Change |
+|--------|------------------|-----------------|--------|
+| src/ files | 131 | 132 | +1 (base class) |
+| src/ LOC | 54,890 | 54,492 | -398 |
+| config/ files | — | — | -1 (feature_flags.json deleted) |
+| config/ LOC | 565 | 501 | -64 |
+
+---
+
+## Cumulative Progress (4 phases)
 
 | Metric | Before Cleanup | Current | Reduction |
 |--------|---------------|---------|-----------|
-| src/ files | 169 | 131 | -38 (22%) |
-| src/ LOC | 68,551 | 54,890 | -13,661 (20%) |
-| tests/ files | — | 137 | -14+ deleted |
+| src/ files | 169 | 132 | -37 (22%) |
+| src/ LOC | 68,551 | 54,492 | -14,059 (20.5%) |
+| config/ LOC | 565 | 501 | -64 (11.3%) |
+| test/ files | 151 | 135 | -16 (10.6%) |
 
-## Top 5 Largest Files Remaining
+---
 
-| File | LOC | Refactor Priority |
-|------|-----|-------------------|
+## Recommended Next Steps
+
+**HIGH PRIORITY (Low Risk, High Value):**
+
+1. **Fix Configuration Duplication (Easy Win)**
+   - Delete `config/production.yaml` (identical to development.yaml)
+   - Remove 60+ lines of orphaned YAML sections
+   - Remove 4 dead feature flags from `config.py`
+   - Estimated: ~120 LOC reduction, <30 minutes
+
+2. **CircuitBreaker Consolidation (Medium Effort)**
+   - Extend `src/shared/resilience/circuit_breaker.py` with HTTP-specific features
+   - Replace 2 other implementations with imports from shared module
+   - Update ~12 caller files
+   - Estimated: ~155 LOC reduction, ~2-3 hours
+
+**MEDIUM PRIORITY (Moderate Risk):**
+
+3. **Remove Additional Dead Code**
+   - Scan for more `@status: DEAD` methods in remaining files
+   - Check for unused imports after Phase 4 changes
+   - Estimated: 50-100 LOC reduction
+
+4. **Test Suite Hygiene**
+   - Remove tests for deleted functionality
+   - Identify truly dead tests vs. just disabled tests
+   - Target: Reduce test count further while maintaining coverage
+
+**LOW PRIORITY (High Risk/Complexity):**
+
+5. **Large Function Decomposition**
+   - Refactor `process_document()` (347 lines) in worker.py
+   - Refactor `mcp_endpoint()` (312 lines) in mcp_app.py
+   - Requires careful extraction and extensive testing
+   - Estimated: Better structure but no LOC reduction, 4-6 hours
+
+---
+
+## Phase 4 Summary
+
+Phase 4 successfully consolidated Chonkie adapters (eliminating 288 lines of duplication), cleaned up dead methods in providers (-19 LOC), removed orphaned feature flags (-64 LOC), and completed comprehensive architecture analysis identifying future improvement opportunities.
+
+**Total Phase 4 Impact:** -398 LOC (0.7% reduction) + valuable architecture documentation
+**Key Achievement:** Transformed 2 nearly-identical adapter classes into a clean inheritance hierarchy, making future adapter additions significantly easier.
+
+---
+
+## Current State Summary
+
+**Remaining Work:**
+- Configuration cleanup (~120 LOC): Delete duplicate production.yaml, remove orphaned sections and dead flags
+- CircuitBreaker consolidation (~155 LOC): Unify 3 implementations into 1
+- Additional dead code scan
+- Test suite hygiene
+
+**Largest Files (refactoring candidates):**
+| File | LOC | Priority |
+|------|-----|----------|
 | src/ingestion/atomic.py | ~4,050 | High |
 | src/mcp_server/mcp_app.py | ~3,830 | High |
 | src/query/hybrid_retrieval.py | ~2,080 | Medium |
 | src/shared/config.py | ~2,015 | Medium |
 | src/query/vector_backends.py | ~1,750 | Medium |
-
----
-
-## Phase 4: Next Priorities
-
-1. **Chonkie adapter consolidation** (~319 LOC savings via base class — Arctic + Qwen3 share 85% of their code)
-2. **Dead methods in embedding providers** (~50 LOC across voyage.py, jina.py, etc.)
-3. **Feature flag consolidation** (merge overlapping flags)
-4. **Configuration simplification** (deduplicate config fields)
-5. **Large function decomposition** (process_document, mcp_endpoint — both ~300 lines)
-6. **CircuitBreaker unification** (3 implementations → 1)
