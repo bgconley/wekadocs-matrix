@@ -405,7 +405,6 @@ class HybridSearchEngine:
         k: int = 20,
         filters: Optional[Dict] = None,
         expand_graph: bool = True,
-        find_paths: bool = False,
         focused_entity_ids: Optional[List[str]] = None,  # Task 7C.8: Entity focus bias
     ) -> HybridSearchResults:
         """
@@ -423,7 +422,6 @@ class HybridSearchEngine:
             k: Number of results to return
             filters: Optional filters for vector search
             expand_graph: Whether to expand from seeds via graph
-            find_paths: Whether to find connecting paths between top results
             focused_entity_ids: Entity IDs to bias toward (from session history)
 
         Returns:
@@ -489,13 +487,6 @@ class HybridSearchEngine:
             expanded = self._expand_from_seeds(results[: min(10, len(results))])
             results.extend(expanded)
             graph_time_ms = (time.time() - graph_start) * 1000
-
-        # Step 3: Find connecting paths (if enabled)
-        if find_paths and len(results) >= 2:
-            graph_start = time.time()
-            bridged = self._find_connecting_paths(results[: min(5, len(results))])
-            results.extend(bridged)
-            graph_time_ms += (time.time() - graph_start) * 1000
 
         # Step 4: Ranking and deduplication happens in ranking.py
         # For now, just remove duplicates by node_id
@@ -629,66 +620,6 @@ class HybridSearchEngine:
             )
 
         return expanded_results
-
-    def _find_connecting_paths(self, seeds: List[SearchResult]) -> List[SearchResult]:
-        """
-        Find shortest paths connecting top seed nodes.
-        """
-        if len(seeds) < 2:
-            return []
-
-        seed_ids = [s.node_id for s in seeds[:5]]  # Limit to top 5
-
-        # Find shortest paths between seeds
-        metadata_projection = build_metadata_projection("node")
-        path_query = (
-            """
-        UNWIND $ids AS a
-        UNWIND $ids AS b
-        WITH DISTINCT a, b WHERE a < b
-        MATCH (x {id: a}), (y {id: b})
-        MATCH path=shortestPath((x)-[*..3]-(y))
-        WITH path, nodes(path) AS path_nodes, length(path) AS len
-        WHERE len > 0 AND len <= 3
-        UNWIND path_nodes AS node
-        WITH DISTINCT node, min(len) AS min_dist
-        WHERE node.id NOT IN $ids  // Don't return seeds again
-        RETURN node.id AS id, labels(node)[0] AS label,
-               """
-            + metadata_projection
-            + """ AS metadata, min_dist AS dist
-        LIMIT 30
-        """
-        )
-
-        bridge_results = []
-
-        try:
-            with self.neo4j_driver.session() as session:
-                result = session.run(
-                    path_query,
-                    ids=seed_ids,
-                    metadata_text_limit=METADATA_TEXT_LIMIT,
-                )
-
-                for record in result:
-                    bridge_results.append(
-                        SearchResult(
-                            node_id=record["id"],
-                            node_label=record["label"],
-                            score=0.3,  # Lower score for bridge nodes
-                            distance=record["dist"],
-                            metadata=record["metadata"],
-                        )
-                    )
-        except Exception as e:
-            logger.warning(
-                "Path finding error during hybrid search",
-                error=str(e),
-                seed_count=len(seeds),
-            )
-
-        return bridge_results
 
     def _enrich_with_coverage(self, results: List[SearchResult]) -> List[SearchResult]:
         """
