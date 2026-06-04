@@ -12,56 +12,20 @@
 # See: /docs/pseudocode-reference.md → Task 3.3
 # Pre-Phase 7 B3: Modified to use embedding provider abstraction
 
-import hashlib
 import os
-import re
-import time
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Dict, Optional
 
-import redis
 from neo4j import Driver
-from qdrant_client.http.models import PayloadSchemaType, SparseVector
-from qdrant_client.models import (
-    HnswConfigDiff,
-    OptimizersConfigDiff,
-    SparseVectorParams,
-    VectorParams,
-)
-
-from src.ingestion.chunk_assembler import get_chunk_assembler
 
 # Phase 7E-4: Monitoring imports
-from src.monitoring.metrics import MetricsCollector
-from src.monitoring.slos import check_slos_and_log
 from src.providers.factory import ProviderFactory
-from src.shared.chunk_utils import (
-    create_chunk_metadata,
-    validate_chunk_schema,
-)
 from src.shared.config import (
     Config,
     get_embedding_plan,
     get_embedding_settings,
-    get_expected_namespace_suffix,
     get_settings,
 )
-from src.shared.embedding_fields import (
-    canonicalize_embedding_metadata,
-    ensure_no_embedding_model_in_payload,
-    validate_embedding_metadata,
-)
 from src.shared.observability import get_logger
-from src.shared.observability.metrics import (
-    chunk_token_distribution,
-    chunks_created_total,
-    chunks_oversized_total,
-    embedding_profile_guard_events_total,
-    ingestion_duration_seconds,
-)
-from src.shared.qdrant_schema import build_qdrant_schema
-from src.shared.schema import ensure_schema_version
 
 logger = get_logger(__name__)
 GRAPH_BUILDER_INIT_LOGGED = False
