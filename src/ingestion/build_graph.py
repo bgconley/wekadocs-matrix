@@ -116,45 +116,6 @@ GENERIC_HEADING_BLACKLIST = frozenset(
     }
 )
 
-# C.1.3: Entity validity criteria - entity_types that qualify for :Entity label
-# Updated for GLiNER v2 labels (2024-12)
-VALID_ENTITY_TYPES = frozenset(
-    {
-        # Legacy structural entity types
-        "heading_concept",
-        "cli_command",
-        "config_param",
-        "concept",
-        "api_endpoint",
-        "parameter",
-        "option",
-        "feature",
-        "service",
-        "module",
-        # GLiNER v2 entity types (refined for retrieval)
-        "COMMAND",
-        "PARAMETER",
-        "COMPONENT",
-        "PROTOCOL",
-        "CLOUD_PROVIDER",
-        "STORAGE_CONCEPT",
-        "VERSION",
-        "PROCEDURE_STEP",
-        "ERROR",
-        "CAPACITY_METRIC",
-        # Lowercase variants (for case-insensitive matching)
-        "command",
-        "component",
-        "protocol",
-        "cloud_provider",
-        "storage_concept",
-        "version",
-        "procedure_step",
-        "error",
-        "capacity_metric",
-    }
-)
-
 
 class GraphBuilder:
     """Builds graph from parsed documents, sections, and entities."""
@@ -2872,27 +2833,6 @@ class GraphBuilder:
             label=label,
         )
 
-    # @status: DEAD — defined but never called anywhere
-    def _set_embedding_version_in_neo4j(self, node_id: str, label: str):
-        """Set embedding_version metadata in Neo4j without storing vector."""
-        query = f"""
-        MATCH (n:{label} {{id: $node_id}})
-        SET n.embedding_version = $version
-        RETURN n.id as id
-        """
-
-        with self.driver.session() as session:
-            session.run(
-                query,
-                node_id=node_id,
-                version=self.embedding_version,
-            )
-
-        logger.debug(
-            "Embedding version set in Neo4j",
-            node_id=node_id,
-            label=label,
-        )
 
     # @status: DEAD — only called internally
     def _upsert_section_embedding_metadata(
