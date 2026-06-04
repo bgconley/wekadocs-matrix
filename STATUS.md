@@ -1,8 +1,8 @@
 # Cleanup Execution Status
 
 **Last updated:** 2026-06-03
-**Current phase:** Phase 1 (Delete dead files) ✅ COMPLETE
-**Next phase:** Phase 2 (Strip dead methods from mixed-status files)
+**Current phase:** Phase 2 (Strip dead methods) ✅ COMPLETE
+**Next phase:** Phase 3 (Delete hybrid_search.py and related cleanup)
 
 ---
 
