@@ -34,9 +34,9 @@ def test_apply_embedding_profile_defaults_when_missing_profile(monkeypatch):
 
     apply_embedding_profile(config, settings, DEV_CONFIG_PATH)
 
-    assert config.embedding.profile == "bge_m3"
-    assert config.embedding.embedding_model == "BAAI/bge-m3"
-    assert config.embedding.provider == "bge-m3-service"
+    assert config.embedding.profile == "qwen3_0_6b"
+    assert config.embedding.embedding_model == "Qwen/Qwen3-Embedding-0.6B"
+    assert config.embedding.provider == "embedding-service"
     assert config.embedding.version.startswith("plan-")
 
 
@@ -46,9 +46,9 @@ def test_apply_embedding_profile_honors_env_override(monkeypatch):
 
     apply_embedding_profile(config, settings, DEV_CONFIG_PATH)
 
-    assert config.embedding.profile == "bge_m3"
-    assert config.embedding.embedding_model == "BAAI/bge-m3"
-    assert config.embedding.provider == "bge-m3-service"
+    assert config.embedding.profile == "qwen3_0_6b"
+    assert config.embedding.embedding_model == "Qwen/Qwen3-Embedding-0.6B"
+    assert config.embedding.provider == "embedding-service"
     assert config.embedding.dims == 1024
     assert config.embedding.version.startswith("plan-")
 

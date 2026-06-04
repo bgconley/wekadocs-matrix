@@ -25,6 +25,8 @@ from typing import Any, Dict
 
 import structlog
 
+from src.ingestion.parsers.shadow_comparison import ShadowModeError  # noqa: E402
+
 logger = structlog.get_logger(__name__)
 
 # Parser engine constants
@@ -242,4 +244,5 @@ __all__ = [
     "get_fail_on_mismatch",
     "ENGINE_LEGACY",
     "ENGINE_MARKDOWN_IT_PY",
+    "ShadowModeError",
 ]

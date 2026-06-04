@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.mcp_server.mcp_app import _infer_source, _infer_source_tags
+from src.mcp_server.mcp_search import _infer_source, _infer_source_tags
 from src.query.hybrid_retrieval import ChunkResult
 
 

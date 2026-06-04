@@ -11,10 +11,8 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pytest
 
-from src.providers.embeddings.arctic_chonkie_adapter import (
-    CHONKIE_AVAILABLE,
-    ArcticChonkieAdapter,
-)
+from src.providers.embeddings.arctic_chonkie_adapter import ArcticChonkieAdapter
+from src.providers.embeddings.base_chonkie_adapter import CHONKIE_AVAILABLE
 
 
 class TestArcticChonkieAdapterInit:
@@ -343,7 +341,7 @@ class TestIsAvailable:
     def test_is_available_without_chonkie(self):
         """is_available() returns False when chonkie not installed."""
         with patch(
-            "src.providers.embeddings.arctic_chonkie_adapter.CHONKIE_AVAILABLE", False
+            "src.providers.embeddings.base_chonkie_adapter.CHONKIE_AVAILABLE", False
         ):
             # Need to reimport or directly test the logic
             # Since CHONKIE_AVAILABLE is checked at module load, we test the class method

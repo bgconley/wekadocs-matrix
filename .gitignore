@@ -82,3 +82,4 @@ infra/terraform/environments/dev/terraform.tfvars
 **/tfplan.binary
 *.bak
 .aider*
+.venv_py311/

@@ -12,10 +12,10 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from src.mcp_server.mcp_app import (
+from src.mcp_server.mcp_search import _extract_evidence_from_passages
+from src.mcp_server.mcp_utils import (
     KB_EVIDENCE_INTERNAL_FETCH_K,
     KB_EVIDENCE_MAX_FETCH_K,
-    _extract_evidence_from_passages,
 )
 
 # ── Helpers ──────────────────────────────────────────────────────────

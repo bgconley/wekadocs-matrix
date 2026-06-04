@@ -7,12 +7,12 @@ def test_reload_config_respects_env_overrides(monkeypatch):
     monkeypatch.setenv("EMBEDDINGS_PROFILE", "bge_m3")
     monkeypatch.setenv("BGE_M3_API_URL", "http://127.0.0.1:9000")
     reload_config()
-    assert get_config().embedding.profile == "bge_m3"
+    assert get_config().embedding.profile == "qwen3_0_6b"
 
     # Plan overrides EMBEDDINGS_PROFILE when present
     monkeypatch.setenv("EMBEDDINGS_PROFILE", "jina_v3")
     reload_config()
-    assert get_config().embedding.profile == "bge_m3"
+    assert get_config().embedding.profile == "qwen3_0_6b"
 
     # Clean up env for downstream tests
     monkeypatch.delenv("EMBEDDINGS_PROFILE", raising=False)

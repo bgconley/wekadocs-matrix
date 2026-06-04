@@ -80,10 +80,42 @@ def test_bge_reranker_mode_skips_bm25(monkeypatch):
         is_microdoc_stub=False,
         doc_is_microdoc=False,
         is_microdoc_extra=False,
+        # Expansion tracking
+        is_expanded=False,
+        expansion_source=None,
+        context_source=None,
+        # Additional scoring metadata
+        title_vec_score=None,
+        doc_title_vec_score=None,
+        doc_title_sparse_score=None,
+        title_sparse_score=None,
+        entity_vec_score=None,
+        lexical_vec_score=None,
+        # RELATED_TO graph signal scores
+        related_to_score=None,
+        related_to_edge_score=None,
+        related_to_prior_score=None,
+        related_to_source_doc=None,
+        inherited_score=None,
+        # Retrieval context metadata
+        embedding_version=None,
+        tenant=None,
+        # GLiNER entity metadata
+        entity_metadata=None,
+        entity_boost_applied=False,
+        # Structural metadata
+        structural_metadata=None,
+        structural_boost_applied=False,
+        # Heading path
+        parent_path_norm=None,
+        # RRF debug
+        rrf_field_contributions=None,
+        # Colbert vector
+        colbert_vector=None,
     )
 
     dummy_vec_retriever = SimpleNamespace(
-        search=lambda q, k, f: [fake_chunk],
+        search=lambda q, k, f, lexical_query=None: [fake_chunk],
         last_stats={"duration_ms": 1, "path": "query_api"},
         supports_sparse=True,
         supports_colbert=True,
@@ -91,7 +123,9 @@ def test_bge_reranker_mode_skips_bm25(monkeypatch):
         schema_supports_colbert=True,
         sparse_field_name="text-sparse",
         field_weights={"content": 1.0},
+        rrf_field_weights={"content": 1.0},
         use_query_api=True,
+        get_queried_vector_fields=lambda: ["content"],
     )
 
     # monkeypatch HybridRetriever internals to avoid real deps
@@ -123,6 +157,10 @@ def test_bge_reranker_mode_skips_bm25(monkeypatch):
         "src.query.hybrid_retrieval.HybridRetriever._annotate_coverage",
         lambda self, results: None,
     )
+    monkeypatch.setattr(
+        "src.query.hybrid_retrieval.HybridRetriever._graph_retrieval_channel",
+        lambda self, query, doc_tag, intent=None: ([], {}),
+    )
 
     hr = HybridRetriever(
         neo4j_driver=None,
@@ -135,7 +173,7 @@ def test_bge_reranker_mode_skips_bm25(monkeypatch):
     # inject dummy reranker
     monkeypatch.setattr(hr, "_get_reranker", lambda: DummyRerankProvider())
 
-    def fake_apply(query, seeds, metrics):
+    def fake_apply(query, seeds, metrics, **kwargs):
         for idx, c in enumerate(seeds):
             c.rerank_score = float(len(seeds) - idx)
             c.reranker = "dummy"

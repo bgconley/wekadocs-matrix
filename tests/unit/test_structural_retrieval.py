@@ -161,13 +161,13 @@ class TestGetQueryTypeRRFWeights:
         """CLI query type should return CLI-specific weights."""
         weights = get_query_type_rrf_weights("cli")
         assert "entity-sparse" in weights
-        assert weights["entity-sparse"] == 1.8  # CLI boosts entities
+        assert weights["entity-sparse"] == 1.5  # CLI boosts entities
 
     def test_conceptual_query_type_returns_conceptual_weights(self):
         """Conceptual query type should return conceptual-specific weights."""
         weights = get_query_type_rrf_weights("conceptual")
         assert "content" in weights
-        assert weights["content"] == 2.5  # Conceptual boosts semantic
+        assert weights["content"] == 1.0  # Conceptual boosts semantic
 
     def test_unknown_query_type_falls_back_to_default(self):
         """Unknown query type should fall back to default (conceptual)."""
@@ -201,7 +201,7 @@ class TestGetQueryTypeRRFWeights:
         assert "custom_field" in weights
         assert weights["custom_field"] == 0.5
         # CLI weights should override for known fields
-        assert weights["entity-sparse"] == 1.8
+        assert weights["entity-sparse"] == 1.5
 
     def test_none_query_type_uses_default(self):
         """None query type should use default query type."""

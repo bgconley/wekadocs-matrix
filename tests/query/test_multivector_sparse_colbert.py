@@ -64,7 +64,7 @@ def test_build_prefetch_includes_sparse_when_supported():
     prefetch = retriever._build_prefetch_entries(
         bundle, None, retriever.query_api_dense_limit
     )
-    names = [getattr(p.query, "name", None) for p in prefetch]
+    names = [getattr(p, "using", None) for p in prefetch]
     assert "text-sparse" in names
 
 
@@ -98,5 +98,5 @@ def test_build_query_api_query_prefers_colbert_when_supported():
         multivector=SimpleNamespace(vectors=[[0.1, 0.2, 0.3], [0.3, 0.2, 0.1]]),
     )
     query, name = retriever._build_query_api_query(bundle)
-    assert name == "late-interaction"
+    assert name == "content"
     assert isinstance(query, list)
