@@ -75,47 +75,6 @@ def test_upsert_validated_exists():
     return True
 
 
-def test_blue_green_helper_exists():
-    """Test C4: Blue/green collection helper exists"""
-    print("Testing blue/green collection helper...")
-
-    # Import connections module
-    try:
-        from src.shared.connections import CompatQdrantClient
-    except ImportError:
-        # Fallback to direct module loading
-        spec = importlib.util.spec_from_file_location(
-            "connections", os.path.join(project_root, "src/shared/connections.py")
-        )
-        connections = importlib.util.module_from_spec(spec)
-        # Temporarily add required modules to sys.modules
-        sys.modules["src"] = type(sys)("src")
-        sys.modules["src.shared"] = type(sys)("src.shared")
-        sys.modules["src.shared.config"] = type(sys)("src.shared.config")
-        sys.modules["src.shared.observability"] = type(sys)("src.shared.observability")
-        spec.loader.exec_module(connections)
-        CompatQdrantClient = connections.CompatQdrantClient
-
-    # Check that CompatQdrantClient has create_collection_with_dims
-    assert hasattr(
-        CompatQdrantClient, "create_collection_with_dims"
-    ), "CompatQdrantClient missing create_collection_with_dims helper"
-
-    # Check method signature
-    import inspect
-
-    sig = inspect.signature(CompatQdrantClient.create_collection_with_dims)
-    params = list(sig.parameters.keys())
-
-    assert "size" in params, "create_collection_with_dims missing size parameter"
-    assert (
-        "distance" in params
-    ), "create_collection_with_dims missing distance parameter"
-
-    print("✓ PASS: Blue/green collection helper exists")
-    return True
-
-
 def test_all_upserts_use_validated():
     """Test C3: All upsert calls use upsert_validated"""
     print("Testing all upsert calls use validated version...")
@@ -228,7 +187,6 @@ def main():
         ("C1: Incremental placeholder vectors", test_incremental_placeholder_vectors),
         ("C2: upsert_validated exists", test_upsert_validated_exists),
         ("C3: All upserts validated", test_all_upserts_use_validated),
-        ("C4: Blue/green helper", test_blue_green_helper_exists),
         ("Dimension validation", test_dimension_validation_logic),
         ("Documentation", test_documentation_exists),
     ]

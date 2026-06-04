@@ -14,7 +14,6 @@ import httpx
 
 from src.providers.embeddings.base import EmbeddingProvider
 from src.providers.embeddings.contracts import (
-    DocumentEmbeddingBundle,
     QueryEmbeddingBundle,
 )
 from src.providers.settings import EmbeddingSettings as ProviderEmbeddingSettings
@@ -122,10 +121,6 @@ class VoyageEmbeddingProvider(EmbeddingProvider):
             batched = self._embed_contextual([[text]], input_type=input_type)
             return batched[0][0]
         return self._embed_standard([text], input_type=input_type)[0]
-
-    def embed_documents_all(self, texts: List[str]) -> List[DocumentEmbeddingBundle]:
-        dense_vectors = self.embed_documents(texts)
-        return [DocumentEmbeddingBundle(dense=list(vec)) for vec in dense_vectors]
 
     def embed_query_all(self, text: str) -> QueryEmbeddingBundle:
         dense = self.embed_query(text)

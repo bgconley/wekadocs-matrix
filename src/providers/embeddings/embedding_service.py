@@ -10,7 +10,6 @@ from typing import List, Optional, Sequence, Tuple, Type
 
 from src.providers.embeddings.base import EmbeddingProvider
 from src.providers.embeddings.contracts import (
-    DocumentEmbeddingBundle,
     MultiVectorEmbedding,
     QueryEmbeddingBundle,
     SparseEmbedding,
@@ -209,33 +208,6 @@ class EmbeddingServiceProvider(EmbeddingProvider):
     def embed_colbert(self, texts: List[str]) -> List[List[List[float]]]:
         """Return ColBERT multi-vectors for downstream consumers."""
         return self._embed_with_retry(texts, "embed_colbert")
-
-    def embed_documents_all(self, texts: List[str]) -> List[DocumentEmbeddingBundle]:
-        """Return dense + sparse + multivector bundles for each document."""
-        dense_vectors = self.embed_documents(texts)
-        sparse_batches = (
-            self.embed_sparse(texts)
-            if self.supports_sparse
-            else [None] * len(dense_vectors)
-        )
-        colbert_batches = (
-            self.embed_colbert(texts)
-            if self.supports_colbert
-            else [None] * len(dense_vectors)
-        )
-
-        bundles: List[DocumentEmbeddingBundle] = []
-        for idx, dense in enumerate(dense_vectors):
-            sparse_entry = sparse_batches[idx] if idx < len(sparse_batches) else None
-            colbert_entry = colbert_batches[idx] if idx < len(colbert_batches) else None
-            bundles.append(
-                DocumentEmbeddingBundle(
-                    dense=list(dense),
-                    sparse=_to_sparse_embedding(sparse_entry),
-                    multivector=_to_multivector(colbert_entry),
-                )
-            )
-        return bundles
 
     def embed_query_all(self, text: str) -> QueryEmbeddingBundle:
         """Return dense + sparse + multivector bundle for a query."""

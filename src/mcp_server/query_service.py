@@ -740,7 +740,6 @@ class QueryService:
         top_k: int = 20,
         filters: Optional[Dict[str, Any]] = None,
         expand_graph: bool = True,
-        find_paths: bool = False,
         verbosity: str = "graph",
         session_id: Optional[str] = None,  # Task 7C.8: Multi-turn session ID
         turn: Optional[int] = None,  # Task 7C.8: Turn number within session
@@ -753,7 +752,6 @@ class QueryService:
             top_k: Number of results to return
             filters: Optional filters for vector search
             expand_graph: Whether to expand from seeds via graph
-            find_paths: Whether to find connecting paths
             verbosity: Response detail level (full=text only, graph=text+relationships, default=graph)
             session_id: Optional session ID for multi-turn tracking (Task 7C.8)
             turn: Optional turn number within session (Task 7C.8)
@@ -1003,7 +1001,6 @@ class QueryService:
                     k=top_k,
                     filters=filters,
                     expand_graph=expand_graph,
-                    find_paths=find_paths,
                     focused_entity_ids=(
                         focused_entity_ids if focused_entity_ids else None
                     ),

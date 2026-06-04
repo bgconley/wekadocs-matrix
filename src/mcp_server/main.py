@@ -629,7 +629,6 @@ async def mcp_tools_call(request: MCPToolCallRequest, response: Response):
                             query=query,
                             top_k=top_k,
                             expand_graph=True,
-                            find_paths=False,
                             verbosity=verbosity,
                         )
 

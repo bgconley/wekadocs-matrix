@@ -1918,7 +1918,6 @@ async def search_documentation(
             query=query,
             top_k=top_k,
             expand_graph=True,
-            find_paths=False,
             verbosity=verb,
         )
 
