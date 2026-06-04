@@ -81,3 +81,4 @@ infra/terraform/environments/dev/terraform.tfvars
 **/tfplan
 **/tfplan.binary
 *.bak
+.aider*

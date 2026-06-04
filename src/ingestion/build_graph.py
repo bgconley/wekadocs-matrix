@@ -549,20 +549,6 @@ class GraphBuilder:
         )
         stats["cache_invalidation"] = invalidation_stats
 
-        # Optional reconciliation step to repair drift for legacy data
-        if (
-            self.config.ingestion.reconciliation.enabled
-            and self.qdrant_client
-            and self.vector_primary == "qdrant"
-        ):
-            from src.ingestion.reconcile import Reconciler
-
-            try:
-                reconciler = Reconciler(self.driver, self.config, self.qdrant_client)
-                reconciler.reconcile()
-            except Exception as exc:
-                logger.warning("Reconciliation after upsert failed", error=str(exc))
-
         # Phase 7E-4: Collect metrics and monitor SLOs
         duration_seconds = time.time() - start_time
         stats["duration_ms"] = int(duration_seconds * 1000)

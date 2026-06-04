@@ -43,7 +43,6 @@ from src.shared.config import (
     get_config,
     get_embedding_plan,
     get_embedding_settings,
-    get_expected_namespace_suffix,
     get_settings,
 )
 from src.shared.observability import get_logger
@@ -150,14 +149,7 @@ class HybridRetriever:
 
         hybrid_config = getattr(config.search, "hybrid", None)
         qdrant_vector_cfg = getattr(config.search.vector, "qdrant", None)
-        # BM25 config is nested under hybrid, not directly under search
-        bm25_config = getattr(hybrid_config, "bm25", None)
         self.hybrid_mode = getattr(hybrid_config, "mode", "legacy")
-        # Timeouts and index migration toggle (set early for downstream use)
-        timeout_ms = getattr(hybrid_config, "bm25_timeout_ms", None)
-        self.bm25_timeout_seconds = (
-            float(timeout_ms) / 1000.0 if timeout_ms is not None else 2.0
-        )
         expansion_timeout_ms = getattr(hybrid_config, "expansion_timeout_ms", None)
         self.expansion_timeout_seconds = (
             float(expansion_timeout_ms) / 1000.0
@@ -169,74 +161,15 @@ class HybridRetriever:
         )
 
         self.neo4j_driver = neo4j_driver
-        bm25_index_name = getattr(bm25_config, "index_name", None)
-        bm25_enabled = getattr(bm25_config, "enabled", False)
-        self.bm25_retriever = None
-        if self.hybrid_mode != "bge_reranker" and bm25_enabled:
-            self.bm25_retriever = BM25Retriever(
-                neo4j_driver,
-                index_name=bm25_index_name,
-                timeout_seconds=self.bm25_timeout_seconds,
-                allow_index_migration=self.allow_index_migration,
-            )
         search_config = config.search
         qdrant_collection = getattr(
             getattr(search_config.vector, "qdrant", None), "collection_name", None
         )
         namespace_mode = getattr(settings, "embedding_namespace_mode", "none")
-        namespace_suffix = get_expected_namespace_suffix(
-            self.embedding_settings, namespace_mode
-        )
-        bm25_namespaced = False
-        if self.bm25_retriever is not None:
-            bm25_namespaced = bool(
-                namespace_suffix
-                and self.bm25_retriever.index_name
-                and str(self.bm25_retriever.index_name).endswith(namespace_suffix)
-            )
-        qdrant_namespaced = bool(
-            namespace_suffix
-            and qdrant_collection
-            and str(qdrant_collection).endswith(namespace_suffix)
-        )
-        strict_env = getattr(settings, "env", "development").lower() not in (
-            "development",
-            "dev",
-            "test",
-        )
-        if (
-            self.bm25_retriever is not None
-            and qdrant_namespaced
-            and not bm25_namespaced
-        ):
-            message = (
-                "BM25 index appears global while Qdrant collection is namespaced. "
-                "Set search.bm25.index_name to the namespaced value or allow override."
-            )
-            override = os.getenv("ALLOW_NAMESPACE_MISMATCH", "false").lower() == "true"
-            if strict_env and not override:
-                raise RuntimeError(
-                    f"{message} bm25_index={self.bm25_retriever.index_name} "
-                    f"qdrant_collection={qdrant_collection}"
-                )
-            logger.warning(
-                message,
-                extra={
-                    "bm25_index_name": self.bm25_retriever.index_name,
-                    "qdrant_collection_name": qdrant_collection,
-                    "namespace_mode": namespace_mode,
-                    "override": override,
-                },
-            )
         self.namespace_mode = namespace_mode
         self.qdrant_collection_name = qdrant_collection
         global HYBRID_INIT_LOGGED
         if not HYBRID_INIT_LOGGED:
-            bm25_name = (
-                getattr(self.bm25_retriever, "index_name", None)
-                if self.bm25_retriever is not None
-                else None
-            )
             logger.info(
                 "HybridRetriever initialized",
                 extra={
@@ -253,7 +186,6 @@ class HybridRetriever:
                         self.embedding_settings, "version", None
                     ),
                     "embedding_namespace_mode": namespace_mode,
-                    "bm25_index_name": bm25_name,
                     "qdrant_collection_name": qdrant_collection,
                 },
             )
@@ -304,10 +236,6 @@ class HybridRetriever:
                 strict=strict_validation,
             )
 
-        timeout_ms = getattr(hybrid_config, "bm25_timeout_ms", None)
-        self.bm25_timeout_seconds = (
-            float(timeout_ms) / 1000.0 if timeout_ms is not None else 2.0
-        )
         expansion_timeout_ms = getattr(hybrid_config, "expansion_timeout_ms", None)
         self.expansion_timeout_seconds = (
             float(expansion_timeout_ms) / 1000.0
@@ -490,24 +418,15 @@ class HybridRetriever:
             search_config.response, "max_sections_per_parent", 3
         )
 
-        # Load configuration
-        # (already assigned above)
-        # Fusion configuration
-        self.fusion_method = FusionMethod(getattr(hybrid_config, "method", "rrf"))
+        # Fusion configuration (RRF only; weighted fusion removed)
+        configured_method = getattr(hybrid_config, "method", "rrf")
+        if configured_method != "rrf":
+            logger.warning(
+                "Weighted fusion is no longer supported; using RRF",
+                configured_method=configured_method,
+            )
+        self.fusion_method = FusionMethod.RRF
         self.rrf_k = getattr(hybrid_config, "rrf_k", 60)
-        self.fusion_alpha = getattr(hybrid_config, "fusion_alpha", 0.6)
-        bm25_cfg = getattr(hybrid_config, "bm25", None)
-        bm25_weight = getattr(bm25_cfg, "weight", None) if bm25_cfg else None
-        vector_weight = getattr(hybrid_config, "vector_weight", None)
-        if bm25_weight is not None and vector_weight is not None:
-            try:
-                total = float(bm25_weight) + float(vector_weight)
-                if total > 0:
-                    self.fusion_alpha = float(vector_weight) / total
-            except Exception:
-                logger.debug(
-                    "Could not derive fusion_alpha from weights; using default"
-                )
         self.graph_propagation_decay = getattr(
             hybrid_config, "graph_propagation_decay", 0.85
         )
@@ -578,32 +497,16 @@ class HybridRetriever:
             and self.graph_max_depth > 0
         )
 
-        # Micro-doc stitching configuration
-        self.micro_max_neighbors = int(os.getenv("MICRODOC_MAX_NEIGHBORS", "2"))
-        self.microdoc_enabled = self.micro_max_neighbors > 0
-        self.micro_min_tokens = int(os.getenv("MICRODOC_MIN_TOKENS", "600"))
-        self.micro_doc_max = int(os.getenv("MICRODOC_DOC_MAX", "2000"))
-        self.micro_dir_depth = int(os.getenv("MICRODOC_DIR_DEPTH", "2"))
-        self.micro_knn_limit = int(os.getenv("MICRODOC_KNN_LIMIT", "5"))
-        self.micro_sim_threshold = float(os.getenv("MICRODOC_SIM_THRESHOLD", "0.76"))
-        self.micro_per_doc_budget = int(
-            os.getenv("MICRODOC_PER_DOC_TOKEN_BUDGET", "300")
-        )
-        self.micro_total_budget = int(os.getenv("MICRODOC_MAX_STITCH_TOKENS", "1200"))
-        if self.micro_total_budget < self.micro_per_doc_budget:
-            self.micro_total_budget = self.micro_per_doc_budget
-
         # Context budget
         self.context_max_tokens = getattr(
             search_config.response, "answer_context_max_tokens", 4500
         )
 
         logger.info(
-            f"HybridRetriever initialized: fusion={self.fusion_method.value}, "
-            f"rrf_k={self.rrf_k}, alpha={self.fusion_alpha}, "
+            f"HybridRetriever initialized: "
+            f"rrf_k={self.rrf_k}, "
             f"expansion={'enabled' if self.expansion_enabled else 'disabled'}, "
-            f"context_budget={self.context_max_tokens}, "
-            f"microdoc_neighbors={self.micro_max_neighbors}"
+            f"context_budget={self.context_max_tokens}"
         )
         if self.embedding_settings:
             logger.info(
@@ -741,32 +644,6 @@ class HybridRetriever:
     ) -> None:
         return _gp.blend_related_to_scores(self, fused_results, query_type, metrics)
 
-    def _apply_graph_reranker(
-        self,
-        query: str,
-        doc_tag: Optional[str],
-        vector_results: List[ChunkResult],
-        metrics: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        return _gp.apply_graph_reranker(self, query, doc_tag, vector_results, metrics)
-
-    def _build_bm25_predicates(
-        self, filters: Dict[str, Any]
-    ) -> Tuple[List[str], Dict[str, Any]]:
-        """Build WHERE predicates and params for BM25 search."""
-        where_clauses: List[str] = []
-        params: Dict[str, Any] = {}
-
-        for key, value in filters.items():
-            param_name = f"filter_{key}"
-            if isinstance(value, list):
-                where_clauses.append(f"chunk.{key} IN ${param_name}")
-                params[param_name] = value
-            else:
-                where_clauses.append(f"chunk.{key} = ${param_name}")
-                params[param_name] = value
-        return where_clauses, params
-
     def retrieve(
         self,
         query: str,
@@ -798,7 +675,7 @@ class HybridRetriever:
         lexical_query = query_original or query
         metrics: Dict[str, Any] = {
             "namespace_mode": getattr(self, "namespace_mode", None),
-            "bm25_index_name": getattr(self.bm25_retriever, "index_name", None),
+            "bm25_index_name": None,
             "qdrant_collection_name": getattr(
                 getattr(self, "vector_retriever", None),
                 "collection_name",
@@ -889,36 +766,9 @@ class HybridRetriever:
         entity_overfetch_multiplier = 2 if boost_terms else 1
         candidate_k = min(top_k * 3 * entity_overfetch_multiplier, 200)
 
-        # Branch: vector-only (bge_reranker) vs legacy (BM25 + fusion)
-        bm25_results: List[ChunkResult] = []
         vec_results: List[ChunkResult] = []
-
-        if self.hybrid_mode != "bge_reranker" and self.bm25_retriever:
-            # BM25 search — strip embedding_version since fulltext search
-            # is embedding-agnostic and the version filter would exclude
-            # all chunks ingested under a different embedding plan.
-            bm25_filters = {
-                k: v for k, v in normalized_filters.items() if k != "embedding_version"
-            }
-            bm25_start = time.time()
-            bm25_results = self.bm25_retriever.search(
-                lexical_query, candidate_k, bm25_filters
-            )
-            metrics["bm25_time_ms"] = (time.time() - bm25_start) * 1000
-            metrics["bm25_count"] = len(bm25_results)
-
-            # LGTM Phase 4: Verbose log event 2 - sparse_search_complete
-            logger.info(
-                "sparse_search_complete",
-                query=query[:50],
-                results_count=len(bm25_results),
-                top_scores=[r.bm25_score for r in bm25_results[:5] if r.bm25_score],
-                top_doc_ids=[r.document_id for r in bm25_results[:5]],
-                search_time_ms=round(metrics["bm25_time_ms"], 2),
-            )
-        else:
-            metrics["bm25_time_ms"] = 0.0
-            metrics["bm25_count"] = 0
+        metrics["bm25_time_ms"] = 0.0
+        metrics["bm25_count"] = 0
 
         # Vector search (always)
         # Apply query-type-specific RRF field weights if adaptive weighting is enabled.
@@ -981,20 +831,8 @@ class HybridRetriever:
 
         # Step 2: Fuse rankings
         fusion_start = time.time()
-        if self.hybrid_mode == "bge_reranker":
-            # Vector-only path: use vector scores directly
-            fused_results = vec_results
-            for r in fused_results:
-                if r.fused_score is None:
-                    r.fused_score = r.vector_score
-                r.fusion_method = "weighted"
-            metrics["fusion_method"] = "vector-only"
-        else:
-            if self.fusion_method == FusionMethod.RRF:
-                fused_results = self._rrf_fusion(bm25_results, vec_results)
-            else:
-                fused_results = self._weighted_fusion(bm25_results, vec_results)
-            metrics["fusion_method"] = self.fusion_method.value
+        fused_results = self._rrf_fusion([], vec_results)
+        metrics["fusion_method"] = "rrf"
         metrics["fusion_time_ms"] = (time.time() - fusion_start) * 1000
 
         fused_results = [r for r in fused_results if not r.is_microdoc_stub]
@@ -1005,7 +843,7 @@ class HybridRetriever:
         logger.info(
             "rrf_fusion_complete",
             dense_count=len(vec_results),
-            bm25_count=len(bm25_results),  # Renamed from sparse_count for clarity
+            bm25_count=0,
             fused_count=len(fused_results),
             fusion_method=metrics.get("fusion_method", "unknown"),
             rrf_k=self.rrf_k,
@@ -1093,26 +931,19 @@ class HybridRetriever:
 
         # Optional graph retrieval channel (entity-anchored, cross-doc allowed)
         graph_channel_stats: Dict[str, Any] = {}
-        graph_candidates: List[ChunkResult] = []  # Initialize for logging safety
-        graph_as_reranker_flag = self._plan.use_graph_score_override
+        graph_candidates: List[ChunkResult] = []
         graph_initial_count = len(fused_results)
-        # Graph channel dispatch — plan-driven
         if self._plan.use_entity_graph_channel and not self.neo4j_disabled:
-            if graph_as_reranker_flag:
-                graph_channel_stats = self._apply_graph_reranker(
-                    query, doc_tag, fused_results, metrics
+            graph_candidates, graph_channel_stats = self._graph_retrieval_channel(
+                query, doc_tag, intent=intent
+            )
+            if graph_candidates:
+                fused_results, merge_stats = self._merge_graph_channel_candidates(
+                    fused_results,
+                    graph_candidates,
+                    query_type=query_type,
                 )
-            else:
-                graph_candidates, graph_channel_stats = self._graph_retrieval_channel(
-                    query, doc_tag, intent=intent
-                )
-                if graph_candidates:
-                    fused_results, merge_stats = self._merge_graph_channel_candidates(
-                        fused_results,
-                        graph_candidates,
-                        query_type=query_type,
-                    )
-                    graph_channel_stats.update(merge_stats)
+                graph_channel_stats.update(merge_stats)
 
             # LGTM Phase 4: Verbose log event 5 - graph_augmentation_complete
             logger.info(
@@ -1130,7 +961,7 @@ class HybridRetriever:
                 relationship_types_used=graph_channel_stats.get(
                     "graph_relationship_types", []
                 ),
-                graph_mode="reranker" if graph_as_reranker_flag else "channel",
+                graph_mode="channel",
                 entity_anchors_found=graph_channel_stats.get("entity_anchors_found", 0),
                 merged_into_existing=graph_channel_stats.get(
                     "graph_channel_merged_into_existing", 0
@@ -1153,9 +984,7 @@ class HybridRetriever:
             )
         metrics.update(graph_channel_stats)
 
-        # ── Signal pool ordering (plan-driven) ────────────────────
-        pool_before_colbert = self._plan.signal_pool_before_colbert
-        metrics["signal_pool_before_colbert"] = pool_before_colbert
+        metrics["signal_pool_before_colbert"] = True
 
         # Helper: run ColBERT rerank on a candidate list
         def _run_colbert(
@@ -1215,14 +1044,8 @@ class HybridRetriever:
             and bool(fused_results)
         )
 
-        if (
-            pool_before_colbert
-            and self._plan.use_signal_pool
-            and self._signal_pool_config
-        ):
-            # ── A1 path: signal pool FIRST, then ColBERT reorders pool ──
-            # Signal pool sees full fusion output (200+ candidates, full diversity).
-            # ColBERT then reorders the entire pool without dropping candidates.
+        # ── Signal pool → ColBERT path ──────────────────────────────
+        if self._plan.use_signal_pool and self._signal_pool_config:
             metrics["colbert_input_from_pool"] = True
 
             pre_rerank_structural: List[ChunkResult] = []
@@ -1253,71 +1076,24 @@ class HybridRetriever:
             metrics["signal_pool_slot_fills"] = pool_result.slot_fills
             metrics["signal_pool_degraded"] = pool_result.degraded
 
-            # ColBERT reorders the entire pool — limit = pool size (no truncation)
             if colbert_available:
                 rerank_candidates = _run_colbert(
                     pool_result.pool, len(pool_result.pool)
                 )
             else:
                 rerank_candidates = pool_result.pool
-        else:
-            # ── Legacy path: ColBERT first (truncates), then signal pool ──
+        elif self._reranker_enabled:
+            pool_cap = self.rerank_top_n or top_k
+            rerank_pool_size = min(pool_cap, len(fused_results))
+            rerank_candidates = fused_results[:rerank_pool_size]
+            metrics["signal_pool_enabled"] = False
+            metrics["signal_pool_used"] = False
             metrics["colbert_input_from_pool"] = False
-
-            # Optional ColBERT rerank between fusion and cross-encoder
-            if colbert_available:
-                colbert_limit = min(
-                    len(fused_results),
-                    max(
-                        top_k * self.colbert_candidate_multiplier,
-                        self.colbert_candidate_limit,
-                    ),
-                )
-                colbert_candidates = fused_results[:colbert_limit]
-                fused_results = _run_colbert(colbert_candidates, colbert_limit)
-
-            pre_rerank_structural = []
-
-            if (
-                self._reranker_enabled
-                and self._plan.use_signal_pool
-                and self._signal_pool_config
-            ):
-                if not intent.precision_mode:
-                    try:
-                        pre_rerank_structural = self._expand_with_structure(
-                            query, fused_results[:10], doc_tag, force=True
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "pre_rerank_structural_expansion_failed",
-                            extra={"error": str(e)},
-                        )
-                else:
-                    logger.info(
-                        "pre_rerank_structural_expansion_skipped",
-                        query_type=intent.query_type,
-                        reason="precision_mode",
-                    )
-
-                pool_result = build_signal_pool(
-                    fused_results, pre_rerank_structural, self._signal_pool_config
-                )
-                rerank_candidates = pool_result.pool
-
-                metrics["signal_pool_enabled"] = True
-                metrics["signal_pool_used"] = True
-                metrics["signal_pool_size"] = len(rerank_candidates)
-                metrics["signal_pool_slot_fills"] = pool_result.slot_fills
-                metrics["signal_pool_degraded"] = pool_result.degraded
-            elif self._reranker_enabled:
-                pool_cap = self.rerank_top_n or top_k
-                rerank_pool_size = min(pool_cap, len(fused_results))
-                rerank_candidates = fused_results[:rerank_pool_size]
-                metrics["signal_pool_enabled"] = False
-                metrics["signal_pool_used"] = False
-            else:
-                rerank_candidates = fused_results
+        else:
+            rerank_candidates = fused_results
+            metrics["signal_pool_enabled"] = False
+            metrics["signal_pool_used"] = False
+            metrics["colbert_input_from_pool"] = False
 
         # ── Cross-encoder reranker ─────────────────────────────────
         reranker_active = False
@@ -1435,17 +1211,8 @@ class HybridRetriever:
         if reranker_active:
             seed_ids = {chunk.chunk_id for chunk in seeds}
 
-        microdoc_extras: List[ChunkResult] = []
-        microdoc_tokens = 0
-        if self.microdoc_enabled:
-            microdoc_extras, microdoc_tokens = self._expand_microdoc_results(
-                query, fused_results, seeds, filters or {}
-            )
-            metrics["microdoc_extras"] = len(microdoc_extras)
-            metrics["microdoc_tokens"] = microdoc_tokens
-        else:
-            metrics["microdoc_extras"] = 0
-            metrics["microdoc_tokens"] = 0
+        metrics["microdoc_extras"] = 0
+        metrics["microdoc_tokens"] = 0
 
         # Step 5: Gating decision for expansion
         when = ExpandWhen(expand_when)
@@ -1526,10 +1293,6 @@ class HybridRetriever:
                 time.time() - structure_start
             ) * 1000
             metrics["structure_expansion_count"] = 0
-
-        # Include micro-doc extras prior to dedup
-        if microdoc_extras:
-            all_results.extend(microdoc_extras)
 
         # Step 6: Dedup, hydrate citations, and maintain deterministic ordering
         all_results = self._dedup_results(all_results)
@@ -1705,11 +1468,6 @@ class HybridRetriever:
         self, bm25_results: List[ChunkResult], vec_results: List[ChunkResult]
     ) -> List[ChunkResult]:
         return _fp.rrf_fusion(self, bm25_results, vec_results)
-
-    def _weighted_fusion(
-        self, bm25_results: List[ChunkResult], vec_results: List[ChunkResult]
-    ) -> List[ChunkResult]:
-        return _fp.weighted_fusion(self, bm25_results, vec_results)
 
     def _apply_doc_continuity_boost(
         self, chunks: List[ChunkResult], alpha: float = 0.12
@@ -2270,56 +2028,11 @@ class HybridRetriever:
     def _neighbor_score(self, source_score: float) -> float:
         return _ep.neighbor_score(source_score)
 
-    def _expand_microdoc_results(
-        self,
-        query: str,
-        fused_results: List[ChunkResult],
-        seeds: List[ChunkResult],
-        filters: Dict[str, Any],
-    ) -> Tuple[List[ChunkResult], int]:
-        return _ep.expand_microdoc_results(self, query, fused_results, seeds, filters)
-
-    def _is_microdoc_candidate(self, chunk: ChunkResult) -> bool:
-        return _ep.is_microdoc_candidate(self, chunk)
-
-    def _is_microdoc_source(self, chunk: ChunkResult) -> bool:
-        return _ep.is_microdoc_source(self, chunk)
-
-    def _microdoc_from_fused(
-        self,
-        base: ChunkResult,
-        fused_pool: List[ChunkResult],
-        used_docs: Set[str],
-        limit: int,
-    ) -> List[ChunkResult]:
-        return _ep.microdoc_from_fused(self, base, fused_pool, used_docs, limit)
-
-    def _microdoc_from_directory(
-        self,
-        base: ChunkResult,
-        used_docs: Set[str],
-        limit: int,
-        filters: Dict[str, Any],
-    ) -> List[ChunkResult]:
-        return _ep.microdoc_from_directory(self, base, used_docs, limit, filters)
-
-    def _microdoc_from_knn(
-        self,
-        base: ChunkResult,
-        used_docs: Set[str],
-        limit: int,
-        filters: Dict[str, Any],
-    ) -> List[ChunkResult]:
-        return _ep.microdoc_from_knn(self, base, used_docs, limit, filters)
-
     def _truncate_text(self, text: str, token_budget: int) -> Tuple[str, int]:
         return _ep.truncate_text(self, text, token_budget)
 
     def _chunk_from_props(self, props: Dict[str, Any]) -> ChunkResult:
         return _gp.chunk_from_props(props)
-
-    def _path_prefix(self, source_path: Optional[str]) -> Optional[str]:
-        return _ep.path_prefix(source_path, self.micro_dir_depth)
 
     def _enforce_context_budget(
         self, results: List[ChunkResult], starting_tokens: int = 0

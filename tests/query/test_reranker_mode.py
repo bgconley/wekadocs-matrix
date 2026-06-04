@@ -113,10 +113,6 @@ def test_bge_reranker_mode_skips_bm25(monkeypatch):
         lambda self, chunks: None,
     )
     monkeypatch.setattr(
-        "src.query.hybrid_retrieval.HybridRetriever._expand_microdoc_results",
-        lambda self, query, fused_results, seeds, filters: ([], 0),
-    )
-    monkeypatch.setattr(
         "src.query.hybrid_retrieval.HybridRetriever._apply_graph_enrichment",
         lambda self, seeds, results, doc_tag: (
             [],

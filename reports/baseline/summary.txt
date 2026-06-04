@@ -1,0 +1,1 @@
+collected=1690 passed=0 failed=0 errored=2 skipped=0 ruff_issues=2 mypy_errors=532

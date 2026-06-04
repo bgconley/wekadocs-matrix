@@ -33,15 +33,43 @@ class MockRankedResult:
 class MockMxbaiRerankV2:
     """Mock for MxbaiRerankV2 -- returns deterministic scores."""
 
-    def __init__(self, model_id, max_length=8192):
+    def __init__(
+        self,
+        model_id,
+        max_length=8192,
+        device="cpu",
+        torch_dtype="auto",
+    ):
         self.model_id = model_id
         self.max_length = max_length
+        self.device = device
+        self.torch_dtype = torch_dtype
+        self.predefined_length = 96
+        self.model_max_length = 32768
+        self.max_length_padding = 32768
         # Expose a stub .model attribute so device-move logic doesn't crash
         self.model = MagicMock()
+        self.model.dtype = torch_dtype
+        self.model.device = device
+        self.model.config = MagicMock(use_cache=True)
+        self.model.generation_config = MagicMock(use_cache=True)
+        self.last_rank_kwargs = None
 
     def rank(
-        self, query, documents, instruction=None, return_documents=False, top_k=None
+        self,
+        query,
+        documents,
+        instruction=None,
+        return_documents=False,
+        top_k=None,
+        batch_size=32,
     ):
+        self.last_rank_kwargs = {
+            "instruction": instruction,
+            "return_documents": return_documents,
+            "top_k": top_k,
+            "batch_size": batch_size,
+        }
         top_k = top_k or len(documents)
         results = []
         for i in range(min(top_k, len(documents))):
@@ -123,6 +151,11 @@ class TestHealth:
             "warmup_ok",
             "max_length",
             "dtype",
+            "batch_size",
+            "loaded_dtype",
+            "loaded_device",
+            "gpu_memory_allocated_mb",
+            "gpu_memory_reserved_mb",
         ):
             assert key in data, f"missing key: {key}"
 
@@ -238,6 +271,17 @@ class TestRerankHappyPath:
         # Response model should be the service's configured model, not the request's
         assert resp.json()["model"] == "mixedbread-ai/mxbai-rerank-large-v2"
 
+    def test_rerank_uses_configured_batch_size(self, client, _patched_server):
+        resp = client.post(
+            "/v1/rerank",
+            json={
+                "query": "test query",
+                "documents": ["a", "b", "c", "d", "e"],
+            },
+        )
+        assert resp.status_code == 200
+        assert _patched_server._model.last_rank_kwargs["batch_size"] == 8
+
 
 # ---------------------------------------------------------------------------
 # /v1/rerank — validation errors
@@ -347,3 +391,31 @@ class TestPydanticModels:
         assert len(resp.results) == 1
         assert resp.model == "test-model"
         assert resp.latency_ms == 42.5
+
+
+class TestRuntimeHelpers:
+    def test_resolve_torch_dtype(self, _patched_server):
+        assert (
+            _patched_server.resolve_torch_dtype("float16")
+            == _patched_server.torch.float16
+        )
+        assert (
+            _patched_server.resolve_torch_dtype("bf16")
+            == _patched_server.torch.bfloat16
+        )
+        assert (
+            _patched_server.resolve_torch_dtype("float32")
+            == _patched_server.torch.float32
+        )
+        assert _patched_server.resolve_torch_dtype("auto") == "auto"
+
+    def test_optimize_loaded_model_corrects_padding_and_disables_cache(
+        self, _patched_server
+    ):
+        model = MockMxbaiRerankV2(
+            "mixedbread-ai/mxbai-rerank-large-v2", max_length=8192
+        )
+        _patched_server.optimize_loaded_model(model)
+        assert model.max_length_padding == 8288
+        assert model.model.config.use_cache is False
+        assert model.model.generation_config.use_cache is False

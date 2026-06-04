@@ -41,6 +41,7 @@ class ServiceConfig:
     device: str = os.getenv("MXBAI_DEVICE", "auto")
     dtype: str = os.getenv("MXBAI_DTYPE", "float16")
     max_length: int = int(os.getenv("MXBAI_MAX_LENGTH", "8192"))
+    batch_size: int = int(os.getenv("MXBAI_BATCH_SIZE", "8"))
     max_concurrency: int = int(os.getenv("MXBAI_MAX_CONCURRENCY", "1"))
     port: int = int(os.getenv("MXBAI_PORT", "9006"))
 
@@ -64,23 +65,97 @@ def detect_device(device_config: str) -> str:
     return "cpu"
 
 
+def resolve_torch_dtype(dtype_config: str) -> str | torch.dtype:
+    normalized = dtype_config.strip().lower()
+    if normalized == "auto":
+        return "auto"
+    if normalized in {"float16", "fp16", "half"}:
+        return torch.float16
+    if normalized in {"bfloat16", "bf16"}:
+        return torch.bfloat16
+    if normalized in {"float32", "fp32", "full"}:
+        return torch.float32
+    raise ValueError(f"Unsupported MXBAI_DTYPE: {dtype_config}")
+
+
+def round_up_to_multiple_of_8(value: int, *, max_value: int | None = None) -> int:
+    rounded = ((value + 7) // 8) * 8
+    if max_value is not None:
+        rounded = min(rounded, max_value)
+    return rounded
+
+
+def optimize_loaded_model(model) -> None:
+    core_model = getattr(model, "model", None)
+    if core_model is not None:
+        if hasattr(core_model, "config"):
+            core_model.config.use_cache = False
+        generation_config = getattr(core_model, "generation_config", None)
+        if generation_config is not None:
+            generation_config.use_cache = False
+
+    predefined_length = getattr(model, "predefined_length", None)
+    model_max_length = getattr(model, "model_max_length", None)
+    max_length = getattr(model, "max_length", None)
+    current_padding = getattr(model, "max_length_padding", None)
+    if not all(
+        isinstance(value, int)
+        for value in (predefined_length, model_max_length, max_length, current_padding)
+    ):
+        return
+
+    corrected_padding = round_up_to_multiple_of_8(
+        min(model_max_length, max_length + predefined_length),
+        max_value=model_max_length,
+    )
+    if corrected_padding != current_padding:
+        logger.info(
+            "Correcting max_length_padding from %s to %s",
+            current_padding,
+            corrected_padding,
+        )
+        model.max_length_padding = corrected_padding
+
+
+def current_cuda_memory_mb() -> tuple[int, int] | None:
+    if not torch.cuda.is_available():
+        return None
+    allocated = int(torch.cuda.memory_allocated() / (1024 * 1024))
+    reserved = int(torch.cuda.memory_reserved() / (1024 * 1024))
+    return allocated, reserved
+
+
 # ── Model loading ────────────────────────────────────────────────────
 
 
-def load_model(model_id: str, device: str, max_length: int):
+def load_model(
+    model_id: str,
+    device: str,
+    dtype_config: str,
+    max_length: int,
+):
     """Load the MxbaiRerankV2 model."""
     from mxbai_rerank import MxbaiRerankV2
 
-    logger.info(f"Loading model {model_id} (max_length={max_length})...")
-    model = MxbaiRerankV2(model_id, max_length=max_length)
+    torch_dtype = resolve_torch_dtype(dtype_config)
+    logger.info(
+        "Loading model %s (device=%s dtype=%s max_length=%s)...",
+        model_id,
+        device,
+        dtype_config,
+        max_length,
+    )
+    model = MxbaiRerankV2(
+        model_id,
+        device=device,
+        torch_dtype=torch_dtype,
+        max_length=max_length,
+    )
+    optimize_loaded_model(model)
 
-    # Move to device if needed
-    if device == "cuda" and hasattr(model, "model"):
-        model.model.to("cuda")
-    elif device == "mps" and hasattr(model, "model"):
-        model.model.to("mps")
-
-    logger.info(f"Model loaded on {device}")
+    loaded_dtype = str(getattr(getattr(model, "model", None), "dtype", "unknown"))
+    loaded_device = str(getattr(getattr(model, "model", None), "device", device))
+    logger.info("Model loaded on %s with dtype=%s", loaded_device, loaded_dtype)
     return model
 
 
@@ -92,25 +167,44 @@ async def lifespan(app: FastAPI):
     global _model, _semaphore, _warmup_ok
 
     device = detect_device(_config.device)
-    _model = load_model(_config.model_id, device, _config.max_length)
+    _model = load_model(_config.model_id, device, _config.dtype, _config.max_length)
     _semaphore = asyncio.Semaphore(_config.max_concurrency)
 
     # Warmup with dummy data
     try:
         logger.info("Running warmup rerank...")
-        _model.rank("warmup query", ["warmup document one", "warmup document two"])
+        _model.rank(
+            "warmup query",
+            ["warmup document one", "warmup document two"],
+            batch_size=min(_config.batch_size, 2),
+        )
         _warmup_ok = True
         logger.info("Warmup complete")
     except Exception as e:
         logger.warning(f"Warmup failed: {e}")
         _warmup_ok = False
+    finally:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
+    memory = current_cuda_memory_mb()
+    loaded_dtype = str(getattr(getattr(_model, "model", None), "dtype", "unknown"))
+    loaded_device = str(getattr(getattr(_model, "model", None), "device", device))
     logger.info(
-        f"mxbai-rerank service ready: model={_config.model_id} "
-        f"device={device} max_length={_config.max_length} port={_config.port}"
+        "mxbai-rerank service ready: model=%s device=%s dtype=%s max_length=%s batch_size=%s port=%s allocated_mb=%s reserved_mb=%s",
+        _config.model_id,
+        loaded_device,
+        loaded_dtype,
+        _config.max_length,
+        _config.batch_size,
+        _config.port,
+        memory[0] if memory else "n/a",
+        memory[1] if memory else "n/a",
     )
     yield
     _model = None
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     logger.info("mxbai-rerank service shutting down")
 
 
@@ -168,8 +262,21 @@ async def health():
         "device": detect_device(_config.device),
         "dtype": _config.dtype,
         "max_length": _config.max_length,
+        "batch_size": _config.batch_size,
         "loaded": _model is not None,
         "warmup_ok": _warmup_ok,
+        "loaded_dtype": str(
+            getattr(getattr(_model, "model", None), "dtype", "unknown")
+        ),
+        "loaded_device": str(
+            getattr(getattr(_model, "model", None), "device", "unknown")
+        ),
+        "gpu_memory_allocated_mb": (
+            current_cuda_memory_mb()[0] if current_cuda_memory_mb() else None
+        ),
+        "gpu_memory_reserved_mb": (
+            current_cuda_memory_mb()[1] if current_cuda_memory_mb() else None
+        ),
     }
 
 
@@ -184,7 +291,11 @@ async def rerank(request: RerankRequest):
     async with _semaphore:
         try:
             # mxbai-rerank library call
-            kwargs = {"return_documents": False, "top_k": top_k}
+            kwargs = {
+                "return_documents": False,
+                "top_k": top_k,
+                "batch_size": _config.batch_size,
+            }
             if request.instruction:
                 kwargs["instruction"] = request.instruction
 
@@ -192,6 +303,9 @@ async def rerank(request: RerankRequest):
         except Exception as e:
             logger.error(f"Rerank failed: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Rerank failed: {str(e)}")
+        finally:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     latency_ms = (time.time() - start) * 1000
 

@@ -126,16 +126,6 @@ def qdrant_client(docker_services_running):
     # Don't close - shared across tests
 
 
-@pytest.fixture
-def jwt_token():
-    """Create a valid JWT token for testing"""
-    from src.mcp_server.security import get_jwt_auth
-
-    auth = get_jwt_auth()
-    token = auth.create_token(subject="test_user")
-    return token
-
-
 @pytest.fixture(scope="session", autouse=True)
 def setup_tracing():
     """Initialize OpenTelemetry tracing for all tests"""

@@ -1,0 +1,180 @@
+benchmark:
+  id: canonical_retrieval_smoke_v1
+  frozen_on: "2026-03-08"
+  purpose: >-
+    Frozen retrieval benchmark for graph-assisted debugging and ranking regressions.
+    Prompt text is part of the contract. Do not substitute paraphrases when comparing runs.
+  defaults:
+    top_k: 20
+    max_quotes: 10
+
+queries:
+  - id: meta_architecture_01
+    label: Metadata Architecture
+    category: architecture
+    difficulty: medium
+    text: "how is metadata managed and architected on a weka cluster"
+    rationale: "Primary metadata architecture sentinel. Historically good when architecture retrieval is healthy."
+    acceptance:
+      rules:
+        - kind: heading_contains
+          within: 5
+          any_of: ["Metadata management", "Metadata processing"]
+          min_matches: 1
+          note: "At least one core metadata section appears in the top 5."
+        - kind: heading_contains
+          within: 10
+          any_of: ["Metadata limitations"]
+          min_matches: 1
+          note: "Metadata limitations appears somewhere in the top 10."
+        - kind: doc_tag_max_count
+          within: 10
+          doc_tag: "aws-solutions"
+          max_count: 1
+          note: "Cloud-noise docs are limited in the top 10."
+
+  - id: meta_limitations_01
+    label: Metadata Limitations
+    category: reference
+    difficulty: easy
+    text: "what are the metadata limitations in WEKA filesystems"
+    rationale: "Reference-style metadata query tied to an exact corpus heading."
+    acceptance:
+      rules:
+        - kind: heading_contains
+          within: 3
+          any_of: ["Metadata limitations"]
+          min_matches: 1
+          note: "Metadata limitations should surface in the top 3."
+
+  - id: backend_config_01
+    label: Dedicated Backend Configuration
+    category: configuration
+    difficulty: medium
+    text: "How do I configure a dedicated backend in WEKA?"
+    rationale: "Configuration benchmark grounded in the exact dedicated-backend heading."
+    acceptance:
+      rules:
+        - kind: heading_contains
+          within: 5
+          any_of: ["Dedicated backend configuration"]
+          min_matches: 1
+          note: "Dedicated backend guidance should appear in the top 5."
+
+  - id: sizing_containers_01
+    label: Container Sizing
+    category: sizing
+    difficulty: medium
+    text: "How do I appropriately size the weka drives, compute, and frontends containers?"
+    rationale: "Stable sizing prompt used in prior graph/specificity attribution runs."
+    acceptance:
+      rules:
+        - kind: heading_contains
+          within: 5
+          any_of:
+            - "Backend CPU usage"
+            - "Plan the WEKA system hardware requirements"
+            - "Example 2: a server with a limited number of cores"
+            - "Client's memory requirements"
+          min_matches: 2
+          note: "Top 5 should include at least two core sizing sections."
+        - kind: doc_tag_max_count
+          within: 10
+          doc_tag: "aws-solutions"
+          max_count: 1
+          note: "Cloud-noise docs remain limited in the top 10."
+
+  - id: hardware_minimums_01
+    label: Minimum Hardware Requirements
+    category: reference
+    difficulty: medium
+    text: "What are the minimum hardware requirements for a WEKA cluster?"
+    rationale: "Known weak prompt retained intentionally so regressions and fixes are visible."
+    acceptance:
+      rules:
+        - kind: heading_contains
+          within: 5
+          any_of:
+            - "Server minimum requirements"
+            - "Minimal server configuration for a WEKA cluster"
+          min_matches: 1
+          note: "At least one minimum-requirements section appears in the top 5."
+
+  - id: cli_drive_01
+    label: Cluster Drive CLI
+    category: command
+    difficulty: easy
+    text: "How do I use the weka cluster drive command?"
+    rationale: "Command-usage sentinel for exact CLI retrieval quality."
+    acceptance:
+      rules:
+        - kind: heading_contains
+          within: 5
+          any_of: ["weka cluster drive"]
+          min_matches: 3
+          note: "Top 5 should be dominated by cluster-drive command sections."
+        - kind: doc_tag_equals
+          within: 5
+          any_of: ["getting-started-with-weka"]
+          min_matches: 3
+          note: "At least three of the top 5 results should come from the CLI guide."
+
+  - id: expand_cluster_01
+    label: Cluster Expansion
+    category: procedural
+    difficulty: easy
+    text: "How do I expand storage capacity in a WEKA cluster?"
+    rationale: "Procedural query that should consistently hit expansion docs."
+    acceptance:
+      rules:
+        - kind: heading_contains
+          within: 5
+          any_of: ["Expand a cluster", "Expand and shrink cluster resources"]
+          min_matches: 2
+          note: "Top 5 should include both primary expansion topics."
+
+  - id: deduplication_01
+    label: Deduplication / Data Reduction
+    category: conceptual
+    difficulty: easy
+    text: "what is WEKA deduplication"
+    rationale: "Reference/conceptual benchmark for data-reduction terminology."
+    acceptance:
+      rules:
+        - kind: heading_contains
+          within: 5
+          any_of:
+            - "Data reduction **in WEKA filesystems**"
+            - "How data reduction operates"
+          min_matches: 1
+          note: "Data reduction guidance should appear in the top 5."
+
+  - id: local_weka_home_ports_01
+    label: Local WEKA Home Ports
+    category: reference
+    difficulty: medium
+    text: "What ports are required for Local WEKA Home?"
+    rationale: "Ports benchmark grounded in the Local WEKA Home deployment docs."
+    acceptance:
+      rules:
+        - kind: heading_contains
+          within: 5
+          any_of:
+            - "Deploy Local WEKA Home v3.0 or higher"
+            - "Change the Local WEKA Home listening ports"
+          min_matches: 1
+          note: "Local WEKA Home deployment/ports guidance should appear in the top 5."
+
+  - id: gui_overview_01
+    label: WEKA GUI Overview
+    category: navigational
+    difficulty: easy
+    text: "How do I manage the system using the WEKA GUI?"
+    rationale: "GUI/admin query with a canonical exact heading in the corpus."
+    acceptance:
+      rules:
+        - kind: heading_contains
+          within: 3
+          any_of: ["WEKA GUI overview"]
+          min_matches: 1
+          note: "WEKA GUI overview should appear in the top 3."
