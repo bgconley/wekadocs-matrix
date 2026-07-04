@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: factory.py (registered provider)
+# =============================================================================
 """
 Jina AI rerank provider implementation.
 Phase 7C: Remote API provider for jina-reranker models (v2/v3).
@@ -78,10 +82,13 @@ class JinaRerankProvider:
             },
         )
 
-        # Initialize circuit breaker (shared with embedding provider)
-        from src.providers.embeddings.jina import CircuitBreaker, RateLimiter
+        # Initialize circuit breaker and rate limiter
+        from src.providers.embeddings.jina import RateLimiter
+        from src.shared.resilience import CircuitBreaker
 
-        self._circuit_breaker = CircuitBreaker(failure_threshold=5, timeout=300)
+        self._circuit_breaker = CircuitBreaker(
+            name="jina-reranker", failure_threshold=5, timeout=300
+        )
 
         # Initialize rate limiter for rerank API (500 RPM, 1M TPM - standard tier)
         self._rate_limiter = RateLimiter(
@@ -101,7 +108,14 @@ class JinaRerankProvider:
         """Get provider name."""
         return self._provider_name
 
-    def rerank(self, query: str, candidates: List[Dict], top_k: int = 10) -> List[Dict]:
+    def rerank(
+        self,
+        query: str,
+        candidates: List[Dict],
+        top_k: int = 10,
+        *,
+        instruction: Optional[str] = None,
+    ) -> List[Dict]:
         """
         Rerank candidates using Jina reranker.
 

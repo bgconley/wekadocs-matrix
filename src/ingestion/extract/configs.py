@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: extract/__init__.py
+# =============================================================================
 # Implements Phase 3, Task 3.2 (Entity extraction - Configurations)
 # See: /docs/spec.md §3.1 (Domain entities)
 # See: /docs/implementation-plan.md → Task 3.2
@@ -7,6 +11,7 @@ import hashlib
 import re
 from typing import Dict, List, Tuple
 
+from src.providers.ner.labels import normalize_entity_name
 from src.shared.observability import get_logger
 
 logger = get_logger(__name__)
@@ -105,28 +110,50 @@ def _extract_config_parameters(
     configurations = []
     mentions = []
 
-    # Patterns for config parameters
-    patterns = [
-        r"([A-Z_][A-Z0-9_]{2,})\s*=",  # UPPER_CASE_VAR = value
-        r"`([a-z][a-z0-9\-_\.]+)`\s*:\s*",  # `config.key`: value
-        r"--([a-z][a-z0-9\-]+)(?:\s|=)",  # --flag-name
-    ]
+    # Pattern 1: UPPER_CASE_VAR = value
+    for match in re.finditer(r"([A-Z_][A-Z0-9_]{2,})\s*=", text):
+        param_name = match.group(1)
+        if _is_valid_config_name(param_name):
+            config_entity = _create_config_entity(
+                param_name,
+                f"Configuration parameter: {param_name}",
+                "parameter",
+            )
+            configurations.append(config_entity)
 
-    for pattern in patterns:
-        for match in re.finditer(pattern, text):
-            param_name = match.group(1)
+            span = (match.start(1), match.end(1))
+            mention = _create_mention(section_id, config_entity["id"], span, 0.75)
+            mentions.append(mention)
 
-            if _is_valid_config_name(param_name):
-                config_entity = _create_config_entity(
-                    param_name,
-                    f"Configuration parameter: {param_name}",
-                    "parameter",
-                )
-                configurations.append(config_entity)
+    # Pattern 2: `config.key`: value
+    for match in re.finditer(r"`([a-z][a-z0-9\-_\.]+)`\s*:\s*", text):
+        param_name = match.group(1)
+        if _is_valid_config_name(param_name):
+            config_entity = _create_config_entity(
+                param_name,
+                f"Configuration parameter: {param_name}",
+                "parameter",
+            )
+            configurations.append(config_entity)
 
-                span = (match.start(1), match.end(1))
-                mention = _create_mention(section_id, config_entity["id"], span, 0.75)
-                mentions.append(mention)
+            span = (match.start(1), match.end(1))
+            mention = _create_mention(section_id, config_entity["id"], span, 0.75)
+            mentions.append(mention)
+
+    # Pattern 3: --flag-name (scoped to CLI flag extraction path only)
+    for match in re.finditer(r"--([a-z][a-z0-9\-]+)(?:\s|=)", text):
+        flag_name = match.group(1)
+        if _is_valid_flag_name(flag_name):
+            config_entity = _create_config_entity(
+                flag_name,
+                f"CLI flag: --{flag_name}",
+                "flag",
+            )
+            configurations.append(config_entity)
+
+            span = (match.start(1), match.end(1))
+            mention = _create_mention(section_id, config_entity["id"], span, 0.75)
+            mentions.append(mention)
 
     return configurations, mentions
 
@@ -236,14 +263,45 @@ def _is_valid_config_name(name: str) -> bool:
     return name.lower() not in excluded
 
 
+def _is_valid_flag_name(name: str) -> bool:
+    """Validate CLI flag names (Pattern 3) with a larger noise exclusion set."""
+    if not _is_valid_config_name(name):
+        return False
+
+    excluded_flags = {
+        # CLI output formatting flags (common across subcommands)
+        "color",
+        "filter-color",
+        "output",
+        "format",
+        "filter",
+        "sort",
+        "profile",
+        "raw-units",
+        "verbose",
+        "no-header",
+        "json",
+        "csv",
+        "utf8",
+        # Generic flag names
+        "new-name",
+    }
+    return name.lower() not in excluded_flags
+
+
 def _create_config_entity(name: str, description: str, category: str) -> Dict:
     """Create a Configuration entity."""
-    entity_id = hashlib.sha256(f"configuration:{name}".encode("utf-8")).hexdigest()
+    normalized_name = normalize_entity_name(name)
+    entity_id = hashlib.sha256(
+        f"configuration:{normalized_name}".encode("utf-8")
+    ).hexdigest()
 
     return {
         "id": entity_id,
         "label": "Configuration",
-        "name": name,
+        "name": normalized_name,
+        "entity_type": "CONFIGURATION",
+        "source": "structural",
         "description": description,
         "category": category,
         "introduced_in": None,

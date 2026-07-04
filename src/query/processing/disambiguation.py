@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: hybrid_retrieval.py
+# =============================================================================
 """
 Query disambiguation using GLiNER entity extraction.
 

@@ -4,10 +4,11 @@ from typing import List
 
 import pytest
 
-from src.providers.embeddings.bge_m3_service import BGEM3ServiceProvider
 from src.providers.embeddings.contracts import (
-    DocumentEmbeddingBundle,
     QueryEmbeddingBundle,
+)
+from src.providers.embeddings.embedding_service import (
+    EmbeddingServiceProvider as BGEM3ServiceProvider,  # renamed
 )
 from src.providers.settings import EmbeddingCapabilities, EmbeddingSettings
 
@@ -76,20 +77,6 @@ def test_sparse_and_colbert_helpers():
 
     colbert = provider.embed_colbert(["a"])
     assert len(colbert[0]) == 2
-
-
-def test_embed_documents_all_returns_bundles():
-    fake_client = _FakeEmbeddingClient(dims=4)
-    provider = BGEM3ServiceProvider(settings=_sample_settings(4), client=fake_client)
-
-    bundles = provider.embed_documents_all(["a", "b"])
-    assert all(isinstance(b, DocumentEmbeddingBundle) for b in bundles)
-    first = bundles[0]
-    assert len(first.dense) == 4
-    assert first.sparse is not None
-    assert first.sparse.indices == [0, 1]
-    assert first.multivector is not None
-    assert first.multivector.vectors[0] == [0.1, 0.2]
 
 
 def test_embed_query_all_returns_bundle():

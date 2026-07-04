@@ -1,9 +1,24 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: (package init)
+# =============================================================================
 """
 Embedding provider interfaces and implementations.
-Pre-Phase 7: Creates abstraction layer for embedding generation.
+
+Providers:
+- SentenceTransformersProvider: Local HuggingFace models
+- SnowflakeArcticProvider: Dense embeddings via local Arctic service
+- EmbeddingServiceProvider: Unified gateway (dense + sparse + ColBERT) via /v1/embeddings/*
+- VoyageEmbeddingProvider: Voyage AI contextual embeddings
+- JinaEmbeddingProvider: Jina AI embeddings
 """
 
 from .base import EmbeddingProvider
 from .sentence_transformers import SentenceTransformersProvider
+from .snowflake_arctic import SnowflakeArcticProvider
 
-__all__ = ["EmbeddingProvider", "SentenceTransformersProvider"]
+__all__ = [
+    "EmbeddingProvider",
+    "SentenceTransformersProvider",
+    "SnowflakeArcticProvider",
+]

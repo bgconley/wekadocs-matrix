@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: hybrid_retrieval.py, build_graph.py
+# =============================================================================
 # Implements Phase 5, Task 5.2 (Monitoring & observability)
 # See: /docs/spec.md §7 (Observability & SLOs)
 # Prometheus metrics for WekaDocs GraphRAG MCP
@@ -272,6 +276,12 @@ tool_response_bytes = Histogram(
         262144,
         524288,
     ),
+)
+
+excerpt_truncations_total = Counter(
+    "mcp_excerpt_truncations_total",
+    "Total truncated excerpt responses returned by MCP tools.",
+    ["tool_name"],
 )
 
 response_builder_evidence_count = Histogram(

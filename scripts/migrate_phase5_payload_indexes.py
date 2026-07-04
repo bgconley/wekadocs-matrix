@@ -18,7 +18,7 @@ Usage:
     python scripts/migrate_phase5_payload_indexes.py --execute
 
     # Specify collection name
-    python scripts/migrate_phase5_payload_indexes.py --collection chunks_multi_bge_m3 --execute
+    python scripts/migrate_phase5_payload_indexes.py --collection chunks_multi --execute
 
 Environment:
     QDRANT_HOST: Qdrant host (default: localhost)
@@ -180,8 +180,8 @@ def main():
     )
     parser.add_argument(
         "--collection",
-        default="chunks_multi_bge_m3",
-        help="Collection name (default: chunks_multi_bge_m3)",
+        default="chunks_multi",
+        help="Collection name (default: chunks_multi)",
     )
     parser.add_argument(
         "--execute",

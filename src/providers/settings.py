@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: factory.py, config.py
+# =============================================================================
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -27,7 +31,7 @@ class EmbeddingSettings:
     tokenizer_model_id: Optional[str]
     service_url: Optional[str]
     capabilities: EmbeddingCapabilities
-    extra: Dict[str, str] = field(default_factory=dict)
+    extra: Dict[str, object] = field(default_factory=dict)
 
 
 def build_embedding_telemetry(settings: "EmbeddingSettings") -> Dict[str, str]:

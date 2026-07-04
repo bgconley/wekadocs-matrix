@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: main.py, mcp_app.py
+# =============================================================================
 """
 Graph Traversal Service (E4)
 Implements traverse_relationships MCP tool for multi-turn graph exploration.

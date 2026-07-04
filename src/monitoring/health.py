@@ -1,6 +1,10 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: main.py
+# =============================================================================
 """
 Phase 7E-4: Health Check System
-Verifies Neo4j schema v2.2, Qdrant 1024-D, embedding configuration at startup
+Verifies Neo4j schema v4.0, Qdrant 1024-D, embedding configuration at startup
 
 Reference: Canonical Spec L3513-3528, L535, L621, L3570
 Integration Guide L1905-1918
@@ -15,7 +19,7 @@ from typing import Dict, List
 from neo4j import Driver
 from qdrant_client import QdrantClient
 
-from src.shared.config import get_config
+from src.shared.config import get_config, get_embedding_plan
 
 logger = logging.getLogger(__name__)
 
@@ -64,21 +68,22 @@ class SystemHealth:
 
 class HealthChecker:
     """
-    Comprehensive health check system for GraphRAG v2.2.
+    Comprehensive health check system for GraphRAG v4.1.
 
     Verifies:
-    - Neo4j constraints and indexes exist (v2.2 schema)
+    - Neo4j constraints and indexes exist (v4.1 schema, Chunk-only + RELATED_TO v2)
     - Vector indexes are 1024-D with cosine distance
     - Qdrant collection exists with 1024-D named vectors
-    - SchemaVersion marker is v2.2
+    - SchemaVersion marker is v4.1
+    - RELATED_TO relationship indexes for GDS prerequisites (DEGRADED if missing)
     - Embedding configuration matches canonical spec
     """
 
-    # Canonical requirements from Phase 7E spec
-    REQUIRED_SCHEMA_VERSION = "v2.2"
+    # Canonical requirements — updated for unified gateway model stack
+    REQUIRED_SCHEMA_VERSION = "v4.1"
     REQUIRED_EMBED_DIM = 1024
-    REQUIRED_EMBED_MODEL = "BAAI/bge-m3"
-    REQUIRED_EMBED_PROVIDER = "bge-m3-service"
+    REQUIRED_EMBED_MODEL = "BAAI/bge-m3"  # profile-driven; legacy check
+    REQUIRED_EMBED_PROVIDER = "bge-m3-service"  # profile-driven; legacy check
     REQUIRED_DISTANCE = "cosine"
 
     def __init__(
@@ -88,7 +93,7 @@ class HealthChecker:
         embed_dim: int,
         embed_model: str,
         embed_provider: str,
-        qdrant_collection: str = "chunks_multi_bge_m3",
+        qdrant_collection: str = "chunks_multi",
     ):
         """
         Initialize health checker.
@@ -296,6 +301,15 @@ class HealthChecker:
             "chunk_parent_chunk_id",
             "entity_type_normalized_name",
         ]
+        # RELATED_TO v2 indexes (GDS prerequisites) — DEGRADED if missing
+        # These are checked separately because the DDL must land before code deployment.
+        # Once DDL is confirmed on all environments, these can be promoted to required.
+        gds_indexes = [
+            "related_to_score_final_idx",
+            "related_to_method_idx",
+            "related_to_quality_tier_idx",
+            "related_to_is_mutual_idx",
+        ]
 
         try:
             with self.neo4j_driver.session() as session:
@@ -307,20 +321,33 @@ class HealthChecker:
                 missing = [
                     idx for idx in required_indexes if idx not in existing_indexes
                 ]
+                missing_gds = [
+                    idx for idx in gds_indexes if idx not in existing_indexes
+                ]
 
-                if not missing:
+                if not missing and not missing_gds:
                     return HealthCheckResult(
                         name="neo4j_indexes",
                         status=HealthStatus.HEALTHY,
-                        message=f"All {len(required_indexes)} required property indexes exist",
-                        details={"indexes": required_indexes},
+                        message=f"All {len(required_indexes) + len(gds_indexes)} indexes exist (incl. GDS prerequisites)",
+                        details={
+                            "indexes": required_indexes,
+                            "gds_indexes": gds_indexes,
+                        },
+                    )
+                elif not missing and missing_gds:
+                    return HealthCheckResult(
+                        name="neo4j_indexes",
+                        status=HealthStatus.DEGRADED,
+                        message=f"Core indexes OK; missing GDS prerequisites: {', '.join(missing_gds)}",
+                        details={"missing_gds": missing_gds},
                     )
                 else:
                     return HealthCheckResult(
                         name="neo4j_indexes",
                         status=HealthStatus.DEGRADED,
-                        message=f"Missing optional indexes: {', '.join(missing)} (performance may be impacted)",
-                        details={"missing": missing},
+                        message=f"Missing indexes: {', '.join(missing + missing_gds)} (performance may be impacted)",
+                        details={"missing": missing, "missing_gds": missing_gds},
                     )
         except Exception as e:
             logger.exception("Index check failed")
@@ -553,21 +580,41 @@ class HealthChecker:
 
     def _check_embedding_config(self) -> HealthCheckResult:
         """Verify embedding configuration matches canonical spec."""
+        expected_dim = self.REQUIRED_EMBED_DIM
+        expected_model = self.REQUIRED_EMBED_MODEL
+        expected_provider = self.REQUIRED_EMBED_PROVIDER
+
+        try:
+            plan = get_embedding_plan()
+        except Exception as exc:
+            logger.warning(
+                "Embedding plan unavailable; falling back to legacy embedding expectations.",
+                exc_info=exc,
+            )
+            plan = None
+
+        if plan and plan.dense:
+            dense_profile = plan.dense.profile
+            if getattr(dense_profile, "dims", None):
+                expected_dim = dense_profile.dims
+            if getattr(dense_profile, "model_id", None):
+                expected_model = dense_profile.model_id
+            if getattr(dense_profile, "provider", None):
+                expected_provider = dense_profile.provider
+
         issues = []
 
-        if self.embed_dim != self.REQUIRED_EMBED_DIM:
+        if self.embed_dim != expected_dim:
+            issues.append(f"EMBED_DIM is {self.embed_dim} (expected {expected_dim})")
+
+        if self.embed_model != expected_model:
             issues.append(
-                f"EMBED_DIM is {self.embed_dim} (expected {self.REQUIRED_EMBED_DIM})"
+                f"EMBED_MODEL is '{self.embed_model}' (expected '{expected_model}')"
             )
 
-        if self.embed_model != self.REQUIRED_EMBED_MODEL:
+        if self.embed_provider != expected_provider:
             issues.append(
-                f"EMBED_MODEL is '{self.embed_model}' (expected '{self.REQUIRED_EMBED_MODEL}')"
-            )
-
-        if self.embed_provider != self.REQUIRED_EMBED_PROVIDER:
-            issues.append(
-                f"EMBED_PROVIDER is '{self.embed_provider}' (expected '{self.REQUIRED_EMBED_PROVIDER}')"
+                f"EMBED_PROVIDER is '{self.embed_provider}' (expected '{expected_provider}')"
             )
 
         if not issues:

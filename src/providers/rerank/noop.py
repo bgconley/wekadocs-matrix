@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: factory.py (registered provider)
+# =============================================================================
 """
 No-op reranker implementation.
 Phase 7C: Passthrough reranker that preserves original ordering.
@@ -9,7 +13,7 @@ Used when:
 """
 
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +44,14 @@ class NoopReranker:
         """Get provider name."""
         return self._provider_name
 
-    def rerank(self, query: str, candidates: List[Dict], top_k: int = 10) -> List[Dict]:
+    def rerank(
+        self,
+        query: str,
+        candidates: List[Dict],
+        top_k: int = 10,
+        *,
+        instruction: Optional[str] = None,
+    ) -> List[Dict]:
         """
         Return candidates unchanged (no reranking).
 

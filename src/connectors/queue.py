@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: manager.py
+# =============================================================================
 """
 Redis-based ingestion queue for connector events.
 Supports priority queuing, backpressure monitoring, and graceful degradation.

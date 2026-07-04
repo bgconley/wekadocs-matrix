@@ -1,3 +1,11 @@
+# =============================================================================
+# @status: DORMANT
+# @reason: Legacy BeautifulSoup-based markdown parser. Only loaded when
+#          config.ingestion.parser.engine == "legacy" or when markdown-it-py
+#          import fails. Default engine is "markdown-it-py" since Phase 3.
+# @gated-by: config.ingestion.parser.engine / markdown-it-py ImportError fallback
+# @superseded-by: src/ingestion/parsers/markdown_it_parser.py
+# =============================================================================
 # Implements Phase 3, Task 3.1 (Multi-format parser - Markdown)
 # See: /docs/spec.md §3 (Data model - Document/Section)
 # See: /docs/implementation-plan.md → Task 3.1

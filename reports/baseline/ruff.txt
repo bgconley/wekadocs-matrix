@@ -1,0 +1,26 @@
+F841 Local variable `qdrant_namespaced` is assigned to but never used
+   --> src/query/hybrid_retrieval.py:173:9
+    |
+171 |             self.embedding_settings, namespace_mode
+172 |         )
+173 |         qdrant_namespaced = bool(
+    |         ^^^^^^^^^^^^^^^^^
+174 |             namespace_suffix
+175 |             and qdrant_collection
+    |
+help: Remove assignment to unused variable `qdrant_namespaced`
+
+F841 Local variable `strict_env` is assigned to but never used
+   --> src/query/hybrid_retrieval.py:178:9
+    |
+176 |             and str(qdrant_collection).endswith(namespace_suffix)
+177 |         )
+178 |         strict_env = getattr(settings, "env", "development").lower() not in (
+    |         ^^^^^^^^^^
+179 |             "development",
+180 |             "dev",
+    |
+help: Remove assignment to unused variable `strict_env`
+
+Found 2 errors.
+No fixes available (2 hidden fixes can be enabled with the `--unsafe-fixes` option).

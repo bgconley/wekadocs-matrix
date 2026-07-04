@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: observability package
+# =============================================================================
 # Implements Phase 5, Task 5.2 (Monitoring & observability)
 # OpenTelemetry trace exemplars for Prometheus metrics
 # See: /docs/spec.md §7 (Observability & SLOs)

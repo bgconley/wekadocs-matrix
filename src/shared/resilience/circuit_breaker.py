@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: reranker, GLiNER providers
+# =============================================================================
 """
 Thread-safe Circuit Breaker pattern implementation.
 
@@ -102,12 +106,16 @@ def _safe_parse_float(env_var: str, default: float) -> float:
         return default
 
 
-class CircuitState(Enum):
+class CircuitState(str, Enum):
     """Circuit breaker states following the standard pattern."""
 
     CLOSED = "closed"  # Normal operation, requests pass through
     OPEN = "open"  # Failing, reject requests immediately
     HALF_OPEN = "half_open"  # Testing recovery with single request
+
+
+# Backward-compatible alias used by connectors module
+CircuitBreakerState = CircuitState
 
 
 # Environment variable configuration with sensible defaults
@@ -143,34 +151,51 @@ class CircuitBreaker:
 
     def __init__(
         self,
-        name: str,
+        name: str = "unnamed",
         failure_threshold: int = DEFAULT_FAILURE_THRESHOLD,
         recovery_timeout: float = DEFAULT_RECOVERY_TIMEOUT,
+        *,
+        timeout_seconds: Optional[float] = None,
+        timeout: Optional[float] = None,
+        half_open_max_calls: Optional[int] = None,
     ) -> None:
         """
         Initialize the circuit breaker.
 
         Args:
-            name: Identifier for logging and metrics
+            name: Identifier for logging and metrics (default: "unnamed")
             failure_threshold: Consecutive failures before opening circuit
             recovery_timeout: Seconds to wait before testing recovery
+            timeout_seconds: Alias for recovery_timeout (connector compatibility)
+            timeout: Alias for recovery_timeout (jina compatibility)
+            half_open_max_calls: Max test calls allowed in HALF_OPEN state
+                (None = unlimited, default). From connector implementation.
         """
+        # Handle timeout aliases: timeout_seconds > timeout > recovery_timeout
+        if timeout_seconds is not None:
+            recovery_timeout = timeout_seconds
+        elif timeout is not None:
+            recovery_timeout = timeout
+
         self.name = name
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
+        self.half_open_max_calls = half_open_max_calls
 
         # State tracking (protected by lock)
         self._state = CircuitState.CLOSED
         self._failure_count = 0
         self._last_failure_time: Optional[float] = None
+        self._half_open_calls = 0
         self._lock = threading.Lock()
 
         logger.debug(
             "circuit_breaker_initialized",
             extra={
-                "name": name,
+                "circuit_name": name,
                 "failure_threshold": failure_threshold,
                 "recovery_timeout": recovery_timeout,
+                "half_open_max_calls": half_open_max_calls,
             },
         )
 
@@ -193,7 +218,7 @@ class CircuitBreaker:
         This method handles state transitions:
         - CLOSED: Always allows requests
         - OPEN: Checks if recovery timeout has passed, transitions to HALF_OPEN if so
-        - HALF_OPEN: Allows one test request
+        - HALF_OPEN: Allows requests (limited by half_open_max_calls if set)
 
         Returns:
             True if request is allowed, False if circuit is open and should fail-fast
@@ -211,18 +236,28 @@ class CircuitBreaker:
                     elapsed = time.time() - self._last_failure_time
                     if elapsed >= self.recovery_timeout:
                         self._state = CircuitState.HALF_OPEN
+                        self._half_open_calls = 0
                         logger.info(
                             "circuit_breaker_half_open",
                             extra={
-                                "name": self.name,
+                                "circuit_name": self.name,
                                 "elapsed_seconds": elapsed,
                                 "reason": "recovery_timeout_reached",
                             },
                         )
-                        return True
+                        # Fall through to HALF_OPEN handling below
+                    else:
+                        return False
+                else:
+                    return False
+
+            # HALF_OPEN: allow request (check max calls if configured)
+            if self.half_open_max_calls is not None:
+                if self._half_open_calls < self.half_open_max_calls:
+                    self._half_open_calls += 1
+                    return True
                 return False
 
-            # HALF_OPEN: allow one request to test recovery
             return True
 
     def record_success(self) -> None:
@@ -239,10 +274,11 @@ class CircuitBreaker:
             if self._state == CircuitState.HALF_OPEN:
                 self._state = CircuitState.CLOSED
                 self._failure_count = 0
+                self._half_open_calls = 0
                 logger.info(
                     "circuit_breaker_closed",
                     extra={
-                        "name": self.name,
+                        "circuit_name": self.name,
                         "reason": "recovery_success",
                     },
                 )
@@ -267,20 +303,22 @@ class CircuitBreaker:
             if self._state == CircuitState.HALF_OPEN:
                 # Recovery test failed, reopen circuit
                 self._state = CircuitState.OPEN
+                self._half_open_calls = 0
                 logger.warning(
                     "circuit_breaker_reopened",
                     extra={
-                        "name": self.name,
+                        "circuit_name": self.name,
                         "reason": "recovery_failed",
                     },
                 )
             elif self._failure_count >= self.failure_threshold:
                 # Threshold reached, open circuit
                 self._state = CircuitState.OPEN
+                self._half_open_calls = 0
                 logger.warning(
                     "circuit_breaker_opened",
                     extra={
-                        "name": self.name,
+                        "circuit_name": self.name,
                         "failure_count": self._failure_count,
                         "threshold": self.failure_threshold,
                     },
@@ -299,14 +337,47 @@ class CircuitBreaker:
             previous_state = self._state
             self._state = CircuitState.CLOSED
             self._failure_count = 0
+            self._half_open_calls = 0
             self._last_failure_time = None
             logger.info(
                 "circuit_breaker_reset",
                 extra={
-                    "name": self.name,
+                    "circuit_name": self.name,
                     "previous_state": previous_state.value,
                 },
             )
+
+    # === Backward-compatible aliases ===
+
+    def can_proceed(self) -> bool:
+        """Alias for allow_request() (connector compatibility)."""
+        return self.allow_request()
+
+    def can_attempt(self) -> bool:
+        """Alias for allow_request() (jina compatibility)."""
+        return self.allow_request()
+
+    def get_state(self) -> CircuitState:
+        """Get current circuit breaker state (connector compatibility)."""
+        with self._lock:
+            return self._state
+
+    def get_stats(self) -> dict:
+        """Get circuit breaker statistics (connector compatibility)."""
+        with self._lock:
+            return {
+                "state": self._state.value,
+                "failure_count": self._failure_count,
+                "failure_threshold": self.failure_threshold,
+                "timeout_seconds": self.recovery_timeout,
+                "last_failure_time": self._last_failure_time,
+            }
+
+    @property
+    def failures(self) -> int:
+        """Current failure count (jina compatibility alias)."""
+        with self._lock:
+            return self._failure_count
 
     def is_open(self) -> bool:
         """Check if circuit is currently open (fail-fast mode)."""

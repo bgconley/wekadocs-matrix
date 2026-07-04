@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: mcp_app.py
+# =============================================================================
 """
 Phase 7E-2: Context Assembly and Budget Enforcement
 Integrates with hybrid retrieval to assemble coherent context within token budget
@@ -11,7 +15,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from src.providers.tokenizer_service import TokenizerService
-from src.query.hybrid_retrieval import ChunkResult
+from src.query.retrieval_types import ChunkResult
 from src.shared.config import get_config
 from src.shared.observability import get_logger
 

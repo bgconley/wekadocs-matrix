@@ -1,0 +1,43 @@
+# Retrieval Diagnostics — aca4dc8d-1ccf-47ab-a571-0aac190c3ead
+
+- timestamp: 2026-03-05T02:18:06.426772Z
+- transport: http
+- tool: kb_retrieve_evidence
+- session_id: server-ca87cbcd-e64d-444f-9a53-56cd624506d5
+- trace: None/None
+- scope: project_id=wekadocs-matrix env=development doc_tag=None
+
+## Timings (ms)
+- bm25: 8.546590805053711
+- vector_search: 229.40826416015625
+- fusion: 0.16570091247558594
+- rerank: 1411.2157821655273
+- graph_expansion: 31.205177307128906
+- total: 1724.8492240905762
+
+## Counts
+- candidates_initial: 63
+- candidates_post_filter: 24
+- candidates_post_dedupe: 24
+- returned: 24
+- dropped: dedupe=0 veto=0 scope_mismatch=0
+
+## Top Results
+| rank | chunk_id | doc_tag | source | fused | rerank | graph | token_count |
+|---:|---|---|---|---:|---:|---:|---:|
+| 1 | e7c8543481447e73443731541b3621197afebb7c058c22ac9fc78af49b71122c_chunk_3_c38fa3eee2a6d9c7 | planning-and-installation | reranked | 0.013282548476454293 | 0.9895108342170715 | 0.0 | 171 |
+| 2 | e7c8543481447e73443731541b3621197afebb7c058c22ac9fc78af49b71122c_chunk_4_834f6038590fce11 | planning-and-installation | reranked | 0.006641274238227146 | 0.49475541710853577 | 1.0 | 27 |
+| 3 | a022e478b1cb70f5dd664cc2749d7abe0d359aeb90eeac3c6ec045a74a176a40_chunk_25_23b0a8d36bc12500 | monitor-the-weka-cluster | reranked | 0.016332767402376908 | 0.8816148638725281 | 0.0 | 176 |
+| 4 | ad480023b795da0d7ef568f29249c2aec1c5d7a2dffd69e4e24d63ccffdfc3b9_chunk_7_d3477ec689735741 | weka-filesystems-and-object-stores | reranked | 0.013684210526315788 | 0.859663724899292 | 0.0 | 200 |
+| 5 | ad480023b795da0d7ef568f29249c2aec1c5d7a2dffd69e4e24d63ccffdfc3b9_chunk_6_849c3efc5e750f2e | weka-filesystems-and-object-stores | reranked | 0.3037894736842105 | 0.429831862449646 | 1.0 | 110 |
+| 6 | ad480023b795da0d7ef568f29249c2aec1c5d7a2dffd69e4e24d63ccffdfc3b9_chunk_8_fd5452511956b7fe | weka-filesystems-and-object-stores | reranked | 0.3037894736842105 | 0.429831862449646 | 1.0 | 123 |
+| 7 | 8fb882f4af6a5b3363d19cb98057c677d1a1ff031d9ba254d4e0fbb891818ecf_chunk_10_9caec8b0e14ab163 | azure-solutions | reranked | 0.012657894736842104 | 0.6406359076499939 | 0.0 | 184 |
+| 8 | 8fb882f4af6a5b3363d19cb98057c677d1a1ff031d9ba254d4e0fbb891818ecf_chunk_11_dbd7e71ae88c1cf3 | azure-solutions | reranked | 0.006328947368421052 | 0.32031795382499695 | 1.0 | 110 |
+| 9 | e7c8543481447e73443731541b3621197afebb7c058c22ac9fc78af49b71122c_chunk_2_6f7c861bbebcfdf2 | planning-and-installation | reranked | 0.006641274238227146 | 0.49475541710853577 | 1.0 | 179 |
+| 10 | a022e478b1cb70f5dd664cc2749d7abe0d359aeb90eeac3c6ec045a74a176a40_chunk_24_2ee3e04151fd34f6 | monitor-the-weka-cluster | reranked | 0.008166383701188454 | 0.44080743193626404 | 1.0 | 107 |
+
+## Budgets
+- response_bytes: 2342
+- tokens_estimate: 992
+- partial: False
+- limit_reason: none

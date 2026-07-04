@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: TEST_ONLY
+# @reason: 0 src/ imports; 1 test import
+# =============================================================================
 """
 Template schemas and guardrails for advanced query patterns.
 Phase 4, Task 4.1

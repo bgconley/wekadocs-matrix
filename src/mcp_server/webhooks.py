@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: main.py
+# =============================================================================
 """
 Phase 5, Task 5.1 - Webhook endpoints for external connectors.
 Handles incoming webhooks from GitHub, Notion, Confluence, etc.

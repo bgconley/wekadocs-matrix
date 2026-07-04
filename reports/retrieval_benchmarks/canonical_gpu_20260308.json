@@ -1,0 +1,985 @@
+{
+  "summary": {
+    "benchmark_id": "canonical_retrieval_smoke_v1",
+    "frozen_on": "2026-03-08",
+    "started_at": "2026-03-08T07:25:39.971485+00:00",
+    "completed_at": "2026-03-08T07:27:22.741289+00:00",
+    "base_url": "http://10.25.0.50:8000",
+    "tool_name": "kb_retrieve_evidence",
+    "query_count": 10,
+    "passed_queries": 8,
+    "failed_queries": 2,
+    "avg_latency_ms": 10253.040504455566,
+    "duration_ms": 102769.74511146545
+  },
+  "queries": [
+    {
+      "id": "meta_architecture_01",
+      "label": "Metadata Architecture",
+      "category": "architecture",
+      "text": "how is metadata managed and architected on a weka cluster",
+      "latency_ms": 9466.804027557373,
+      "top_results": [
+        {
+          "rank": 1,
+          "doc_tag": "weka-system-overview",
+          "heading": "Multi-container backend (MCB) architecture",
+          "confidence": 6.911
+        },
+        {
+          "rank": 2,
+          "doc_tag": "best-practice-guides",
+          "heading": "Converged configuration",
+          "confidence": 6.841
+        },
+        {
+          "rank": 3,
+          "doc_tag": "kubernetes",
+          "heading": "Example: Connect to an internal WEKA cluster",
+          "confidence": 6.884
+        },
+        {
+          "rank": 4,
+          "doc_tag": "weka-system-overview",
+          "heading": "Metadata management",
+          "confidence": 6.797
+        },
+        {
+          "rank": 5,
+          "doc_tag": "weka-system-overview",
+          "heading": "Metadata processing",
+          "confidence": 6.709
+        },
+        {
+          "rank": 6,
+          "doc_tag": "weka-system-overview",
+          "heading": "Cluster architecture basics",
+          "confidence": 6.692
+        },
+        {
+          "rank": 7,
+          "doc_tag": "weka-system-overview",
+          "heading": "Data reduction **in WEKA filesystems**",
+          "confidence": 6.648
+        },
+        {
+          "rank": 8,
+          "doc_tag": "README",
+          "heading": "About WEKA documentation",
+          "confidence": 6.691
+        },
+        {
+          "rank": 9,
+          "doc_tag": "weka-system-overview",
+          "heading": "Metadata limitations **in WEKA filesystems**",
+          "confidence": 6.665
+        },
+        {
+          "rank": 10,
+          "doc_tag": "weka-system-overview",
+          "heading": "**Introduction to WEKA** filesystems",
+          "confidence": 6.647
+        }
+      ],
+      "evaluation": {
+        "passed": true,
+        "rule_count": 3,
+        "passed_rule_count": 3,
+        "rules": [
+          {
+            "kind": "heading_contains",
+            "passed": true,
+            "note": "At least one core metadata section appears in the top 5.",
+            "within": 5,
+            "matched_count": 2,
+            "required_count": 1,
+            "matched_ranks": [
+              4,
+              5
+            ],
+            "matched_values": [
+              "Metadata management",
+              "Metadata processing"
+            ]
+          },
+          {
+            "kind": "heading_contains",
+            "passed": true,
+            "note": "Metadata limitations appears somewhere in the top 10.",
+            "within": 10,
+            "matched_count": 1,
+            "required_count": 1,
+            "matched_ranks": [
+              9
+            ],
+            "matched_values": [
+              "Metadata limitations **in WEKA filesystems**"
+            ]
+          },
+          {
+            "kind": "doc_tag_max_count",
+            "passed": true,
+            "note": "Cloud-noise docs are limited in the top 10.",
+            "within": 10,
+            "matched_count": 0,
+            "max_count": 1,
+            "matched_ranks": [],
+            "matched_values": []
+          }
+        ]
+      },
+      "comparison": null
+    },
+    {
+      "id": "meta_limitations_01",
+      "label": "Metadata Limitations",
+      "category": "reference",
+      "text": "what are the metadata limitations in WEKA filesystems",
+      "latency_ms": 9398.174047470093,
+      "top_results": [
+        {
+          "rank": 1,
+          "doc_tag": "weka-system-overview",
+          "heading": "Metadata limitations **in WEKA filesystems**",
+          "confidence": 7.539
+        },
+        {
+          "rank": 2,
+          "doc_tag": "weka-system-overview",
+          "heading": "Metadata units calculation",
+          "confidence": 7.409
+        },
+        {
+          "rank": 3,
+          "doc_tag": "weka-system-overview",
+          "heading": "Data reduction **in WEKA filesystems**",
+          "confidence": 6.911
+        },
+        {
+          "rank": 4,
+          "doc_tag": "weka-system-overview",
+          "heading": "Metadata processing",
+          "confidence": 6.884
+        },
+        {
+          "rank": 5,
+          "doc_tag": "weka-system-overview",
+          "heading": "**Introduction to WEKA** filesystems",
+          "confidence": 6.909
+        },
+        {
+          "rank": 6,
+          "doc_tag": "weka-system-overview",
+          "heading": "Guidelines for data storage in tiered WEKA system configurations",
+          "confidence": 6.779
+        },
+        {
+          "rank": 7,
+          "doc_tag": "weka-system-overview",
+          "heading": "Metadata management",
+          "confidence": 6.709
+        },
+        {
+          "rank": 8,
+          "doc_tag": "weka-system-overview",
+          "heading": "WEKA filesystem limits",
+          "confidence": 6.649
+        },
+        {
+          "rank": 9,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "Filesystem (cont.)",
+          "confidence": 6.561
+        },
+        {
+          "rank": 10,
+          "doc_tag": "README",
+          "heading": "About WEKA documentation",
+          "confidence": 6.604
+        }
+      ],
+      "evaluation": {
+        "passed": true,
+        "rule_count": 1,
+        "passed_rule_count": 1,
+        "rules": [
+          {
+            "kind": "heading_contains",
+            "passed": true,
+            "note": "Metadata limitations should surface in the top 3.",
+            "within": 3,
+            "matched_count": 1,
+            "required_count": 1,
+            "matched_ranks": [
+              1
+            ],
+            "matched_values": [
+              "Metadata limitations **in WEKA filesystems**"
+            ]
+          }
+        ]
+      },
+      "comparison": null
+    },
+    {
+      "id": "backend_config_01",
+      "label": "Dedicated Backend Configuration",
+      "category": "configuration",
+      "text": "How do I configure a dedicated backend in WEKA?",
+      "latency_ms": 11040.924787521362,
+      "top_results": [
+        {
+          "rank": 1,
+          "doc_tag": "best-practice-guides",
+          "heading": "Dedicated backend configuration",
+          "confidence": 6.83
+        },
+        {
+          "rank": 2,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "WEKA GUI overview",
+          "confidence": 6.726
+        },
+        {
+          "rank": 3,
+          "doc_tag": "README",
+          "heading": "About WEKA documentation",
+          "confidence": 6.639
+        },
+        {
+          "rank": 4,
+          "doc_tag": "additional-protocols",
+          "heading": "Workflow overview: configure SMB support",
+          "confidence": 6.639
+        },
+        {
+          "rank": 5,
+          "doc_tag": "best-practice-guides",
+          "heading": "WEKA and Slurm integration in dedicated backend architecture",
+          "confidence": 6.655
+        },
+        {
+          "rank": 6,
+          "doc_tag": "best-practice-guides",
+          "heading": "WEKA",
+          "confidence": 6.715
+        },
+        {
+          "rank": 7,
+          "doc_tag": "weka-system-overview",
+          "heading": "**Introduction to WEKA** filesystems",
+          "confidence": 6.447
+        },
+        {
+          "rank": 8,
+          "doc_tag": "best-practice-guides",
+          "heading": "Example: Slurm and WEKA dedicated backend architecture with DPDK mount mode (cont.)",
+          "confidence": 6.48
+        },
+        {
+          "rank": 9,
+          "doc_tag": "planning-and-installation",
+          "heading": "Overview (cont.)",
+          "confidence": 6.36
+        },
+        {
+          "rank": 10,
+          "doc_tag": "planning-and-installation",
+          "heading": "5. Add clients or use converged mode",
+          "confidence": 6.332
+        }
+      ],
+      "evaluation": {
+        "passed": true,
+        "rule_count": 1,
+        "passed_rule_count": 1,
+        "rules": [
+          {
+            "kind": "heading_contains",
+            "passed": true,
+            "note": "Dedicated backend guidance should appear in the top 5.",
+            "within": 5,
+            "matched_count": 1,
+            "required_count": 1,
+            "matched_ranks": [
+              1
+            ],
+            "matched_values": [
+              "Dedicated backend configuration"
+            ]
+          }
+        ]
+      },
+      "comparison": null
+    },
+    {
+      "id": "sizing_containers_01",
+      "label": "Container Sizing",
+      "category": "sizing",
+      "text": "How do I appropriately size the weka drives, compute, and frontends containers?",
+      "latency_ms": 9587.813138961792,
+      "top_results": [
+        {
+          "rank": 1,
+          "doc_tag": "planning-and-installation",
+          "heading": "Backend CPU usage",
+          "confidence": 7.265
+        },
+        {
+          "rank": 2,
+          "doc_tag": "planning-and-installation",
+          "heading": "Plan the WEKA system hardware requirements",
+          "confidence": 7.235
+        },
+        {
+          "rank": 3,
+          "doc_tag": "planning-and-installation",
+          "heading": "Example 2: a server with a limited number of cores (cont.)",
+          "confidence": 7.12
+        },
+        {
+          "rank": 4,
+          "doc_tag": "weka-system-overview",
+          "heading": "**Server and container limits**",
+          "confidence": 6.889
+        },
+        {
+          "rank": 5,
+          "doc_tag": "weka-system-overview",
+          "heading": "Multi-container backend (MCB) architecture",
+          "confidence": 6.875
+        },
+        {
+          "rank": 6,
+          "doc_tag": "kubernetes",
+          "heading": "Example",
+          "confidence": 6.797
+        },
+        {
+          "rank": 7,
+          "doc_tag": "weka-system-overview",
+          "heading": "Process types and core requirements",
+          "confidence": 6.727
+        },
+        {
+          "rank": 8,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "weka local resources (cont.)",
+          "confidence": 6.74
+        },
+        {
+          "rank": 9,
+          "doc_tag": "planning-and-installation",
+          "heading": "WEKA on GCP overview",
+          "confidence": 6.744
+        },
+        {
+          "rank": 10,
+          "doc_tag": "planning-and-installation",
+          "heading": "Example 2: a server with a limited number of cores",
+          "confidence": 6.696
+        }
+      ],
+      "evaluation": {
+        "passed": true,
+        "rule_count": 2,
+        "passed_rule_count": 2,
+        "rules": [
+          {
+            "kind": "heading_contains",
+            "passed": true,
+            "note": "Top 5 should include at least two core sizing sections.",
+            "within": 5,
+            "matched_count": 3,
+            "required_count": 2,
+            "matched_ranks": [
+              1,
+              2,
+              3
+            ],
+            "matched_values": [
+              "Backend CPU usage",
+              "Plan the WEKA system hardware requirements",
+              "Example 2: a server with a limited number of cores (cont.)"
+            ]
+          },
+          {
+            "kind": "doc_tag_max_count",
+            "passed": true,
+            "note": "Cloud-noise docs remain limited in the top 10.",
+            "within": 10,
+            "matched_count": 0,
+            "max_count": 1,
+            "matched_ranks": [],
+            "matched_values": []
+          }
+        ]
+      },
+      "comparison": null
+    },
+    {
+      "id": "hardware_minimums_01",
+      "label": "Minimum Hardware Requirements",
+      "category": "reference",
+      "text": "What are the minimum hardware requirements for a WEKA cluster?",
+      "latency_ms": 10928.76410484314,
+      "top_results": [
+        {
+          "rank": 1,
+          "doc_tag": "README",
+          "heading": "About WEKA documentation",
+          "confidence": 6.379
+        },
+        {
+          "rank": 2,
+          "doc_tag": "weka-system-overview",
+          "heading": "**Introduction to WEKA** filesystems",
+          "confidence": 6.269
+        },
+        {
+          "rank": 3,
+          "doc_tag": "weka-system-overview",
+          "heading": "Data reduction **in WEKA filesystems**",
+          "confidence": 5.962
+        },
+        {
+          "rank": 4,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "WEKA GUI overview",
+          "confidence": 5.919
+        },
+        {
+          "rank": 5,
+          "doc_tag": "planning-and-installation",
+          "heading": "Overview (cont.)",
+          "confidence": 5.831
+        },
+        {
+          "rank": 6,
+          "doc_tag": "best-practice-guides",
+          "heading": "Overview",
+          "confidence": 5.821
+        },
+        {
+          "rank": 7,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "weka cluster servers (cont.)",
+          "confidence": 5.645
+        },
+        {
+          "rank": 8,
+          "doc_tag": "planning-and-installation",
+          "heading": "Before you begin",
+          "confidence": 5.701
+        },
+        {
+          "rank": 9,
+          "doc_tag": "planning-and-installation",
+          "heading": "Backend servers memory requirements",
+          "confidence": 5.557
+        },
+        {
+          "rank": 10,
+          "doc_tag": "weka-system-overview",
+          "heading": "Cluster architecture basics",
+          "confidence": 5.481
+        }
+      ],
+      "evaluation": {
+        "passed": false,
+        "rule_count": 1,
+        "passed_rule_count": 0,
+        "rules": [
+          {
+            "kind": "heading_contains",
+            "passed": false,
+            "note": "At least one minimum-requirements section appears in the top 5.",
+            "within": 5,
+            "matched_count": 0,
+            "required_count": 1,
+            "matched_ranks": [],
+            "matched_values": []
+          }
+        ]
+      },
+      "comparison": null
+    },
+    {
+      "id": "cli_drive_01",
+      "label": "Cluster Drive CLI",
+      "category": "command",
+      "text": "How do I use the weka cluster drive command?",
+      "latency_ms": 11411.391973495483,
+      "top_results": [
+        {
+          "rank": 1,
+          "doc_tag": "README",
+          "heading": "About WEKA documentation",
+          "confidence": 6.646
+        },
+        {
+          "rank": 2,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "weka cluster drive (cont.)",
+          "confidence": 6.471
+        },
+        {
+          "rank": 3,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "weka cluster drive (cont.)",
+          "confidence": 6.385
+        },
+        {
+          "rank": 4,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "weka cluster drive",
+          "confidence": 6.341
+        },
+        {
+          "rank": 5,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "WEKA GUI overview",
+          "confidence": 6.298
+        },
+        {
+          "rank": 6,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "weka cluster drive (cont.)",
+          "confidence": 6.296
+        },
+        {
+          "rank": 7,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "weka cluster drive (cont.)",
+          "confidence": 6.339
+        },
+        {
+          "rank": 8,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "Drive",
+          "confidence": 6.339
+        },
+        {
+          "rank": 9,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "Top-level commands",
+          "confidence": 6.164
+        },
+        {
+          "rank": 10,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "Run first IOs with WEKA filesystem",
+          "confidence": 6.079
+        }
+      ],
+      "evaluation": {
+        "passed": true,
+        "rule_count": 2,
+        "passed_rule_count": 2,
+        "rules": [
+          {
+            "kind": "heading_contains",
+            "passed": true,
+            "note": "Top 5 should be dominated by cluster-drive command sections.",
+            "within": 5,
+            "matched_count": 3,
+            "required_count": 3,
+            "matched_ranks": [
+              2,
+              3,
+              4
+            ],
+            "matched_values": [
+              "weka cluster drive (cont.)",
+              "weka cluster drive (cont.)",
+              "weka cluster drive"
+            ]
+          },
+          {
+            "kind": "doc_tag_equals",
+            "passed": true,
+            "note": "At least three of the top 5 results should come from the CLI guide.",
+            "within": 5,
+            "matched_count": 4,
+            "required_count": 3,
+            "matched_ranks": [
+              2,
+              3,
+              4,
+              5
+            ],
+            "matched_values": [
+              "getting-started-with-weka",
+              "getting-started-with-weka",
+              "getting-started-with-weka",
+              "getting-started-with-weka"
+            ]
+          }
+        ]
+      },
+      "comparison": null
+    },
+    {
+      "id": "expand_cluster_01",
+      "label": "Cluster Expansion",
+      "category": "procedural",
+      "text": "How do I expand storage capacity in a WEKA cluster?",
+      "latency_ms": 10666.54086112976,
+      "top_results": [
+        {
+          "rank": 1,
+          "doc_tag": "kubernetes",
+          "heading": "Expand a cluster",
+          "confidence": 6.938
+        },
+        {
+          "rank": 2,
+          "doc_tag": "operation-guide",
+          "heading": "Expand and shrink cluster resources",
+          "confidence": 6.888
+        },
+        {
+          "rank": 3,
+          "doc_tag": "operation-guide",
+          "heading": "Expansion considerations (cont.)",
+          "confidence": 6.675
+        },
+        {
+          "rank": 4,
+          "doc_tag": "planning-and-installation",
+          "heading": "Overview",
+          "confidence": 6.537
+        },
+        {
+          "rank": 5,
+          "doc_tag": "operation-guide",
+          "heading": "Expansion considerations",
+          "confidence": 6.487
+        },
+        {
+          "rank": 6,
+          "doc_tag": "best-practice-guides",
+          "heading": "**Example scenario**",
+          "confidence": 6.4
+        },
+        {
+          "rank": 7,
+          "doc_tag": "weka-system-overview",
+          "heading": "**Introduction to WEKA** filesystems",
+          "confidence": 6.356
+        },
+        {
+          "rank": 8,
+          "doc_tag": "planning-and-installation",
+          "heading": "WMS deployment prerequisites",
+          "confidence": 6.356
+        },
+        {
+          "rank": 9,
+          "doc_tag": "best-practice-guides",
+          "heading": "**Expansion guidelines**",
+          "confidence": 6.312
+        },
+        {
+          "rank": 10,
+          "doc_tag": "operation-guide",
+          "heading": "What happens after expansion or shrinking?",
+          "confidence": 6.312
+        }
+      ],
+      "evaluation": {
+        "passed": true,
+        "rule_count": 1,
+        "passed_rule_count": 1,
+        "rules": [
+          {
+            "kind": "heading_contains",
+            "passed": true,
+            "note": "Top 5 should include both primary expansion topics.",
+            "within": 5,
+            "matched_count": 2,
+            "required_count": 2,
+            "matched_ranks": [
+              1,
+              2
+            ],
+            "matched_values": [
+              "Expand a cluster",
+              "Expand and shrink cluster resources"
+            ]
+          }
+        ]
+      },
+      "comparison": null
+    },
+    {
+      "id": "deduplication_01",
+      "label": "Deduplication / Data Reduction",
+      "category": "conceptual",
+      "text": "what is WEKA deduplication",
+      "latency_ms": 9648.35500717163,
+      "top_results": [
+        {
+          "rank": 1,
+          "doc_tag": "weka-system-overview",
+          "heading": "**Introduction to WEKA** filesystems",
+          "confidence": 6.925
+        },
+        {
+          "rank": 2,
+          "doc_tag": "weka-system-overview",
+          "heading": "Introduction (cont.)",
+          "confidence": 6.706
+        },
+        {
+          "rank": 3,
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "heading": "Manage object stores (cont.)",
+          "confidence": 6.763
+        },
+        {
+          "rank": 4,
+          "doc_tag": "weka-system-overview",
+          "heading": "Data reduction **in WEKA filesystems**",
+          "confidence": 6.575
+        },
+        {
+          "rank": 5,
+          "doc_tag": "weka-system-overview",
+          "heading": "Introduction",
+          "confidence": 6.575
+        },
+        {
+          "rank": 6,
+          "doc_tag": "aws-solutions",
+          "heading": "Slurm based architecture with AWS ParallelCluster (cont.)",
+          "confidence": 6.575
+        },
+        {
+          "rank": 7,
+          "doc_tag": "README",
+          "heading": "About WEKA documentation",
+          "confidence": 6.4
+        },
+        {
+          "rank": 8,
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "heading": "Manage filesystems",
+          "confidence": 6.4
+        },
+        {
+          "rank": 9,
+          "doc_tag": "weka-system-overview",
+          "heading": "**OBS**",
+          "confidence": 6.4
+        },
+        {
+          "rank": 10,
+          "doc_tag": "planning-and-installation",
+          "heading": "WEKA installation on Azure",
+          "confidence": 6.356
+        }
+      ],
+      "evaluation": {
+        "passed": true,
+        "rule_count": 1,
+        "passed_rule_count": 1,
+        "rules": [
+          {
+            "kind": "heading_contains",
+            "passed": true,
+            "note": "Data reduction guidance should appear in the top 5.",
+            "within": 5,
+            "matched_count": 1,
+            "required_count": 1,
+            "matched_ranks": [
+              4
+            ],
+            "matched_values": [
+              "Data reduction **in WEKA filesystems**"
+            ]
+          }
+        ]
+      },
+      "comparison": null
+    },
+    {
+      "id": "local_weka_home_ports_01",
+      "label": "Local WEKA Home Ports",
+      "category": "reference",
+      "text": "What ports are required for Local WEKA Home?",
+      "latency_ms": 10748.97313117981,
+      "top_results": [
+        {
+          "rank": 1,
+          "doc_tag": "README",
+          "heading": "About WEKA documentation",
+          "confidence": 6.369
+        },
+        {
+          "rank": 2,
+          "doc_tag": "weka-system-overview",
+          "heading": "**Introduction to WEKA** filesystems",
+          "confidence": 6.2
+        },
+        {
+          "rank": 3,
+          "doc_tag": "kubernetes",
+          "heading": "Prerequisites",
+          "confidence": 6.15
+        },
+        {
+          "rank": 4,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "WEKA GUI overview",
+          "confidence": 5.85
+        },
+        {
+          "rank": 5,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "weka fs quota (cont.)",
+          "confidence": 5.85
+        },
+        {
+          "rank": 6,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "weka local setup (cont.)",
+          "confidence": 5.8
+        },
+        {
+          "rank": 7,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "weka fs tier (cont.)",
+          "confidence": 5.763
+        },
+        {
+          "rank": 8,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "weka fs group (cont.)",
+          "confidence": 5.763
+        },
+        {
+          "rank": 9,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "weka fs tier (cont.)",
+          "confidence": 5.763
+        },
+        {
+          "rank": 10,
+          "doc_tag": "planning-and-installation",
+          "heading": "Overview (cont.)",
+          "confidence": 5.763
+        }
+      ],
+      "evaluation": {
+        "passed": false,
+        "rule_count": 1,
+        "passed_rule_count": 0,
+        "rules": [
+          {
+            "kind": "heading_contains",
+            "passed": false,
+            "note": "Local WEKA Home deployment/ports guidance should appear in the top 5.",
+            "within": 5,
+            "matched_count": 0,
+            "required_count": 1,
+            "matched_ranks": [],
+            "matched_values": []
+          }
+        ]
+      },
+      "comparison": null
+    },
+    {
+      "id": "gui_overview_01",
+      "label": "WEKA GUI Overview",
+      "category": "navigational",
+      "text": "How do I manage the system using the WEKA GUI?",
+      "latency_ms": 9632.66396522522,
+      "top_results": [
+        {
+          "rank": 1,
+          "doc_tag": "planning-and-installation",
+          "heading": "Overview (cont.)",
+          "confidence": 7.044
+        },
+        {
+          "rank": 2,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "WEKA GUI overview",
+          "confidence": 6.925
+        },
+        {
+          "rank": 3,
+          "doc_tag": "README",
+          "heading": "About WEKA documentation",
+          "confidence": 6.794
+        },
+        {
+          "rank": 4,
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "heading": "Manage filesystems",
+          "confidence": 6.45
+        },
+        {
+          "rank": 5,
+          "doc_tag": "weka-system-overview",
+          "heading": "**Introduction to WEKA** filesystems",
+          "confidence": 6.487
+        },
+        {
+          "rank": 6,
+          "doc_tag": "planning-and-installation",
+          "heading": "What to do next",
+          "confidence": 6.312
+        },
+        {
+          "rank": 7,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "weka fs protection",
+          "confidence": 6.237
+        },
+        {
+          "rank": 8,
+          "doc_tag": "additional-protocols",
+          "heading": "Workflow overview: configure SMB support",
+          "confidence": 6.312
+        },
+        {
+          "rank": 9,
+          "doc_tag": "getting-started-with-weka",
+          "heading": "Commands hierarchy",
+          "confidence": 6.275
+        },
+        {
+          "rank": 10,
+          "doc_tag": "best-practice-guides",
+          "heading": "WEKA",
+          "confidence": 6.188
+        }
+      ],
+      "evaluation": {
+        "passed": true,
+        "rule_count": 1,
+        "passed_rule_count": 1,
+        "rules": [
+          {
+            "kind": "heading_contains",
+            "passed": true,
+            "note": "WEKA GUI overview should appear in the top 3.",
+            "within": 3,
+            "matched_count": 1,
+            "required_count": 1,
+            "matched_ranks": [
+              2
+            ],
+            "matched_values": [
+              "WEKA GUI overview"
+            ]
+          }
+        ]
+      },
+      "comparison": null
+    }
+  ]
+}

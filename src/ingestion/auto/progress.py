@@ -1,3 +1,12 @@
+# =============================================================================
+# @status: STANDALONE
+# @reason: Dependency of cli.py (ingestctl). ProgressTracker/ProgressReader
+#          provide Redis-backed progress tracking for CLI progress display.
+#          Not called from worker.py or service.py production paths, but
+#          required for the standalone CLI tool which is being kept and
+#          developed further.
+# @called-by: src/ingestion/auto/cli.py
+# =============================================================================
 # Implements Phase 6, Task 6.2 (Progress event emission)
 # See: /docs/app-spec-phase6.md
 # See: /docs/implementation-plan-phase-6.md → Task 6.2

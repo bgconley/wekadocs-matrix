@@ -58,7 +58,7 @@ def get_neo4j_chunks(driver):
         return chunks
 
 
-def get_qdrant_point_ids(client, collection_name="chunks_multi_bge_m3"):
+def get_qdrant_point_ids(client, collection_name="chunks_multi"):
     """Get all point IDs from Qdrant."""
     point_ids = set()
     offset = None

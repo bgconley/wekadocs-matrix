@@ -7,6 +7,8 @@ Validates token counting accuracy, splitting logic, and integrity verification.
 
 import hashlib
 import os
+import sys
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -27,8 +29,27 @@ from src.providers.tokenizer_service import (
     HuggingFaceTokenizerBackend,
     JinaSegmenterBackend,
     TokenizerService,
+    VoyageTokenCounterBackend,
     create_tokenizer_service,
 )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def voyage_token_counter_stub():
+    """Stub voyageai.Client to avoid network calls in tokenizer tests."""
+    monkeypatch = pytest.MonkeyPatch()
+
+    class DummyClient:
+        def __init__(self, api_key=None):
+            self.api_key = api_key
+            self._backend = HuggingFaceTokenizerBackend()
+
+        def count_tokens(self, texts, model):
+            return sum(self._backend.count_tokens(text) for text in texts)
+
+    monkeypatch.setitem(sys.modules, "voyageai", SimpleNamespace(Client=DummyClient))
+    yield
+    monkeypatch.undo()
 
 
 class TestHuggingFaceTokenizerBackend:
@@ -632,6 +653,20 @@ weka command-{i} --flag1=test
 
         # Verify some content preserved
         assert len(truncated) > 0
+
+
+def test_voyage_token_counter_backend(monkeypatch):
+    class DummyClient:
+        def __init__(self, api_key=None):
+            self.api_key = api_key
+
+        def count_tokens(self, texts, model):
+            assert model == "voyage-context-3"
+            return 7
+
+    monkeypatch.setitem(sys.modules, "voyageai", SimpleNamespace(Client=DummyClient))
+    backend = VoyageTokenCounterBackend(model_id="voyage-context-3", api_key="test")
+    assert backend.count_tokens("hello world") == 7
 
 
 if __name__ == "__main__":

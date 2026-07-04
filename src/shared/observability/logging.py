@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: (core infrastructure)
+# =============================================================================
 # Implements Phase 1, Task 1.2 (MCP server foundation)
 # See: /docs/spec.md §7 (Observability)
 # Structured logging with correlation IDs and OTEL trace context

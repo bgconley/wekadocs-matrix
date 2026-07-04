@@ -177,12 +177,12 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "mimir" },
-          "expr": "collection_vectors{job=\"qdrant\", collection=\"chunks_multi_bge_m3\"}",
+          "expr": "collection_vectors{job=\"qdrant\", collection=~\"chunks_multi.*\"}",
           "legendFormat": "{{vector}}",
           "refId": "A"
         }
       ],
-      "title": "Qdrant Vectors by Type (chunks_multi_bge_m3)",
+      "title": "Qdrant Vectors by Type (chunks_multi*)",
       "type": "timeseries"
     },
     {

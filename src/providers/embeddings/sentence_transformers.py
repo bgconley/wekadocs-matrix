@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: factory.py (registered provider)
+# =============================================================================
 """
 SentenceTransformers embedding provider implementation.
 Pre-Phase 7: Concrete implementation using sentence-transformers library.

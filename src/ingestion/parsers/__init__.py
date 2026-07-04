@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: atomic.py
+# =============================================================================
 """
 Parser module for WekaDocs ingestion pipeline.
 
@@ -21,7 +25,7 @@ from typing import Any, Dict
 
 import structlog
 
-from src.ingestion.parsers.shadow_comparison import ShadowModeError
+from src.ingestion.parsers.shadow_comparison import ShadowModeError  # noqa: E402
 
 logger = structlog.get_logger(__name__)
 
@@ -233,15 +237,12 @@ def _parse_with_shadow_comparison(
     return legacy_result
 
 
-# Convenience re-exports for direct imports
-# Note: ShadowModeError is imported at the top of the module
-
 __all__ = [
     "parse_markdown",
     "get_parser_engine",
     "get_shadow_mode",
     "get_fail_on_mismatch",
-    "ShadowModeError",
     "ENGINE_LEGACY",
     "ENGINE_MARKDOWN_IT_PY",
+    "ShadowModeError",
 ]

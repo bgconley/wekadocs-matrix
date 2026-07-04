@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 .venv/
 .env
+.env.docker
+.env.local
+.env.production
 .pytest_cache/
 
 # macOS
@@ -41,9 +44,21 @@ build/
 # Node (if any)
 node_modules/
 
+# Codex / MCP caches (local-only)
+.codex-cache/
+
+# AI Session Context Files (regeneratable, session-specific)
+AGENT_CONTEXT.md
+TASK_BACKLOG.md
+EMBEDDER_CORRECTIONS.md
+SESSION_CONTEXT_*.md
+
 # Docker
 *.log
 docker/*.log
+
+# Runtime logs and traces
+logs/
 
 # Reports: ignore heavy artifacts but keep gate files
 reports/**/coverage/
@@ -65,3 +80,6 @@ infra/terraform/environments/dev/terraform.tfvars
 **/terraform.tfstate.backup
 **/tfplan
 **/tfplan.binary
+*.bak
+.aider*
+.venv_py311/

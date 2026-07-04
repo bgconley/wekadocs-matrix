@@ -159,13 +159,15 @@ def measure_reranker_latency(
     baseline latency before the batching fix (Phase 1.1).
     """
     try:
-        from src.providers.rerank.local_bge_service import BGERerankerServiceProvider
+        from src.providers.rerank.local_reranker_service import (
+            LocalRerankerServiceProvider,
+        )
     except ImportError as e:
         logger.error(f"Cannot import reranker: {e}")
         return None
 
     try:
-        reranker = BGERerankerServiceProvider()
+        reranker = LocalRerankerServiceProvider()
         # Health check
         if not reranker.health_check():
             logger.warning("Reranker health check failed - service may be unavailable")
@@ -460,15 +462,15 @@ def check_connectivity() -> Dict[str, bool]:
     try:
         import httpx
 
-        url = os.environ.get("RERANKER_BASE_URL", "http://127.0.0.1:9001")
+        url = os.environ.get("RERANKER_BASE_URL", "http://127.0.0.1:9005")
         resp = httpx.post(
             f"{url}/v1/rerank",
             json={
                 "query": "test",
                 "documents": ["test doc"],
-                "model": "BAAI/bge-reranker-v2-m3",
+                "model": "Qwen/Qwen3-Reranker-0.6B",
             },
-            timeout=10,
+            timeout=30,  # Qwen3 reranker timeout
         )
         status["reranker"] = resp.status_code == 200 and "results" in resp.json()
     except Exception as e:

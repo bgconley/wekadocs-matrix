@@ -1,0 +1,3 @@
+collected=1692 passed=15 failed=9 errored=1 skipped=0
+NOTE: stopped at --maxfail=10 after 24 tests ran (9 failed + 15 passed + 1 collection error)
+1 collection error: tests/test_phase7e3_cache_invalidation.py - ModuleNotFoundError: No module named 'tools.redis_epoch_bump'

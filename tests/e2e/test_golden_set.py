@@ -413,27 +413,7 @@ class TestGoldenSetSanity:
         assert hasattr(result, "results")
         assert isinstance(result.results, list)
 
-    def test_feature_flags_configured(self):
-        """
-        Verify Phase 7a feature flags are configured.
-
-        DoD:
-        - verbosity_enabled flag exists and is enabled
-        - graph_mode_enabled flag exists and is enabled
-        """
-        from src.shared.feature_flags import get_feature_flag_manager
-
-        manager = get_feature_flag_manager()
-
-        # Check verbosity flag
-        assert manager.is_enabled(
-            "verbosity_enabled"
-        ), "verbosity_enabled flag not enabled"
-
-        # Check graph mode flag
-        assert manager.is_enabled(
-            "graph_mode_enabled"
-        ), "graph_mode_enabled flag not enabled"
+    # REMOVED: test_feature_flags_configured (imported deleted src.shared.feature_flags)
 
     def test_metrics_collectors_available(self):
         """

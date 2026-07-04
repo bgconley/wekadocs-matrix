@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: mcp_app.py
+# =============================================================================
 """
 ContextBudgetManager enforces the token and byte guardrails described in
 docs/cdx-outputs/retrieval_fix.json.

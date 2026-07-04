@@ -1,3 +1,10 @@
+# =============================================================================
+# @status: ACTIVE
+# @reason: Core infrastructure for Neo4j, Qdrant, Redis connections.
+#          Dead methods (purge_document, create_collection_with_dims) removed
+#          in Phase 3 cleanup.
+# @called-by: worker.py, main.py, mcp_app.py, query_service.py
+# =============================================================================
 # Implements Phase 1, Task 1.2 (MCP server foundation)
 # See: /docs/spec.md §2 (Architecture)
 # See: /docs/expert-coder-guidance.md → 1.2 (connection pools, graceful shutdown)
@@ -168,19 +175,6 @@ class CompatQdrantClient(QdrantClient):
             collection_name=collection_name, wait=wait_arg, **normalized
         )
 
-    def purge_document(self, collection_name: str, document_id: str):
-        """Delete all vectors for a specific document."""
-        filt = Filter(
-            must=[
-                FieldCondition(key="document_id", match=MatchValue(value=document_id))
-            ]
-        )
-        return self._base_delete(
-            collection_name=collection_name,
-            points_selector=FilterSelector(filter=filt),
-            wait=True,
-        )
-
     def upsert_validated(
         self,
         collection_name: str,
@@ -343,50 +337,6 @@ class CompatQdrantClient(QdrantClient):
             except TypeError:
                 return None
         return None
-
-    def create_collection_with_dims(
-        self,
-        collection_name: str,
-        size: int,
-        distance: str = "Cosine",
-    ):
-        """
-        Pre-Phase 7: Helper to create a collection with specific dimensions.
-        Supports blue/green collection pattern for dimension changes.
-
-        Args:
-            collection_name: Name for the new collection
-            size: Vector dimension size
-            distance: Distance metric (Cosine, Euclid, Dot)
-
-        Note: This helper prepares for future blue/green migrations
-              but does NOT execute them automatically.
-        """
-        from qdrant_client.models import Distance, VectorParams
-
-        # Map string distance to enum
-        distance_map = {
-            "cosine": Distance.COSINE,
-            "euclid": Distance.EUCLID,
-            "dot": Distance.DOT,
-        }
-        distance_enum = distance_map.get(distance.lower(), Distance.COSINE)
-
-        # Check if collection already exists
-        collections = self.get_collections()
-        if collection_name not in [c.name for c in collections.collections]:
-            logger.info(
-                f"Creating collection '{collection_name}' with "
-                f"size={size}, distance={distance}"
-            )
-            self.create_collection(
-                collection_name=collection_name,
-                vectors_config=VectorParams(size=size, distance=distance_enum),
-            )
-        else:
-            logger.info(
-                f"Collection '{collection_name}' already exists, skipping creation"
-            )
 
 
 class ConnectionManager:

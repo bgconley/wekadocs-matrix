@@ -1,16 +1,24 @@
+# =============================================================================
+# @status: ACTIVE — ENTRY POINT
+# @called-by: uvicorn (docker CMD)
+# =============================================================================
 # Implements Phase 1, Task 1.2 (MCP server foundation)
 # See: /docs/spec.md §2 (Architecture), §9 (Interfaces)
 # See: /docs/implementation-plan.md → Task 1.2 DoD & Tests
 # FastAPI MCP server with health, metrics, and MCP protocol endpoints
 
 import contextlib
+import json
+import os
 import time
 from datetime import datetime
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from redis import Redis
+from starlette.responses import Response
 
 # Phase 7E-4: Health checks and SLO monitoring
 from src.connectors.manager import ConnectorManager
@@ -37,6 +45,7 @@ from src.shared.observability.metrics import (
 )
 
 from . import webhooks
+from .mcp_app import build_mcp_server
 from .models import (
     HealthResponse,
     MCPInitializeRequest,
@@ -54,6 +63,47 @@ config, settings = init_config()
 setup_logging(config.app.log_level)
 logger = get_logger(__name__)
 
+MCP_HTTP_STREAMABLE_ENABLED = os.getenv(
+    "MCP_HTTP_STREAMABLE_ENABLED", "true"  # Default: ON (was "false")
+).lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+MCP_HTTP_LEGACY_REST_ENABLED = os.getenv(
+    "MCP_HTTP_LEGACY_REST_ENABLED", "false"  # Default: OFF (was "true")
+).lower() in {"1", "true", "yes", "on"}
+MCP_HTTP_STREAMABLE_JSON_RESPONSE = os.getenv(
+    "MCP_HTTP_STREAMABLE_JSON_RESPONSE", "false"
+).lower() in {"1", "true", "yes", "on"}
+MCP_HTTP_STREAMABLE_STATELESS = os.getenv(
+    "MCP_HTTP_STREAMABLE_STATELESS", "false"
+).lower() in {"1", "true", "yes", "on"}
+
+
+def _ensure_streamable_accept_headers(scope: dict) -> dict:
+    if not MCP_HTTP_STREAMABLE_JSON_RESPONSE:
+        return scope
+    headers = list(scope.get("headers") or [])
+    accept_values = [v for k, v in headers if k == b"accept"]
+    if accept_values and any(b"text/event-stream" in v for v in accept_values):
+        return scope
+    updated = [(k, v) for k, v in headers if k != b"accept"]
+    updated.append((b"accept", b"application/json, text/event-stream"))
+    patched = dict(scope)
+    patched["headers"] = updated
+    logger.debug("Patched MCP accept header for JSON-only client")
+    return patched
+
+
+def _apply_legacy_mcp_deprecation_headers(response: Response) -> None:
+    response.headers["Deprecation"] = "true"
+    response.headers["Warning"] = (
+        '299 - "Deprecated MCP REST endpoint; use /_mcp (Streamable HTTP)"'
+    )
+
+
 # Create FastAPI app
 app = FastAPI(
     title=config.app.name,
@@ -62,6 +112,43 @@ app = FastAPI(
 )
 app.include_router(webhooks.router)
 app.state.connector_manager = None
+app.state.mcp_server = None
+app.state.mcp_session_manager = None
+app.state.mcp_session_manager_context = None
+
+
+async def _mcp_streamable_http_app(scope, receive, send) -> None:
+    root_path = scope.get("root_path", "") or ""
+    raw_path = scope.get("path", "") or ""
+    combined_path = root_path + raw_path
+    raw_path_bytes = scope.get("raw_path", b"") or b""
+    if isinstance(raw_path_bytes, (bytes, bytearray)):
+        raw_path_str = raw_path_bytes.decode("latin-1", errors="ignore")
+    else:
+        raw_path_str = str(raw_path_bytes)
+    if (
+        raw_path.rstrip("/") == "/health"
+        or combined_path.rstrip("/") == "/_mcp/health"
+        or raw_path_str.rstrip("/").endswith("/health")
+    ):
+        status = 200 if app.state.mcp_session_manager else 503
+        payload = {"status": "ok" if status == 200 else "starting"}
+        response = Response(
+            content=json.dumps(payload),
+            media_type="application/json",
+            status_code=status,
+        )
+        await response(scope, receive, send)
+        return
+    if not MCP_HTTP_STREAMABLE_ENABLED or app.state.mcp_session_manager is None:
+        response = Response(status_code=404)
+        await response(scope, receive, send)
+        return
+    patched_scope = _ensure_streamable_accept_headers(scope)
+    await app.state.mcp_session_manager.handle_request(patched_scope, receive, send)
+
+
+app.mount("/_mcp", _mcp_streamable_http_app)
 
 # Setup OpenTelemetry tracing
 setup_tracing(app, settings)
@@ -252,6 +339,23 @@ async def startup_event():
             )
         else:
             app.state.connector_manager = None
+
+        if MCP_HTTP_STREAMABLE_ENABLED:
+            app.state.mcp_server = build_mcp_server()
+            app.state.mcp_session_manager = StreamableHTTPSessionManager(
+                app.state.mcp_server,
+                json_response=MCP_HTTP_STREAMABLE_JSON_RESPONSE,
+                stateless=MCP_HTTP_STREAMABLE_STATELESS,
+            )
+            app.state.mcp_session_manager_context = app.state.mcp_session_manager.run()
+            await app.state.mcp_session_manager_context.__aenter__()
+            logger.info("Streamable MCP HTTP enabled at /_mcp")
+
+        if MCP_HTTP_LEGACY_REST_ENABLED:
+            logger.warning(
+                "Legacy REST MCP endpoints (/mcp/*) are deprecated and will be removed. "
+                "Set MCP_HTTP_STREAMABLE_ENABLED=true and use /_mcp instead.",
+            )
     except Exception as e:
         logger.error("Failed to start MCP server", error=str(e))
         raise
@@ -268,6 +372,11 @@ async def shutdown_event():
             with contextlib.suppress(Exception):
                 connector_manager.close()
             app.state.connector_manager = None
+        if app.state.mcp_session_manager_context is not None:
+            await app.state.mcp_session_manager_context.__aexit__(None, None, None)
+            app.state.mcp_session_manager_context = None
+            app.state.mcp_session_manager = None
+            app.state.mcp_server = None
         await close_connections()
         logger.info("MCP server shut down successfully")
     except Exception as e:
@@ -362,9 +471,15 @@ async def readiness():
     )
 
 
-@app.get("/metrics")
+@app.get("/metrics", response_model=MetricsResponse)
 async def metrics():
-    """Prometheus metrics endpoint"""
+    """JSON metrics endpoint."""
+    return await metrics_json()
+
+
+@app.get("/metrics/prometheus")
+async def metrics_prometheus():
+    """Prometheus metrics endpoint."""
     from starlette.responses import Response
 
     return Response(content=get_metrics(), media_type="text/plain; version=0.0.4")
@@ -400,8 +515,11 @@ async def metrics_json():
 
 
 @app.post("/mcp/initialize", response_model=MCPInitializeResponse)
-async def mcp_initialize(request: MCPInitializeRequest):
+async def mcp_initialize(request: MCPInitializeRequest, response: Response):
+    if not MCP_HTTP_LEGACY_REST_ENABLED:
+        raise HTTPException(status_code=404, detail="Legacy MCP REST disabled")
     """Initialize MCP connection"""
+    _apply_legacy_mcp_deprecation_headers(response)
     logger.info("MCP initialize request", client_info=request.client_info)
 
     return MCPInitializeResponse(
@@ -419,8 +537,11 @@ async def mcp_initialize(request: MCPInitializeRequest):
 
 
 @app.get("/mcp/tools/list", response_model=MCPToolsListResponse)
-async def mcp_tools_list():
+async def mcp_tools_list(response: Response):
+    if not MCP_HTTP_LEGACY_REST_ENABLED:
+        raise HTTPException(status_code=404, detail="Legacy MCP REST disabled")
     """List available MCP tools"""
+    _apply_legacy_mcp_deprecation_headers(response)
     # Tool definitions (Phase 2+ will populate these properly)
     tools = [
         MCPTool(
@@ -465,8 +586,11 @@ async def mcp_tools_list():
 
 
 @app.post("/mcp/tools/call", response_model=MCPToolCallResponse)
-async def mcp_tools_call(request: MCPToolCallRequest):
+async def mcp_tools_call(request: MCPToolCallRequest, response: Response):
+    if not MCP_HTTP_LEGACY_REST_ENABLED:
+        raise HTTPException(status_code=404, detail="Legacy MCP REST disabled")
     """Execute an MCP tool"""
+    _apply_legacy_mcp_deprecation_headers(response)
     from src.mcp_server.query_service import get_query_service
     from src.shared.observability.exemplars import trace_mcp_tool
     from src.shared.observability.metrics import (
@@ -505,7 +629,6 @@ async def mcp_tools_call(request: MCPToolCallRequest):
                             query=query,
                             top_k=top_k,
                             expand_graph=True,
-                            find_paths=False,
                             verbosity=verbosity,
                         )
 

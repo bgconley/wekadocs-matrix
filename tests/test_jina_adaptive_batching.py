@@ -353,18 +353,22 @@ class TestCircuitBreaker:
 
         # Should enter half-open
         assert breaker.can_attempt() is True
-        assert breaker.state == "half-open"
+        assert breaker.state == "half_open"
 
     def test_circuit_breaker_closes_on_success(self):
-        """Test that circuit breaker closes on success."""
-        breaker = CircuitBreaker(failure_threshold=2, timeout=300)
+        """Test that circuit breaker closes on success after recovery test."""
+        breaker = CircuitBreaker(failure_threshold=2, timeout=1)
 
         # Open the circuit
         breaker.record_failure()
         breaker.record_failure()
         assert breaker.state == "open"
 
-        # Record success should reset
+        # Wait for recovery timeout, then test (transitions to half_open)
+        time.sleep(1.1)
+        assert breaker.can_attempt() is True  # Triggers transition to half_open
+
+        # Success in half-open should close circuit
         breaker.record_success()
         assert breaker.state == "closed"
         assert breaker.failures == 0

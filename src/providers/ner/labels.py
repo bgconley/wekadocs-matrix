@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: disambiguation.py (eager top-level import)
+# =============================================================================
 """
 Entity label configuration for GLiNER zero-shot NER.
 
@@ -10,7 +14,8 @@ This module provides:
 - Utility functions to retrieve labels from config or defaults
 """
 
-from typing import List
+import re
+from typing import Dict, List
 
 from src.shared.config import get_config
 from src.shared.observability import get_logger
@@ -46,14 +51,66 @@ DEFAULT_LABELS: List[str] = [
 ]
 
 # Entities to exclude from enrichment (too common, pollutes queries)
-# These are filtered out AFTER extraction to avoid noisy embeddings
+# These are filtered out AFTER extraction to avoid noisy embeddings.
+# Case-insensitive matching via is_excluded_entity() — lowercase entries suffice.
 ENTITY_EXCLUSIONS: set[str] = {
+    # Brand terms
     "weka",
     "WEKA",
     "Weka",
     "WekaFS",
     "wekafs",
+    # Generic domain vocabulary — high document frequency, low discriminative value
+    "system",
+    "server",
+    "cluster",
+    "node",
+    "service",
+    "data",
+    "file",
+    "process",
+    "configuration",
+    "management",
+    "user",
+    "group",
+    "host",
+    "client",
+    "network",
+    "storage",
+    "volume",
+    "drive",
+    # Over-generic measurement terms
+    "performance",
+    "capacity",
+    "size",
+    "time",
+    "number",
+    # Over-generic procedure words
+    "step",
+    "click",
+    "select",
+    "run",
+    "enter",
 }
+
+# Per-label confidence floors for retrieval signals (entity-sparse, _embedding_text).
+# Entities below these thresholds are still recorded in entity_metadata (informational)
+# but excluded from retrieval-critical paths (_mentions, _embedding_text).
+# Rationale: GLiNER's confidence varies by label type. Abstract/ambiguous labels
+# (STORAGE_CONCEPT, CAPACITY_METRIC) need higher thresholds to avoid noise.
+RETRIEVAL_CONFIDENCE_FLOORS: Dict[str, float] = {
+    "COMMAND": 0.55,
+    "PARAMETER": 0.55,
+    "PROTOCOL": 0.60,
+    "CLOUD_PROVIDER": 0.65,
+    "VERSION": 0.55,
+    "ERROR": 0.55,
+    "COMPONENT": 0.60,
+    "PROCEDURE_STEP": 0.70,
+    "STORAGE_CONCEPT": 0.70,
+    "CAPACITY_METRIC": 0.70,
+}
+DEFAULT_RETRIEVAL_FLOOR: float = 0.60
 
 
 def get_default_labels() -> List[str]:
@@ -120,3 +177,113 @@ def is_excluded_entity(entity_text: str) -> bool:
     return normalized in ENTITY_EXCLUSIONS or normalized.lower() in {
         e.lower() for e in ENTITY_EXCLUSIONS
     }
+
+
+# Structural (regex-extracted) entity noise terms.
+# These entities bypass GLiNER gates and can become high-DF hubs that dilute
+# entity-sparse vectors and graph priors.
+_STRUCTURAL_NOISE_TERMS: frozenset[str] = frozenset(
+    {
+        # CLI output formatting flags (belt-and-suspenders with extractor gating)
+        "color",
+        "filter-color",
+        "output",
+        "format",
+        "filter",
+        "sort",
+        "profile",
+        "raw-units",
+        "verbose",
+        "no-header",
+        "json",
+        "csv",
+        "utf8",
+        # Generic procedure/step boilerplate
+        "procedure",
+        "step",
+        "note",
+        "example",
+        "overview",
+        "prerequisites",
+        "before you begin",
+        "related topics",
+        "optional",
+        "required",
+        # Generic computing terms that leak from structural extractors
+        "new-name",
+        "path",
+        "port",
+        "hostname",
+        "timeout",
+        "password",
+        "username",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "none",
+        "default",
+    }
+)
+
+
+def normalize_entity_name(name: str) -> str:
+    """
+    Normalize an entity name for dedupe + filtering.
+
+    Strips common Markdown artifacts (bold/italic markers, backticks),
+    collapses whitespace, and trims edge punctuation without mutating
+    meaningful internal characters like underscores/hyphens.
+    """
+    if not name:
+        return ""
+
+    s = str(name).strip()
+
+    # Strip Markdown bold/italic wrappers.
+    # Do bold/underline first to avoid leaving stray markers behind.
+    # Examples: "**Procedure**" -> "Procedure", "__Note__" -> "Note".
+    s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+    s = re.sub(r"__(.+?)__", r"\1", s)
+
+    # Remove inline code fences/backticks.
+    s = s.replace("`", "")
+
+    # Strip remaining emphasis markers at edges only (avoid nuking underscores
+    # inside config keys like memory_mb).
+    s = s.strip("*_")
+
+    # Collapse whitespace.
+    s = re.sub(r"\s+", " ", s).strip()
+
+    # Trim edge punctuation (keep hyphens/underscores inside names).
+    s = s.strip(" \t\r\n\"'“”‘’()[]{}<>.,:;!?")
+
+    return s
+
+
+def is_excluded_structural_entity(name: str) -> bool:
+    """Unified quality gate for structural (regex-extracted) entities."""
+    normalized = normalize_entity_name(name)
+    if not normalized:
+        return True
+
+    # Very short lowercase tokens are usually noise (e.g., "of", "to", "it").
+    # Preserve short alnum tokens when they contain digits (e.g., "s3", "v4")
+    # or are ALLCAPS (e.g., "IP"). Everything else <=2 chars is filtered.
+    if len(normalized) <= 2:
+        if normalized.isalnum() and any(ch.isdigit() for ch in normalized):
+            pass
+        elif normalized.isalnum() and normalized.upper() == normalized:
+            pass
+        else:
+            return True
+
+    if is_excluded_entity(normalized):
+        return True
+
+    lowered = normalized.lower()
+    if lowered in _STRUCTURAL_NOISE_TERMS:
+        return True
+
+    return False

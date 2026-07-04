@@ -1,5 +1,13 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: (package init)
+# =============================================================================
 """Resilience patterns for distributed system robustness."""
 
-from src.shared.resilience.circuit_breaker import CircuitBreaker, CircuitState
+from src.shared.resilience.circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerState,
+    CircuitState,
+)
 
-__all__ = ["CircuitBreaker", "CircuitState"]
+__all__ = ["CircuitBreaker", "CircuitState", "CircuitBreakerState"]

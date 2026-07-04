@@ -1,3 +1,12 @@
+# =============================================================================
+# @status: DORMANT
+# @reason: GLiNER NER enrichment for chunks. Only loaded via lazy import in
+#          atomic.py:1042, gated by config.ner.enabled (defaults to enabled
+#          when GLiNER service is configured). Non-blocking: failure passes
+#          through without aborting ingestion.
+# @gated-by: config.ner.enabled
+# @called-by: atomic.py:1042 (lazy import inside _prepare_ingestion)
+# =============================================================================
 """GLiNER entity extraction for document ingestion enrichment.
 
 Phase 2 of GLiNER integration: Document Ingestion Pipeline.
@@ -23,6 +32,8 @@ from typing import Any, Dict, List
 
 from src.providers.ner.gliner_service import GLiNERService
 from src.providers.ner.labels import (
+    DEFAULT_RETRIEVAL_FLOOR,
+    RETRIEVAL_CONFIDENCE_FLOORS,
     extract_label_name,
     get_default_labels,
     is_excluded_entity,
@@ -126,22 +137,45 @@ def enrich_chunks_with_entities(chunks: List[Dict[str, Any]]) -> None:
             for etype in entity_types:
                 entity_type_counts[etype] = entity_type_counts.get(etype, 0) + 1
 
+            # Filter entities for retrieval-critical paths using per-label confidence floors.
+            # Full entity list stays in entity_metadata (informational); only high-confidence
+            # entities flow into _embedding_text and _mentions (retrieval signals).
+            retrieval_entities = [
+                e
+                for e in entities
+                if e.score
+                >= RETRIEVAL_CONFIDENCE_FLOORS.get(
+                    extract_label_name(e.label), DEFAULT_RETRIEVAL_FLOOR
+                )
+            ]
+
             # Build transient embedding text with entity context
             # Format: "{title}\n\n{text}\n\n[Context: type1: val1; type2: val2]"
+            # Uses retrieval_entities (confidence-gated) not full entities list
             entity_context = "; ".join(
-                f"{extract_label_name(e.label)}: {e.text}" for e in entities
+                f"{extract_label_name(e.label)}: {e.text}" for e in retrieval_entities
             )
             base_text = chunk.get("text", "")
             title = chunk.get("title", "") or chunk.get("heading", "")
 
-            if title:
-                chunk["_embedding_text"] = (
-                    f"{title}\n\n{base_text}\n\n[Context: {entity_context}]"
-                )
+            if entity_context:
+                if title:
+                    chunk["_embedding_text"] = (
+                        f"{title}\n\n{base_text}\n\n[Context: {entity_context}]"
+                    )
+                else:
+                    chunk["_embedding_text"] = (
+                        f"{base_text}\n\n[Context: {entity_context}]"
+                    )
             else:
-                chunk["_embedding_text"] = f"{base_text}\n\n[Context: {entity_context}]"
+                # No entities passed the confidence floor — no entity context appended
+                if title:
+                    chunk["_embedding_text"] = f"{title}\n\n{base_text}"
+                else:
+                    chunk["_embedding_text"] = base_text
 
             # Append to _mentions for entity-sparse vector generation
+            # Uses retrieval_entities (confidence-gated) for retrieval signals
             # Deduplicate against existing mentions to prevent double-counting
             existing_mentions = chunk.get("_mentions", [])
             seen_keys = {
@@ -150,7 +184,7 @@ def enrich_chunks_with_entities(chunks: List[Dict[str, Any]]) -> None:
             }
 
             new_mentions = []
-            for e in entities:
+            for e in retrieval_entities:
                 clean_label = extract_label_name(e.label)
                 key = (e.text.lower(), clean_label.lower())
                 if key not in seen_keys:

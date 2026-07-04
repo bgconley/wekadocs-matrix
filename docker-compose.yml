@@ -15,10 +15,11 @@ volumes:
   qdrant-data:
   redis-data:
   hf-cache:  # Phase 7C: HuggingFace tokenizer cache
+  # (Tailscale sidecar volumes removed — sidecars no longer used)
 
 services:
   neo4j:
-    image: neo4j:2025.10.1-community
+    image: neo4j:2025.10.1-enterprise
     container_name: weka-neo4j
     networks:
       - weka-net
@@ -32,6 +33,7 @@ services:
     environment:
       - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD}
       - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+      - NEO4J_PLUGINS=["graph-data-science"]
       - NEO4J_server_memory_heap_initial__size=${NEO4J_HEAP_INITIAL:-1280m}
       - NEO4J_server_memory_heap_max__size=${NEO4J_HEAP_MAX:-2560m}
       - NEO4J_server_memory_pagecache_size=${NEO4J_PAGECACHE:-2G}
@@ -41,7 +43,7 @@ services:
       - NEO4J_apoc_import_file_enabled=true
       - NEO4J_apoc_import_file_use__neo4j__config=true
       - NEO4J_server_db_query__cache__size=50
-      - NEO4J_db_transaction_timeout=30s
+      - NEO4J_db_transaction_timeout=120s
     deploy:
       resources:
         limits:
@@ -117,6 +119,10 @@ services:
       retries: 3
       start_period: 5s
 
+  # ============================================================================
+  # Application Services
+  # ============================================================================
+
   mcp-server:
     build:
       context: .
@@ -126,36 +132,41 @@ services:
       - weka-net
     ports:
       - "${MCP_PORT:-8000}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./config:/app/config:ro
       - ./src:/app/src:ro
       - ./scripts:/app/scripts:ro
       - ./tests:/app/tests:ro
+      - ./reports:/app/reports
       - ./hf-cache:/opt/hf-cache
     env_file:
-      - .env
+      - .env.docker
     environment:
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
       # Phase 7C: Embedding Provider Configuration
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
-      # Legacy vars cleared to avoid override; set blank to prefer profile-driven config
-      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-bge-m3-service}
-      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
-      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
-      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-symmetric}
-      - HF_TOKENIZER_ID=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
-      - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
-      - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
-      - RERANK_MODEL=${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
-      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://host.docker.internal:9001}
+      - BGE_M3_API_URL=${BGE_M3_API_URL:-http://10.25.0.50:8080}
+      - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://10.25.0.50:9002}
+      - RERANK_PROVIDER=${RERANK_PROVIDER:-local-reranker-service}
+      - RERANK_MODEL=${RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}
+      - RERANKER_TOKENIZER_ID=${RERANKER_TOKENIZER_ID:-Qwen/Qwen3-Reranker-4B}
+      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://10.25.0.50:8080}
+      - RERANKER_TIMEOUT_SECONDS=${RERANKER_TIMEOUT_SECONDS:-120}
       - JINA_API_KEY=${JINA_API_KEY}
       - ANSWER_MODEL=${ANSWER_MODEL:-search-result-formatting}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
+      - TOKENIZER_ALLOW_SEGMENTER_FALLBACK=false
+      - HF_CACHE=/opt/hf-cache
       - HF_HOME=/opt/hf-cache
-      - TRANSFORMERS_OFFLINE=false
+      - HF_HUB_CACHE=/opt/hf-cache/hub
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
+      - HF_HUB_DISABLE_TELEMETRY=1
+      - TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-false}
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000
@@ -224,6 +235,8 @@ services:
     command: python -m src.ingestion.worker
     networks:
       - weka-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./config:/app/config:ro
       - ./src:/app/src
@@ -231,7 +244,7 @@ services:
       - ./data:/app/data:ro
       - ./hf-cache:/opt/hf-cache
     env_file:
-      - .env
+      - .env.docker
     environment:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest
@@ -240,20 +253,23 @@ services:
       # Phase 7C: Embedding Provider Configuration
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
-      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-bge-m3-service}
-      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
-      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
-      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-symmetric}
-      - HF_TOKENIZER_ID=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
-      - BGE_M3_API_URL=${BGE_M3_API_URL:-http://host.docker.internal:9000}
-      - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
-      - RERANK_MODEL=${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
-      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://host.docker.internal:9001}
+      - BGE_M3_API_URL=${BGE_M3_API_URL:-http://10.25.0.50:8080}
+      - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://10.25.0.50:9002}
+      - RERANK_PROVIDER=${RERANK_PROVIDER:-local-reranker-service}
+      - RERANK_MODEL=${RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}
+      - RERANKER_TOKENIZER_ID=${RERANKER_TOKENIZER_ID:-Qwen/Qwen3-Reranker-4B}
+      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://10.25.0.50:8080}
+      - RERANKER_TIMEOUT_SECONDS=${RERANKER_TIMEOUT_SECONDS:-120}
       - JINA_API_KEY=${JINA_API_KEY}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
+      - TOKENIZER_ALLOW_SEGMENTER_FALLBACK=false
+      - HF_CACHE=/opt/hf-cache
       - HF_HOME=/opt/hf-cache
-      - TRANSFORMERS_OFFLINE=false
+      - HF_HUB_CACHE=/opt/hf-cache/hub
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
+      - HF_HUB_DISABLE_TELEMETRY=1
+      - TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-false}
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000
@@ -335,37 +351,43 @@ services:
       - weka-net
     ports:
       - "8081:8081"  # Health/metrics/ready endpoints
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./config:/app/config:ro
       - ./src:/app/src
       - ./data:/app/data
       - ./hf-cache:/opt/hf-cache
     env_file:
-      - .env
+      - .env.docker
     environment:
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - INGEST_NS=ingest
       - INGEST_WATCH_DIR=/app/data/ingest
+      - INGEST_WATCH_MODE=${INGEST_WATCH_MODE:-auto}
       - INGEST_PORT=8081
       - ENV=${ENV:-development}
       - CONFIG_PATH=/app/config/${ENV:-development}.yaml
       # Phase 7C: Embedding Provider Configuration
       - EMBEDDINGS_PROFILE=${EMBEDDINGS_PROFILE:-bge_m3}
       - EMBEDDING_NAMESPACE_MODE=${EMBEDDING_NAMESPACE_MODE:-profile}
-      - EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER:-bge-m3-service}
-      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
-      - EMBEDDINGS_DIM=${EMBEDDINGS_DIM:-1024}
-      - EMBEDDINGS_TASK=${EMBEDDINGS_TASK:-symmetric}
-      - HF_TOKENIZER_ID=${EMBEDDINGS_MODEL:-BAAI/bge-m3}
-      - RERANK_PROVIDER=${RERANK_PROVIDER:-bge-reranker-service}
-      - RERANK_MODEL=${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
-      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://host.docker.internal:9001}
+      - BGE_M3_API_URL=${BGE_M3_API_URL:-http://10.25.0.50:8080}
+      - GLINER_SERVICE_URL=${GLINER_SERVICE_URL:-http://10.25.0.50:9002}
+      - RERANK_PROVIDER=${RERANK_PROVIDER:-local-reranker-service}
+      - RERANK_MODEL=${RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}
+      - RERANKER_TOKENIZER_ID=${RERANKER_TOKENIZER_ID:-Qwen/Qwen3-Reranker-4B}
+      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://10.25.0.50:8080}
+      - RERANKER_TIMEOUT_SECONDS=${RERANKER_TIMEOUT_SECONDS:-120}
       - JINA_API_KEY=${JINA_API_KEY}
       # Phase 7C Hotfix: Tokenizer Service Configuration
       - TOKENIZER_BACKEND=hf
-      - HF_TOKENIZER_ID=jinaai/jina-embeddings-v3
+      - TOKENIZER_ALLOW_SEGMENTER_FALLBACK=false
+      - HF_CACHE=/opt/hf-cache
       - HF_HOME=/opt/hf-cache
-      - TRANSFORMERS_OFFLINE=false
+      - HF_HUB_CACHE=/opt/hf-cache/hub
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
+      - HF_HUB_DISABLE_TELEMETRY=1
+      - TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-false}
       - JINA_SEGMENTER_BASE_URL=https://api.jina.ai/v1/segment
       - SEGMENTER_TOKENIZER_NAME=xlm-roberta-base
       - SEGMENTER_TIMEOUT_MS=5000

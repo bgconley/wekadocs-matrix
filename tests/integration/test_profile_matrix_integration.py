@@ -1,7 +1,10 @@
 import os
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from src.providers.factory import ProviderFactory
 from src.shared import config as config_module
@@ -44,16 +47,34 @@ def test_real_profile_embeddings(profile, provider_hint):
     patch_env = {"EMBEDDINGS_PROFILE": profile}  # pragma: allowlist secret
     if "NEO4J_PASSWORD" not in os.environ:
         patch_env["NEO4J_PASSWORD"] = "placeholder"  # pragma: allowlist secret
+    temp_manifest = None
+    if "EMBEDDING_PROFILES_PATH" not in os.environ:
+        manifest_path = (
+            Path(__file__).resolve().parents[2] / "config" / "embedding_profiles.yaml"
+        )
+        data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        data.pop("plan", None)
+        temp_manifest = tempfile.NamedTemporaryFile(suffix=".yaml", delete=False)
+        temp_manifest.write(yaml.safe_dump(data).encode("utf-8"))
+        temp_manifest.flush()
+        patch_env["EMBEDDING_PROFILES_PATH"] = temp_manifest.name
 
-    with patch.dict(os.environ, patch_env, clear=False):
-        config_module._config = None
-        config_module._settings = None
-        settings = get_embedding_settings()
-        assert settings.profile == profile
-        assert settings.provider == provider_hint
+    try:
+        with patch.dict(os.environ, patch_env, clear=False):
+            config_module._config = None
+            config_module._settings = None
+            settings = get_embedding_settings()
+            assert settings.profile == profile
+            assert settings.provider == provider_hint
 
-        embedder = ProviderFactory.create_embedding_provider(settings=settings)
+            embedder = ProviderFactory.create_embedding_provider(settings=settings)
 
-        vectors = embedder.embed_documents(["real provider ping"])
-        assert len(vectors) == 1
-        assert len(vectors[0]) == settings.dims
+            vectors = embedder.embed_documents(["real provider ping"])
+            assert len(vectors) == 1
+            assert len(vectors[0]) == settings.dims
+    finally:
+        if temp_manifest:
+            try:
+                os.unlink(temp_manifest.name)
+            except OSError:
+                pass

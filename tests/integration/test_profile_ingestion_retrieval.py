@@ -1,9 +1,12 @@
 import os
+import tempfile
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 
 import pytest
+import yaml
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, PointStruct, VectorParams
 
@@ -45,8 +48,22 @@ def _profile_env(profile: str):
     patch_env = {"EMBEDDINGS_PROFILE": profile}  # pragma: allowlist secret
     if "NEO4J_PASSWORD" not in os.environ:
         patch_env["NEO4J_PASSWORD"] = "placeholder"  # pragma: allowlist secret
-    original = {k: os.environ.get(k) for k in patch_env}
+    temp_manifest = None
     try:
+        if "EMBEDDING_PROFILES_PATH" not in os.environ:
+            manifest_path = (
+                Path(__file__).resolve().parents[2]
+                / "config"
+                / "embedding_profiles.yaml"
+            )
+            data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+            data.pop("plan", None)
+            temp_manifest = tempfile.NamedTemporaryFile(suffix=".yaml", delete=False)
+            temp_manifest.write(yaml.safe_dump(data).encode("utf-8"))
+            temp_manifest.flush()
+            patch_env["EMBEDDING_PROFILES_PATH"] = temp_manifest.name
+
+        original = {k: os.environ.get(k) for k in patch_env}
         os.environ.update(patch_env)
         config_module._config = None
         config_module._settings = None
@@ -59,6 +76,11 @@ def _profile_env(profile: str):
                 os.environ[key] = value
         config_module._config = None
         config_module._settings = None
+        if temp_manifest:
+            try:
+                os.unlink(temp_manifest.name)
+            except OSError:
+                pass
 
 
 @pytest.mark.integration

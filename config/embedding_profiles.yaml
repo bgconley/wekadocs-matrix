@@ -1,3 +1,16 @@
+plan:
+  dense: "qwen3_0_6b"
+  sparse: "spladev3"
+  colbert: "colbertv2"
+  enable_sparse: true
+  enable_colbert: true
+
+reranker:
+  provider: "local-reranker-service"
+  model_id: "Qwen/Qwen3-Reranker-4B"
+  context_window: 8192
+  base_url: "http://10.25.0.50:8080"
+
 profiles:
   jina_v3:
     description: "Jina Embeddings v3 (1024-D, multilingual, normalized)."
@@ -40,6 +53,197 @@ profiles:
       multilingual: true
     requirements:
       - "BGE_M3_API_URL"
+
+  voyage_context_3:
+    description: "Voyage contextualized chunk embeddings (dense only, contextual)."
+    provider: "voyage-ai"
+    model_id: "voyage-context-3"
+    version: "voyage-context-3"
+    dims: 1024
+    similarity: "cosine"
+    task: "retrieval.passage"
+    query_task: "query"
+    document_task: "document"
+    output_dimension: 1024
+    output_dtype: "float"
+    tokenizer:
+      backend: "hf"
+      model_id: "voyageai/voyage-context-3"
+    token_counting:
+      backend: "voyage"
+      model_id: "voyage-context-3"
+    supports_contextualized_chunks: true
+    contextual_limits:
+      max_inputs: 1000
+      max_total_tokens: 120000
+      max_total_chunks: 16000
+      context_window_tokens: 32000
+    capabilities:
+      supports_dense: true
+      supports_sparse: false
+      supports_colbert: false
+      supports_long_sequences: true
+      normalized_output: true
+      multilingual: true
+    requirements:
+      - "VOYAGE_API_KEY"
+
+  snowflake_arctic_v2l:
+    description: "Snowflake Arctic Embed L v2.0 (dense only; used for Chonkie boundaries)."
+    provider: "snowflake-arctic-service"
+    model_id: "Snowflake/snowflake-arctic-embed-l-v2.0"
+    version: "snowflake-arctic-embed-l-v2.0"
+    dims: 1024
+    similarity: "cosine"
+    task: "retrieval.passage"
+    query_task: "query"
+    document_task: "document"
+    output_dimension: 1024
+    output_dtype: "float"
+    tokenizer:
+      backend: "hf"
+      model_id: "Snowflake/snowflake-arctic-embed-l-v2.0"
+    capabilities:
+      supports_dense: true
+      supports_sparse: false
+      supports_colbert: false
+      supports_long_sequences: true
+      normalized_output: true
+      multilingual: true
+    requirements:
+      - "CHONKIE_EMBEDDINGS_BASE_URL"
+
+  qwen3_0_6b:
+    description: "Qwen3-Embedding-0.6B (1024-D, dense only) via unified gateway."
+    provider: "embedding-service"
+    model_id: "Qwen/Qwen3-Embedding-0.6B"
+    version: "Qwen3-Embedding-0.6B"
+    dims: 1024
+    similarity: "cosine"
+    task: "retrieval.passage"
+    query_instruction: "Instruct: Given a technical query about WEKA distributed file system, retrieve relevant documentation passages covering system architecture, data management, filesystem internals, configuration, administration, troubleshooting, performance, and CLI commands\nQuery: "
+    tokenizer:
+      backend: "hf"
+      model_id: "Qwen/Qwen3-Embedding-0.6B"
+    capabilities:
+      supports_dense: true
+      supports_sparse: false
+      supports_colbert: false
+      supports_long_sequences: true
+      normalized_output: true
+      multilingual: true
+    requirements:
+      - "EMBEDDING_BASE_URL"
+
+  spladev3:
+    description: "SPLADE v3 (learned sparse retrieval) via unified gateway."
+    provider: "embedding-service"
+    model_id: "naver/splade-v3"
+    version: "splade-v3"
+    dims: 30522
+    similarity: "cosine"
+    task: "retrieval.passage"
+    tokenizer:
+      backend: "hf"
+      model_id: "naver/splade-v3"
+    capabilities:
+      supports_dense: false
+      supports_sparse: true
+      supports_colbert: false
+      supports_long_sequences: false
+      normalized_output: false
+      multilingual: false
+    requirements:
+      - "EMBEDDING_BASE_URL"
+
+  colbertv2:
+    description: "ColBERTv2 (late interaction, 128-D per-token) via unified gateway."
+    provider: "embedding-service"
+    model_id: "colbert-ai/colbertv2.0"
+    version: "colbertv2.0"
+    dims: 128
+    similarity: "cosine"
+    task: "retrieval.passage"
+    tokenizer:
+      backend: "hf"
+      model_id: "colbert-ai/colbertv2.0"
+    capabilities:
+      supports_dense: false
+      supports_sparse: false
+      supports_colbert: true
+      supports_long_sequences: false
+      normalized_output: true
+      multilingual: false
+    requirements:
+      - "EMBEDDING_BASE_URL"
+
+  qwen3_4b:
+    description: "Qwen3-Embedding-4B (1024-D, dense only) via Triton gateway. LEGACY — prefer qwen3_0_6b."
+    provider: "qwen3-triton-service"
+    model_id: "Qwen/Qwen3-Embedding-4B"
+    version: "Qwen3-Embedding-4B"
+    dims: 1024
+    similarity: "cosine"
+    task: "retrieval.passage"
+    tokenizer:
+      backend: "hf"
+      model_id: "Qwen/Qwen3-Embedding-4B"
+    capabilities:
+      supports_dense: true
+      supports_sparse: false
+      supports_colbert: false
+      supports_long_sequences: true
+      normalized_output: true
+      multilingual: true
+    requirements:
+      - "QWEN3_EMBED_URL"
+
+  voyage_3_large:
+    description: "Voyage 3 Large (dense only). Placeholder - verify dims/model id."
+    provider: "voyage-ai"
+    model_id: "voyage-3-large"
+    version: "voyage-3-large"
+    dims: 1024
+    similarity: "cosine"
+    task: "retrieval.passage"
+    tokenizer:
+      backend: "hf"
+      model_id: "voyageai/voyage-3-large"
+    token_counting:
+      backend: "voyage"
+      model_id: "voyage-3-large"
+    capabilities:
+      supports_dense: true
+      supports_sparse: false
+      supports_colbert: false
+      supports_long_sequences: true
+      normalized_output: true
+      multilingual: true
+    requirements:
+      - "VOYAGE_API_KEY"
+
+  snowflake_arctic_l_v2_0:
+    description: "Snowflake Arctic L v2.0 (dense only). Placeholder - verify dims/model id."
+    provider: "sentence-transformers"
+    model_id: "snowflake-arctic-l-v2.0"
+    version: "snowflake-arctic-l-v2.0"
+    dims: 1024
+    similarity: "cosine"
+    task: "retrieval.passage"
+    tokenizer:
+      backend: "hf"
+      model_id: "snowflake-arctic-l-v2.0"
+    token_counting:
+      backend: "hf"
+      model_id: "snowflake-arctic-l-v2.0"
+    capabilities:
+      supports_dense: true
+      supports_sparse: false
+      supports_colbert: false
+      supports_long_sequences: true
+      normalized_output: true
+      multilingual: true
+    requirements: []
 
   st_minilm:
     description: "SentenceTransformers MiniLM (384-D, fast baseline)."

@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: mcp_app.py
+# =============================================================================
 """
 TextService fetches section text with strict truncation and byte accounting.
 """

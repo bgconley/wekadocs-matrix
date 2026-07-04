@@ -52,7 +52,7 @@ class TestProviderFactory:
     def test_create_bge_m3_service_provider(self):
         """Test creating the BGE-M3 service-backed provider."""
         with patch(
-            "src.providers.embeddings.bge_m3_service.BGEM3ServiceProvider"
+            "src.providers.embeddings.embedding_service.EmbeddingServiceProvider"
         ) as mock_provider_cls:
             mock_instance = MagicMock(spec=EmbeddingProvider)
             mock_provider_cls.return_value = mock_instance
@@ -71,7 +71,7 @@ class TestProviderFactory:
     def test_bge_aliases_normalize_to_service(self):
         """Test that bge aliases normalize to the service provider."""
         with patch(
-            "src.providers.embeddings.bge_m3_service.BGEM3ServiceProvider"
+            "src.providers.embeddings.embedding_service.EmbeddingServiceProvider"
         ) as mock_provider_cls:
             mock_provider_cls.return_value = MagicMock(spec=EmbeddingProvider)
             provider = ProviderFactory.create_embedding_provider(

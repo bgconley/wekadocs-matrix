@@ -1,4 +1,17 @@
 #!/usr/bin/env python3
+# =============================================================================
+# @status: RETIRED
+# @reason: One-time migration script. All provisions are now subsumed by the
+#          active ingestion pipeline:
+#          - parent_path_norm / parent_chunk_id: structural_edges.py (per-doc)
+#          - Structural edges (NEXT_CHUNK, PARENT_HEADING): structural_edges.py
+#          - Index creation: indexes exist in DB; health.py monitors them
+#          - Entity normalization: historical backfill complete
+#          - Contract checks: one-time validation, not ongoing
+#          Imports 3 DEAD modules (contract_checks, entity_normalization,
+#          structural_builder) which are safe to delete in Phase D.
+# @retired-date: 2026-03-02
+# =============================================================================
 """
 One-time Neo4j structural edge migration script.
 
@@ -299,6 +312,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
+    parser.add_argument(
+        "--force-retired-script",
+        action="store_true",
+        help="Override retirement guard and allow execution",
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--dry-run",
@@ -322,6 +340,21 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Retirement guard — this script is retired (2026-03-02).
+    # All provisions are subsumed by the active ingestion pipeline.
+    if not args.force_retired_script:
+        print(
+            "ERROR: This script is RETIRED (2026-03-02).\n"
+            "All provisions are now handled by the active ingestion pipeline:\n"
+            "  - structural_edges.py (parent_path_norm, NEXT_CHUNK, etc.)\n"
+            "  - atomic.py (chunk writes, HAS_CHUNK edges)\n"
+            "  - health.py (index monitoring)\n"
+            "\n"
+            "If you truly need to run this, use --force-retired-script.\n"
+            "But first verify that the modules it imports still exist."
+        )
+        sys.exit(1)
 
     # Determine mode
     dry_run = not args.execute

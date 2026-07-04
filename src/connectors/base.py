@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: github.py, manager.py
+# =============================================================================
 """
 Base connector class for external systems integration.
 Implements polling, webhooks, queue-based ingestion, and circuit breaker integration.
@@ -11,8 +15,8 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
-    from src.connectors.circuit_breaker import CircuitBreaker
     from src.connectors.queue import IngestionQueue
+    from src.shared.resilience import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 

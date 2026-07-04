@@ -333,12 +333,14 @@ class TestShadowModeIntegration:
 
     def test_get_fail_on_mismatch_enabled(self):
         """get_fail_on_mismatch should return True when configured."""
+        from unittest.mock import MagicMock
+
         from src.ingestion.parsers import get_fail_on_mismatch
 
         with patch("src.shared.config.get_config") as mock_config:
-            mock_config.return_value = {
-                "ingestion": {"parser": {"fail_on_mismatch": True}}
-            }
+            mock_cfg = MagicMock()
+            mock_cfg.ingestion.parser.fail_on_mismatch = True
+            mock_config.return_value = mock_cfg
             result = get_fail_on_mismatch()
             assert result is True
 

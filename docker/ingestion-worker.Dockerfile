@@ -16,12 +16,37 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Prefetch jina-embeddings-v3 tokenizer during build (Phase 7C hotfix)
+# Prefetch tokenizers during build (Phase 7C hotfix)
 # This eliminates runtime downloads and enables offline operation
-ENV HF_HOME=/opt/hf-cache
+ARG HF_HUB_OFFLINE=1
+ARG TRANSFORMERS_OFFLINE=1
+ENV HF_HOME=/opt/hf-cache \
+    HF_HUB_CACHE=/opt/hf-cache/hub \
+    HF_HUB_OFFLINE=${HF_HUB_OFFLINE} \
+    TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE} \
+    HF_HUB_DISABLE_TELEMETRY=1
 RUN mkdir -p /opt/hf-cache && \
-    python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('jinaai/jina-embeddings-v3', cache_dir='/opt/hf-cache')" && \
-    echo "Tokenizer prefetched successfully"
+    python - <<'PY' && \
+    echo "Tokenizers prefetched successfully"
+from transformers import AutoTokenizer
+import os
+
+offline = os.getenv("HF_HUB_OFFLINE", "1").lower() in {"1", "true", "yes"}
+models = [
+    "voyageai/voyage-context-3",
+    "BAAI/bge-m3",
+    "Qwen/Qwen3-Reranker-0.6B",
+]
+for model_id in models:
+    try:
+        AutoTokenizer.from_pretrained(
+            model_id,
+            cache_dir="/opt/hf-cache",
+            local_files_only=offline,
+        )
+    except Exception as exc:
+        print(f"Tokenizer prefetch skipped for {model_id}: {exc}")
+PY
 
 # Copy application code
 COPY src/ /app/src/

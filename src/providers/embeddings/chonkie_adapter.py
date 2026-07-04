@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: semantic_chunker.py
+# =============================================================================
 """
 Adapter to use BGE-M3 embedding service with Chonkie's SemanticChunker.
 
@@ -14,36 +18,12 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 import httpx
 import numpy as np
 
 log = logging.getLogger(__name__)
-
-
-class OversizeEmbeddingInputError(ValueError):
-    """Raised when an embedding request would exceed the model's input token limit."""
-
-    def __init__(
-        self,
-        *,
-        max_tokens: int,
-        safe_tokens: int,
-        oversize: List[dict],
-        message: Optional[str] = None,
-    ):
-        self.max_tokens = max_tokens
-        self.safe_tokens = safe_tokens
-        self.oversize = oversize
-        if message is None:
-            msg = (
-                f"Embedding input exceeds safe token limit (safe={safe_tokens}, max={max_tokens}). "
-                f"Oversize items: {oversize}"
-            )
-        else:
-            msg = message
-        super().__init__(msg)
 
 
 # Attempt to import chonkie's base class
@@ -217,58 +197,6 @@ class BgeM3ChonkieAdapter(BaseEmbeddings if CHONKIE_AVAILABLE else object):
         # Fallback: TokenizerService count
         return self._get_tokenizer().count_tokens(text)
 
-    def _truncate_to_tokens(self, text: str, max_tokens: int) -> str:
-        """Truncate text to at most max_tokens using HF tokenizer decode."""
-        tok = self._get_hf_tokenizer()
-        if tok is None:
-            raise OversizeEmbeddingInputError(
-                max_tokens=self._max_input_tokens,
-                safe_tokens=self._safe_input_tokens,
-                oversize=[{"error": "no_hf_tokenizer", "required": max_tokens}],
-                message="Cannot truncate: underlying HF tokenizer unavailable",
-            )
-        try:
-            ids = tok.encode(text, add_special_tokens=False)
-        except TypeError:
-            ids = tok.encode(text)
-        ids = ids[:max_tokens]
-        return tok.decode(ids, skip_special_tokens=True)
-
-    def _split_to_token_windows(
-        self, text: str, *, window_tokens: int, overlap_tokens: int
-    ) -> List[str]:
-        """Split text into decoded token windows (<=window_tokens) with overlap."""
-        if window_tokens <= 0:
-            return [text]
-
-        tok = self._get_hf_tokenizer()
-        if tok is None:
-            # As a last resort, return the original text; caller should handle.
-            return [text]
-
-        try:
-            ids = tok.encode(text, add_special_tokens=False)
-        except TypeError:
-            ids = tok.encode(text)
-
-        if len(ids) <= window_tokens:
-            return [text]
-
-        windows: List[str] = []
-        start = 0
-        overlap = max(0, min(overlap_tokens, window_tokens - 1))
-        while start < len(ids):
-            end = min(start + window_tokens, len(ids))
-            chunk_ids = ids[start:end]
-            chunk_text = tok.decode(chunk_ids, skip_special_tokens=True)
-            if chunk_text.strip():
-                windows.append(chunk_text)
-            if end >= len(ids):
-                break
-            start = max(0, end - overlap)
-
-        return windows
-
     # -------------------------
     # HTTP embedding calls
     # -------------------------
@@ -435,99 +363,11 @@ class BgeM3ChonkieAdapter(BaseEmbeddings if CHONKIE_AVAILABLE else object):
             List of 1024-dimensional numpy arrays (float32)
 
         Raises:
-            OversizeEmbeddingInputError: If an input exceeds the safe token limit and
-                BGE_M3_OVERSIZE_POLICY=raise (default).
             httpx.HTTPError: If embedding request fails
         """
         if not texts:
             return []
 
-        # Guard against oversize inputs (BGE-M3 rejects >8192 tokens).
-        token_counts = [self._count_tokens_model(t) for t in texts]
-        oversize: List[Dict[str, Any]] = [
-            {"index": i, "tokens": tc}
-            for i, tc in enumerate(token_counts)
-            if tc > self._safe_input_tokens
-        ]
-
-        if oversize:
-            policy = (self._oversize_policy or "raise").lower().strip()
-
-            if policy == "truncate":
-                log.warning(
-                    "Oversize embedding inputs; truncating to safe limit",
-                    extra={
-                        "safe_input_tokens": self._safe_input_tokens,
-                        "oversize": oversize,
-                        "batch_size": len(texts),
-                    },
-                )
-                texts = [
-                    (
-                        self._truncate_to_tokens(t, self._safe_input_tokens)
-                        if tc > self._safe_input_tokens
-                        else t
-                    )
-                    for t, tc in zip(texts, token_counts)
-                ]
-                return self._embed_batch_http(texts)
-
-            if policy == "split_and_pool":
-                log.warning(
-                    "Oversize embedding inputs; splitting into windows and pooling",
-                    extra={
-                        "safe_input_tokens": self._safe_input_tokens,
-                        "oversize": oversize,
-                        "batch_size": len(texts),
-                    },
-                )
-
-                # Embed safe items in one batch.
-                out: List[Optional[np.ndarray]] = [None] * len(texts)
-                safe_texts: List[str] = []
-                safe_indices: List[int] = []
-                for i, (t, tc) in enumerate(zip(texts, token_counts)):
-                    if tc <= self._safe_input_tokens:
-                        safe_indices.append(i)
-                        safe_texts.append(t)
-
-                if safe_texts:
-                    safe_embs = self._embed_batch_http(safe_texts)
-                    for idx, emb in zip(safe_indices, safe_embs):
-                        out[idx] = emb
-
-                # For oversize items: split into safe windows, embed, mean-pool.
-                for item in oversize:
-                    i = int(item["index"])
-                    windows = self._split_to_token_windows(
-                        texts[i],
-                        window_tokens=self._safe_input_tokens,
-                        overlap_tokens=self._pooling_overlap_tokens,
-                    )
-                    window_embs = self._embed_batch_http(windows)
-                    pooled = np.mean(np.stack(window_embs, axis=0), axis=0).astype(
-                        np.float32
-                    )
-                    # Normalize to unit length (common for retrieval embeddings).
-                    norm = float(np.linalg.norm(pooled))
-                    if norm > 0:
-                        pooled = (pooled / norm).astype(np.float32)
-                    out[i] = pooled
-
-                # mypy: we ensure all are filled
-                return [
-                    e if e is not None else np.zeros(self._dimension, dtype=np.float32)
-                    for e in out
-                ]
-
-            # Default: raise (fail fast) and force caller to pre-split.
-            raise OversizeEmbeddingInputError(
-                max_tokens=self._max_input_tokens,
-                safe_tokens=self._safe_input_tokens,
-                oversize=oversize,
-            )
-
-        # No oversize; perform normal embedding.
         try:
             return self._embed_batch_http(texts)
         except httpx.HTTPError as e:
@@ -539,132 +379,6 @@ class BgeM3ChonkieAdapter(BaseEmbeddings if CHONKIE_AVAILABLE else object):
 
     # Alias for clarity
     embed_dense = embed_batch
-
-    def embed_sparse(self, texts: List[str]) -> List[dict]:
-        """
-        Generate SPARSE (BM25-style lexical) embeddings via BGE-M3 service.
-
-        Maintains continuity with BGEM3ServiceProvider for full multi-vector support.
-        Sparse embeddings capture lexical/keyword signals for hybrid retrieval.
-
-        Args:
-            texts: List of texts to embed
-
-        Returns:
-            List of sparse embedding dicts with 'indices' and 'values' keys
-
-        Raises:
-            httpx.HTTPError: If embedding request fails
-        """
-        if not texts:
-            return []
-
-        client = self._get_client()
-        try:
-            response = client.post(
-                f"{self._service_url}/v1/embeddings/sparse",
-                json={"model": self._model_name, "input": texts},
-            )
-            response.raise_for_status()
-            data = response.json()
-        except httpx.HTTPError as e:
-            log.error(
-                "BGE-M3 sparse embedding request failed",
-                extra={"error": str(e), "batch_size": len(texts)},
-            )
-            raise
-
-        # Response format: {"data": [{"index": 0, "indices": [...], "values": [...], ...}]}
-        # Extract indices and values from each item, sorted by index
-        results = []
-        items = data.get("data", []) if isinstance(data, dict) else data
-        for item in sorted(items, key=lambda x: x.get("index", 0)):
-            results.append(
-                {
-                    "indices": item.get("indices", []),
-                    "values": item.get("values", []),
-                }
-            )
-        return results
-
-    def embed_colbert(self, texts: List[str]) -> List[List[List[float]]]:
-        """
-        Generate ColBERT (late-interaction) multi-vector embeddings via BGE-M3 service.
-
-        Maintains continuity with BGEM3ServiceProvider for full multi-vector support.
-        ColBERT embeddings are token-level vectors for MaxSim scoring.
-
-        Args:
-            texts: List of texts to embed
-
-        Returns:
-            List of ColBERT embeddings, each is a list of token vectors (1024-D each)
-
-        Raises:
-            httpx.HTTPError: If embedding request fails
-        """
-        if not texts:
-            return []
-
-        client = self._get_client()
-        try:
-            response = client.post(
-                f"{self._service_url}/v1/embeddings/colbert",
-                json={"model": self._model_name, "input": texts},
-            )
-            response.raise_for_status()
-            data = response.json()
-        except httpx.HTTPError as e:
-            log.error(
-                "BGE-M3 ColBERT embedding request failed",
-                extra={"error": str(e), "batch_size": len(texts)},
-            )
-            raise
-
-        # Response format: {"data": [{"index": 0, "vectors": [[...], ...], ...}, ...]}
-        # Extract vectors from each item, sorted by index
-        results = []
-        items = data.get("data", []) if isinstance(data, dict) else data
-        for item in sorted(items, key=lambda x: x.get("index", 0)):
-            vectors = item.get("vectors", [])
-            results.append(vectors)
-        return results
-
-    def embed_all(self, texts: List[str]) -> List[dict]:
-        """
-        Generate all three embedding types (dense, sparse, ColBERT) in one call.
-
-        Provides full continuity with the existing 8-vector pipeline.
-        Useful when you need all modalities for a set of texts.
-
-        Args:
-            texts: List of texts to embed
-
-        Returns:
-            List of dicts with 'dense', 'sparse', and 'colbert' keys
-
-        Note:
-            Makes three separate HTTP calls. For high-volume use, consider
-            using BGEM3ServiceProvider.embed_documents_all() which may have
-            optimizations.
-        """
-        if not texts:
-            return []
-
-        dense = self.embed_batch(texts)
-        sparse = self.embed_sparse(texts)
-        colbert = self.embed_colbert(texts)
-
-        results = []
-        for i in range(len(texts)):
-            results.append(
-                {
-                    "dense": dense[i] if i < len(dense) else None,
-                    "sparse": sparse[i] if i < len(sparse) else None,
-                    "colbert": colbert[i] if i < len(colbert) else None,
-                }
-            )
-        return results
 
     def count_tokens(self, text: str) -> int:
         """
@@ -718,43 +432,45 @@ class BgeM3ChonkieAdapter(BaseEmbeddings if CHONKIE_AVAILABLE else object):
         )
         return tokenizer_service
 
-    # Alias for backward compatibility
-    def get_tokenizer_or_token_counter(self) -> Any:
-        """Alias for get_tokenizer() - backward compatibility."""
-        return self.get_tokenizer()
-
     @classmethod
     def is_available(cls) -> bool:
         """
-        Check if BGE-M3 service is reachable.
+        Check if the embedding service is reachable.
 
-        This is used to determine whether to use semantic chunking
-        or fall back to simpler approaches.
+        Tries /health (unified gateway) then /healthz (legacy BGE-M3 service).
 
         Returns:
-            True if chonkie is installed AND BGE-M3 service is healthy
+            True if chonkie is installed AND embedding service is healthy
         """
         if not CHONKIE_AVAILABLE:
             log.debug("Chonkie not available - CHONKIE_AVAILABLE=False")
             return False
 
-        service_url = os.getenv("BGE_M3_API_URL") or "http://127.0.0.1:9000"
+        service_url = (
+            os.getenv("BGE_M3_API_URL")
+            or os.getenv("EMBEDDING_BASE_URL")
+            or "http://127.0.0.1:9000"
+        )
         try:
             with httpx.Client(timeout=5.0) as client:
-                r = client.get(f"{service_url}/healthz")
-                if r.status_code == 200:
-                    health = r.json()
-                    is_healthy = health.get("status") == "ok"
-                    if is_healthy:
-                        log.debug(
-                            "BGE-M3 service healthy",
-                            extra={"service_url": service_url},
-                        )
-                    return is_healthy
+                # Try unified gateway /health first, then legacy /healthz
+                for path in ("/health", "/healthz"):
+                    try:
+                        r = client.get(f"{service_url}{path}")
+                        if r.status_code == 200:
+                            health = r.json()
+                            if health.get("status") in ("ok", "healthy"):
+                                log.debug(
+                                    "Embedding service healthy",
+                                    extra={"service_url": service_url, "path": path},
+                                )
+                                return True
+                    except Exception:
+                        continue
                 return False
         except Exception as e:
             log.debug(
-                "BGE-M3 service unavailable",
+                "Embedding service unavailable",
                 extra={"service_url": service_url, "error": str(e)},
             )
             return False

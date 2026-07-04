@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE — ENTRY POINT
+# @called-by: python -m (docker CMD)
+# =============================================================================
 import asyncio
 import os
 import signal

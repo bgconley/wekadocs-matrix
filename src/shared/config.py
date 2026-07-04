@@ -1,15 +1,21 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: (core infrastructure, imported everywhere)
+# =============================================================================
 # Implements Phase 1, Task 1.2 (MCP server foundation)
 # See: /docs/spec.md §2 (Architecture)
 # Configuration loader with environment variable support
 # Enhanced for Pre-Phase 7: Added validation for embedding configuration
 
+import hashlib
+import json
 import logging
 import os
 import re
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError, validator
@@ -119,6 +125,32 @@ class EmbeddingProfileTokenizer(BaseModel):
         return value.strip()
 
 
+class EmbeddingProfileTokenCounting(BaseModel):
+    backend: str = Field(default="hf")
+    model_id: Optional[str] = None
+
+    @validator("backend")
+    def _backend_not_empty(cls, value: str):
+        if not value or not value.strip():
+            raise ValueError(
+                "token counting backend must be provided for embedding profiles"
+            )
+        return value.strip()
+
+
+class EmbeddingContextualLimits(BaseModel):
+    max_inputs: int = 1000
+    max_total_tokens: int = 120000
+    max_total_chunks: int = 16000
+    context_window_tokens: Optional[int] = None
+
+    @validator("max_inputs", "max_total_tokens", "max_total_chunks")
+    def _positive_limits(cls, value: int):
+        if value <= 0:
+            raise ValueError("contextual limits must be greater than zero")
+        return value
+
+
 class EmbeddingProfileCapabilities(BaseModel):
     supports_dense: bool = True
     supports_sparse: bool = False
@@ -136,9 +168,25 @@ class EmbeddingProfileDefinition(BaseModel):
     dims: int
     similarity: str = "cosine"
     task: str = "retrieval.passage"
+    query_task: Optional[str] = None
+    document_task: Optional[str] = None
+    output_dimension: Optional[int] = None
+    output_dtype: Optional[str] = None
+    query_instruction: Optional[str] = Field(
+        default=None,
+        description=(
+            "Instruction prefix prepended to queries (not documents) during embedding. "
+            "Qwen3-Embedding uses 'Instruct: ...\\nQuery: ' format. "
+            "BGE-M3 uses 'Represent this sentence...' format. "
+            "When None, the provider applies its own default."
+        ),
+    )
     tokenizer: EmbeddingProfileTokenizer = Field(
         default_factory=EmbeddingProfileTokenizer
     )
+    token_counting: Optional[EmbeddingProfileTokenCounting] = None
+    supports_contextualized_chunks: bool = False
+    contextual_limits: Optional[EmbeddingContextualLimits] = None
     capabilities: EmbeddingProfileCapabilities = Field(
         default_factory=EmbeddingProfileCapabilities
     )
@@ -186,6 +234,102 @@ class EmbeddingProfileDefinition(BaseModel):
                 "requirements entries must be non-empty environment variable names"
             )
         return value.strip()
+
+
+class EmbeddingPlanDefinition(BaseModel):
+    dense: str
+    sparse: Optional[str] = None
+    colbert: Optional[str] = None
+    enable_sparse: bool = False
+    enable_colbert: bool = False
+
+    @validator("dense")
+    def _dense_required(cls, value: str):
+        if not value or not value.strip():
+            raise ValueError("embedding plan requires a dense profile id")
+        return value.strip()
+
+    @validator("sparse", "colbert")
+    def _role_not_empty(cls, value: Optional[str]):
+        if value is None:
+            return value
+        if not value.strip():
+            raise ValueError("embedding role profile ids must be non-empty")
+        return value.strip()
+
+
+class EmbeddingProfileManifest(BaseModel):
+    profiles: Dict[str, EmbeddingProfileDefinition] = Field(default_factory=dict)
+    plan: Optional[EmbeddingPlanDefinition] = None
+
+    class Config:
+        extra = "ignore"
+
+
+class EmbeddingRolePlan(BaseModel):
+    role: str
+    profile_name: str
+    profile: EmbeddingProfileDefinition
+    enabled: bool = True
+
+
+class EmbeddingPlan(BaseModel):
+    dense: EmbeddingRolePlan
+    sparse: Optional[EmbeddingRolePlan] = None
+    colbert: Optional[EmbeddingRolePlan] = None
+
+
+def _embedding_plan_fingerprint(plan: EmbeddingPlan) -> str:
+    def role_payload(role: Optional[EmbeddingRolePlan]) -> Optional[Dict[str, Any]]:
+        if role is None:
+            return None
+        profile = role.profile
+        return {
+            "role": role.role,
+            "profile_name": role.profile_name,
+            "provider": profile.provider,
+            "model_id": profile.model_id,
+            "version": profile.version or profile.model_id,
+            "dims": profile.dims,
+            "similarity": profile.similarity,
+            "task": profile.task,
+            "query_task": profile.query_task,
+            "document_task": profile.document_task,
+            "output_dimension": profile.output_dimension,
+            "output_dtype": profile.output_dtype,
+            "tokenizer": {
+                "backend": profile.tokenizer.backend,
+                "model_id": profile.tokenizer.model_id,
+            },
+            "token_counting": (
+                profile.token_counting.model_dump() if profile.token_counting else None
+            ),
+            "supports_contextualized_chunks": profile.supports_contextualized_chunks,
+            "contextual_limits": (
+                profile.contextual_limits.model_dump()
+                if profile.contextual_limits
+                else None
+            ),
+            "capabilities": {
+                "supports_dense": profile.capabilities.supports_dense,
+                "supports_sparse": profile.capabilities.supports_sparse,
+                "supports_colbert": profile.capabilities.supports_colbert,
+                "supports_long_sequences": profile.capabilities.supports_long_sequences,
+                "normalized_output": profile.capabilities.normalized_output,
+                "multilingual": profile.capabilities.multilingual,
+            },
+        }
+
+    payload = {
+        "dense": role_payload(plan.dense),
+        "sparse": role_payload(plan.sparse),
+        "colbert": role_payload(plan.colbert),
+    }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    digest = hashlib.sha256(encoded).hexdigest()
+    return f"plan-{digest}"
 
 
 class QdrantQueryStrategy(str, Enum):
@@ -274,13 +418,80 @@ class ExpansionConfig(BaseModel):
     )
 
 
+class SignalPoolConfig(BaseModel):
+    """Signal-diverse rerank pool configuration.
+
+    Instead of sending the flat top-N by fused score to the reranker,
+    the signal pool builder selects candidates that maximize coverage
+    across all retrieval signal types (dense, sparse, BM25, structural).
+    """
+
+    enabled: bool = False
+    pool_size: int = 200
+
+    # Slot allocations (should sum to <= pool_size; remainder is backfill)
+    consensus_slots: int = 50  # Top by fused_score (multi-signal agreement)
+    content_dense_slots: int = 20  # Unique to content-dense vector
+    title_dense_slots: int = 15  # Unique to title-dense vector
+    doc_title_dense_slots: int = 15  # Unique to doc_title-dense vector
+    text_sparse_slots: int = 20  # Unique to text-sparse / BM25
+    entity_sparse_slots: int = 15  # Unique to entity-sparse
+    title_sparse_slots: int = 15  # Unique to title-sparse
+    structural_slots: int = 20  # NEXT_CHUNK + sibling graph expansion
+    related_to_slots: int = 10  # RELATED_TO expanded chunks
+    per_doc_depth_slots: int = 30  # Per-document depth coverage
+
+    # Per-document depth parameters
+    per_doc_k: int = 5  # Top K documents by best chunk score
+    per_doc_m: int = 6  # Target signal-diverse chunks per document
+
+    # Graceful degradation: use BM25/vector provenance when per-field scores unavailable
+    fallback_to_provenance: bool = True
+
+
 class RerankerConfig(BaseModel):
     enabled: bool = False
-    provider: Optional[str] = None
-    model: Optional[str] = None
+    provider: Optional[str] = "local-reranker-service"
+    model: Optional[str] = "Qwen/Qwen3-Reranker-4B"
     top_n: int = 100
-    max_pairs: int = 50
-    max_tokens_per_pair: int = 1024
+    max_pairs: int = 50  # unused — never referenced by any code
+    max_tokens_per_pair: int = 1024  # unused — never referenced by any code
+    instruction: Optional[str] = Field(
+        default=None,
+        description=(
+            "Domain-tuned instruction for the cross-encoder reranker. "
+            "Qwen3-Reranker-4B supports custom instructions that guide relevance judgments. "
+            "When set, prepended to the query for each (query, document) rerank pair."
+        ),
+    )
+    instructions_by_type: Optional[Dict[str, str]] = Field(
+        default=None,
+        description=(
+            "Per-query-type reranker instructions. Maps query_type string "
+            "to an instruction that overrides the default instruction field. "
+            "Used to give the cross-encoder type-specific relevance guidance."
+        ),
+    )
+    instruction_mode: str = Field(
+        default="prepend",
+        description=(
+            "How to send the instruction to the reranker service. "
+            "'prepend' prepends it to the query string (Qwen-compatible). "
+            "'native' sends it as a separate 'instruction' field in the JSON payload."
+        ),
+    )
+    batch_size: int = Field(
+        default=16,
+        description="Number of documents per reranker batch request.",
+    )
+    max_tokens_total: int = Field(
+        default=8192,
+        description="Maximum total tokens (query + instruction + document) per rerank pair.",
+    )
+    max_tokens_per_doc: int = Field(
+        default=7500,
+        description="Maximum tokens per document before truncation.",
+    )
 
 
 class StructuralRetrievalConfig(BaseModel):
@@ -310,6 +521,15 @@ class StructuralRetrievalConfig(BaseModel):
 
 
 class HybridSearchConfig(BaseModel):
+    # Retrieval profile: coherent preset replacing individual feature flags.
+    # None = legacy flag inference (exact current behavior).
+    profile: Optional[
+        Literal["vector_only", "precision_vector", "graph_assisted", "graph_full"]
+    ] = None
+    # Restricted overrides for specific plan fields when profile is set.
+    # Only "use_specificity_adjustment" and "use_graph_score_override" are allowed.
+    profile_overrides: Dict[str, bool] = Field(default_factory=dict)
+
     enabled: bool = True
     # Master switch: completely disable ALL Neo4j queries in retrieval path
     neo4j_disabled: bool = True  # PHASE 1 VECTOR-ONLY: bypass citation, coverage, graph
@@ -388,6 +608,7 @@ class HybridSearchConfig(BaseModel):
         }
     )
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
+    signal_pool: SignalPoolConfig = Field(default_factory=SignalPoolConfig)
     bm25: BM25Config = Field(default_factory=BM25Config)  # Phase 7E
     expansion: ExpansionConfig = Field(default_factory=ExpansionConfig)  # Phase 7E
     structural: StructuralRetrievalConfig = Field(
@@ -530,7 +751,7 @@ class SemanticChunkingConfig(BaseModel):
     min_tokens: int = 100  # KEY: Allow small coherent chunks (research-aligned)
     max_tokens: int = 512
     respect_sentence_boundaries: bool = True
-    embedding_adapter: str = "bge_m3"
+    embedding_adapter: str = "qwen3_4b"
 
     # Structural boundary handling
     preserve_heading_boundaries: bool = True  # Never merge across headings
@@ -594,7 +815,7 @@ class CrossDocLinkingConfig(BaseModel):
         description="Minimum documents required before linking is attempted",
     )
     collection_name: str = Field(
-        default="chunks_multi_bge_m3",
+        default="chunks_multi",
         description="Qdrant collection name for vector searches",
     )
 
@@ -614,6 +835,47 @@ class CrossDocLinkingConfig(BaseModel):
     colbert_max_tokens: int = Field(
         default=200,
         description="Maximum tokens for ColBERT comparison (truncate beyond)",
+    )
+
+    # RELATED_TO v2 edge model settings
+    edge_model_version: str = Field(
+        default="2.0",
+        description="Edge property schema version written to method_version",
+    )
+    colbert_rerank_before_write: bool = Field(
+        default=True,
+        description="Run ColBERT reranking before edge creation (v2 mode)",
+    )
+
+    # Reciprocity settings
+    compute_reciprocity: bool = Field(
+        default=True,
+        description="Compute is_mutual and mutual_score after linking",
+    )
+
+    # Structural prior settings
+    compute_priors: bool = Field(
+        default=True,
+        description="Compute structural priors (REFERENCES, entities, taxonomy)",
+    )
+    entity_hub_threshold: int = Field(
+        default=20,
+        ge=1,
+        description="Suppress entities appearing in more than N documents",
+    )
+
+    # Quality tier thresholds (for RRF method)
+    quality_tier_high: float = Field(
+        default=0.040,
+        ge=0.0,
+        le=1.0,
+        description="score_final >= this is 'high' quality tier (RRF)",
+    )
+    quality_tier_medium: float = Field(
+        default=0.028,
+        ge=0.0,
+        le=1.0,
+        description="score_final >= this is 'medium' quality tier (RRF)",
     )
 
 
@@ -812,6 +1074,30 @@ class FeatureFlagsConfig(BaseModel):
         description="Enable sibling, parent section, and shared-entity context expansion",
     )
 
+    # Signal-diverse rerank pool (requires query_api_weighted_fusion for full per-field scores)
+    signal_diverse_rerank_pool: bool = Field(
+        default=False,
+        description="Enable signal-diverse rerank pool with 200-candidate budget",
+    )
+
+    # Phase A1: Signal pool ordering — run signal pool before ColBERT
+    signal_pool_before_colbert: bool = Field(
+        default=False,
+        description="Build signal pool from full fusion output before ColBERT truncation",
+    )
+
+    # Phase A3: Focused reranker text for precision intents
+    precision_focused_rerank_text: bool = Field(
+        default=False,
+        description="Use anchor-focused evidence windows for precision reranker input",
+    )
+
+    # Phase B1: Post-rerank specificity adjustment (deferred)
+    precision_specificity_adjustment: bool = Field(
+        default=False,
+        description="Post-rerank tie-break bonus for anchor matches in heading/path",
+    )
+
 
 class GitHubConnectorSettings(BaseModel):
     enabled: bool = False
@@ -864,6 +1150,14 @@ class ReferencesQueryConfig(BaseModel):
     enable_cross_doc_signals: bool = True
     cross_doc_weight_ratio: float = 0.3
     max_referencing_docs: int = 3
+
+    # RELATED_TO retrieval integration
+    enable_related_to_signals: bool = True
+    related_to_weight_ratio: float = 0.15
+    related_to_seed_docs: int = 5
+    related_to_max_docs: int = 3
+    related_to_chunks_per_doc: int = 3
+    related_to_min_edge_score: float = 0.025
 
 
 class ReferencesConfig(BaseModel):
@@ -1003,26 +1297,24 @@ def _resolve_profiles_path(config_path: Path, settings: Settings) -> Path:
 
 
 @lru_cache(maxsize=4)
-def _load_embedding_profiles(
-    manifest_path: str,
-) -> Dict[str, EmbeddingProfileDefinition]:
+def _load_embedding_manifest(manifest_path: str) -> EmbeddingProfileManifest:
     path = Path(manifest_path)
     if not path.exists():
         raise FileNotFoundError(f"Embedding profile manifest not found: {path}")
     with path.open("r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
-    profiles_data = data.get("profiles", {})
-    profiles: Dict[str, EmbeddingProfileDefinition] = {}
-    for name, payload in profiles_data.items():
-        try:
-            profiles[name] = EmbeddingProfileDefinition(**payload)
-        except (
-            ValidationError
-        ) as exc:  # pragma: no cover - exercised via dedicated tests
-            raise ValueError(
-                f"Embedding profile '{name}' in {path} is invalid: {exc}"
-            ) from exc
-    return profiles
+    try:
+        return EmbeddingProfileManifest(**data)
+    except ValidationError as exc:  # pragma: no cover - exercised via dedicated tests
+        raise ValueError(
+            f"Embedding profile manifest in {path} is invalid: {exc}"
+        ) from exc
+
+
+def _load_embedding_profiles(
+    manifest_path: str,
+) -> Dict[str, EmbeddingProfileDefinition]:
+    return _load_embedding_manifest(manifest_path).profiles
 
 
 def _ensure_embedding_resolved(embedding: EmbeddingConfig) -> None:
@@ -1043,10 +1335,47 @@ def _ensure_embedding_resolved(embedding: EmbeddingConfig) -> None:
 
 def apply_embedding_profile(config: Config, settings: Settings, config_path: Path):
     profiles_path = _resolve_profiles_path(config_path, settings)
-    profiles = _load_embedding_profiles(str(profiles_path))
+    manifest = _load_embedding_manifest(str(profiles_path))
+    profiles = manifest.profiles
+    plan = manifest.plan
 
     configured_profile = config.embedding.profile
     runtime_profile = settings.embedding_profile
+
+    if plan:
+        if plan.dense not in profiles:
+            raise ValueError(
+                f"Embedding plan dense profile '{plan.dense}' not defined in {profiles_path}"
+            )
+        if plan.sparse and plan.sparse not in profiles:
+            raise ValueError(
+                f"Embedding plan sparse profile '{plan.sparse}' not defined in {profiles_path}"
+            )
+        if plan.colbert and plan.colbert not in profiles:
+            raise ValueError(
+                f"Embedding plan colbert profile '{plan.colbert}' not defined in {profiles_path}"
+            )
+        if plan.enable_sparse and not plan.sparse:
+            raise ValueError(
+                "Embedding plan enable_sparse is true but no sparse profile is set."
+            )
+        if plan.enable_colbert and not plan.colbert:
+            raise ValueError(
+                "Embedding plan enable_colbert is true but no colbert profile is set."
+            )
+        if runtime_profile:
+            logger.warning(
+                "Embedding plan present; ignoring EMBEDDINGS_PROFILE override (%s).",
+                runtime_profile,
+            )
+            runtime_profile = None
+        if configured_profile and configured_profile != plan.dense:
+            logger.info(
+                "Embedding plan overrides embedding.profile from %s to %s",
+                configured_profile,
+                plan.dense,
+            )
+        configured_profile = plan.dense
 
     # Compute the baseline profile from config or manifest defaults
     if not configured_profile:
@@ -1120,12 +1449,46 @@ def apply_embedding_profile(config: Config, settings: Settings, config_path: Pat
 
     profile = profiles[profile_name]
     strict_env = env not in ("development", "dev", "test")
+    plan_fingerprint = None
+    if plan:
+        dense_name = plan.dense
+        sparse_name = plan.sparse if plan.enable_sparse else None
+        colbert_name = plan.colbert if plan.enable_colbert else None
+        dense_role = EmbeddingRolePlan(
+            role="dense",
+            profile_name=dense_name,
+            profile=profiles[dense_name],
+            enabled=True,
+        )
+        sparse_role = (
+            EmbeddingRolePlan(
+                role="sparse",
+                profile_name=sparse_name,
+                profile=profiles[sparse_name],
+                enabled=True,
+            )
+            if sparse_name
+            else None
+        )
+        colbert_role = (
+            EmbeddingRolePlan(
+                role="colbert",
+                profile_name=colbert_name,
+                profile=profiles[colbert_name],
+                enabled=True,
+            )
+            if colbert_name
+            else None
+        )
+        plan_fingerprint = _embedding_plan_fingerprint(
+            EmbeddingPlan(dense=dense_role, sparse=sparse_role, colbert=colbert_role)
+        )
     overrides = {
         "profile": profile_name,
         "embedding_model": profile.model_id,
         "dims": profile.dims,
         "similarity": profile.similarity,
-        "version": profile.version or profile.model_id,
+        "version": plan_fingerprint or profile.version or profile.model_id,
         "provider": profile.provider,
         "task": profile.task,
         "tokenizer_backend": profile.tokenizer.backend,
@@ -1140,11 +1503,29 @@ def apply_embedding_profile(config: Config, settings: Settings, config_path: Pat
     config.embedding = config.embedding.copy(update=overrides)
 
     suffix_source = _resolve_namespace_suffix(
-        profile_name, profile, settings.embedding_namespace_mode
+        profile_name,
+        profile,
+        settings.embedding_namespace_mode,
+        embedding_version=plan_fingerprint,
     )
     qdrant_cfg = getattr(config.search.vector, "qdrant", None)
     neo4j_cfg = getattr(config.search.vector, "neo4j", None)
     bm25_cfg = getattr(config.search, "bm25", None)
+    if plan and qdrant_cfg:
+        if qdrant_cfg.enable_sparse != plan.enable_sparse:
+            logger.info(
+                "Embedding plan overrides qdrant enable_sparse from %s to %s",
+                qdrant_cfg.enable_sparse,
+                plan.enable_sparse,
+            )
+        if qdrant_cfg.enable_colbert != plan.enable_colbert:
+            logger.info(
+                "Embedding plan overrides qdrant enable_colbert from %s to %s",
+                qdrant_cfg.enable_colbert,
+                plan.enable_colbert,
+            )
+        qdrant_cfg.enable_sparse = plan.enable_sparse
+        qdrant_cfg.enable_colbert = plan.enable_colbert
     if suffix_source:
         if qdrant_cfg and hasattr(qdrant_cfg, "collection_name"):
             qdrant_cfg.collection_name = namespace_identifier(
@@ -1160,28 +1541,36 @@ def apply_embedding_profile(config: Config, settings: Settings, config_path: Pat
             )
 
     if qdrant_cfg:
-        if getattr(qdrant_cfg, "enable_sparse", False) and not getattr(
-            profile.capabilities, "supports_sparse", False
-        ):
-            message = (
-                f"Profile '{profile_name}' does not support sparse embeddings but "
-                "enable_sparse is True."
+        if plan and not getattr(profile.capabilities, "supports_dense", True):
+            raise ValueError(
+                f"Embedding plan dense profile '{profile_name}' does not support dense embeddings."
             )
-            if strict_env:
-                raise ValueError(message)
-            logger.warning("%s Disabling sparse for this run.", message)
-            qdrant_cfg.enable_sparse = False
-        if getattr(qdrant_cfg, "enable_colbert", False) and not getattr(
-            profile.capabilities, "supports_colbert", False
-        ):
-            message = (
-                f"Profile '{profile_name}' does not support ColBERT but "
-                "enable_colbert is True."
+        if getattr(qdrant_cfg, "enable_sparse", False):
+            sparse_profile = (
+                profiles.get(plan.sparse) if plan and plan.sparse else profile
             )
-            if strict_env:
-                raise ValueError(message)
-            logger.warning("%s Disabling ColBERT for this run.", message)
-            qdrant_cfg.enable_colbert = False
+            if not getattr(sparse_profile.capabilities, "supports_sparse", False):
+                message = (
+                    f"Profile '{sparse_profile.model_id}' does not support sparse "
+                    "embeddings but enable_sparse is True."
+                )
+                if strict_env:
+                    raise ValueError(message)
+                logger.warning("%s Disabling sparse for this run.", message)
+                qdrant_cfg.enable_sparse = False
+        if getattr(qdrant_cfg, "enable_colbert", False):
+            colbert_profile = (
+                profiles.get(plan.colbert) if plan and plan.colbert else profile
+            )
+            if not getattr(colbert_profile.capabilities, "supports_colbert", False):
+                message = (
+                    f"Profile '{colbert_profile.model_id}' does not support ColBERT "
+                    "but enable_colbert is True."
+                )
+                if strict_env:
+                    raise ValueError(message)
+                logger.warning("%s Disabling ColBERT for this run.", message)
+                qdrant_cfg.enable_colbert = False
         if getattr(qdrant_cfg, "enable_colbert", False) and not getattr(
             qdrant_cfg, "use_query_api", False
         ):
@@ -1198,6 +1587,18 @@ def apply_embedding_profile(config: Config, settings: Settings, config_path: Pat
             qdrant_cfg.collection_name = namespace_identifier(
                 qdrant_cfg.collection_name, suffix_source
             )
+
+    cross_doc_cfg = getattr(config.ingestion, "cross_doc_linking", None)
+    if cross_doc_cfg and qdrant_cfg and hasattr(qdrant_cfg, "collection_name"):
+        if cross_doc_cfg.collection_name != qdrant_cfg.collection_name:
+            logger.info(
+                "Aligning cross-doc collection name with Qdrant collection",
+                extra={
+                    "cross_doc_collection": cross_doc_cfg.collection_name,
+                    "qdrant_collection": qdrant_cfg.collection_name,
+                },
+            )
+            cross_doc_cfg.collection_name = qdrant_cfg.collection_name
 
     missing_req = [req for req in profile.requirements if not os.getenv(req)]
     if missing_req:
@@ -1254,6 +1655,10 @@ def load_config() -> tuple[Config, Settings]:
         config_dict = yaml.safe_load(f)
 
     config = Config(**config_dict)
+    gliner_service_url = os.getenv("GLINER_SERVICE_URL")
+    if gliner_service_url:
+        logger.warning("GLINER_SERVICE_URL override applied: %s", gliner_service_url)
+        config.ner.service_url = gliner_service_url
     apply_embedding_profile(config, settings, config_path)
 
     # Pre-Phase 7: Perform startup validation
@@ -1363,6 +1768,84 @@ def get_embedding_settings(
         capabilities=capabilities,
         extra=env_overrides,
     )
+
+
+def get_embedding_plan(config_override: Optional[Config] = None) -> EmbeddingPlan:
+    config = config_override or get_config()
+    settings = get_settings()
+
+    if settings.config_path:
+        config_path = Path(settings.config_path)
+    else:
+        config_path = (
+            Path(__file__).parent.parent.parent / "config" / f"{settings.env}.yaml"
+        )
+
+    profiles_path = _resolve_profiles_path(config_path, settings)
+    manifest = _load_embedding_manifest(str(profiles_path))
+    profiles = manifest.profiles
+    plan_def = manifest.plan
+
+    if not profiles:
+        raise ValueError(
+            f"Embedding plan requires profiles in {profiles_path}; none found."
+        )
+
+    if plan_def:
+        dense_name = plan_def.dense
+        sparse_name = plan_def.sparse if plan_def.enable_sparse else None
+        colbert_name = plan_def.colbert if plan_def.enable_colbert else None
+    else:
+        dense_name = config.embedding.profile or DEFAULT_EMBEDDING_PROFILE
+        if dense_name not in profiles and profiles:
+            dense_name = next(iter(profiles.keys()))
+        qdrant_cfg = getattr(config.search.vector, "qdrant", None)
+        enable_sparse = bool(getattr(qdrant_cfg, "enable_sparse", False))
+        enable_colbert = bool(getattr(qdrant_cfg, "enable_colbert", False))
+        sparse_name = dense_name if enable_sparse else None
+        colbert_name = dense_name if enable_colbert else None
+
+    if dense_name not in profiles:
+        raise ValueError(
+            f"Embedding plan dense profile '{dense_name}' not defined in {profiles_path}"
+        )
+    if sparse_name and sparse_name not in profiles:
+        raise ValueError(
+            f"Embedding plan sparse profile '{sparse_name}' not defined in {profiles_path}"
+        )
+    if colbert_name and colbert_name not in profiles:
+        raise ValueError(
+            f"Embedding plan colbert profile '{colbert_name}' not defined in {profiles_path}"
+        )
+
+    dense_role = EmbeddingRolePlan(
+        role="dense",
+        profile_name=dense_name,
+        profile=profiles[dense_name],
+        enabled=True,
+    )
+    sparse_role = (
+        EmbeddingRolePlan(
+            role="sparse",
+            profile_name=sparse_name,
+            profile=profiles[sparse_name],
+            enabled=True,
+        )
+        if sparse_name
+        else None
+    )
+    colbert_role = (
+        EmbeddingRolePlan(
+            role="colbert",
+            profile_name=colbert_name,
+            profile=profiles[colbert_name],
+            enabled=True,
+        )
+        if colbert_name
+        else None
+    )
+
+    return EmbeddingPlan(dense=dense_role, sparse=sparse_role, colbert=colbert_role)
 
 
 def validate_config_at_startup(config: Config, settings: Settings) -> None:
@@ -1514,14 +1997,19 @@ def _resolve_namespace_suffix(
     profile_name: Optional[str],
     profile: Optional[EmbeddingProfileDefinition],
     mode: str,
+    *,
+    embedding_version: Optional[str] = None,
 ) -> Optional[str]:
     normalized = (mode or "profile").lower()
     if normalized in {"", "none", "disabled"}:
         return None
     if normalized == "profile":
         return profile_name
-    if normalized == "version" and profile:
-        return profile.version or profile.model_id
+    if normalized == "version":
+        if embedding_version:
+            return embedding_version
+        if profile:
+            return profile.version or profile.model_id
     if normalized == "model" and profile:
         return profile.model_id
     return None

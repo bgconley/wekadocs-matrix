@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: mcp_app.py
+# =============================================================================
 """
 Query Service for MCP Server
 Integrates hybrid search, ranking, and response building.
@@ -17,7 +21,7 @@ from src.providers.factory import ProviderFactory
 from src.providers.rerank.base import RerankProvider
 from src.providers.tokenizer_service import TokenizerService
 from src.query.context_assembly import ContextAssembler
-from src.query.hybrid_retrieval import ChunkResult, HybridRetriever
+from src.query.hybrid_retrieval import HybridRetriever
 from src.query.hybrid_search import HybridSearchEngine, QdrantVectorStore, SearchResult
 from src.query.planner import QueryPlanner
 from src.query.ranking import (  # Ranker bypassed - hybrid_retrieval handles ranking
@@ -29,8 +33,9 @@ from src.query.response_builder import (
     Verbosity,
     build_response,
 )
+from src.query.retrieval_types import ChunkResult
 from src.query.session_tracker import SessionTracker
-from src.shared.config import get_config, get_embedding_settings
+from src.shared.config import get_config, get_embedding_plan, get_embedding_settings
 from src.shared.connections import get_connection_manager
 from src.shared.observability import get_logger
 from src.shared.observability.metrics import (
@@ -67,6 +72,7 @@ class QueryService:
 
     def __init__(self):
         self.config = get_config()
+        self.embedding_plan = get_embedding_plan()
         self.embedding_settings = get_embedding_settings()
         self._embedder: Optional[EmbeddingProvider] = None
         self._reranker: Optional[RerankProvider] = None  # Phase 7C: Reranker cache
@@ -123,7 +129,9 @@ class QueryService:
 
             # Phase 7C: Use provider factory for ENV-based selection / profile overrides
             factory = ProviderFactory()
-            self._embedder = factory.create_embedding_provider(settings=settings)
+            self._embedder = factory.create_embedding_provider_for_role(
+                self.embedding_plan.dense
+            )
 
             # Validate dimensions match configuration
             if self._embedder.dims != expected_dims:
@@ -282,6 +290,7 @@ class QueryService:
         *,
         fetch_k: int,
         filters: Optional[Dict[str, Any]] = None,
+        expand: bool = True,
     ) -> Tuple[List[ChunkResult], Dict[str, Any]]:
         """
         Lightweight helper that returns raw ChunkResult objects for section-level tools.
@@ -289,21 +298,29 @@ class QueryService:
         Note: Applies the same query rewriting as search() for consistency.
         MCP clients often generate keyword-heavy queries that need reformulation.
         """
+        original_query = query
         # Apply query rewriting for better cross-encoder performance
         query, was_rewritten = self._rewrite_keyword_query(query)
         if was_rewritten:
             logger.info(
                 "search_sections_light: query rewritten",
-                original=query[:100],
+                original=original_query[:100],
             )
 
         retriever = self._get_7e_retriever()
+        # Dual-query strategy: reformulated query for dense/reranker,
+        # original keywords for BM25/sparse (lexical signals prefer raw keywords)
         chunks, metrics = retriever.retrieve(
             query=query,
+            query_original=original_query if was_rewritten else None,
             top_k=fetch_k,
             filters=filters or {},
-            expand=True,
+            expand=expand,
         )
+        metrics["query_rewrite_applied"] = was_rewritten
+        metrics["query_rewrite_original"] = original_query
+        metrics["query_rewrite_result"] = query
+        metrics["query_rewrite_reason"] = "keyword_stuffed" if was_rewritten else None
 
         # Enforce fetch_k as hard limit (same as search())
         if len(chunks) > fetch_k:
@@ -610,17 +627,112 @@ class QueryService:
             function_ratio=round(function_ratio, 2),
         )
 
-        # Build a natural language question from keywords
-        # Strategy: Wrap in an explanatory question template
-        rewritten = f"Explain {query}. How does this work and what is the technical architecture?"
+        # Try LLM-based reformulation first, fall back to intent-aware templates
+        rewritten = self._llm_reformulate(query)
+        method = "llm" if rewritten else "heuristic_fallback"
+
+        if not rewritten:
+            rewritten = self._heuristic_reformulate(query, words)
 
         logger.info(
             "query_rewritten",
             original=query[:100],
             rewritten=rewritten[:150],
+            method=method,
         )
 
         return rewritten, True
+
+    def _llm_reformulate(self, query: str) -> Optional[str]:
+        """Reformulate a query using Qwen2.5-1.5B-Instruct via the unified gateway.
+
+        Returns None if the LLM is unavailable or the call fails, allowing
+        the caller to fall back to heuristic templates.
+        """
+        import os
+
+        gateway_url = os.getenv("EMBEDDING_BASE_URL")
+        if not gateway_url:
+            return None
+
+        import httpx
+
+        try:
+            client = httpx.Client(base_url=gateway_url, timeout=5.0)
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a query reformulator for a technical documentation "
+                                "search system about WEKA (a distributed file system). "
+                                "Rewrite the user's input as a clear, natural language question. "
+                                "Output ONLY the rewritten question, nothing else. "
+                                "If the input is already a well-formed question, return it unchanged."
+                            ),
+                        },
+                        {"role": "user", "content": query},
+                    ],
+                    "max_tokens": 100,
+                    "temperature": 0.0,
+                },
+            )
+            client.close()
+            if response.status_code == 200:
+                data = response.json()
+                content = (
+                    data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                )
+                reformulated = content.strip()
+                if reformulated and len(reformulated) > 5:
+                    return reformulated
+        except Exception as exc:
+            logger.debug("llm_reformulate_failed", error=str(exc))
+        return None
+
+    @staticmethod
+    def _heuristic_reformulate(query: str, words: list[str]) -> str:
+        """Intent-aware heuristic templates for query reformulation fallback."""
+        lowered = query.lower()
+
+        # Detect intent from keywords
+        config_keywords = {
+            "config",
+            "setup",
+            "configure",
+            "setting",
+            "enable",
+            "disable",
+            "install",
+        }
+        error_keywords = {
+            "error",
+            "fail",
+            "issue",
+            "troubleshoot",
+            "fix",
+            "debug",
+            "problem",
+        }
+        procedure_keywords = {
+            "how to",
+            "steps",
+            "procedure",
+            "upgrade",
+            "migrate",
+            "deploy",
+        }
+
+        if any(kw in lowered for kw in error_keywords):
+            return f"How do I troubleshoot {query} in WEKA?"
+        if any(kw in lowered for kw in procedure_keywords):
+            return f"What are the steps to {query} in WEKA?"
+        if any(kw in lowered for kw in config_keywords):
+            return f"How do I configure {query} in WEKA?"
+        return f"Explain {query} in the context of WEKA documentation."
 
     def search(
         self,
@@ -628,7 +740,6 @@ class QueryService:
         top_k: int = 20,
         filters: Optional[Dict[str, Any]] = None,
         expand_graph: bool = True,
-        find_paths: bool = False,
         verbosity: str = "graph",
         session_id: Optional[str] = None,  # Task 7C.8: Multi-turn session ID
         turn: Optional[int] = None,  # Task 7C.8: Turn number within session
@@ -641,7 +752,6 @@ class QueryService:
             top_k: Number of results to return
             filters: Optional filters for vector search
             expand_graph: Whether to expand from seeds via graph
-            find_paths: Whether to find connecting paths
             verbosity: Response detail level (full=text only, graph=text+relationships, default=graph)
             session_id: Optional session ID for multi-turn tracking (Task 7C.8)
             turn: Optional turn number within session (Task 7C.8)
@@ -891,7 +1001,6 @@ class QueryService:
                     k=top_k,
                     filters=filters,
                     expand_graph=expand_graph,
-                    find_paths=find_paths,
                     focused_entity_ids=(
                         focused_entity_ids if focused_entity_ids else None
                     ),

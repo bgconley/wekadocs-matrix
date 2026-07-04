@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: build_graph.py, hybrid_retrieval.py
+# =============================================================================
 """
 Phase 7E-4: Metrics Collector
 Comprehensive metrics for ingestion, retrieval, and chunk quality

@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: atomic.py
+# =============================================================================
 # Phase 3: Cross-Document Reference Extraction
 # Implements (Chunk)-[:REFERENCES]->(Document) edge pattern
 # See: /docs/cdx-outputs/2025-11-28-graphrag-architecture-enhancement-plan-v2-CANONICAL.md

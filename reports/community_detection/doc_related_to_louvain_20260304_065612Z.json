@@ -1,0 +1,2516 @@
+{
+  "generated_at": "2026-03-04T06:56:12.589777+00:00",
+  "graph": {
+    "nodes": 262,
+    "edges": 952,
+    "modularity": 0.647397561965963,
+    "algorithm": "louvain_communities (networkx)",
+    "seed": 0,
+    "note": "Edges are :RELATED_TO treated as undirected for community detection."
+  },
+  "communities": [
+    {
+      "community_id": "comm_01",
+      "size": 55,
+      "label": "planning-and-installation/monitor-the-weka-cluster | planning solutions add",
+      "top_categories": [
+        "planning-and-installation",
+        "monitor-the-weka-cluster",
+        "aws-solutions"
+      ],
+      "top_keywords": [
+        "planning",
+        "solutions",
+        "add",
+        "sagemaker",
+        "hyperpod",
+        "local"
+      ],
+      "internal_edges": 163,
+      "density": 0.10976430976430976,
+      "documents": [
+        {
+          "id": "015a5f9125ff4f42f5ba2301b9f4657e08175f61236a87265f45eec4ec03b1ec",
+          "title": "Upgrade WEKA versions",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/upgrading-weka-versions.md"
+        },
+        {
+          "id": "02374c0f667a709883fdff08ff985d443040b26b0fb0bdaabca68e29ee4d9c93",
+          "title": "Deploy Local WEKA Home v3.0 or higher",
+          "doc_tag": "monitor-the-weka-cluster",
+          "doc_category": "monitor-the-weka-cluster",
+          "source_uri": "file:///app/data/ingest/monitor-the-weka-cluster/the-wekaio-support-cloud/local-weka-home-deployment.md"
+        },
+        {
+          "id": "0a0108e511fe664d34ecb1d9932a6adc1e7e9a29da285fd3a76b96b796eaab60",
+          "title": "WEKA Cloud Deployment Manager Web (CDM Web) User Guide",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-cdm-web-user-guide.md"
+        },
+        {
+          "id": "144821f18586e4a58951da3e0f3efd49fbbdb60a08a401a42b7af0183c1e4db9",
+          "title": "WEKA Operator day-2 operations",
+          "doc_tag": "kubernetes",
+          "doc_category": "kubernetes",
+          "source_uri": "file:///app/data/ingest/kubernetes/weka-operator-day-2-operations.md"
+        },
+        {
+          "id": "19b07e802a1d1841cb56697c11fb67ba0bfec7ead9a36617940dce332aa421cc",
+          "title": "Converged WEKA system deployment",
+          "doc_tag": "weka-system-overview",
+          "doc_category": "weka-system-overview",
+          "source_uri": "file:///app/data/ingest/weka-system-overview/about/converged-weka-system-deployment.md"
+        },
+        {
+          "id": "1a7bc320a09ba9f314457b7833f55f1dab9eaf30ae48b258da8d1e1e810d0612",
+          "title": "Update WMS and WSA",
+          "doc_tag": "appendices",
+          "doc_category": "appendices",
+          "source_uri": "file:///app/data/ingest/appendices/update-wms-and-wsa.md"
+        },
+        {
+          "id": "22fcc93f17ca64cd7d5ca3a0d07c5d6f70935d397e314f948e464870816819c9",
+          "title": "WEKA project description",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-gcp/weka-project-description.md"
+        },
+        {
+          "id": "24038ff5959fc2f45ec02fea934bce516df14715e73b32e5c5949812c903984e",
+          "title": "Multi-tenancy in WEKA",
+          "doc_tag": "kubernetes",
+          "doc_category": "kubernetes",
+          "source_uri": "file:///app/data/ingest/kubernetes/multi-tenancy-in-weka.md"
+        },
+        {
+          "id": "2b485cefc54a3a1274bce65248a75ea1e2cf6cf4d706ff1ef7af238225529768",
+          "title": "Get support for your WEKA system",
+          "doc_tag": "support",
+          "doc_category": "support",
+          "source_uri": "file:///app/data/ingest/support/getting-support-for-your-weka-system.md"
+        },
+        {
+          "id": "32ce3213a5ebc95881b2749e6c4d2505ad81786046929ae7f0dbae018a8dbd4c",
+          "title": "Local WEKA Home overview",
+          "doc_tag": "monitor-the-weka-cluster",
+          "doc_category": "monitor-the-weka-cluster",
+          "source_uri": "file:///app/data/ingest/monitor-the-weka-cluster/the-wekaio-support-cloud/local-weka-home-overview.md"
+        },
+        {
+          "id": "36630ad2a4f69d563c9e0f957e70a62bfab00ab2a2dae6c4b1978242428ed86d",
+          "title": "Enforce security and compliance",
+          "doc_tag": "monitor-the-weka-cluster",
+          "doc_category": "monitor-the-weka-cluster",
+          "source_uri": "file:///app/data/ingest/monitor-the-weka-cluster/the-wekaio-support-cloud/enforce-security-and-compliance.md"
+        },
+        {
+          "id": "446a972b50c4006bd8f7b39cdc8de12009e3fd825b8e11b2792c75c5817dd509",
+          "title": "WEKA Cloud Deployment Manager Local (CDM Local) User Guide",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-cdm-local-user-manager.md"
+        },
+        {
+          "id": "465de1902549934e889098fc46a76ccd31b2e9cd6443b6f0af2ea41cfb9206ef",
+          "title": "WEKA networking",
+          "doc_tag": "weka-system-overview",
+          "doc_category": "weka-system-overview",
+          "source_uri": "file:///app/data/ingest/weka-system-overview/networking-in-wekaio.md"
+        },
+        {
+          "id": "4706f3ca9d1c0cc64042fba34e8b9c6fc23571a71dc2d74ebb7b0cdfb1e55752",
+          "title": "Add WEKA to an existing SageMaker HyperPod cluster",
+          "doc_tag": "aws-solutions",
+          "doc_category": "aws-solutions",
+          "source_uri": "file:///app/data/ingest/aws-solutions/sagemaker-hyperpod-and-weka-integrations/add-weka-to-an-existing-sagemaker-hyperpod-cluster.md"
+        },
+        {
+          "id": "49c44c45ea518017dd45dd1226377e7d9bc906c178b6de21ebf8a746cd9cdd2b",
+          "title": "SageMaker HyperPod and WEKA Integrations",
+          "doc_tag": "aws-solutions",
+          "doc_category": "aws-solutions",
+          "source_uri": "file:///app/data/ingest/aws-solutions/sagemaker-hyperpod-and-weka-integrations/README.md"
+        },
+        {
+          "id": "4b034ea678ae8d3df1d1ac649283f42176994d75f8be5a02ba49f045169a3977",
+          "title": "Manage the system using the WEKA CLI",
+          "doc_tag": "getting-started-with-weka",
+          "doc_category": "getting-started-with-weka",
+          "source_uri": "file:///app/data/ingest/getting-started-with-weka/manage-the-system-using-weka-cli/README.md"
+        },
+        {
+          "id": "4b4820ddfd83035b501fe982f9709294a8894ec090ea02bc8a82d66c95a9f3b0",
+          "title": "Add WEKA to an existing Amazon SageMaker HyperPod cluster",
+          "doc_tag": "aws-solutions",
+          "doc_category": "aws-solutions",
+          "source_uri": "file:///app/data/ingest/aws-solutions/amazon-sagemaker-hyperpod-and-weka-integrations/add-weka-to-an-existing-amazon-sagemaker-hyperpod-cluster.md"
+        },
+        {
+          "id": "4dba17eb7f30c1ba2c400eedc20b986d0cb6aae0fd5115949dfd13e7185d1676",
+          "title": "Manually configure the WEKA cluster using the resources generator",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/bare-metal/manually-configure-the-weka-cluster-using-the-resource-generator/README.md"
+        },
+        {
+          "id": "4e0803c68e68c1b35c580dd64073b56a53df2d875071ddf94031a0f42ac0457b",
+          "title": "Add clients to a WEKA cluster on AWS",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-the-cloud-formation/adding-clients.md"
+        },
+        {
+          "id": "4e6a558a33d423117077d325fac378ac1eeacea6b738954045d038bfce4d86ea",
+          "title": "WEKA v4.4 documentation",
+          "doc_tag": "README",
+          "doc_category": null,
+          "source_uri": "file:///app/data/ingest/README.md"
+        },
+        {
+          "id": "5587731454cda919c1bb9eb576f3ca91d5daab8fdd0cabe912758573061adef9",
+          "title": "AWS ParallelCluster and WEKA Integration",
+          "doc_tag": "aws-solutions",
+          "doc_category": "aws-solutions",
+          "source_uri": "file:///app/data/ingest/aws-solutions/aws-parallelcluster-and-weka-integration.md"
+        },
+        {
+          "id": "5c5ccbbd047ed7e847f9c896f27597e4728bef39749eefefc7d2a9e9eb024992",
+          "title": "Configure the WEKA cluster using the WEKA Configurator",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/bare-metal/configure-the-weka-cluster-using-the-weka-configurator.md"
+        },
+        {
+          "id": "5e8d52fb2cc378b8b984229cca4d9e01be9661f170dd2335bb6f339be9ef7f95",
+          "title": "WEKA Home - The WEKA support cloud",
+          "doc_tag": "monitor-the-weka-cluster",
+          "doc_category": "monitor-the-weka-cluster",
+          "source_uri": "file:///app/data/ingest/monitor-the-weka-cluster/the-wekaio-support-cloud/README.md"
+        },
+        {
+          "id": "5ff0767e214fecb5fc56581586f8a30f193cf8d53e86118bd2d91f8a0177eb79",
+          "title": "WEKA cluster auto-scaling in AWS",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-terraform/weka-cluster-auto-scaling-in-aws.md"
+        },
+        {
+          "id": "68f550aace2bba80c41b5d4c2853502b9457937f84e18eabe4d8ba66bafc7c41",
+          "title": "Add clients to a WEKA cluster on Azure",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-azure/add-clients.md"
+        },
+        {
+          "id": "6fbfad44d9a531a66e61fd0879e9128d32121d0e01029ab9dd46cbac4c09a09b",
+          "title": "Deploy a new Amazon SageMaker HyperPod cluster with WEKA",
+          "doc_tag": "aws-solutions",
+          "doc_category": "aws-solutions",
+          "source_uri": "file:///app/data/ingest/aws-solutions/amazon-sagemaker-hyperpod-and-weka-integrations/deploy-a-new-amazon-sagemaker-hyperpod-cluster-with-weka.md"
+        },
+        {
+          "id": "72b9a809f18a8c1d290bdb11ccb29d149d448fc5d1fdbfbb5799fcd9a78110f9",
+          "title": "Add SELinux support",
+          "doc_tag": "appendices",
+          "doc_category": "appendices",
+          "source_uri": "file:///app/data/ingest/appendices/weka-csi-plugin/add-selinux-support.md"
+        },
+        {
+          "id": "77ad79dc3456bc8dbe727d1402e63fcfa1fe326ba7875565dd18c8900d65f50a",
+          "title": "Add a backend server",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/expanding-and-shrinking-cluster-resources/add-a-backend-server.md"
+        },
+        {
+          "id": "7e9d710190c086e4b463e5fcdb0aa4943bbf9dd59ae1d3c590c9ea6168b35a2c",
+          "title": "VLAN tagging in the WEKA system",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/bare-metal/manually-configure-the-weka-cluster-using-the-resource-generator/vlan-tagging-in-the-weka-system.md"
+        },
+        {
+          "id": "7efb7711ca4adf54ad08a9f4dc8d6fd2c9e9b4d9db423ff3ec956e18024a26de",
+          "title": "Manage WEKA drivers",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/manage-weka-drivers.md"
+        },
+        {
+          "id": "81a0049245541e6b3386c5c3c56ccf6f9b54a7c97ec6c5929b41cbb21d8763c4",
+          "title": "Install the WEKA cluster using the WMS with WSA",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/bare-metal/install-the-weka-cluster-using-the-wms-with-wsa.md"
+        },
+        {
+          "id": "81f7c738d552fef07c1aed5a53ed07d7c4ae4a9174e10617a74154b300c85a60",
+          "title": "Manually install OS and WEKA on servers",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/bare-metal/manually-install-os-and-weka-on-servers.md"
+        },
+        {
+          "id": "85778ae83f24fe364bc8a05f9f68fab3b539283912d9bdf326824d6da870ff65",
+          "title": "WEKA performance tests",
+          "doc_tag": "performance",
+          "doc_category": "performance",
+          "source_uri": "file:///app/data/ingest/performance/testing-weka-system-performance/README.md"
+        },
+        {
+          "id": "8b30d966699e6f4804114d77f153139d5ad910d847d5ed0c3184b0225526ad41",
+          "title": "Redundancy optimization in WEKA",
+          "doc_tag": "weka-system-overview",
+          "doc_category": "weka-system-overview",
+          "source_uri": "file:///app/data/ingest/weka-system-overview/about/optimize-redundancy-in-weka-deployments.md"
+        },
+        {
+          "id": "8ee4ac557b5a29b0d1b5a5e4b64971aa3c241e9237bde5fc122f2fd9ea7b29f3",
+          "title": "WEKA system functionality features",
+          "doc_tag": "weka-system-overview",
+          "doc_category": "weka-system-overview",
+          "source_uri": "file:///app/data/ingest/weka-system-overview/about/weka-system-functionality-features.md"
+        },
+        {
+          "id": "8fb882f4af6a5b3363d19cb98057c677d1a1ff031d9ba254d4e0fbb891818ecf",
+          "title": "Azure CycleCloud for SLURM and WEKA Integration",
+          "doc_tag": "azure-solutions",
+          "doc_category": "azure-solutions",
+          "source_uri": "file:///app/data/ingest/azure-solutions/azure-cyclecloud-for-slurm-and-weka-integration.md"
+        },
+        {
+          "id": "a022e478b1cb70f5dd664cc2749d7abe0d359aeb90eeac3c6ec045a74a176a40",
+          "title": "Deploy Local WEKA Home v2.x",
+          "doc_tag": "monitor-the-weka-cluster",
+          "doc_category": "monitor-the-weka-cluster",
+          "source_uri": "file:///app/data/ingest/monitor-the-weka-cluster/the-wekaio-support-cloud/deploy-local-weka-home-v2.x.md"
+        },
+        {
+          "id": "a07f87a4741aec15a9be5b115b499f93b2727d471fed9eaa99cf9ead18398db4",
+          "title": "Add clients to an on-premises WEKA cluster",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/bare-metal/adding-clients-bare-metal.md"
+        },
+        {
+          "id": "a534cf863ac852c9758d262c4a75f6827c866bf9192abd9e3801b8e5c7a71b0a",
+          "title": "WEKA cluster installation on bare metal servers",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/bare-metal/README.md"
+        },
+        {
+          "id": "aa27e6674486d311e943b2b301542f864d121f7f48a55ec13471e937ae57e3a6",
+          "title": "Broadcom NIC requirements for WEKA system",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/bare-metal/setting-up-the-hosts/broadcom-adapter-setup-for-weka-system.md"
+        },
+        {
+          "id": "aaa54974a4e1389e826cd3ad41ae123d7666033f2d219a6afbeb8551ed8ef059",
+          "title": "WEKA installation on OCI",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-oci.md"
+        },
+        {
+          "id": "b6695fae8da29ecdbe98c29dbfcd7a77301d1161f5e242530d05b30b9c2de3f6",
+          "title": "WEKA installation on GCP",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-gcp/README.md"
+        },
+        {
+          "id": "b77077cd6da14939e3a1b93e37585878da5540ebf27519ef9cf0e6c9fc2f3818",
+          "title": "Plan the WEKA system hardware requirements",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/bare-metal/planning-a-weka-system-installation.md"
+        },
+        {
+          "id": "bf2cfb07252b3b4b23a6d25fa3a0dcc61c2b9a564bf9df3accea90e6fdc3d6dc",
+          "title": "Deploy a new SageMaker HyperPod cluster with WEKA",
+          "doc_tag": "aws-solutions",
+          "doc_category": "aws-solutions",
+          "source_uri": "file:///app/data/ingest/aws-solutions/sagemaker-hyperpod-and-weka-integrations/deploy-a-new-sagemaker-hyperpod-cluster-with-weka.md"
+        },
+        {
+          "id": "c8e7d22102fd19cae8dd13e99e56cd43f5d8c1866587085ef9bd2eededff1695",
+          "title": "WEKA containers architecture overview",
+          "doc_tag": "weka-system-overview",
+          "doc_category": "weka-system-overview",
+          "source_uri": "file:///app/data/ingest/weka-system-overview/weka-containers-architecture-overview.md"
+        },
+        {
+          "id": "cbaa5961df9e6216e996aabf67ccb0c5e6560f7596f05af0962aaa2704cb5bd6",
+          "title": "WEKA security overview",
+          "doc_tag": "security",
+          "doc_category": "security",
+          "source_uri": "file:///app/data/ingest/security/security.md"
+        },
+        {
+          "id": "cdd4cbbbd0a2c421dd9715e30e8ccef413f046004b43b8f8a5e39b344d2b370d",
+          "title": "Manually prepare the system for WEKA configuration",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/bare-metal/setting-up-the-hosts/README.md"
+        },
+        {
+          "id": "cf1f50c4e563934ea51afff690ed41b41df846f04312a2dd8f80abc570dfd88d",
+          "title": "Deploy monitoring tools using the WEKA Management Station (WMS)",
+          "doc_tag": "monitor-the-weka-cluster",
+          "doc_category": "monitor-the-weka-cluster",
+          "source_uri": "file:///app/data/ingest/monitor-the-weka-cluster/deploy-monitoring-tools-using-the-weka-management-station-wms.md"
+        },
+        {
+          "id": "d01c701bfa59bcfb6a7253287a704cc9bde39a7ada8e636e1df6973be2605aca",
+          "title": "Amazon SageMaker HyperPod and WEKA Integrations",
+          "doc_tag": "aws-solutions",
+          "doc_category": "aws-solutions",
+          "source_uri": "file:///app/data/ingest/aws-solutions/amazon-sagemaker-hyperpod-and-weka-integrations/README.md"
+        },
+        {
+          "id": "dc432ee5e95caa145ee1fa46087717aa37cee5fd1901688fa73fbb0be73bc2b5",
+          "title": "Configure and use AWS CLI with WEKA S3 storage",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/configure-and-use-aws-cli-with-weka-s3-storage.md"
+        },
+        {
+          "id": "dc891c89e783fe5664afab03d11d5f1c66b4d2fa8c5cd904673f590de785f1aa",
+          "title": "Set up WEKAmon for external monitoring",
+          "doc_tag": "monitor-the-weka-cluster",
+          "doc_category": "monitor-the-weka-cluster",
+          "source_uri": "file:///app/data/ingest/monitor-the-weka-cluster/external-monitoring.md"
+        },
+        {
+          "id": "e7c8543481447e73443731541b3621197afebb7c058c22ac9fc78af49b71122c",
+          "title": "Install the WEKA cluster using the WSA",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/bare-metal/install-the-weka-cluster-using-the-wsa.md"
+        },
+        {
+          "id": "e8f95cd561444875a41c6966f409e23014ebef2b8fdc685a6d54ffd6e52dbc46",
+          "title": "Obtain the WEKA installation packages",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/bare-metal/obtaining-the-weka-install-file.md"
+        },
+        {
+          "id": "f89bf80674f441090e02f80d3b8c61b9317e6746c5a6aca3881a60586fd0de83",
+          "title": "Add clients to a WEKA cluster on GCP",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-gcp/add-clients.md"
+        },
+        {
+          "id": "fc133258fd75b54feeb3b6b082181c50266375c9e561d0bc0146611631ec285d",
+          "title": "WEKA client and mount modes",
+          "doc_tag": "weka-system-overview",
+          "doc_category": "weka-system-overview",
+          "source_uri": "file:///app/data/ingest/weka-system-overview/weka-client-and-mount-modes.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_02",
+      "size": 32,
+      "label": "weka-filesystems-and-object-stores/security | filesystems stores object",
+      "top_categories": [
+        "weka-filesystems-and-object-stores",
+        "security",
+        "support"
+      ],
+      "top_keywords": [
+        "filesystems",
+        "stores",
+        "object",
+        "data",
+        "mount",
+        "tiered"
+      ],
+      "internal_edges": 73,
+      "density": 0.14717741935483872,
+      "documents": [
+        {
+          "id": "0f1ba202e0acdddcd737e800a4b00d60449aa53c6f5c657036b6365770b957f8",
+          "title": "Protocols debug level management",
+          "doc_tag": "support",
+          "doc_category": "support",
+          "source_uri": "file:///app/data/ingest/support/diagnostics-management/protocols-debug-level-management/README.md"
+        },
+        {
+          "id": "1527574cb54bc78a59a3516689c0bcdcf4485b1762e3d31d87a5ec44f859680d",
+          "title": "Manage login banner",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/security/manage-the-login-banner/README.md"
+        },
+        {
+          "id": "37fc8be0d9366b06a91e17fd9d534c54e61a36602a38b7263e4564c06b4265f1",
+          "title": "Manage filesystems",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/managing-filesystems/README.md"
+        },
+        {
+          "id": "3ca49af0005ea01a3c42ee4fdd9c5e7a8a9773a6dd4ccf8759601ae38600950f",
+          "title": "Manage filesystem groups",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/managing-filesystem-groups/README.md"
+        },
+        {
+          "id": "3f801aa01472014e85b5675734569d7e35c9466bd156910f2eebdeb0bc6f30a9",
+          "title": "Manual fetch and release of data",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/tiering/pre-fetching-from-object-store.md"
+        },
+        {
+          "id": "4cea7664a6378e5ea551a7b13b8820dd333745b2cefa1e4ddc9cb2ac12163c34",
+          "title": "Manage KMS",
+          "doc_tag": "security",
+          "doc_category": "security",
+          "source_uri": "file:///app/data/ingest/security/kms-management/README.md"
+        },
+        {
+          "id": "5028e70eb6a11eee5e308799be3928695ce9d342631c153964772dd95fb180ea",
+          "title": "Manage token expiration",
+          "doc_tag": "security",
+          "doc_category": "security",
+          "source_uri": "file:///app/data/ingest/security/manage-token-expiration.md"
+        },
+        {
+          "id": "7383646b1146d023249873a72d3e86f417d011eaac71bc528408c136185c67cd",
+          "title": "Data management in tiered filesystems",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/tiering/data-management-in-tiered-filesystems.md"
+        },
+        {
+          "id": "84e5c63a91c42a3069a6b39ef53e5bad8dc6fc1888816d0593e2bc96017eee01",
+          "title": "Diagnostics management",
+          "doc_tag": "support",
+          "doc_category": "support",
+          "source_uri": "file:///app/data/ingest/support/diagnostics-management/README.md"
+        },
+        {
+          "id": "86d38724736a4041fe458f430f6c33274b4fa1537e054fb4dfd69c8c827be7de",
+          "title": "Manage object stores",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/managing-object-stores/README.md"
+        },
+        {
+          "id": "8cd0d1ebd947a42a4bb9107ac7df95eaa9c11df12930113c1297d794f850a4df",
+          "title": "Cluster capacity and redundancy management",
+          "doc_tag": "weka-system-overview",
+          "doc_category": "weka-system-overview",
+          "source_uri": "file:///app/data/ingest/weka-system-overview/cluster-capacity-and-redundancy-management.md"
+        },
+        {
+          "id": "91e3e5283e68cff1b00752bd27e813fbe5734cff5a83bae10b64a6feef82f9ef",
+          "title": "Mount filesystems from multiple clusters on a single client",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/mounting-filesystems/mount-filesystems-from-multiple-clusters-on-a-single-client.md"
+        },
+        {
+          "id": "96a54ed2b48018518b395feb461016a0e90dd685525866cfc71aa2f5b011eb87",
+          "title": "Advanced data lifecycle management",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/tiering/README.md"
+        },
+        {
+          "id": "96bededfe27d8149a733327413a76e8062f3202cba775fb5fede1cd578ef7082",
+          "title": "Optimize support and data management",
+          "doc_tag": "monitor-the-weka-cluster",
+          "doc_category": "monitor-the-weka-cluster",
+          "source_uri": "file:///app/data/ingest/monitor-the-weka-cluster/the-wekaio-support-cloud/optimize-support-and-data-management.md"
+        },
+        {
+          "id": "a320925922ecd7e42a189dfe8b10689aca54c0b6cb8a803f67c65813464a40e0",
+          "title": "Data lifecycle management",
+          "doc_tag": "weka-system-overview",
+          "doc_category": "weka-system-overview",
+          "source_uri": "file:///app/data/ingest/weka-system-overview/data-storage.md"
+        },
+        {
+          "id": "a62bbff416ba40546152aa36f3426da69ba82ba873faecc7cc9dd723147d172a",
+          "title": "User management",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/user-management/README.md"
+        },
+        {
+          "id": "af42cd5af4398a55bd20fafb9cf232321e895c2fc412f784d9d5d16ac7bacf6a",
+          "title": "Manage Cross-Origin Resource Sharing",
+          "doc_tag": "security",
+          "doc_category": "security",
+          "source_uri": "file:///app/data/ingest/security/manage-cross-origin-resource-sharing.md"
+        },
+        {
+          "id": "b1295d37f8f8b67040f6d9c398be8500336a514933d42cd412123f080a6c3341",
+          "title": "Manage login banner",
+          "doc_tag": "security",
+          "doc_category": "security",
+          "source_uri": "file:///app/data/ingest/security/manage-the-login-banner.md"
+        },
+        {
+          "id": "b363df2382d77cda1d358b3b376cb5a37917c73efd3101cbee320a138444cf8b",
+          "title": "SSD capacity management",
+          "doc_tag": "weka-system-overview",
+          "doc_category": "weka-system-overview",
+          "source_uri": "file:///app/data/ingest/weka-system-overview/ssd-capacity-management.md"
+        },
+        {
+          "id": "b3cd77223f853c489c2985f7ded5b9206575e72515f520845dc0a7d317d23ab6",
+          "title": "Transition between tiered and SSD-only filesystems",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/tiering/transition-between-tiered-and-ssd-only-filesystems.md"
+        },
+        {
+          "id": "b5655c09dcc6989825c493f947d5bb701350cdb9169d7845be2ad25b40600dbb",
+          "title": "Diagnostics data management",
+          "doc_tag": "support",
+          "doc_category": "support",
+          "source_uri": "file:///app/data/ingest/support/diagnostics-management/diagnostics-utility.md"
+        },
+        {
+          "id": "ba8d5d7e6eab318ca108633d66b1c4554d1b3ffca3b5c2de7c6e4121c28b91c4",
+          "title": "Mount filesystems from Single Client to Multiple Clusters (SCMC)",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/mounting-filesystems/mount-fs-from-scmc.md"
+        },
+        {
+          "id": "c44b9114517568f373cbb20612d94f3d74a827e910a3877aebbe9fbc69f662e4",
+          "title": "Manage alerts and integrations",
+          "doc_tag": "monitor-the-weka-cluster",
+          "doc_category": "monitor-the-weka-cluster",
+          "source_uri": "file:///app/data/ingest/monitor-the-weka-cluster/the-wekaio-support-cloud/manage-alerts-and-integrations.md"
+        },
+        {
+          "id": "c7dab1fbd0c9d82bf6bad07c7a43ab3c8e4cd60ce5b786ac37f6a241590e167b",
+          "title": "Quota management",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/quota-management/README.md"
+        },
+        {
+          "id": "c9f0021dcafaf10402bd0e00ecaa898748b3b104443d4b5b758277f8476100bc",
+          "title": "Filesystems, object stores, and filesystem groups",
+          "doc_tag": "weka-system-overview",
+          "doc_category": "weka-system-overview",
+          "source_uri": "file:///app/data/ingest/weka-system-overview/filesystems.md"
+        },
+        {
+          "id": "d19b1df15ee59192104cc518f9f72eef5c9d3df29a8607265c6d3e104965c39e",
+          "title": "Mount authentication for organization filesystems",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/organizations/organizations-2.md"
+        },
+        {
+          "id": "d7bf8f816f0229f63013147cf0168a5955244e1b97b9ecf5f9f1000eeaaa38df",
+          "title": "Advanced time-based policies for data storage location",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/tiering/advanced-time-based-policies-for-data-storage-location.md"
+        },
+        {
+          "id": "dbf809175f9c1d414917c2a756cf622f9e72f1cfbe1ccadd460562ace2dd46bd",
+          "title": "Manage TLS certificates",
+          "doc_tag": "security",
+          "doc_category": "security",
+          "source_uri": "file:///app/data/ingest/security/tls-certificate-management/README.md"
+        },
+        {
+          "id": "dcf84eb73c004046c7f36b58a59e7071c1aec08eb7873328a261d6d711d3f6ce",
+          "title": "Mount filesystems",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/mounting-filesystems/README.md"
+        },
+        {
+          "id": "df667c213aaa8400c3770dfe1400b7474c4224f857e18a2be3655df7e4239798",
+          "title": "Manage account lockout threshold policy",
+          "doc_tag": "security",
+          "doc_category": "security",
+          "source_uri": "file:///app/data/ingest/security/account-lockout-threshold-policy-management.md"
+        },
+        {
+          "id": "e406e6d3f2c36bd5193c02b0974a407b9431cbd283d484cde19e0bd29fba7f3e",
+          "title": "Organizations management",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/organizations/README.md"
+        },
+        {
+          "id": "f67bec02270c317d263820746862c4c15435f2fd425247aff62caa494a2f3a82",
+          "title": "Traces management",
+          "doc_tag": "support",
+          "doc_category": "support",
+          "source_uri": "file:///app/data/ingest/support/diagnostics-management/traces-management/README.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_03",
+      "size": 28,
+      "label": "weka-filesystems-and-object-stores/operation-guide | object stores filesystems",
+      "top_categories": [
+        "weka-filesystems-and-object-stores",
+        "operation-guide",
+        "security"
+      ],
+      "top_keywords": [
+        "object",
+        "stores",
+        "filesystems",
+        "policies",
+        "protocols",
+        "tasks"
+      ],
+      "internal_edges": 102,
+      "density": 0.2698412698412698,
+      "documents": [
+        {
+          "id": "0ce6b8d560e2ca3355d42b72895f6fdc9473e09b94e5bc56f14a4acdaf20a1fe",
+          "title": "Snapshots",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/snapshots/README.md"
+        },
+        {
+          "id": "1fc305c05001903160207bfe4c71fc2f4a9cf4ef477bbf8b921b72284ac73480",
+          "title": "Manage filesystem groups using the CLI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/managing-filesystem-groups/manage-filesystem-groups-using-the-cli.md"
+        },
+        {
+          "id": "3e251d27d4639ae179ad408cbb92c9d333116631a09e3246ee929cbeafb7389e",
+          "title": "Configure audit webhook using the CLI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/audit-s3-apis/audit-s3-apis.md"
+        },
+        {
+          "id": "3eb489566625814ba19b810eda277b1a4e5596c3f27fb47cef8c70f48b623e7d",
+          "title": "Manage traces using the CLI",
+          "doc_tag": "support",
+          "doc_category": "support",
+          "source_uri": "file:///app/data/ingest/support/diagnostics-management/traces-management/manage-traces-using-the-cli.md"
+        },
+        {
+          "id": "42d4828293f6f13a0955c693bf8163d1e4022c979bb0a1ba12247227087fa5c1",
+          "title": "Snapshot policies",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/snapshot-policies/README.md"
+        },
+        {
+          "id": "44a70b90961c632133ee1c30f5bbd55a5922cbf8884702bef1f5aac29db7aeb4",
+          "title": "Manage TLS certificates using CLI",
+          "doc_tag": "security",
+          "doc_category": "security",
+          "source_uri": "file:///app/data/ingest/security/tls-certificate-management/manage-the-tls-certificate-using-the-cli.md"
+        },
+        {
+          "id": "459779df46446ac5ed6821274775f865257f27564a1cf9d6abd96928395d726c",
+          "title": "Manage CIDR-based security policies",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/security/manage-cidr-based-security-policies.md"
+        },
+        {
+          "id": "50229b703dd80cdbb2fbd96a9ab8a1fc42fef78b6b9a26be709d7b28e33be8e7",
+          "title": "Manage background tasks using the CLI",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/background-tasks/manage-background-tasks-using-the-cli.md"
+        },
+        {
+          "id": "63e5503a10849571580b5b542d2bf90d9cb2536071b4c838aae6fcaf91b6c695",
+          "title": "Background tasks",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/background-tasks/README.md"
+        },
+        {
+          "id": "697e9ccee5f6f3ceb44d51d0ea8ad790e40a68297e1a26bad4d3bd0269326459",
+          "title": "Manage object stores using the CLI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/managing-object-stores/managing-object-stores-1.md"
+        },
+        {
+          "id": "6aa5896c2d8a005dc5c0038d28a4c8ecc415d440a1f720e71c2463b227e968cd",
+          "title": "Manage events using the CLI",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/events/events-1.md"
+        },
+        {
+          "id": "6fa13922658a4d694be77b2387e5a447cd517a8dace4504e132c95e491ae95e3",
+          "title": "Manage alerts using the CLI",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/alerts/alerts-1.md"
+        },
+        {
+          "id": "7065921e415e9633769c1479e97b823a663ac9b9765e58e2d993691f1eecf4a2",
+          "title": "Manage snapshot policies using the CLI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/snapshot-policies/manage-snapshot-policies-using-the-cli.md"
+        },
+        {
+          "id": "7d73b050a16d8ca946296d748125c934e1eabb8e5a27f1b868bc9f44337c926b",
+          "title": "Manage protocols debug level using the CLI",
+          "doc_tag": "support",
+          "doc_category": "support",
+          "source_uri": "file:///app/data/ingest/support/diagnostics-management/protocols-debug-level-management/manage-protocols-debug-level-using-the-cli.md"
+        },
+        {
+          "id": "7df69c74a1da1e24d731d761ef33bdc00720ba7621367760edca37689c2ddba3",
+          "title": "Manage Snap-To-Object using the CLI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/snap-to-obj/snap-to-obj-1.md"
+        },
+        {
+          "id": "8558318d843c87b68840cb41dbee5c9843751a0af13ec4b6e48bc692147fac8c",
+          "title": "Snap-To-Object",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/snap-to-obj/README.md"
+        },
+        {
+          "id": "8eb09e9c246389facc468ff506441f7840939248e6d5245a973aa762b0d4ac14",
+          "title": "Manage filesystems using the CLI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/managing-filesystems/managing-filesystems-1.md"
+        },
+        {
+          "id": "91ea72a36b9b006785062a68bf763737525da29f4ef84ccaeccb1941d0fdda08",
+          "title": "Attach or detach object store buckets using the CLI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/attaching-detaching-object-stores-to-from-filesystems/attaching-detaching-object-stores-to-from-filesystems-1.md"
+        },
+        {
+          "id": "928f4336482380eac73de0fb11d3e7c970c30e1e57b151c8ef4216b1420091b9",
+          "title": "Manage KMS using CLI",
+          "doc_tag": "security",
+          "doc_category": "security",
+          "source_uri": "file:///app/data/ingest/security/kms-management/kms-management-1.md"
+        },
+        {
+          "id": "a2dc9d9dfaab07ff29dd6c38bf0a7e7a3aad47605c086ca6304c0d5fb06472e8",
+          "title": "Manage SMB using the CLI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/smb-support/smb-management-using-the-cli.md"
+        },
+        {
+          "id": "ad480023b795da0d7ef568f29249c2aec1c5d7a2dffd69e4e24d63ccffdfc3b9",
+          "title": "Manage quotas using the CLI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/quota-management/quota-management.md"
+        },
+        {
+          "id": "c5776eabb6fdb0a1f2e00aff5bac6d8dee9229edce2632b6e05961326ecf2584",
+          "title": "Set up the SnapTool external snapshots manager",
+          "doc_tag": "monitor-the-weka-cluster",
+          "doc_category": "monitor-the-weka-cluster",
+          "source_uri": "file:///app/data/ingest/monitor-the-weka-cluster/snapshot-management.md"
+        },
+        {
+          "id": "e0257c1a7f608ef68f07fcf3ecb1596a712d31b88bfd8400a17bba8b789397f2",
+          "title": "Manage users using the CLI",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/user-management/user-management-1.md"
+        },
+        {
+          "id": "eb43303bfabeb760e18ce4185aee77552b8f37f93ca92beae97c9eed56908e3c",
+          "title": "Manage CIDR-based security policies",
+          "doc_tag": "security",
+          "doc_category": "security",
+          "source_uri": "file:///app/data/ingest/security/manage-cidr-based-security-policies.md"
+        },
+        {
+          "id": "f0e2c0bba4bccfd4b625c6a592acce837eb2b8de370a880a1c4b97539096f6e3",
+          "title": "Set up a Data Services container for background tasks",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/background-tasks/set-up-a-data-services-container-for-background-tasks.md"
+        },
+        {
+          "id": "f2212e400b3407a192b0ef5fae1e526e50492145ce31b1c67f25cd8d9efc9d45",
+          "title": "Manage snapshots using the CLI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/snapshots/snapshots-1.md"
+        },
+        {
+          "id": "f3378fcab8450835a478e4cd184d1b7351b6af25ad4dc64d927114f26ca03e41",
+          "title": "Manage organizations using the CLI",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/organizations/organizations-1.md"
+        },
+        {
+          "id": "f3af94d8c69678b692d0915155f9609f1cd227ddf7783f566af34e6db466a4be",
+          "title": "Manage statistics using the CLI",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/statistics/statistics-1.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_04",
+      "size": 23,
+      "label": "planning-and-installation/appendices | planning terraform deployment",
+      "top_categories": [
+        "planning-and-installation",
+        "appendices"
+      ],
+      "top_keywords": [
+        "planning",
+        "terraform",
+        "deployment",
+        "types",
+        "gcp",
+        "tutorial"
+      ],
+      "internal_edges": 57,
+      "density": 0.22529644268774704,
+      "documents": [
+        {
+          "id": "05fa6c2473b793a8dc4f50382acede667492a758a7023c9a1928587de4592850",
+          "title": "GCP-WEKA deployment Terraform package description",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-gcp/gcp-terraform-package-description.md"
+        },
+        {
+          "id": "123cfc5515da9569c706db9a4646f8a79835c94eb3dbdb697ef05d32b31b5025",
+          "title": "AWS Outposts deployment",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-the-cloud-formation/aws-outposts-deployment.md"
+        },
+        {
+          "id": "2e94a5865e502e4aef6b9fd4618ced5166655377765a94220077bfe2297d158a",
+          "title": "Auto-scale virtual machines in Azure",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-azure/auto-scale-virtual-machines-in-azure.md"
+        },
+        {
+          "id": "3255868a1185ad77ecb618766cc96e5789be41942f86179852e35a76c055fad7",
+          "title": "Supported EC2 instance types using Terraform",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-terraform/supported-ec2-instance-types.md"
+        },
+        {
+          "id": "4c1ce3ba92cb415163083c3a095fd23206f456f6c9c8a21d87738967a584d34c",
+          "title": "Detailed deployment tutorial: WEKA on GCP using Terraform",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-gcp/detailed-deployment-tutorial-weka-on-gcp-using-terraform.md"
+        },
+        {
+          "id": "54cd80b03179131de9033eb7f0a293707f66816b234aa3407407cd2831d4a48d",
+          "title": "Deployment",
+          "doc_tag": "appendices",
+          "doc_category": "appendices",
+          "source_uri": "file:///app/data/ingest/appendices/weka-csi-plugin/deployment.md"
+        },
+        {
+          "id": "67ceb9351a5f9723b624410f601e3c91104bb9fe5addd2153b180a29dfb60b0f",
+          "title": "Auto scaling group",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-the-cloud-formation/auto-scaling-group.md"
+        },
+        {
+          "id": "80a431ce7e4e8f0ee1a9e5eea60640a2e8b8104ec89afe2f031196e4b710e9d8",
+          "title": "Deployment on GCP using Terraform",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-gcp/deployment-on-gcp-using-terraform.md"
+        },
+        {
+          "id": "82262f5935c2b28a88298c0ac85b349fb81db93e13bf910aae6973c4964991e5",
+          "title": "WEKA installation on Azure",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-azure/README.md"
+        },
+        {
+          "id": "9660a88fd0db08e30e202d0fe60b171acb7e142c1c528712c2097622191f3b1b",
+          "title": "WEKA installation on AWS",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/README.md"
+        },
+        {
+          "id": "9d17fbf1c92f9d05e20074025b59c04101051b1f4fa230b43d936b2c1c97841a",
+          "title": "Auto-scale instances in GCP",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-gcp/auto-scale-instances-in-gcp.md"
+        },
+        {
+          "id": "b1d010a81eed17da3dfb94c2fce17f3919f6fa2c22c7df6278698f5055014fc0",
+          "title": "Deployment on Azure using Terraform",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-azure/deployment-on-azure-using-terraform.md"
+        },
+        {
+          "id": "b959dd974ad4377b5c21ea113647026f36dc6c053b0c2b82e1235e5a47468d79",
+          "title": "Azure-WEKA deployment Terraform package description",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-azure/azure-weka-terraform-package-description.md"
+        },
+        {
+          "id": "bd2e1601b1c0adb1861ede7b79120195bb6391d9aa14cd99376cbd972f5569e5",
+          "title": "Supported virtual machine types",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-azure/supported-virtual-machine-types.md"
+        },
+        {
+          "id": "bf1ec53ded2de06b6e45dd2d3ffbbd5cd234b1d92927e5d2ef1671c4b007e69b",
+          "title": "Terraform-AWS-WEKA module description",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-terraform/aws-weka-terraform-deployment-module-description.md"
+        },
+        {
+          "id": "cac3f7866b43acb8009f1edf31b366503d89ad681ff8e82608049f09243b3be7",
+          "title": "Supported EC2 instance types using Cloud Formation",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-the-cloud-formation/supported-ec2-instance-types-using-cloud-formation.md"
+        },
+        {
+          "id": "d1d7e04fb40d9a473c9dbc8034efb1b4dca9e737d6ba697e16ef6354df9919d7",
+          "title": "WEKA installation on AWS using the Cloud Formation",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-the-cloud-formation/README.md"
+        },
+        {
+          "id": "d4545fd00240cca1afb8db7dcfeeea1268da9fdf7116bb60e1ec54c54cfeade0",
+          "title": "Detailed deployment tutorial: WEKA on Azure using Terraform",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-azure/detailed-deployment-tutorial-weka-on-azure-using-terraform.md"
+        },
+        {
+          "id": "d79c700befc481dab115f7b63cb678bc5704a772b849d35cc1d97b1fa451fe85",
+          "title": "Deployment types",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-the-cloud-formation/deployment-types.md"
+        },
+        {
+          "id": "e2a7a0288c5b373d71feff6c94dc42fd156920f11b363dde1fb883c60cf95db4",
+          "title": "CloudFormation template generator",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-the-cloud-formation/cloudformation.md"
+        },
+        {
+          "id": "e7a77ededb39dd60dd30de8bbea0c57fb5a1ba43e45c05fa862f06feba59fb64",
+          "title": "Deployment on AWS using Terraform",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-terraform/deployment-on-aws-using-terraform.md"
+        },
+        {
+          "id": "f0d1810de9d1e9a1493a8cf4aa35f4ac9169b3b4a3373a8fa89116e7e40e81da",
+          "title": "WEKA installation on AWS using Terraform",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-terraform/README.md"
+        },
+        {
+          "id": "f71dee2d405fc957967c37920b64ec64c07ca79312c4a4300d21623e5ffe6249",
+          "title": "Detailed deployment tutorial: WEKA on AWS using Terraform",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-terraform/detailed-deployment-tutorial-weka-on-aws-using-terraform.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_05",
+      "size": 23,
+      "label": "weka-filesystems-and-object-stores/operation-guide | object stores filesystems",
+      "top_categories": [
+        "weka-filesystems-and-object-stores",
+        "operation-guide",
+        "additional-protocols"
+      ],
+      "top_keywords": [
+        "object",
+        "stores",
+        "filesystems",
+        "protocols",
+        "additional",
+        "store"
+      ],
+      "internal_edges": 151,
+      "density": 0.5968379446640316,
+      "documents": [
+        {
+          "id": "1c47ed1e6f4c0c10ba6f78d0b46c9a0c485d656fe5b25aab3e897b64ef36dde0",
+          "title": "Manage filesystems using the GUI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/managing-filesystems/managing-filesystems.md"
+        },
+        {
+          "id": "21c13ff00ecc7dcc8eaaefa7e395b8b99ab347912ae427c1d86e44f74e7d2751",
+          "title": "Manage snapshots using the GUI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/snapshots/snapshots.md"
+        },
+        {
+          "id": "224870920c92ae3028a129e7a8ceb1844cf4c67948890c45a4c2fe979acb307f",
+          "title": "Manage quotas using the GUI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/quota-management/manage-quotas-using-the-gui.md"
+        },
+        {
+          "id": "315fc03001e2a28e4590ae5102bc53dea6e60ccf70fa480654261a3cac55d1a4",
+          "title": "Manage snapshot policies using the GUI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/snapshot-policies/manage-snapshot-policies-using-the-gui.md"
+        },
+        {
+          "id": "3b031a0922ded635b78da49d3ccc243c5e4735014aab3bb029bf8b4f861c710a",
+          "title": "Manage TLS certificates using GUI",
+          "doc_tag": "security",
+          "doc_category": "security",
+          "source_uri": "file:///app/data/ingest/security/tls-certificate-management/manage-the-tls-certificate-using-the-gui.md"
+        },
+        {
+          "id": "5b08451b6d29cd1c54ad7e5f6e54dd1564dfcdb4c87bd4d2331a58a1fb384eb0",
+          "title": "Manage background tasks using the GUI",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/background-tasks/manage-background-tasks-using-the-gui.md"
+        },
+        {
+          "id": "60184ac83e01e03fd66d95f2877850ad7a73772e1b1707d44092d189ca84fd2f",
+          "title": "Configure audit webhook using the GUI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/audit-s3-apis/configure-audit-webhook-using-the-gui.md"
+        },
+        {
+          "id": "70cd9c86cf5f56489b4c92a4af45f6cff6e30014ef3681e463d06bb1a28ecd98",
+          "title": "Manage traces using the GUI",
+          "doc_tag": "support",
+          "doc_category": "support",
+          "source_uri": "file:///app/data/ingest/support/diagnostics-management/traces-management/manage-traces-using-the-gui.md"
+        },
+        {
+          "id": "7b9dc6650a788012b4fe4e4eba08677d30bc1a793897b3beb7399a6e96443112",
+          "title": "Attach or detach object store bucket using the GUI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/attaching-detaching-object-stores-to-from-filesystems/attaching-detaching-object-stores-to-from-filesystems.md"
+        },
+        {
+          "id": "8bdd788f80853cf1a1f3872c03496d758fcc8cdbd56c6d18998564edbc9fd865",
+          "title": "Manage SMB using the GUI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/smb-support/smb-management-using-the-gui.md"
+        },
+        {
+          "id": "8dc46b88fd34005e3aa4c785a01bb9f7c7036da3b2c2c56d4c4b7b3aa07a2261",
+          "title": "Manage alerts using the GUI",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/alerts/alerts.md"
+        },
+        {
+          "id": "91897be332bdad686ace5310783c9686416af6d18409e3abaa8d55d05813b832",
+          "title": "Manage Snap-To-Object using the GUI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/snap-to-obj/snap-to-obj.md"
+        },
+        {
+          "id": "95f5d6800cad4e285d832bcf20d5f68c36d53d77aef4b514cb9d529974f01a89",
+          "title": "Attach or detach object store buckets",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/attaching-detaching-object-stores-to-from-filesystems/README.md"
+        },
+        {
+          "id": "a56d2ef7bda727517dfb1dd93cb8288e49fc0a2d038b375f2b7544a61eac5b52",
+          "title": "Manage the SMB protocol",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/smb-support/README.md"
+        },
+        {
+          "id": "b01dbce6dfd70aed6426dec03959246ab266555d417236e471e75bffc7874266",
+          "title": "Manage users using the GUI",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/user-management/user-management.md"
+        },
+        {
+          "id": "b4f7d4f8ce1116bc32cfb369ca095aed11892c8d12b829ca26105571cf5e2965",
+          "title": "Manage KMS using GUI",
+          "doc_tag": "security",
+          "doc_category": "security",
+          "source_uri": "file:///app/data/ingest/security/kms-management/kms-management.md"
+        },
+        {
+          "id": "c99901de52f7ef9050c5ba8128fb37f5ea5a769ab188adfe57d087440e08b879",
+          "title": "Manage events using the GUI",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/events/events.md"
+        },
+        {
+          "id": "cc66911d9fdaf4ad37dfabf267d8d3382b558d44f9675a2b3f22e2093164ef99",
+          "title": "Manage organizations using the GUI",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/organizations/organizations.md"
+        },
+        {
+          "id": "d00fcfed7f95eafc0366f2268f26003a1a1717082b4eeb3e58ecdb3c130d57c0",
+          "title": "Manage protocols debug level using the GUI",
+          "doc_tag": "support",
+          "doc_category": "support",
+          "source_uri": "file:///app/data/ingest/support/diagnostics-management/protocols-debug-level-management/manage-protocols-debug-level-using-the-gui.md"
+        },
+        {
+          "id": "e0f9b74dab9d0aa204d62dc2f48208a590c9c115ae93ffbbc8c4f79b8f472fdf",
+          "title": "Manage statistics using the GUI",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/statistics/statistics.md"
+        },
+        {
+          "id": "e3a327d4d0dcde3ffb0f04bd872f3921c49321914ec5a819b7de6d0ad7e0dfd7",
+          "title": "Manage the system using the WEKA GUI",
+          "doc_tag": "getting-started-with-weka",
+          "doc_category": "getting-started-with-weka",
+          "source_uri": "file:///app/data/ingest/getting-started-with-weka/manage-the-system-using-weka-gui.md"
+        },
+        {
+          "id": "ed6ec15f0939c6462205c41c818084140e693c59a19dbd5a5bd4e3f7fd42055c",
+          "title": "Manage object stores using the GUI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/managing-object-stores/managing-object-stores.md"
+        },
+        {
+          "id": "f481cdfa9dca42b0b2d56de13a72ef8f064ccb2ba5c77e3eb13977103b7ab888",
+          "title": "Manage filesystem groups using the GUI",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/managing-filesystem-groups/managing-filesystem-groups.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_06",
+      "size": 21,
+      "label": "additional-protocols | additional protocols rules",
+      "top_categories": [
+        "additional-protocols"
+      ],
+      "top_keywords": [
+        "additional",
+        "protocols",
+        "rules",
+        "lifecycle",
+        "buckets",
+        "audit"
+      ],
+      "internal_edges": 94,
+      "density": 0.44761904761904764,
+      "documents": [
+        {
+          "id": "10bcd7dbb95ab1c44818fd5641b2522a32d21a7894bffe1d3b66f25c53ec5587",
+          "title": "Manage S3 lifecycle rules using the GUI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-information-lifecycle-management/s3-information-lifecycle-management.md"
+        },
+        {
+          "id": "1ebce2ff481201cd1dfde382517a1d06c18d09890f083d5a7865c20736d5b14a",
+          "title": "S3 bucket migration between clusters",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-bucket-migration-between-clusters.md"
+        },
+        {
+          "id": "2073c5fa478170a20618ad1da20026ac4fa7cb7272a8783cd879449b4f57a276",
+          "title": "Manage S3 buckets using the CLI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-buckets-management/s3-buckets-management-1.md"
+        },
+        {
+          "id": "216d95adb464f3785e34089f404acf75ac1bc06819703dd28c56044d4d59a9a5",
+          "title": "S3 lifecycle rules management",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-information-lifecycle-management/README.md"
+        },
+        {
+          "id": "244c118c432a240ab8f96fc36d0c0714878d54b2287cc28a8a8e21ce8c346514",
+          "title": "S3 users and authentication",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-users-and-authentication/README.md"
+        },
+        {
+          "id": "2cee7b4bfc31a2fbe58a50964e2a0b73b862c9216bb4744cb93220862d9f4324",
+          "title": "S3 cluster management",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-cluster-management/README.md"
+        },
+        {
+          "id": "50dd3b28d76d3153ae80a0cd5ea63bd4fb71fc68da91ecfea48181381e2a26a3",
+          "title": "Manage S3 buckets using the GUI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-buckets-management/s3-buckets-management.md"
+        },
+        {
+          "id": "5269b8caf1a267bd69e9266df5884bb1c817391d077805b935fa3fffe821a077",
+          "title": "Manage the S3 protocol",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/README.md"
+        },
+        {
+          "id": "5be0fec74c33ef06e8df0f8a8edde309ddba84661d3bb2600abf6ee9486f6ad3",
+          "title": "Access S3 using AWS CLI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/access-s3-using-aws-cli.md"
+        },
+        {
+          "id": "68c1b5f58847917952fb07adf9cc48bc5d1ee80d198746bae162a4ef28377475",
+          "title": "S3 buckets management",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-buckets-management/README.md"
+        },
+        {
+          "id": "74f7f45310a8d736693388991ade85da6862147ac229e5e6c1b6eaada3cd78ed",
+          "title": "S3 supported APIs and limitations",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-limitations.md"
+        },
+        {
+          "id": "751465ec3929db01bd3fba0dac3a3cdb9890ac8ee9275456707ad05a43077c39",
+          "title": "Example: How to use S3 audit events for tracking and security",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/audit-s3-apis/example-how-to-use-s3-audit-events-for-tracking-and-security.md"
+        },
+        {
+          "id": "7a8b0756ff55978c515d8f8bd6fe9786a05d6cf3f890381c231a3c00d3f380cd",
+          "title": "S3 bucket notifications",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-bucket-notifications.md"
+        },
+        {
+          "id": "83f757556ac26ab3b684d9e52a0368b7fd9b84d4d6853f0031e9d0d6857d66ee",
+          "title": "S3 examples using boto3",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-examples-using-boto3.md"
+        },
+        {
+          "id": "93789df6c1c208c02483278cf71cbfaa19c4dc0ac3a717abc8948721de7f2602",
+          "title": "Manage S3 users and authentication using the CLI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-users-and-authentication/s3-users-and-authentication.md"
+        },
+        {
+          "id": "95ac7b9cd6eaf52089d881e3b7d68b5190456f1603ddb884b5ed684eff539b5a",
+          "title": "Audit S3 APIs",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/audit-s3-apis/README.md"
+        },
+        {
+          "id": "a6a7f1f5ed720465427e49a27a49f5b8a4278a6e0f6656f9c0ba19f8889b2e46",
+          "title": "Manage S3 lifecycle rules using the CLI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-information-lifecycle-management/s3-information-lifecycle-management-1.md"
+        },
+        {
+          "id": "b07798eeea67d9a639764f04f47b741370592cefa91f9c4a8ee221d3789948e9",
+          "title": "Example: How to use Splunk to audit S3",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/audit-s3-apis/audit-s3-apis-1.md"
+        },
+        {
+          "id": "b7977cf0cb7663d0aaf2247c81b3b894da1c255aeacdfc03179a710b36d248f3",
+          "title": "Manage the S3 service using the CLI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-cluster-management/s3-cluster-management-1.md"
+        },
+        {
+          "id": "c6330db0b3ad02c48e69d877c3fcdec1b97b7373cae0a004da4c0420cf89da85",
+          "title": "Manage the S3 service using the GUI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-cluster-management/s3-cluster-management.md"
+        },
+        {
+          "id": "de077a54daa28f1afcef5e65930676828a7709232c839f310f3ebaf3aa5668f7",
+          "title": "Manage S3 service accounts using the CLI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/s3/s3-users-and-authentication/s3-users-and-authentication-1.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_07",
+      "size": 13,
+      "label": "operation-guide/weka-system-overview | list statistics events",
+      "top_categories": [
+        "operation-guide",
+        "weka-system-overview",
+        "monitor-the-weka-cluster"
+      ],
+      "top_keywords": [
+        "list",
+        "statistics",
+        "events",
+        "readme",
+        "corrective",
+        "actions"
+      ],
+      "internal_edges": 19,
+      "density": 0.24358974358974358,
+      "documents": [
+        {
+          "id": "079bc90c4ccf7c58c1bd5423ae2b672ee6e29267d139b6f3a08a28fa7184e305",
+          "title": "Explore performance statistics in Grafana",
+          "doc_tag": "monitor-the-weka-cluster",
+          "doc_category": "monitor-the-weka-cluster",
+          "source_uri": "file:///app/data/ingest/monitor-the-weka-cluster/the-wekaio-support-cloud/explore-performance-statistics-in-grafana.md"
+        },
+        {
+          "id": "10ac2cd3524a04e25b41cbf24634a6c9cf4ccbb7132f343fb5bac800818be00a",
+          "title": "List of alerts and corrective actions",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/alerts/list-of-alerts.md"
+        },
+        {
+          "id": "28cbf4503516757aa21d30ccf914983f77b21b998fba57e40271f2b3c98f7715",
+          "title": "Statistics",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/statistics/README.md"
+        },
+        {
+          "id": "314ce0f6330195846ce735e04017b244a0ca0e210df994c220f1e4a6a6fcf138",
+          "title": "Statistics list",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/statistics/statistics-list.md"
+        },
+        {
+          "id": "af072ccb5c39cc000d5b40859cb36ef0d0185e62a50ac9c6ad41600b7372ec78",
+          "title": "Glossary",
+          "doc_tag": "weka-system-overview",
+          "doc_category": "weka-system-overview",
+          "source_uri": "file:///app/data/ingest/weka-system-overview/glossary.md"
+        },
+        {
+          "id": "b679f92de164e35c1daa6f7e13d2caee66629af8c0ce441a4fdf5f3fc9fd2303",
+          "title": "Documentation revision history",
+          "doc_tag": "readme",
+          "doc_category": "readme",
+          "source_uri": "file:///app/data/ingest/readme/documentation-revision-history.md"
+        },
+        {
+          "id": "b7363705906c0411f60cedaea4bd099d40a5d94aad04b99782d043f71a6ffff4",
+          "title": "Introduction",
+          "doc_tag": "weka-system-overview",
+          "doc_category": "weka-system-overview",
+          "source_uri": "file:///app/data/ingest/weka-system-overview/about/README.md"
+        },
+        {
+          "id": "c7b2d0c14d0c34f8360d2709374d4ad63ef1dfbcf79b982f76bd1e0eeae1c09b",
+          "title": "List of statistics",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/statistics/list-of-statistics.md"
+        },
+        {
+          "id": "caf57019531cbec62bad9240167f858c21a3f0029382137655f56e1fe9f21b9e",
+          "title": "Events list",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/events/events-list.md"
+        },
+        {
+          "id": "df69369e423b4e862b02fa54998595132e940a246e20e52ab9605fa4b41ac13e",
+          "title": "Insights",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/insights.md"
+        },
+        {
+          "id": "e40125694cf257000138bbd71d03615f8e18e3405bd1862c895b951095ca9f0b",
+          "title": "List of alerts and corrective actions",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/alerts/list-of-alerts-and-corrective-actions.md"
+        },
+        {
+          "id": "ea8972a179883fb5603bdcfd0018e958900a74ad1a61f4d4768ec609e99418f8",
+          "title": "Events",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/events/README.md"
+        },
+        {
+          "id": "ff2b8eef5710e7410a82fd8af4bfe7ac04c4019b103211e3f3fcbebc790e49d7",
+          "title": "List of events",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/events/list-of-events.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_08",
+      "size": 13,
+      "label": "wekapod/getting-started-with-weka | wekapod process platform",
+      "top_categories": [
+        "wekapod",
+        "getting-started-with-weka",
+        "best-practice-guides"
+      ],
+      "top_keywords": [
+        "wekapod",
+        "process",
+        "platform",
+        "initial",
+        "appliance",
+        "servers"
+      ],
+      "internal_edges": 49,
+      "density": 0.6282051282051282,
+      "documents": [
+        {
+          "id": "150dbf583fef35688e64e2ce569c52b36889a9e036e4c5646e59613033f081df",
+          "title": "Getting started with WEKA REST API",
+          "doc_tag": "getting-started-with-weka",
+          "doc_category": "getting-started-with-weka",
+          "source_uri": "file:///app/data/ingest/getting-started-with-weka/getting-started-with-weka-rest-api.md"
+        },
+        {
+          "id": "3e73b8501efc24c4a6867376679b1551462f6b836d50f92eab8bab5ce972e329",
+          "title": "WEKApod servers overview",
+          "doc_tag": "wekapod",
+          "doc_category": "wekapod",
+          "source_uri": "file:///app/data/ingest/wekapod/server-overview.md"
+        },
+        {
+          "id": "484d64a161d0c0acac0fc3789acc43b393fdf454799e33cc623a97e92ac21f3b",
+          "title": "WEKApod support process",
+          "doc_tag": "wekapod",
+          "doc_category": "wekapod",
+          "source_uri": "file:///app/data/ingest/wekapod/support.md"
+        },
+        {
+          "id": "53144f9f12854d69bca023fc8acfa216c28c19ee1b6fd99526e81f70b8e71a86",
+          "title": "Run first IOs with WEKA filesystem",
+          "doc_tag": "getting-started-with-weka",
+          "doc_category": "getting-started-with-weka",
+          "source_uri": "file:///app/data/ingest/getting-started-with-weka/performing-the-first-io.md"
+        },
+        {
+          "id": "6b5345a6d50116d5af16091a9926ec164e95dc7424a50ebbde6a853ff550b0d8",
+          "title": "WEKApod servers overview",
+          "doc_tag": "wekapod",
+          "doc_category": "wekapod",
+          "source_uri": "file:///app/data/ingest/wekapod/wekapod-servers-overview.md"
+        },
+        {
+          "id": "75626dae912b370b8044525aa1bbed892ae4148e3b9ef0d15b3ec9825fa1f959",
+          "title": "WEKA REST API and equivalent CLI commands",
+          "doc_tag": "getting-started-with-weka",
+          "doc_category": "getting-started-with-weka",
+          "source_uri": "file:///app/data/ingest/getting-started-with-weka/weka-rest-api-and-equivalent-cli-commands.md"
+        },
+        {
+          "id": "77a34f98f60542097380e492ff7e66a977cbaf1fb45fa299371986b26d12d044",
+          "title": "WEKA CLI hierarchy",
+          "doc_tag": "getting-started-with-weka",
+          "doc_category": "getting-started-with-weka",
+          "source_uri": "file:///app/data/ingest/getting-started-with-weka/manage-the-system-using-weka-cli/weka-cli-hierarchy.md"
+        },
+        {
+          "id": "8d97fdb6cfa60a4e37cb79123914e6b3914ac4ec51cb09892f47f52a38eed336",
+          "title": "WEKA and Slurm integration",
+          "doc_tag": "best-practice-guides",
+          "doc_category": "best-practice-guides",
+          "source_uri": "file:///app/data/ingest/best-practice-guides/weka-and-slurm-integration/README.md"
+        },
+        {
+          "id": "9b76acb0d429cd6953c1716e28f419842ed1bf1b512e665f51f9419e2ff80dfe",
+          "title": "WEKApod Data Platform Appliance overview",
+          "doc_tag": "wekapod",
+          "doc_category": "wekapod",
+          "source_uri": "file:///app/data/ingest/wekapod/wekapod-data-platform-appliance-overview.md"
+        },
+        {
+          "id": "b37f58494de5054f7df6796094d4e22bf466651433cc8b3ba7ee40501743b406",
+          "title": "WEKApod support process",
+          "doc_tag": "wekapod",
+          "doc_category": "wekapod",
+          "source_uri": "file:///app/data/ingest/wekapod/wekapod-support-process.md"
+        },
+        {
+          "id": "bcead8cc8f04170861eea8dd2c7723db95d0a586cc80a7f00332bb96dd994a28",
+          "title": "WEKApod Data Platform Appliance overview",
+          "doc_tag": "wekapod",
+          "doc_category": "wekapod",
+          "source_uri": "file:///app/data/ingest/wekapod/overview.md"
+        },
+        {
+          "id": "ca8e1a2a7a2fbb1c8b0c602575e8e1243d3a86717476d77aa2d590a69d946c89",
+          "title": "WEKApod initial system setup and configuration",
+          "doc_tag": "wekapod",
+          "doc_category": "wekapod",
+          "source_uri": "file:///app/data/ingest/wekapod/setup.md"
+        },
+        {
+          "id": "e1d8306464d198a6a61d4583b3776c84f816418a21add237a4d8d9d7b4abb3b2",
+          "title": "WEKApod initial system setup and configuration",
+          "doc_tag": "wekapod",
+          "doc_category": "wekapod",
+          "source_uri": "file:///app/data/ingest/wekapod/wekapod-initial-system-setup-and-configuration.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_09",
+      "size": 11,
+      "label": "operation-guide/monitor-the-weka-cluster | authentication secure secret",
+      "top_categories": [
+        "operation-guide",
+        "monitor-the-weka-cluster",
+        "security"
+      ],
+      "top_keywords": [
+        "authentication",
+        "secure",
+        "secret",
+        "membership",
+        "join",
+        "shrink"
+      ],
+      "internal_edges": 22,
+      "density": 0.4,
+      "documents": [
+        {
+          "id": "080ffcd64d9769d41772f9d70d1c48c73ded5d345c185c98bf2f6eef5cff74cb",
+          "title": "Shrink a cluster",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/expanding-and-shrinking-cluster-resources/shrinking-a-cluster.md"
+        },
+        {
+          "id": "198e2cf18d9db8b1f879db6f053cb9dd78cd179a33d45c680d98b6eae955b0a9",
+          "title": "Secure cluster membership with join secret authentication",
+          "doc_tag": "secure-cluster-membership-with-join-secret-authentication",
+          "doc_category": null,
+          "source_uri": "file:///app/data/ingest/secure-cluster-membership-with-join-secret-authentication.md"
+        },
+        {
+          "id": "408884ee3b3df7a9b9c3f11deff78241d41e7472808b2f629a3b5631d1d29887",
+          "title": "Expand specific resources of a container",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/expanding-and-shrinking-cluster-resources/expansion-of-specific-resources.md"
+        },
+        {
+          "id": "48f69eed354810cff86aac4b92ba60769ce2aa8547bb9cf7de978106b0f8d561",
+          "title": "Obtain authentication tokens",
+          "doc_tag": "security",
+          "doc_category": "security",
+          "source_uri": "file:///app/data/ingest/security/obtain-authentication-tokens.md"
+        },
+        {
+          "id": "595298b94aa3b68059c379719ce0de2ee53520b16c6dc1e43bb507e5be2efb6e",
+          "title": "Export cluster metrics to Prometheus",
+          "doc_tag": "monitor-the-weka-cluster",
+          "doc_category": "monitor-the-weka-cluster",
+          "source_uri": "file:///app/data/ingest/monitor-the-weka-cluster/the-wekaio-support-cloud/export-cluster-metrics-to-prometheus.md"
+        },
+        {
+          "id": "5bf5f1c56d9fb0d7795028960fbf5824b4e60e43a155b1116217453276b0f9f5",
+          "title": "Composable clusters for multi-tenancy in Kubernetes",
+          "doc_tag": "kubernetes",
+          "doc_category": "kubernetes",
+          "source_uri": "file:///app/data/ingest/kubernetes/composable-clusters-for-multi-tenancy-in-kubernetes.md"
+        },
+        {
+          "id": "6fff79900f7e74f678a5c89b7ada16198556531f998f4ae70bba3629bd39cc30",
+          "title": "Additional protocol containers",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/additional-protocols-overview.md"
+        },
+        {
+          "id": "86a011f961c9c012ed6ac9e1a78e45d94d1d7ba71d08e6001d19ff195dcd317b",
+          "title": "Explore cluster insights",
+          "doc_tag": "monitor-the-weka-cluster",
+          "doc_category": "monitor-the-weka-cluster",
+          "source_uri": "file:///app/data/ingest/monitor-the-weka-cluster/the-wekaio-support-cloud/explore-cluster-insights-and-statistics.md"
+        },
+        {
+          "id": "8bd99374c4980c0ef279851074e4e26fde825681233b6e1ee51f32170f7010e3",
+          "title": "Manage authentication across multiple clusters with connection profiles",
+          "doc_tag": "weka-filesystems-and-object-stores",
+          "doc_category": "weka-filesystems-and-object-stores",
+          "source_uri": "file:///app/data/ingest/weka-filesystems-and-object-stores/mounting-filesystems/manage-authentication-across-multiple-clusters-with-connection-profiles.md"
+        },
+        {
+          "id": "e1d0416419fbe129df3ea6ce32b1cf20c5a421bdd7b151ae2e141157f480fbaf",
+          "title": "Expand and shrink cluster resources",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/expanding-and-shrinking-cluster-resources/README.md"
+        },
+        {
+          "id": "f358e556b48cbc001c3254d7511bff4496269f93746599c3a2af6ccf0329dec3",
+          "title": "Convert cluster to multi-container backend",
+          "doc_tag": "appendices",
+          "doc_category": "appendices",
+          "source_uri": "file:///app/data/ingest/appendices/convert-the-cluster-architecture-from-a-single-container-backend-to-a-multi-container-backend.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_10",
+      "size": 6,
+      "label": "planning-and-installation/appendices | planning supported required",
+      "top_categories": [
+        "planning-and-installation",
+        "appendices"
+      ],
+      "top_keywords": [
+        "planning",
+        "supported",
+        "required",
+        "regions",
+        "appendices",
+        "storage"
+      ],
+      "internal_edges": 8,
+      "density": 0.5333333333333333,
+      "documents": [
+        {
+          "id": "46a1fb83e0f015d3da1955fa6fbfd5eee6b7b760f57f66c46659b6e00d4b34bd",
+          "title": "Required services and supported regions",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-terraform/required-services-and-supported-regions.md"
+        },
+        {
+          "id": "4f0852c5b07fc78026a2d3e108ea98a294d0dabbb07ccf69e2657f75c12d1d55",
+          "title": "Required services and supported regions",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-gcp/required-services-and-supported-regions.md"
+        },
+        {
+          "id": "96d1f3c92f4724b2066a4ffe08afb488336b0e9309d2179b0727a3e27b54c67a",
+          "title": "Supported machine types and storage",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-gcp/supported-machine-types-and-storage.md"
+        },
+        {
+          "id": "a48bccc93550825069cbc4bad6948f139996a1eac8e0fabd5743cdf3b89b66a1",
+          "title": "Storage class configurations",
+          "doc_tag": "appendices",
+          "doc_category": "appendices",
+          "source_uri": "file:///app/data/ingest/appendices/weka-csi-plugin/storage-class-configurations.md"
+        },
+        {
+          "id": "d2b1937fd8ce28483394aeaa2c9d516a3f16818962c5413eeaa6488350f080ae",
+          "title": "Required services and supported regions",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-azure/required-services-and-supported-regions.md"
+        },
+        {
+          "id": "f8516a96f74c1090ab7c8d33f0f9515a5369580f36ebb9477a7680f65a96f947",
+          "title": "Tailor your storage class configuration with mount options",
+          "doc_tag": "appendices",
+          "doc_category": "appendices",
+          "source_uri": "file:///app/data/ingest/appendices/weka-csi-plugin/tailor-your-storage-class-configuration-with-mount-options.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_11",
+      "size": 5,
+      "label": "additional-protocols/appendices | additional protocols nfs",
+      "top_categories": [
+        "additional-protocols",
+        "appendices"
+      ],
+      "top_keywords": [
+        "additional",
+        "protocols",
+        "nfs",
+        "networking",
+        "appendices",
+        "transport"
+      ],
+      "internal_edges": 7,
+      "density": 0.7,
+      "documents": [
+        {
+          "id": "19300cce8cda0269f9d212514650d3e30035033f51b999c334718d887ad21e20",
+          "title": "Manage NFS networking using the CLI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/nfs-support/nfs-support-1.md"
+        },
+        {
+          "id": "3dc2da2aadc84784c3630fc06996071213a5e2c8882c5557ce62aac27c9d0c7e",
+          "title": "Manage the NFS protocol",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/nfs-support/README.md"
+        },
+        {
+          "id": "7b39b3e9f5173e4d3871bf1633729ff53f292021386582deede1cebe53dbe7b7",
+          "title": "NFS transport failback",
+          "doc_tag": "appendices",
+          "doc_category": "appendices",
+          "source_uri": "file:///app/data/ingest/appendices/weka-csi-plugin/nfs-transport-failback.md"
+        },
+        {
+          "id": "8c6074b80cba76bd4136aeb2d860c69bd024c6c19ab47314917060a23a71a6f9",
+          "title": "Supported NFS client mount parameters",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/nfs-support/supported-nfs-client-mount-options.md"
+        },
+        {
+          "id": "904569dc2dd56083b709a0b5f37ec6b8140a97d410b28e65dbdd769ceeda7693",
+          "title": "Manage NFS networking using the GUI",
+          "doc_tag": "additional-protocols",
+          "doc_category": "additional-protocols",
+          "source_uri": "file:///app/data/ingest/additional-protocols/nfs-support/nfs-support.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_12",
+      "size": 4,
+      "label": "planning-and-installation/appendices | troubleshooting planning appendices",
+      "top_categories": [
+        "planning-and-installation",
+        "appendices"
+      ],
+      "top_keywords": [
+        "troubleshooting",
+        "planning",
+        "appendices"
+      ],
+      "internal_edges": 6,
+      "density": 1.0,
+      "documents": [
+        {
+          "id": "04bba983d3bb1d7e065696e7b4c90afaefda3ef8d1950331c32ee7ec7c7fed8c",
+          "title": "Troubleshooting",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-gcp/troubleshooting.md"
+        },
+        {
+          "id": "0c033efc164f05563d43ca112e146f9b306846a09ea7e85f509dae56db41a34a",
+          "title": "Troubleshooting",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-azure/troubleshooting.md"
+        },
+        {
+          "id": "cd0fd8ef363fc29e4af583cb70439a6f824f3113adfc0e2078e696a037648bc5",
+          "title": "Troubleshooting",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-the-cloud-formation/troubleshooting.md"
+        },
+        {
+          "id": "e015ebd738cb81d1cc72d7265740c73a75d18875360dbf9e4710db7a76ca3931",
+          "title": "Troubleshooting",
+          "doc_tag": "appendices",
+          "doc_category": "appendices",
+          "source_uri": "file:///app/data/ingest/appendices/weka-csi-plugin/troubleshooting.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_13",
+      "size": 2,
+      "label": "assets | assets untitled",
+      "top_categories": [
+        "assets"
+      ],
+      "top_keywords": [
+        "assets",
+        "untitled"
+      ],
+      "internal_edges": 1,
+      "density": 1.0,
+      "documents": [
+        {
+          "id": "723b60bffba2fc9cdca7f222239507c3b278c1562202cf85a9e31bdbc3d9a385",
+          "title": "Untitled",
+          "doc_tag": "assets",
+          "doc_category": "assets",
+          "source_uri": "file:///app/data/ingest/assets/events.md"
+        },
+        {
+          "id": "8bb6c62d103b43766f08cd8f86a7d8ae20d3621b29b06c7dfc92d19307da7a90",
+          "title": "Untitled",
+          "doc_tag": "assets",
+          "doc_category": "assets",
+          "source_uri": "file:///app/data/ingest/assets/events (1).md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_14",
+      "size": 2,
+      "label": "kubernetes | operator deployment",
+      "top_categories": [
+        "kubernetes"
+      ],
+      "top_keywords": [
+        "operator",
+        "deployment"
+      ],
+      "internal_edges": 1,
+      "density": 1.0,
+      "documents": [
+        {
+          "id": "4a6571cf0cedc49af0344c0c0d3de3e93237f9026d3c8fc06c73a9b3d769f055",
+          "title": "WEKA Operator deployment",
+          "doc_tag": "kubernetes",
+          "doc_category": "kubernetes",
+          "source_uri": "file:///app/data/ingest/kubernetes/weka-operator-deployment/README.md"
+        },
+        {
+          "id": "6d6f4f34ca7454c7c98d4d9c87527a189328a25365831630866be08775ecaece",
+          "title": "WEKA Operator deployment",
+          "doc_tag": "kubernetes",
+          "doc_category": "kubernetes",
+          "source_uri": "file:///app/data/ingest/kubernetes/weka-operator-deployment.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_15",
+      "size": 2,
+      "label": "licensing | licensing license classic",
+      "top_categories": [
+        "licensing"
+      ],
+      "top_keywords": [
+        "licensing",
+        "license",
+        "classic"
+      ],
+      "internal_edges": 1,
+      "density": 1.0,
+      "documents": [
+        {
+          "id": "00aa353e75cc9fd940d9a5bffbe91c15b24c5638d0e8f465652c5fbf0fbc014a",
+          "title": "Classic license",
+          "doc_tag": "licensing",
+          "doc_category": "licensing",
+          "source_uri": "file:///app/data/ingest/licensing/classic-licensing.md"
+        },
+        {
+          "id": "3c3d9948cd00447810dc3578d317968667adb14e13d1cf2dd13382eab673dbd6",
+          "title": "License overview",
+          "doc_tag": "licensing",
+          "doc_category": "licensing",
+          "source_uri": "file:///app/data/ingest/licensing/overview.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_16",
+      "size": 1,
+      "label": "appendices | appendices tool bios",
+      "top_categories": [
+        "appendices"
+      ],
+      "top_keywords": [
+        "appendices",
+        "tool",
+        "bios"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "e2f3a78b2803e78f0a8737c3166fcb3f427c2a2e16f84941758299cf93ab3a42",
+          "title": "BIOS tool",
+          "doc_tag": "appendices",
+          "doc_category": "appendices",
+          "source_uri": "file:///app/data/ingest/appendices/bios-tool.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_17",
+      "size": 1,
+      "label": "appendices | appendices image create",
+      "top_categories": [
+        "appendices"
+      ],
+      "top_keywords": [
+        "appendices",
+        "image",
+        "create",
+        "client"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "0646e27e0bee42df0a18145e617baafa6d2538fab511121f39b6a073a0d00257",
+          "title": "Create a client image",
+          "doc_tag": "appendices",
+          "doc_category": "appendices",
+          "source_uri": "file:///app/data/ingest/appendices/create-a-client-image.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_18",
+      "size": 1,
+      "label": "appendices | appendices static provisioning",
+      "top_categories": [
+        "appendices"
+      ],
+      "top_keywords": [
+        "appendices",
+        "static",
+        "provisioning",
+        "dynamic"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "8fa3e586f8b8ab670ebd8a15d70f6dad7d5e2cd5ab5ab75a0285b78ef19b500f",
+          "title": "Dynamic and static provisioning",
+          "doc_tag": "appendices",
+          "doc_category": "appendices",
+          "source_uri": "file:///app/data/ingest/appendices/weka-csi-plugin/dynamic-and-static-provisioning.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_19",
+      "size": 1,
+      "label": "appendices | appendices pod launch",
+      "top_categories": [
+        "appendices"
+      ],
+      "top_keywords": [
+        "appendices",
+        "pod",
+        "launch",
+        "application",
+        "storage"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "66765b35a905c2f2acada915c7ffaefb417a0f477a8202180ec6bc5299a9dba3",
+          "title": "Launch an application using WEKA as the POD's storage",
+          "doc_tag": "appendices",
+          "doc_category": "appendices",
+          "source_uri": "file:///app/data/ingest/appendices/weka-csi-plugin/launch-an-application-using-weka-as-the-pods-storage.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_20",
+      "size": 1,
+      "label": "appendices | appendices volumes persistent",
+      "top_categories": [
+        "appendices"
+      ],
+      "top_keywords": [
+        "appendices",
+        "volumes",
+        "persistent",
+        "legacy",
+        "enforcement",
+        "upgrade"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "8077aaa1f29d46b941dc0e943fbedc4a2aec218f72c5c1cd39841bfa22c232c8",
+          "title": "Upgrade legacy persistent volumes for capacity enforcement",
+          "doc_tag": "appendices",
+          "doc_category": "appendices",
+          "source_uri": "file:///app/data/ingest/appendices/weka-csi-plugin/upgrade-legacy-persistent-volumes-for-capacity-enforcement.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_21",
+      "size": 1,
+      "label": "appendices | appendices plugin csi",
+      "top_categories": [
+        "appendices"
+      ],
+      "top_keywords": [
+        "appendices",
+        "plugin",
+        "csi"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "5ebdb8b6a891d90a2582f8a9f8ef9a34ee015caff5c220dda6490a7065c11d25",
+          "title": "WEKA CSI Plugin",
+          "doc_tag": "appendices",
+          "doc_category": "appendices",
+          "source_uri": "file:///app/data/ingest/appendices/weka-csi-plugin/README.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_22",
+      "size": 1,
+      "label": "best-practice-guides | cpu conflicting avoid",
+      "top_categories": [
+        "best-practice-guides"
+      ],
+      "top_keywords": [
+        "cpu",
+        "conflicting",
+        "avoid",
+        "allocations"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "75baf0d909a2e2c00c719d1902c2fb530dfe99285adfb6023a141c2408a836c8",
+          "title": "Avoid conflicting CPU allocations",
+          "doc_tag": "best-practice-guides",
+          "doc_category": "best-practice-guides",
+          "source_uri": "file:///app/data/ingest/best-practice-guides/weka-and-slurm-integration/avoid-conflicting-cpu-allocations.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_23",
+      "size": 1,
+      "label": "best-practice-guides | expansion storage",
+      "top_categories": [
+        "best-practice-guides"
+      ],
+      "top_keywords": [
+        "expansion",
+        "storage"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "968fe3f7487f12c19fea823b5e71b8cbd8b0315b84bef18d8acbdbd6ca69674c",
+          "title": "Storage expansion best practice",
+          "doc_tag": "best-practice-guides",
+          "doc_category": "best-practice-guides",
+          "source_uri": "file:///app/data/ingest/best-practice-guides/storage-expansion-best-practice.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_24",
+      "size": 1,
+      "label": "kubernetes | eks amazon deploy",
+      "top_categories": [
+        "kubernetes"
+      ],
+      "top_keywords": [
+        "eks",
+        "amazon",
+        "deploy",
+        "client"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "90874252f9b36379229f06adcfbef85a28b7d2201c6b31b7028c8747fe8cf007",
+          "title": "Deploy the WEKA client on Amazon EKS",
+          "doc_tag": "kubernetes",
+          "doc_category": "kubernetes",
+          "source_uri": "file:///app/data/ingest/kubernetes/weka-operator-deployment/deploy-the-weka-client-on-amazon-eks.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_25",
+      "size": 1,
+      "label": "operation-guide | alerts",
+      "top_categories": [
+        "operation-guide"
+      ],
+      "top_keywords": [
+        "alerts"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "443fa488f109e0f68174a6193f97847789039d1a17a5a1247c77b5e6b22623d6",
+          "title": "Alerts",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/alerts/README.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_26",
+      "size": 1,
+      "label": "operation-guide | congestion",
+      "top_categories": [
+        "operation-guide"
+      ],
+      "top_keywords": [
+        "congestion"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "2a66ea867d48a096a70e7591a31e192ddf17499356f09c5165c3a9dcbb78324a",
+          "title": "System congestion",
+          "doc_tag": "operation-guide",
+          "doc_category": "operation-guide",
+          "source_uri": "file:///app/data/ingest/operation-guide/system-congestion.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_27",
+      "size": 1,
+      "label": "performance | performance environment details",
+      "top_categories": [
+        "performance"
+      ],
+      "top_keywords": [
+        "performance",
+        "environment",
+        "details",
+        "test"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "dee7dd8ff893595dc6c3e25cad8e5cc4297ac2f8541f540fb24c344eb79ce1d7",
+          "title": "Test environment details",
+          "doc_tag": "performance",
+          "doc_category": "performance",
+          "source_uri": "file:///app/data/ingest/performance/testing-weka-system-performance/test-environment-details.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_28",
+      "size": 1,
+      "label": "planning-and-installation | iov enable planning",
+      "top_categories": [
+        "planning-and-installation"
+      ],
+      "top_keywords": [
+        "iov",
+        "enable",
+        "planning"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "759f1c0150957f8258d105eb85652b216b71b3db1abbf4e50a664b36f890b366",
+          "title": "Enable the SR-IOV",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/bare-metal/setting-up-the-hosts/sr-iov-enablement.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_29",
+      "size": 1,
+      "label": "planning-and-installation | posix over google",
+      "top_categories": [
+        "planning-and-installation"
+      ],
+      "top_keywords": [
+        "posix",
+        "over",
+        "google",
+        "engine",
+        "planning",
+        "deployment"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "7d9f51280bb16396ddb14c812d6259bea2fdbbea2e60032d8a3712775c8e60fc",
+          "title": "Google Kubernetes Engine and WEKA over POSIX deployment",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/weka-installation-on-gcp/google-kubernetes-engine-and-weka-over-posix-deployment.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_30",
+      "size": 1,
+      "label": "planning-and-installation | procedures post perform",
+      "top_categories": [
+        "planning-and-installation"
+      ],
+      "top_keywords": [
+        "procedures",
+        "post",
+        "perform",
+        "planning"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "d9ee0b10a2a4b7bd4ed6f726a97bbbe6c227476d863c4cab8384122add836969",
+          "title": "Perform post-configuration procedures",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/bare-metal/perform-post-configuration-procedures.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_31",
+      "size": 1,
+      "label": "planning-and-installation | prerequisites compatibility planning",
+      "top_categories": [
+        "planning-and-installation"
+      ],
+      "top_keywords": [
+        "prerequisites",
+        "compatibility",
+        "planning"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "a46821e2c1b1969657d7d3edeaec8c371b3559678379090a53ecf9accecbf5dc",
+          "title": "Prerequisites and compatibility",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/prerequisites-and-compatibility.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_32",
+      "size": 1,
+      "label": "planning-and-installation | self portal planning",
+      "top_categories": [
+        "planning-and-installation"
+      ],
+      "top_keywords": [
+        "self",
+        "portal",
+        "planning"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "e78907fc7666e3a8f4ab0f1a9676a834ef1dcde3192927097dc175bf71c5c158",
+          "title": "Self-service portal",
+          "doc_tag": "planning-and-installation",
+          "doc_category": "planning-and-installation",
+          "source_uri": "file:///app/data/ingest/planning-and-installation/aws/weka-installation-on-aws-using-the-cloud-formation/self-service-portal.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_33",
+      "size": 1,
+      "label": "wekapod | wekapod rack",
+      "top_categories": [
+        "wekapod"
+      ],
+      "top_keywords": [
+        "wekapod",
+        "rack"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "93b5b0cfeea01ee5c0f73298254577bcbb7f8e10bf92eb743b2be0c1749d6d9b",
+          "title": "Rack installation",
+          "doc_tag": "wekapod",
+          "doc_category": "wekapod",
+          "source_uri": "file:///app/data/ingest/wekapod/rack-installation.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_34",
+      "size": 1,
+      "label": "distribution drivers",
+      "top_categories": [],
+      "top_keywords": [
+        "distribution",
+        "drivers"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "c3689c41e775e7791900c17c0f13ace5181c9103d6136bf9dbd0dd6d08587085",
+          "title": "Drivers distribution service",
+          "doc_tag": "drivers-distribution-service",
+          "doc_category": null,
+          "source_uri": "file:///app/data/ingest/drivers-distribution-service.md"
+        }
+      ]
+    },
+    {
+      "community_id": "comm_35",
+      "size": 1,
+      "label": "stale document test",
+      "top_categories": [],
+      "top_keywords": [
+        "stale",
+        "document",
+        "test"
+      ],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "test-stale-doc-168867ae-090f-465f-b76d-ba03b7d73ccc",
+          "title": "Test Stale Document",
+          "doc_tag": null,
+          "doc_category": null,
+          "source_uri": null
+        }
+      ]
+    },
+    {
+      "community_id": "comm_36",
+      "size": 1,
+      "label": "unlabeled",
+      "top_categories": [],
+      "top_keywords": [],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "doc_test_bridge_4614c10a",
+          "title": null,
+          "doc_tag": null,
+          "doc_category": null,
+          "source_uri": null
+        }
+      ]
+    },
+    {
+      "community_id": "comm_37",
+      "size": 1,
+      "label": "unlabeled",
+      "top_categories": [],
+      "top_keywords": [],
+      "internal_edges": 0,
+      "density": 0.0,
+      "documents": [
+        {
+          "id": "doc_test_bridge_26a8ab47",
+          "title": null,
+          "doc_tag": null,
+          "doc_category": null,
+          "source_uri": null
+        }
+      ]
+    }
+  ]
+}

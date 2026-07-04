@@ -21,7 +21,9 @@ from neo4j import Driver
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 
-from src.providers.embeddings.bge_m3_service import BGEM3ServiceProvider
+from src.providers.embeddings.embedding_service import (
+    EmbeddingServiceProvider as BGEM3ServiceProvider,  # renamed
+)
 from src.providers.settings import EmbeddingCapabilities, EmbeddingSettings
 from src.providers.tokenizer_service import TokenizerService
 from src.query.context_assembly import ContextAssembler

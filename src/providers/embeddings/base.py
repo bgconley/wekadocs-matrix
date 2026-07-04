@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: factory.py (protocol definition)
+# =============================================================================
 """
 Base embedding provider protocol.
 Pre-Phase 7: Defines the interface for all embedding providers.

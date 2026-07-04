@@ -4,6 +4,7 @@ Unit tests for Phase C.4: Structure-Aware Context Expansion.
 Tests the _expand_with_structure method and _build_expanded_chunk helper.
 """
 
+import types
 from unittest.mock import MagicMock
 
 import pytest
@@ -232,6 +233,42 @@ class TestStructureExpansionConfig:
 
         # With empty DB results, should return empty list
         assert result == []
+
+
+class TestSparseRescoringIdentifiers:
+    """Tests for sparse rescoring id alignment with graph/expansion candidates."""
+
+    def test_rescore_uses_payload_kg_id_instead_of_point_uuid(self):
+        retriever = MagicMock(spec=HybridRetriever)
+        client = MagicMock()
+        client.query_points.return_value = types.SimpleNamespace(
+            points=[
+                types.SimpleNamespace(
+                    id="uuid-1",
+                    score=12.5,
+                    payload={"kg_id": "chunk-1"},
+                )
+            ]
+        )
+        retriever.vector_retriever = types.SimpleNamespace(
+            client=client,
+            collection="chunks_multi",
+            sparse_query_name="text_sparse",
+        )
+        retriever.expansion_rescoring_enabled = False
+        retriever.expansion_rescoring_mode = "threshold_only"
+
+        scores = HybridRetriever._rescore_expansion_with_sparse(
+            retriever,
+            [1],
+            [1.0],
+            [_make_chunk("chunk-1")],
+            0.15,
+        )
+
+        assert scores == {"chunk-1": 12.5}
+        call_kwargs = client.query_points.call_args.kwargs
+        assert call_kwargs["with_payload"] is True
 
 
 # Integration-style test (requires actual DB, so marked skip by default)

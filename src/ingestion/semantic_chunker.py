@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: chunk_assembler.py
+# =============================================================================
 # src/ingestion/semantic_chunker.py
 """
 Semantic-first chunking using Chonkie.
@@ -185,6 +189,27 @@ class SemanticChunkerAssembler:
         except Exception:
             self._fallback_overlap_tokens = 80
 
+        # Contextual dense embeddings require non-overlapping chunks.
+        try:
+            from src.shared.config import get_embedding_plan
+
+            embedding_plan = get_embedding_plan()
+            if (
+                embedding_plan
+                and embedding_plan.dense.profile.supports_contextualized_chunks
+            ):
+                self._guard_overlap_tokens = 0
+                self._fallback_overlap_tokens = 0
+                log.info(
+                    "Contextual dense profile detected; disabling chunk overlap.",
+                    extra={
+                        "guard_overlap_tokens": self._guard_overlap_tokens,
+                        "fallback_overlap_tokens": self._fallback_overlap_tokens,
+                    },
+                )
+        except Exception:
+            pass
+
         # Allow environment variable override
         force_semantic = os.getenv("FORCE_SEMANTIC_CHUNKING", "").lower()
         if force_semantic == "true":
@@ -207,21 +232,89 @@ class SemanticChunkerAssembler:
         self._initialize_chunker()
 
     def _initialize_chunker(self):
-        """Initialize Chonkie with BGE-M3 adapter."""
-        from src.providers.embeddings.chonkie_adapter import BgeM3ChonkieAdapter
+        """Initialize Chonkie with the configured embedding adapter."""
+        adapter_name = (self.config.embedding_adapter or "bge_m3").lower()
 
-        # Check if BGE-M3 service is available
-        if not BgeM3ChonkieAdapter.is_available():
+        adapter = None
+        if adapter_name in {
+            "bge_m3",
+            "bge-m3",
+            "bge_m3_service",
+            "bge-m3-service",
+            "qwen3_0_6b",
+            "qwen3-0-6b",
+            "embedding-service",
+        }:
+            from src.providers.embeddings.chonkie_adapter import BgeM3ChonkieAdapter
+
+            service_url = os.getenv("BGE_M3_API_URL") or os.getenv("EMBEDDING_BASE_URL")
+            if not BgeM3ChonkieAdapter.is_available():
+                log.warning(
+                    "Embedding service unavailable; semantic chunking disabled",
+                    extra={"service_url": service_url or "http://127.0.0.1:9000"},
+                )
+                return
+            # Model name is informational — the gateway serves whichever model is loaded
+            model_name = (
+                "Qwen/Qwen3-Embedding-0.6B"
+                if "qwen3" in adapter_name
+                else "BAAI/bge-m3"
+            )
+            adapter = BgeM3ChonkieAdapter(
+                service_url=service_url, model_name=model_name
+            )
+        elif adapter_name in {
+            "snowflake_arctic_v2l",
+            "snowflake-arctic-v2l",
+            "snowflake_arctic",
+        }:
+            from src.providers.embeddings.arctic_chonkie_adapter import (
+                ArcticChonkieAdapter,
+            )
+
+            if not ArcticChonkieAdapter.is_available():
+                log.warning(
+                    "Snowflake Arctic service unavailable; semantic chunking disabled",
+                    extra={
+                        "service_url": os.getenv(
+                            "CHONKIE_EMBEDDINGS_BASE_URL",
+                            "http://127.0.0.1:9010/v1",
+                        )
+                    },
+                )
+                return
+            adapter = ArcticChonkieAdapter()
+        elif adapter_name in {
+            "qwen3_4b",
+            "qwen3-4b",
+            "qwen3_triton",
+            "qwen3-triton",
+        }:
+            from src.providers.embeddings.qwen3_chonkie_adapter import (
+                Qwen3ChonkieAdapter,
+            )
+
+            if not Qwen3ChonkieAdapter.is_available():
+                log.warning(
+                    "Qwen3 embed gateway unavailable; semantic chunking disabled",
+                    extra={
+                        "service_url": os.getenv(
+                            "QWEN3_EMBED_URL",
+                            "http://10.25.0.50:8101",
+                        )
+                    },
+                )
+                return
+            adapter = Qwen3ChonkieAdapter()
+        else:
             log.warning(
-                "BGE-M3 service unavailable; semantic chunking disabled",
-                extra={
-                    "service_url": os.getenv("BGE_M3_API_URL", "http://127.0.0.1:9000")
-                },
+                "Unknown semantic chunking adapter; semantic chunking disabled",
+                extra={"adapter": adapter_name},
             )
             return
 
         try:
-            self._adapter = BgeM3ChonkieAdapter()
+            self._adapter = adapter
             self._chunker = SemanticChunker(
                 embedding_model=self._adapter,
                 threshold=self.config.similarity_threshold,
@@ -230,6 +323,7 @@ class SemanticChunkerAssembler:
             log.info(
                 "SemanticChunkerAssembler initialized",
                 extra={
+                    "embedding_adapter": adapter_name,
                     "similarity_threshold": self.config.similarity_threshold,
                     "target_tokens": self.config.target_tokens,
                     "min_tokens": self.config.min_tokens,
@@ -240,7 +334,7 @@ class SemanticChunkerAssembler:
         except Exception as e:
             log.error(
                 "Failed to initialize Chonkie SemanticChunker",
-                extra={"error": str(e)},
+                extra={"error": str(e), "adapter": adapter_name},
                 exc_info=True,
             )
             self._chunker = None

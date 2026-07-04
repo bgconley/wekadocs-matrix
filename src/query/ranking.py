@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: hybrid_retrieval.py
+# =============================================================================
 """
 Ranking Module (Task 2.3)
 Blends multiple signals to rank search results.

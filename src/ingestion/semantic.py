@@ -1,3 +1,7 @@
+# =============================================================================
+# @status: ACTIVE
+# @called-by: chunk_assembler.py
+# =============================================================================
 """Semantic enrichment provider abstractions for chunk post-processing."""
 
 from __future__ import annotations

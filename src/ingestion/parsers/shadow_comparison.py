@@ -1,3 +1,12 @@
+# =============================================================================
+# @status: DORMANT
+# @reason: Only imported lazily inside _parse_with_shadow_comparison()
+#          when shadow_mode is enabled. Config-gated — shadow_mode defaults
+#          to false so this never loads in normal production. Analogous to
+#          ner_gliner.py (also DORMANT, config-gated).
+# @gated-by: config.ingestion.parser.shadow_mode
+# @called-by: src/ingestion/parsers/__init__.py (lazy, inside function)
+# =============================================================================
 """
 Shadow mode comparison utilities for parser migration.
 
