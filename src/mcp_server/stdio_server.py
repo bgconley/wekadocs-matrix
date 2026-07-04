@@ -125,7 +125,7 @@ async def run_stdio_server() -> None:
 
 
 def main() -> None:
-    logger.info("Starting wekadocs MCP server with STDIO transport")
+    logger.info("Starting nutanixdocs MCP server with STDIO transport")
     anyio.run(run_stdio_server)
 
 

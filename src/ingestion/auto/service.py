@@ -26,7 +26,7 @@ from .watchers import FileSystemWatcher
 
 WATCH_DIR = os.getenv("INGEST_WATCH_DIR", "/app/ingest/incoming")
 PORT = int(os.getenv("INGEST_PORT", "8081"))
-WATCH_TAG = os.getenv("INGEST_TAG", "wekadocs")
+WATCH_TAG = os.getenv("INGEST_TAG", "nutanixdocs")
 
 # Configure structured logging and OTEL export (if enabled via env)
 setup_logging(os.getenv("LOG_LEVEL", "INFO"))
@@ -75,7 +75,7 @@ app = FastAPI(title="Auto-Ingest Service")
 # Setup OpenTelemetry tracing with minimal settings from env
 _otel_settings = SimpleNamespace(
     otel_exporter_otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
-    otel_service_name=os.getenv("OTEL_SERVICE_NAME", "weka-ingestion-service"),
+    otel_service_name=os.getenv("OTEL_SERVICE_NAME", "nutanix-ingestion-service"),
 )
 setup_tracing(app, _otel_settings)
 

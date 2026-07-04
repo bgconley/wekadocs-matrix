@@ -122,7 +122,7 @@ def init_tracing(
 
     Example:
         >>> from src.shared.observability.tracing import init_tracing, get_tracer
-        >>> init_tracing("weka-ingestion-worker")
+        >>> init_tracing("nutanix-ingestion-worker")
         >>> tracer = get_tracer("ingestion")
         >>> with tracer.start_as_current_span("process_document") as span:
         ...     span.set_attribute("doc_id", "abc123")

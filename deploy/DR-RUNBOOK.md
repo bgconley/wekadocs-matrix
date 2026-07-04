@@ -1,7 +1,7 @@
 # Disaster Recovery Runbook
 
 ## Overview
-Disaster recovery procedures for WekaDocs GraphRAG MCP production system.
+Disaster recovery procedures for Nutanix Docs GraphRAG MCP production system.
 
 **RTO Target:** 1 hour (from detection to full service restoration)
 **RPO Target:** 15 minutes (maximum acceptable data loss)
@@ -23,7 +23,7 @@ Disaster recovery procedures for WekaDocs GraphRAG MCP production system.
 2. **Failover to DR Cluster** (Target: 10 min)
    ```bash
    kubectl config use-context dr-cluster
-   kubectl get ns wekadocs
+   kubectl get ns nutanixdocs
    ```
 
 3. **Restore from Backups** (Target: 30 min)
@@ -34,7 +34,7 @@ Disaster recovery procedures for WekaDocs GraphRAG MCP production system.
 
 4. **Verify Services** (Target: 10 min)
    ```bash
-   kubectl get pods -n wekadocs
+   kubectl get pods -n nutanixdocs
    curl http://mcp-server:8000/health
    ```
 5. **Verify BGE-M3 Embedding Service** (Target: 5 min)
@@ -60,13 +60,13 @@ Disaster recovery procedures for WekaDocs GraphRAG MCP production system.
 1. **Identify Corruption Scope** (5 min)
    ```bash
    # Check Neo4j constraints
-   kubectl exec -n wekadocs neo4j-0 -- \
+   kubectl exec -n nutanixdocs neo4j-0 -- \
      cypher-shell "CALL db.constraints()"
    ```
 
 2. **Stop Ingestion** (2 min)
    ```bash
-   kubectl scale deploy ingestion-worker -n wekadocs --replicas=0
+   kubectl scale deploy ingestion-worker -n nutanixdocs --replicas=0
    ```
 
 3. **Restore from Point-in-Time** (20 min)
@@ -81,7 +81,7 @@ Disaster recovery procedures for WekaDocs GraphRAG MCP production system.
 
 5. **Resume Operations** (3 min)
    ```bash
-   kubectl scale deploy ingestion-worker -n wekadocs --replicas=2
+   kubectl scale deploy ingestion-worker -n nutanixdocs --replicas=2
    ```
 
 **Total RTO:** 40 minutes

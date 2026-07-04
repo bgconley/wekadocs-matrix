@@ -1,7 +1,7 @@
 {
   "dashboard": {
-    "title": "WekaDocs GraphRAG MCP - Ingestion & Reconciliation",
-    "tags": ["wekadocs", "mcp", "ingestion", "reconciliation"],
+    "title": "Nutanix Docs GraphRAG MCP - Ingestion & Reconciliation",
+    "tags": ["nutanixdocs", "mcp", "ingestion", "reconciliation"],
     "timezone": "utc",
     "schemaVersion": 27,
     "version": 1,

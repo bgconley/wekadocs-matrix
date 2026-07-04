@@ -3,7 +3,7 @@ Utility: Resolve human-readable slugs in gold files to canonical document_ids.
 
 Usage:
     python scripts/eval/resolve_gold_ids.py "<slug>"
-    python scripts/eval/resolve_gold_ids.py --all docs/sample_ingest/gold_sparse_vs_bm25.yaml
+    python scripts/eval/resolve_gold_ids.py --all docs/nutanix_sample_ingest/gold_sparse_vs_bm25.yaml
 """
 
 import argparse

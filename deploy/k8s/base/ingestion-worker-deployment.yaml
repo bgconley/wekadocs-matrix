@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: ingestion-worker
-  namespace: wekadocs
+  namespace: nutanixdocs
   labels:
     app: ingestion-worker
 spec:
@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: ingestion-worker
-        image: wekadocs-mcp-server:latest
+        image: nutanixdocs-mcp-server:latest
         command: ["python", "-m", "src.ingestion.worker"]
         env:
         - name: ENVIRONMENT
@@ -29,7 +29,7 @@ spec:
         - name: NEO4J_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: wekadocs-secrets
+              name: nutanixdocs-secrets
               key: neo4j-password
         - name: REDIS_URL
           value: "redis://redis:6379"
@@ -48,4 +48,4 @@ spec:
       volumes:
       - name: config
         configMap:
-          name: wekadocs-config
+          name: nutanixdocs-config

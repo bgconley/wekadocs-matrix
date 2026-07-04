@@ -1,5 +1,5 @@
 // ============================================================================
-// WekaDocs GraphRAG Schema v2.2 - BACKWARD COMPATIBLE + HYBRID RAG
+// Nutanix Docs GraphRAG Schema v2.2 - BACKWARD COMPATIBLE + HYBRID RAG
 // ============================================================================
 // Created:     2025-11-05
 // Base:        v2.1 clean snapshot (kept intact)

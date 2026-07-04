@@ -1,5 +1,5 @@
 // ============================================================================
-// WekaDocs GraphRAG Schema v2.1 - Complete Standalone DDL
+// Nutanix Docs GraphRAG Schema v2.1 - Complete Standalone DDL
 // ============================================================================
 // Community Edition Compatible
 // Phase 7C: ENV-selectable providers, 1024-D vectors, multi-turn tracking

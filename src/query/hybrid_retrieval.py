@@ -69,7 +69,7 @@ except ImportError:
 logger = get_logger(__name__)
 
 # LGTM Phase 4: Tracer for retrieval pipeline spans
-_tracer = trace.get_tracer("wekadocs.retrieval") if OTEL_AVAILABLE else None
+_tracer = trace.get_tracer("nutanixdocs.retrieval") if OTEL_AVAILABLE else None
 HYBRID_INIT_LOGGED = False
 
 

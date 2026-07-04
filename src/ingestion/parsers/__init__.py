@@ -3,7 +3,7 @@
 # @called-by: atomic.py
 # =============================================================================
 """
-Parser module for WekaDocs ingestion pipeline.
+Parser module for Nutanix Docs ingestion pipeline.
 
 This module provides a unified interface for document parsing with
 support for multiple parser backends and feature-flag-controlled routing.

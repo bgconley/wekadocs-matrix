@@ -35,7 +35,7 @@ class GitHubConnector(BaseConnector):
         self.base_url = "https://api.github.com"
         self.headers = {
             "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "wekadocs-mcp-connector",
+            "User-Agent": "nutanixdocs-mcp-connector",
         }
         if self.token:
             self.headers["Authorization"] = f"Bearer {self.token}"

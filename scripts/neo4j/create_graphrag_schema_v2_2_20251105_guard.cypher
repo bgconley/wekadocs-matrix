@@ -1,5 +1,5 @@
 // ============================================================================
-// WekaDocs GraphRAG Schema v4.0 - :Section DEPRECATED
+// Nutanix Docs GraphRAG Schema v4.0 - :Section DEPRECATED
 // ============================================================================
 // Created:     2025-11-05
 // Updated:     2025-12-12 (Phase 4: Section→Chunk consolidation)

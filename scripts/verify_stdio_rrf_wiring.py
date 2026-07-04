@@ -53,7 +53,7 @@ def main():
 
     # Test queries
     test_queries = [
-        "WEKA filesystem configuration",
+        "Nutanix filesystem configuration",
         "NFS mount options",
         "cluster node setup",
     ]

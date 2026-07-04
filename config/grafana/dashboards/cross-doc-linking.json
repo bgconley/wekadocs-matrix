@@ -40,7 +40,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "count_over_time({container=\"weka-ingestion-worker\"} |~ \"cross_doc_linking_complete\" [$__range])",
+          "expr": "count_over_time({container=\"nutanix-ingestion-worker\"} |~ \"cross_doc_linking_complete\" [$__range])",
           "refId": "A"
         }
       ],
@@ -70,7 +70,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "count_over_time({container=~\"weka-ingestion-worker|weka-mcp-server\"} |~ \"colbert_rerank_complete\" [$__range])",
+          "expr": "count_over_time({container=~\"nutanix-ingestion-worker|nutanix-mcp-server\"} |~ \"colbert_rerank_complete\" [$__range])",
           "refId": "A"
         }
       ],
@@ -147,13 +147,13 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "sum(count_over_time({container=\"weka-ingestion-worker\"} |~ \"cross_doc_linking_complete\" [$__interval]))",
+          "expr": "sum(count_over_time({container=\"nutanix-ingestion-worker\"} |~ \"cross_doc_linking_complete\" [$__interval]))",
           "legendFormat": "Cross-Doc Linking",
           "refId": "A"
         },
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "sum(count_over_time({container=~\"weka-ingestion-worker|weka-mcp-server\"} |~ \"colbert_rerank_complete\" [$__interval]))",
+          "expr": "sum(count_over_time({container=~\"nutanix-ingestion-worker|nutanix-mcp-server\"} |~ \"colbert_rerank_complete\" [$__interval]))",
           "legendFormat": "ColBERT Rerank",
           "refId": "B"
         }
@@ -178,7 +178,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "{container=\"weka-ingestion-worker\"} |~ \"cross_doc_linking|colbert_rerank|edges_created|edges_updated\"",
+          "expr": "{container=\"nutanix-ingestion-worker\"} |~ \"cross_doc_linking|colbert_rerank|edges_created|edges_updated\"",
           "refId": "A"
         }
       ],
@@ -188,13 +188,13 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["wekadocs", "cross-doc"],
+  "tags": ["nutanixdocs", "cross-doc"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "WekaDocs - Cross-Doc Linking",
-  "uid": "wekadocs-crossdoc",
+  "title": "Nutanix Docs - Cross-Doc Linking",
+  "uid": "nutanixdocs-crossdoc",
   "version": 1,
   "weekStart": ""
 }

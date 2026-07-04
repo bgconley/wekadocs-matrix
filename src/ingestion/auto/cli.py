@@ -254,7 +254,7 @@ def cmd_ingest(args):
             if default_tag and hasattr(default_tag, "tag"):
                 default_tag = default_tag.tag
             else:
-                default_tag = "wekadocs"
+                default_tag = "nutanixdocs"
 
             job_id = queue.enqueue(
                 source_uri=source_uri,

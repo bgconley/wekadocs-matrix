@@ -26,7 +26,7 @@ from src.providers.settings import (
 )
 from src.providers.settings import EmbeddingSettings as ProviderEmbeddingSettings
 
-from .models import WekaBaseModel
+from .models import NutanixBaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -339,7 +339,7 @@ class QdrantQueryStrategy(str, Enum):
 
 
 class QdrantVectorConfig(BaseModel):
-    collection_name: str = "weka_sections"
+    collection_name: str = "nutanix_sections"
     use_grpc: bool = False
     timeout: int = 30
     allow_recreate: bool = False
@@ -543,6 +543,7 @@ class HybridSearchConfig(BaseModel):
     multi_vector_fusion_method: str = "rrf"
     # Phase C: Graph channel configuration
     graph_channel_enabled: bool = False  # Enable graph as independent scoring channel
+    graph_enrichment_enabled: bool = False  # Enable post-retrieval graph enrichment
     graph_adaptive_enabled: bool = False  # Enable adaptive graph weight selection
     colbert_rerank_enabled: bool = True  # Enable ColBERT late-interaction reranking
     colbert_candidate_limit: int = (
@@ -924,7 +925,7 @@ class L1CacheConfig(BaseModel):
 class L2CacheConfig(BaseModel):
     enabled: bool = True
     ttl_seconds: int = 3600
-    key_prefix: str = "weka:cache:v1"
+    key_prefix: str = "nutanix:cache:v1"
 
 
 class CacheInvalidationConfig(BaseModel):
@@ -1006,7 +1007,7 @@ class MonitoringConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
-    name: str = "wekadocs-graphrag-mcp"
+    name: str = "nutanix-docs-matrix"
     version: str = "0.1.0"
     log_level: str = "INFO"
     environment: str = "development"
@@ -1199,7 +1200,7 @@ class NERConfig(BaseModel):
     )
 
 
-class Config(WekaBaseModel):
+class Config(NutanixBaseModel):
     """Main configuration model"""
 
     app: AppConfig
@@ -1279,7 +1280,7 @@ class Settings(BaseSettings):
     otel_exporter_otlp_endpoint: Optional[str] = Field(
         default=None, alias="OTEL_EXPORTER_OTLP_ENDPOINT"
     )
-    otel_service_name: str = Field(default="weka-mcp-server", alias="OTEL_SERVICE_NAME")
+    otel_service_name: str = Field(default="nutanix-mcp-server", alias="OTEL_SERVICE_NAME")
 
     # Logging
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")

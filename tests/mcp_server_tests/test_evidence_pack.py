@@ -23,9 +23,9 @@ from src.mcp_server.mcp_utils import (
 
 def _make_scratch_entry(
     section_id: str = "chunk_1",
-    doc_tag: str = "weka_docs/4.3/admin/s3",
+    doc_tag: str = "nutanix_docs/4.3/admin/s3",
     title: str = "Bucket Settings",
-    text: str = "Set the IAM role ARN in the weka_s3_iam_role field for S3 access control.",
+    text: str = "Set the IAM role ARN in the nutanix_s3_iam_role field for S3 access control.",
     rerank_score: Optional[float] = 0.95,
     fused_score: Optional[float] = 0.7,
     vector_score: Optional[float] = 0.65,
@@ -72,7 +72,7 @@ class FakeScratch:
 
     @staticmethod
     def build_uri(session: str, pid: str) -> str:
-        return f"wekadocs://scratch/{session}/{pid}"
+        return f"nutanixdocs://scratch/{session}/{pid}"
 
 
 class FakeDeps:
@@ -145,7 +145,7 @@ class TestEvidenceExtractionScoring:
             "s",
             "p1",
             _make_scratch_entry(
-                doc_tag="weka_docs/4.3/admin/s3",
+                doc_tag="nutanix_docs/4.3/admin/s3",
                 parent_path_norm="Configuration > S3 Backend",
                 source="reranked",
             ),
@@ -163,7 +163,7 @@ class TestEvidenceExtractionScoring:
 
         assert len(quotes) == 1
         q = quotes[0]
-        assert q["doc_tag"] == "weka_docs/4.3/admin/s3"
+        assert q["doc_tag"] == "nutanix_docs/4.3/admin/s3"
         assert q["parent_path"] == "Configuration > S3 Backend"
         assert q["source"] == "reranked"
         assert q["rank"] == 1
@@ -245,7 +245,7 @@ class TestEvidenceExtractionScoring:
             )
 
         quotes = await _extract_evidence_from_passages(
-            question="weka metadata architecture",
+            question="nutanix metadata architecture",
             passage_ids=[f"p{i}" for i in range(15)],
             max_quotes=20,
             max_quote_tokens=80,
@@ -264,7 +264,7 @@ class TestEvidenceExtractionScoring:
             "p_primary_1",
             _make_scratch_entry(
                 section_id="primary_1",
-                title="WEKA metadata architecture overview",
+                title="Nutanix metadata architecture overview",
                 text="Metadata services coordinate inode updates across the cluster.",
                 rerank_score=0.91,
                 fused_score=0.88,
@@ -309,7 +309,7 @@ class TestEvidenceExtractionScoring:
         )
 
         quotes = await _extract_evidence_from_passages(
-            question="how is metadata managed and architected on a weka cluster",
+            question="how is metadata managed and architected on a nutanix cluster",
             passage_ids=["p_graph_1", "p_primary_2", "p_graph_2", "p_primary_1"],
             max_quotes=4,
             max_quote_tokens=80,
@@ -332,7 +332,7 @@ class TestEvidenceExtractionScoring:
             "p_overview_1",
             _make_scratch_entry(
                 section_id="overview_1",
-                title="WEKA cluster architecture overview",
+                title="Nutanix cluster architecture overview",
                 text="General architecture overview of the cluster.",
                 rerank_score=0.95,
                 source="reranked",
@@ -354,7 +354,7 @@ class TestEvidenceExtractionScoring:
             "p_metadata_limits",
             _make_scratch_entry(
                 section_id="metadata_limits",
-                title="Metadata limitations in WEKA filesystems",
+                title="Metadata limitations in Nutanix filesystems",
                 text="Metadata limitations and inode management constraints are documented here.",
                 rerank_score=0.20,
                 source="reranked",
@@ -374,7 +374,7 @@ class TestEvidenceExtractionScoring:
         )
 
         quotes = await _extract_evidence_from_passages(
-            question="how is metadata managed and architected on a weka cluster",
+            question="how is metadata managed and architected on a nutanix cluster",
             passage_ids=[
                 "p_overview_1",
                 "p_overview_2",

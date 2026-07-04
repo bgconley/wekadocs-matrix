@@ -112,6 +112,9 @@ def retry_with_backoff(
 
 from src.ingestion.neo4j_writers import Neo4jWriter  # noqa: E402
 from src.ingestion.qdrant_writers import QdrantWriter  # noqa: E402
+
+# Backward-compatible re-exports for tests that import from atomic
+from src.ingestion.neo4j_writers import ALLOWED_ENTITY_RELATIONSHIP_TYPES  # noqa: E402
 from src.ingestion.saga import (  # noqa: E402
     IngestionValidator,
     SagaContext,
@@ -143,7 +146,7 @@ except ImportError:
 logger = get_logger(__name__)
 
 # LGTM Phase 4: Tracer for ingestion pipeline spans
-_tracer = trace.get_tracer("wekadocs.ingestion") if OTEL_AVAILABLE else None
+_tracer = trace.get_tracer("nutanixdocs.ingestion") if OTEL_AVAILABLE else None
 
 
 @dataclass
@@ -883,7 +886,7 @@ class AtomicIngestionCoordinator:
                 stem = Path(fname).stem
 
                 # NEW: Extract category from directory path relative to data/ingest/
-                # e.g., /app/data/ingest/wekapod/overview.md → category="wekapod"
+                # e.g., /app/data/ingest/nutanix-platform/overview.md -> category="nutanix-platform"
                 # e.g., /app/data/ingest/aws-solutions/sagemaker/guide.md → category="aws-solutions"
                 path_parts = source_path.parts
                 for i, part in enumerate(path_parts):
@@ -1495,7 +1498,7 @@ class AtomicIngestionCoordinator:
             [] if (supports_sparse and enable_title_sparse) else None
         )
         # entity-sparse: BM25-style lexical matching for entity names
-        # Enables exact term matching for entity-based queries (e.g., "WEKA", "NFS")
+        # Enables exact term matching for entity-based queries (e.g., "Nutanix", "NFS")
         entity_sparse_embeddings: Optional[List[Optional[dict]]] = (
             [] if (supports_sparse and enable_entity_sparse) else None
         )

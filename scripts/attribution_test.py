@@ -8,17 +8,17 @@ import subprocess
 import time
 
 QUERIES = [
-    ("1-META", "how is metadata managed and architected on a weka cluster"),
+    ("1-META", "how is metadata managed and architected on a nutanix cluster"),
     (
         "2-SIZE",
-        "How do I appropriately size the weka drives, compute, and frontends containers?",
+        "How do I appropriately size the nutanix drives, compute, and frontends containers?",
     ),
-    ("3-CLI", "weka cluster run command --force"),
-    ("4-PROC", "how to install WEKA cluster"),
-    ("5-REF", "what is WEKA deduplication"),
+    ("3-CLI", "nutanix cluster run command --force"),
+    ("4-PROC", "how to install Nutanix cluster"),
+    ("5-REF", "what is Nutanix deduplication"),
 ]
 
-REPO = "/home/bgconley/wekadocs-matrix"
+REPO = "/home/bgconley/nutanix-docs-matrix"
 YAML = REPO + "/config/development.yaml"
 OUT_DIR = REPO + "/reports/retrieval_diagnostics/2026-03-07-attribution"
 os.makedirs(OUT_DIR, exist_ok=True)
@@ -105,7 +105,7 @@ def save_traces(run_name, profile_val, spec_val):
     run_dir = OUT_DIR + "/" + run_name
     os.makedirs(run_dir, exist_ok=True)
     res = subprocess.run(
-        ["docker", "logs", "weka-mcp-server"], capture_output=True, text=True
+        ["docker", "logs", "nutanix-mcp-server"], capture_output=True, text=True
     )
     traces = {}
     for line in res.stdout.split("\n"):

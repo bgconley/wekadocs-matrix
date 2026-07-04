@@ -15,13 +15,13 @@ class TestSubsystemArchitecture:
     @pytest.mark.parametrize(
         "query",
         [
-            "how is metadata managed and architected on a weka cluster",
-            "explain WEKA inode management internals",
-            "WEKA filesystem internals and tiering",
-            "how does WEKA handle snapshots limitations",
-            "describe the WEKA data protection scheme and rebuild process",
-            "WEKA metadata architecture overview",
-            "how does data placement work in WEKA",
+            "how is metadata managed and architected on a nutanix cluster",
+            "explain Nutanix inode management internals",
+            "Nutanix filesystem internals and tiering",
+            "how does Nutanix handle snapshots limitations",
+            "describe the Nutanix data protection scheme and rebuild process",
+            "Nutanix metadata architecture overview",
+            "how does data placement work in Nutanix",
         ],
     )
     def test_subsystem_queries_classified_correctly(self, query):
@@ -32,14 +32,14 @@ class TestSubsystemArchitecture:
 
     def test_subsystem_with_cloud_cue_still_subsystem(self):
         """Cloud cues are orthogonal — should NOT disqualify subsystem_architecture."""
-        intent = classify_query_intent("how does WEKA metadata work on Azure")
+        intent = classify_query_intent("how does Nutanix metadata work on Azure")
         assert intent.query_type == "subsystem_architecture"
         assert intent.has_cloud_cues is True
         assert intent.precision_mode is True
         assert "metadata" in intent.subsystem_terms
 
     def test_subsystem_with_aws_still_subsystem(self):
-        intent = classify_query_intent("WEKA tiering architecture on AWS")
+        intent = classify_query_intent("Nutanix tiering architecture on AWS")
         assert intent.query_type == "subsystem_architecture"
         assert intent.has_cloud_cues is True
 
@@ -48,12 +48,12 @@ class TestResourceSizing:
     @pytest.mark.parametrize(
         "query",
         [
-            "How do I appropriately size the weka drives, compute, and frontends containers?",
-            "WEKA frontend sizing requirements",
-            "minimum CPU cores for WEKA containers",
-            "WEKA capacity planning drives compute frontend",
-            "how much memory do WEKA containers need",
-            "WEKA ram requirements for compute containers",
+            "How do I appropriately size the nutanix drives, compute, and frontends containers?",
+            "Nutanix frontend sizing requirements",
+            "minimum CPU cores for Nutanix containers",
+            "Nutanix capacity planning drives compute frontend",
+            "how much memory do Nutanix containers need",
+            "Nutanix ram requirements for compute containers",
         ],
     )
     def test_sizing_queries_classified_correctly(self, query):
@@ -64,7 +64,7 @@ class TestResourceSizing:
 
     def test_sizing_with_cloud_cue_still_sizing(self):
         """Cloud cues are orthogonal — should NOT disqualify resource_sizing."""
-        intent = classify_query_intent("WEKA container sizing on GCP")
+        intent = classify_query_intent("Nutanix container sizing on GCP")
         assert intent.query_type == "resource_sizing"
         assert intent.has_cloud_cues is True
         assert intent.precision_mode is True
@@ -72,7 +72,7 @@ class TestResourceSizing:
 
 class TestExistingTypesStable:
     def test_cli_still_works(self):
-        intent = classify_query_intent("weka cluster run command --force")
+        intent = classify_query_intent("nutanix cluster run command --force")
         assert intent.query_type == "cli"
 
     def test_config_still_works(self):
@@ -80,19 +80,19 @@ class TestExistingTypesStable:
         assert intent.query_type == "config"
 
     def test_procedural_still_works(self):
-        intent = classify_query_intent("how to install WEKA cluster")
+        intent = classify_query_intent("how to install Nutanix cluster")
         assert intent.query_type == "procedural"
 
     def test_troubleshooting_still_works(self):
-        intent = classify_query_intent("WEKA cluster error failed to start")
+        intent = classify_query_intent("Nutanix cluster error failed to start")
         assert intent.query_type == "troubleshooting"
 
     def test_reference_still_works(self):
-        intent = classify_query_intent("what is WEKA deduplication")
+        intent = classify_query_intent("what is Nutanix deduplication")
         assert intent.query_type == "reference"
 
     def test_default_conceptual(self):
-        intent = classify_query_intent("WEKA cluster overview benefits")
+        intent = classify_query_intent("Nutanix cluster overview benefits")
         assert intent.query_type == "conceptual"
 
 
@@ -112,7 +112,7 @@ class TestCloudCueDetection:
         ],
     )
     def test_cloud_cues_detected(self, cue):
-        intent = classify_query_intent(f"deploy WEKA on {cue}")
+        intent = classify_query_intent(f"deploy Nutanix on {cue}")
         assert intent.has_cloud_cues is True
 
 
@@ -127,7 +127,7 @@ class TestEdgeCases:
 
     def test_mixed_subsystem_and_sizing_subsystem_wins(self):
         """When both terms present, subsystem wins (earlier in chain)."""
-        intent = classify_query_intent("WEKA metadata architecture sizing capacity")
+        intent = classify_query_intent("Nutanix metadata architecture sizing capacity")
         assert intent.query_type == "subsystem_architecture"
         assert len(intent.subsystem_terms) >= 1
         assert len(intent.sizing_terms) >= 1
@@ -139,7 +139,7 @@ class TestEdgeCases:
 
     def test_cli_overrides_all(self):
         """CLI with enough signals overrides everything."""
-        intent = classify_query_intent("weka metadata --tiering command")
+        intent = classify_query_intent("nutanix metadata --tiering command")
         assert intent.query_type == "cli"
 
 
@@ -155,7 +155,7 @@ class TestRegressionQueries:
 
     def test_metadata_architecture_query(self):
         intent = classify_query_intent(
-            "how is metadata managed and architected on a weka cluster"
+            "how is metadata managed and architected on a nutanix cluster"
         )
         assert intent.query_type == "subsystem_architecture"
         assert intent.precision_mode is True
@@ -167,7 +167,7 @@ class TestRegressionQueries:
 
     def test_container_sizing_query(self):
         intent = classify_query_intent(
-            "How do I appropriately size the weka drives, compute, and frontends containers?"
+            "How do I appropriately size the nutanix drives, compute, and frontends containers?"
         )
         assert intent.query_type == "resource_sizing"
         assert intent.precision_mode is True
@@ -185,7 +185,7 @@ class TestAnchorModifierSplit:
         assert intent.generic_modifiers == ("managed",)
 
     def test_drives_compute_frontend_sizing(self):
-        intent = classify_query_intent("WEKA drives compute frontend sizing")
+        intent = classify_query_intent("Nutanix drives compute frontend sizing")
         assert "drives" in intent.primary_anchors
         assert "compute" in intent.primary_anchors
         assert "frontend" in intent.primary_anchors
@@ -193,7 +193,7 @@ class TestAnchorModifierSplit:
 
     def test_subsystem_anchors_are_subset_of_terms(self):
         intent = classify_query_intent(
-            "how is metadata managed and architected on a weka cluster"
+            "how is metadata managed and architected on a nutanix cluster"
         )
         for a in intent.primary_anchors:
             assert a in intent.subsystem_terms
@@ -202,7 +202,7 @@ class TestAnchorModifierSplit:
 
     def test_sizing_anchors_are_subset_of_terms(self):
         intent = classify_query_intent(
-            "How do I appropriately size the weka drives, compute, and frontends containers?"
+            "How do I appropriately size the nutanix drives, compute, and frontends containers?"
         )
         for a in intent.primary_anchors:
             assert a in intent.sizing_terms
@@ -211,14 +211,14 @@ class TestAnchorModifierSplit:
 
     def test_empty_anchors_for_modifiers_only(self):
         """A query with only modifier terms still classifies but has empty anchors."""
-        intent = classify_query_intent("WEKA architecture internals backend")
+        intent = classify_query_intent("Nutanix architecture internals backend")
         assert intent.query_type == "subsystem_architecture"
         # "architecture", "internals", "backend" are all modifiers
         assert len(intent.generic_modifiers) >= 1
         # Some terms are modifiers, but primary_anchors may still be empty
 
     def test_non_precision_query_has_empty_anchors(self):
-        intent = classify_query_intent("how to install WEKA cluster")
+        intent = classify_query_intent("how to install Nutanix cluster")
         assert intent.primary_anchors == ()
         assert intent.generic_modifiers == ()
 
@@ -228,17 +228,17 @@ class TestAnchorModifierSplit:
         assert not (SIZING_ANCHORS & SIZING_MODIFIERS)
 
     def test_tiering_is_anchor_not_modifier(self):
-        intent = classify_query_intent("WEKA tiering architecture")
+        intent = classify_query_intent("Nutanix tiering architecture")
         assert "tiering" in intent.primary_anchors
         assert "architecture" in intent.generic_modifiers
 
     def test_snapshots_limitations(self):
-        intent = classify_query_intent("WEKA snapshots limitations")
+        intent = classify_query_intent("Nutanix snapshots limitations")
         assert "snapshots" in intent.primary_anchors
         assert "limitations" in intent.generic_modifiers
 
     def test_ram_cpu_cores_are_sizing_anchors(self):
-        intent = classify_query_intent("WEKA ram cpu cores capacity")
+        intent = classify_query_intent("Nutanix ram cpu cores capacity")
         assert "ram" in intent.primary_anchors
         assert "cpu" in intent.primary_anchors
         assert "cores" in intent.primary_anchors
@@ -253,9 +253,9 @@ class TestWordBoundaryMatching:
         "query",
         [
             "program overview",
-            "How to program WEKA",
+            "How to program Nutanix",
             "diagram of system",
-            "dramatic changes to WEKA",
+            "dramatic changes to Nutanix",
             "resize the window",
         ],
     )
@@ -269,9 +269,9 @@ class TestWordBoundaryMatching:
     @pytest.mark.parametrize(
         "query,expected_term",
         [
-            ("WEKA ram requirements", "ram"),
+            ("Nutanix ram requirements", "ram"),
             ("how much cpu for containers", "cpu"),
-            ("appropriately size the weka drives", "size"),
+            ("appropriately size the nutanix drives", "size"),
         ],
     )
     def test_short_terms_true_positive(self, query, expected_term):

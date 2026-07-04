@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-NAMESPACE="wekadocs"
+NAMESPACE="nutanixdocs"
 BACKUP_DIR="${1:-}"
 
 if [[ -z "$BACKUP_DIR" ]] || [[ ! -d "$BACKUP_DIR" ]]; then
@@ -13,7 +13,7 @@ if [[ -z "$BACKUP_DIR" ]] || [[ ! -d "$BACKUP_DIR" ]]; then
   exit 1
 fi
 
-echo "=== WekaDocs Restore ==="
+echo "=== Nutanix Docs Restore ==="
 echo "Backup location: $BACKUP_DIR"
 echo ""
 
@@ -47,7 +47,7 @@ echo "Restoring Qdrant..."
 QDRANT_POD=$(kubectl get pods -n ${NAMESPACE} -l app=qdrant -o jsonpath='{.items[0].metadata.name}')
 kubectl cp ${BACKUP_DIR}/${QDRANT_FILE} ${NAMESPACE}/${QDRANT_POD}:/tmp/snapshot.tar
 kubectl exec -n ${NAMESPACE} ${QDRANT_POD} -- \
-  curl -X PUT "http://localhost:6333/collections/weka_sections/snapshots/upload" \
+  curl -X PUT "http://localhost:6333/collections/nutanix_sections/snapshots/upload" \
   --data-binary @/tmp/snapshot.tar
 echo "✓ Qdrant restore complete"
 

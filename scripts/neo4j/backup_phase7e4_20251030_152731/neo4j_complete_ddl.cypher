@@ -12,7 +12,7 @@
 // - All performance and search optimizations
 //
 // Usage:
-//   docker exec weka-neo4j cypher-shell -u neo4j -p $PASSWORD -f /path/to/this/file.cypher
+//   docker exec nutanix-neo4j cypher-shell -u neo4j -p $PASSWORD -f /path/to/this/file.cypher
 //
 // ============================================================================
 

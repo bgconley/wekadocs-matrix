@@ -42,7 +42,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "count_over_time({container=\"weka-ingestion-worker\"} |~ \"ingestion_complete\" [$__range])",
+          "expr": "count_over_time({container=\"nutanix-ingestion-worker\"} |~ \"ingestion_complete\" [$__range])",
           "refId": "A"
         }
       ],
@@ -72,7 +72,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "count_over_time({container=\"weka-ingestion-worker\"} |~ \"chunking_complete\" [$__range])",
+          "expr": "count_over_time({container=\"nutanix-ingestion-worker\"} |~ \"chunking_complete\" [$__range])",
           "refId": "A"
         }
       ],
@@ -102,7 +102,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "count_over_time({container=\"weka-ingestion-worker\"} |~ \"embeddings_generated\" [$__range])",
+          "expr": "count_over_time({container=\"nutanix-ingestion-worker\"} |~ \"embeddings_generated\" [$__range])",
           "refId": "A"
         }
       ],
@@ -132,7 +132,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "count_over_time({container=\"weka-ingestion-worker\"} |~ \"error|failed|exception\" [$__range])",
+          "expr": "count_over_time({container=\"nutanix-ingestion-worker\"} |~ \"error|failed|exception\" [$__range])",
           "refId": "A"
         }
       ],
@@ -179,13 +179,13 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "sum(count_over_time({container=\"weka-ingestion-worker\"} |~ \"ingestion_complete\" [$__interval]))",
+          "expr": "sum(count_over_time({container=\"nutanix-ingestion-worker\"} |~ \"ingestion_complete\" [$__interval]))",
           "legendFormat": "Documents Ingested",
           "refId": "A"
         },
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "sum(count_over_time({container=\"weka-ingestion-worker\"} |~ \"document_parsed\" [$__interval]))",
+          "expr": "sum(count_over_time({container=\"nutanix-ingestion-worker\"} |~ \"document_parsed\" [$__interval]))",
           "legendFormat": "Documents Parsed",
           "refId": "B"
         }
@@ -233,13 +233,13 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "sum(count_over_time({container=\"weka-ingestion-worker\"} |~ \"neo4j_write_complete\" [$__interval]))",
+          "expr": "sum(count_over_time({container=\"nutanix-ingestion-worker\"} |~ \"neo4j_write_complete\" [$__interval]))",
           "legendFormat": "Neo4j Writes",
           "refId": "A"
         },
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "sum(count_over_time({container=\"weka-ingestion-worker\"} |~ \"qdrant_upsert_complete\" [$__interval]))",
+          "expr": "sum(count_over_time({container=\"nutanix-ingestion-worker\"} |~ \"qdrant_upsert_complete\" [$__interval]))",
           "legendFormat": "Qdrant Upserts",
           "refId": "B"
         }
@@ -264,7 +264,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "{container=\"weka-ingestion-worker\"} |~ \"ingestion_complete|ingestion_started|document_parsed|chunking_complete|embeddings_generated|neo4j_write_complete|qdrant_upsert_complete\"",
+          "expr": "{container=\"nutanix-ingestion-worker\"} |~ \"ingestion_complete|ingestion_started|document_parsed|chunking_complete|embeddings_generated|neo4j_write_complete|qdrant_upsert_complete\"",
           "refId": "A"
         }
       ],
@@ -274,13 +274,13 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["wekadocs", "ingestion"],
+  "tags": ["nutanixdocs", "ingestion"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "WekaDocs - Ingestion Overview",
-  "uid": "wekadocs-ingestion",
+  "title": "Nutanix Docs - Ingestion Overview",
+  "uid": "nutanixdocs-ingestion",
   "version": 1,
   "weekStart": ""
 }

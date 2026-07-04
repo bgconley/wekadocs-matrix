@@ -1,5 +1,5 @@
 // ============================================================================
-// WekaDocs GraphRAG Schema v2.1 - DEPLOYED SNAPSHOT BACKUP
+// Nutanix Docs GraphRAG Schema v2.1 - DEPLOYED SNAPSHOT BACKUP
 // ============================================================================
 // BACKUP METADATA:
 //   Created:     2025-10-29
@@ -323,7 +323,7 @@ SET sv.version = 'v2.1',
 // The Qdrant collection must be created separately using the Python client.
 // This section documents the exact configuration captured from deployment.
 //
-// COLLECTION NAME: weka_sections_v2
+// COLLECTION NAME: nutanix_sections_v2
 //
 // RESTORATION SCRIPT (Python):
 // --------------------------------------------------------------------------
@@ -334,7 +334,7 @@ SET sv.version = 'v2.1',
 //
 // # Create collection with exact deployed configuration
 // client.create_collection(
-//     collection_name="weka_sections_v2",
+//     collection_name="nutanix_sections_v2",
 //     vectors_config=VectorParams(
 //         size=1024,
 //         distance=Distance.COSINE
@@ -366,34 +366,34 @@ SET sv.version = 'v2.1',
 //
 // # Create payload indexes for fast filtering
 // client.create_payload_index(
-//     collection_name="weka_sections_v2",
+//     collection_name="nutanix_sections_v2",
 //     field_name="document_id",
 //     field_schema="keyword"
 // )
 //
 // client.create_payload_index(
-//     collection_name="weka_sections_v2",
+//     collection_name="nutanix_sections_v2",
 //     field_name="parent_section_id",
 //     field_schema="keyword"
 // )
 //
 // client.create_payload_index(
-//     collection_name="weka_sections_v2",
+//     collection_name="nutanix_sections_v2",
 //     field_name="order",
 //     field_schema="integer"
 // )
 //
 // client.create_payload_index(
-//     collection_name="weka_sections_v2",
+//     collection_name="nutanix_sections_v2",
 //     field_name="updated_at",
 //     field_schema="integer"
 // )
 //
-// print("Qdrant collection 'weka_sections_v2' created successfully")
+// print("Qdrant collection 'nutanix_sections_v2' created successfully")
 // --------------------------------------------------------------------------
 //
 // DEPLOYED CONFIGURATION SUMMARY:
-//   Collection:       weka_sections_v2
+//   Collection:       nutanix_sections_v2
 //   Vector Size:      1024 dimensions
 //   Distance Metric:  Cosine
 //   HNSW m:           16
@@ -469,12 +469,12 @@ SET sv.version = 'v2.1',
 // 1. Verify Neo4j: SHOW CONSTRAINTS; SHOW INDEXES;
 // 2. Verify SchemaVersion: MATCH (sv:SchemaVersion) RETURN sv;
 // 3. Create Qdrant collection using Python script above
-// 4. Verify Qdrant: curl http://localhost:6333/collections/weka_sections_v2
+// 4. Verify Qdrant: curl http://localhost:6333/collections/nutanix_sections_v2
 // 5. Begin data ingestion
 //
 // For troubleshooting:
-// - Neo4j logs: docker logs weka-neo4j
-// - Qdrant logs: docker logs weka-qdrant
+// - Neo4j logs: docker logs nutanix-neo4j
+// - Qdrant logs: docker logs nutanix-qdrant
 // - Schema validation: scripts/verify_embedding_fields.py
 //
 // ============================================================================

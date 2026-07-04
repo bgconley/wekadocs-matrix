@@ -9,7 +9,7 @@ from neo4j import GraphDatabase
 def main():
     uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     user = os.getenv("NEO4J_USER", "neo4j")
-    pwd = os.getenv("NEO4J_PASSWORD", "weka_graphrag_password")
+    pwd = os.getenv("NEO4J_PASSWORD", "nutanix_graphrag_password")
 
     driver = GraphDatabase.driver(uri, auth=(user, pwd))
 

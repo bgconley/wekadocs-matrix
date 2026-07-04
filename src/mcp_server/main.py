@@ -108,7 +108,7 @@ def _apply_legacy_mcp_deprecation_headers(response: Response) -> None:
 app = FastAPI(
     title=config.app.name,
     version=config.app.version,
-    description="WekaDocs GraphRAG MCP Server",
+    description="Nutanix Docs GraphRAG MCP Server",
 )
 app.include_router(webhooks.router)
 app.state.connector_manager = None
@@ -546,7 +546,7 @@ async def mcp_tools_list(response: Response):
     tools = [
         MCPTool(
             name="search_documentation",
-            description="Search Weka documentation using hybrid retrieval with graph context",
+            description="Search Nutanix documentation using hybrid retrieval with graph context",
             input_schema={
                 "type": "object",
                 "properties": {

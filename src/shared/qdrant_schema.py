@@ -111,7 +111,7 @@ def build_qdrant_schema(
 
         # entity-sparse: Lexical matching for entity names mentioned in chunks
         # Enables exact term matching for entity-based queries
-        # Example: "WEKA" or "NFS" matches chunks mentioning those entities
+        # Example: "Nutanix" or "NFS" matches chunks mentioning those entities
         use_entity_sparse = (
             enable_entity_sparse if enable_entity_sparse is not None else True
         )

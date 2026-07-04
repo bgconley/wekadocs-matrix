@@ -5,9 +5,11 @@ TDD tests that validate removal of dead relationship types from the schema.
 These tests should FAIL initially, then PASS after implementation.
 
 Dead types being removed:
-- AFFECTS, CRITICAL_FOR, DEPENDS_ON, RELATED_TO, REQUIRES (never materialized)
+- AFFECTS, CRITICAL_FOR, DEPENDS_ON, REQUIRES (never materialized)
 - PREV (redundant - use <-[:NEXT]-)
 - SAME_HEADING (O(n²) fanout with zero query usage)
+
+RELATED_TO is intentionally active again for cross-document linking.
 """
 
 import re
@@ -22,7 +24,6 @@ DEAD_TYPES = frozenset(
         "AFFECTS",
         "CRITICAL_FOR",
         "DEPENDS_ON",
-        "RELATED_TO",
         "REQUIRES",
         "PREV",
         "SAME_HEADING",
@@ -39,16 +40,19 @@ EXPECTED_ACTIVE_TYPES = frozenset(
         "EXECUTES",
         "FOCUSED_ON",
         "HAS_CITATION",
+        "HAS_CHUNK",
         "HAS_PARAMETER",
         "HAS_QUERY",
-        "HAS_SECTION",
         "IN_CHUNK",
         "IN_SECTION",
         "MENTIONED_IN",
         "MENTIONS",
         "NEXT",
         "NEXT_CHUNK",
+        "PARENT_HEADING",
         "PARENT_OF",
+        "REFERENCES",
+        "RELATED_TO",
         "RESOLVES",
         "RETRIEVED",
         "SUPPORTED_BY",
@@ -154,6 +158,10 @@ class TestCodebaseNoDeadReferences:
                 continue
             # Skip lines mentioning removal context (dead types in parens after "Removed")
             if "fanout with zero query usage" in line:
+                continue
+            if "Never created during ingestion" in line:
+                continue
+            if "Use <-[:NEXT]-" in line:
                 continue
             matches.append(line)
 

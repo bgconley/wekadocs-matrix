@@ -26,17 +26,17 @@ class TestEntity:
         from src.providers.ner.gliner_service import Entity
 
         entity = Entity(
-            text="WEKA",
-            label="weka_software_component",
+            text="NCI",
+            label="PRODUCT",
             start=10,
-            end=14,
+            end=13,
             score=0.95,
         )
 
-        assert entity.text == "WEKA"
-        assert entity.label == "weka_software_component"
+        assert entity.text == "NCI"
+        assert entity.label == "PRODUCT"
         assert entity.start == 10
-        assert entity.end == 14
+        assert entity.end == 13
         assert entity.score == 0.95
 
     def test_entity_frozen(self):
@@ -67,8 +67,8 @@ class TestEntity:
         """Verify Entity can be used in sets (hashable)."""
         from src.providers.ner.gliner_service import Entity
 
-        e1 = Entity("WEKA", "component", 0, 4, 0.9)
-        e2 = Entity("WEKA", "component", 0, 4, 0.9)
+        e1 = Entity("NCI", "component", 0, 3, 0.9)
+        e2 = Entity("NCI", "component", 0, 3, 0.9)
         e3 = Entity("NFS", "protocol", 5, 8, 0.8)
 
         # Same content = same hash (frozen dataclass)
@@ -192,7 +192,7 @@ class TestEntityExtraction:
             mock_model = Mock()
             mock_model.predict_entities.return_value = [
                 {
-                    "text": "WEKA",
+                    "text": "NCI",
                     "label": "component",
                     "start": 0,
                     "end": 4,
@@ -223,10 +223,10 @@ class TestEntityExtraction:
     def test_extract_entities_success(self, mock_service):
         """Verify successful extraction returns Entity objects."""
         labels = ["component", "protocol"]
-        result = mock_service.extract_entities("WEKA uses NFS protocol", labels)
+        result = mock_service.extract_entities("NCI uses NFS protocol", labels)
 
         assert len(result) == 2
-        assert result[0].text == "WEKA"
+        assert result[0].text == "NCI"
         assert result[0].label == "component"
         assert result[1].text == "NFS"
         assert result[1].label == "protocol"
@@ -297,7 +297,7 @@ class TestBatchExtraction:
             mock_model.batch_predict_entities.return_value = [
                 [
                     {
-                        "text": "WEKA",
+                        "text": "NCI",
                         "label": "component",
                         "start": 0,
                         "end": 4,
@@ -316,12 +316,12 @@ class TestBatchExtraction:
             ]
             service._model = mock_model
 
-            texts = ["WEKA documentation", "NFS mount guide"]
+            texts = ["NCI documentation", "NFS mount guide"]
             result = service.batch_extract_entities(texts, ["component", "protocol"])
 
             assert len(result) == 2
             assert len(result[0]) == 1
-            assert result[0][0].text == "WEKA"
+            assert result[0][0].text == "NCI"
             assert len(result[1]) == 1
             assert result[1][0].text == "NFS"
 
@@ -333,9 +333,9 @@ class TestLabelsHelper:
         """Verify label name extraction strips examples."""
         from src.providers.ner.labels import extract_label_name
 
-        label = "weka_software_component (e.g. backend, frontend, agent)"
+        label = "COMPONENT (e.g. AOS, AHV, Prism Central)"
         result = extract_label_name(label)
-        assert result == "weka_software_component"
+        assert result == "COMPONENT"
 
     def test_extract_label_name_without_examples(self):
         """Verify plain labels pass through unchanged."""
@@ -350,7 +350,8 @@ class TestLabelsHelper:
         from src.providers.ner.labels import DEFAULT_LABELS
 
         assert len(DEFAULT_LABELS) > 0
-        assert "weka_software_component" in DEFAULT_LABELS[0]
+        assert "PRODUCT" in DEFAULT_LABELS[0]
+        assert "Nutanix Cloud Platform" in DEFAULT_LABELS[0]
 
     def test_get_label_names_returns_clean_names(self):
         """Verify get_label_names returns clean names without examples."""

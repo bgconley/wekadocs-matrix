@@ -144,7 +144,7 @@ def parse_file_uri(uri: str) -> str:
         Container-local path
 
     Examples:
-        file:///Users/.../wekadocs-matrix/data/ingest/file.md -> /app/data/ingest/file.md
+        file:///Users/.../nutanix-docs-matrix/data/ingest/file.md -> /app/data/ingest/file.md
         /app/data/ingest/file.md -> /app/data/ingest/file.md
     """
     # Handle file:// URIs
@@ -160,7 +160,7 @@ def parse_file_uri(uri: str) -> str:
 
     # Robust host->container mapping: anchor to project root if present
     # Default project root on host is the repo root; in container it's /app
-    repo_marker = "/wekadocs-matrix/"
+    repo_marker = "/nutanix-docs-matrix/"
     if repo_marker in path:
         idx = path.index(repo_marker)
         return "/app" + path[idx + len(repo_marker) - 1 :]
@@ -307,11 +307,11 @@ async def main():
     # LGTM Phase 4: Initialize OTEL tracing for ingestion worker
     # This enables trace context propagation to Alloy → Tempo
     init_tracing(
-        service_name="weka-ingestion-worker",
+        service_name="nutanix-ingestion-worker",
         service_version="1.0.0",
         instrument_redis=True,
     )
-    log.info("otel_tracing_initialized", service="weka-ingestion-worker")
+    log.info("otel_tracing_initialized", service="nutanix-ingestion-worker")
 
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGTERM, handle_shutdown)

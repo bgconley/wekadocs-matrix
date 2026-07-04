@@ -438,7 +438,7 @@ def test_focused_text_extracts_anchor_lines(monkeypatch):
     )
     chunk = _chunk("a", body, 0.5)
     chunk.heading = "Architecture Overview"
-    chunk.parent_path_norm = "Internals > WEKA"
+    chunk.parent_path_norm = "Internals > Nutanix"
     metrics = {}
 
     hr._apply_reranker(
@@ -457,7 +457,7 @@ def test_focused_text_extracts_anchor_lines(monkeypatch):
     assert "unrelated content" in text  # ±1 context for line 3
     assert "deployment guide" not in text  # line 5, outside window
     # Structural context preserved
-    assert "Internals > WEKA" in text
+    assert "Internals > Nutanix" in text
     assert "Architecture Overview" in text
     assert metrics["precision_focused_rerank_text"] is True
 
@@ -837,12 +837,12 @@ def test_specificity_anchor_bonus_breaks_tie():
     # Two chunks tied at 9.375
     c1 = _chunk("generic", "cluster architecture overview", 0.5)
     c1.heading = "Converged configuration"
-    c1.parent_path_norm = "WEKA system overview"
+    c1.parent_path_norm = "Nutanix system overview"
     c1.rerank_score = 9.375
 
     c2 = _chunk("specific", "metadata management details", 0.4)
     c2.heading = "Metadata management"
-    c2.parent_path_norm = "WEKA client and mount modes"
+    c2.parent_path_norm = "Nutanix client and mount modes"
     c2.rerank_score = 9.375
 
     intent = _precision_intent(("metadata",))
@@ -864,12 +864,12 @@ def test_specificity_deploy_penalty():
 
     c1 = _chunk("cloud", "AWS deployment guide", 0.5)
     c1.heading = "Slurm based architecture"
-    c1.parent_path_norm = "AWS ParallelCluster and WEKA"
+    c1.parent_path_norm = "AWS ParallelCluster and Nutanix"
     c1.rerank_score = 9.375
 
     c2 = _chunk("local", "metadata internals", 0.4)
     c2.heading = "Metadata management"
-    c2.parent_path_norm = "WEKA system overview"
+    c2.parent_path_norm = "Nutanix system overview"
     c2.rerank_score = 9.375
 
     intent = _precision_intent(("metadata",))
@@ -1095,7 +1095,7 @@ def test_graph_channel_injects_precision_anchors():
         ),
     )
 
-    # GLiNER returns only "weka" (garbage-filtered away at len < 4)
+    # GLiNER returns only "nutanix" (garbage-filtered away at len < 4)
     class WeakExtractor:
         def extract_entities(self, query):
             return ["we"]  # too short, filtered by garbage filter

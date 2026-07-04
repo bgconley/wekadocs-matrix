@@ -101,7 +101,7 @@ Neo4j Data Cleanup
 
 Qdrant Vector Cleanup
 ------------------------------------------------------------
-  Collection: weka_sections
+  Collection: nutanix_sections
   Before: 560 vectors
 ✅ Deleted 560 vectors
 
@@ -146,7 +146,7 @@ Reports are saved to `reports/cleanup/cleanup-report-YYYYMMDD-HHMMSS.json`:
       "indexes": 35
     },
     "qdrant": {
-      "weka_sections": {
+      "nutanix_sections": {
         "vector_count": 560,
         "config": "..."
       }
@@ -165,7 +165,7 @@ Reports are saved to `reports/cleanup/cleanup-report-YYYYMMDD-HHMMSS.json`:
       "indexes": 35
     },
     "qdrant": {
-      "weka_sections": {
+      "nutanix_sections": {
         "vector_count": 0,
         "deleted": true
       }
@@ -188,7 +188,7 @@ Reports are saved to `reports/cleanup/cleanup-report-YYYYMMDD-HHMMSS.json`:
       "timestamp": "2025-10-18T19:32:01.234567",
       "action": "qdrant_delete_collection",
       "details": {
-        "collection": "weka_sections",
+        "collection": "nutanix_sections",
         "vectors_deleted": 560
       }
     },
@@ -336,7 +336,7 @@ The script uses `shared.config.init_config()` to load settings from:
 
 **Solution:** Run from project root:
 ```bash
-cd /path/to/wekadocs-matrix
+cd /path/to/nutanix-docs-matrix
 python scripts/cleanup-databases.py
 ```
 
@@ -414,7 +414,7 @@ test-clean: clean-db
 
 **Created:** 2025-10-18
 **Author:** Claude Code
-**Maintainer:** wekadocs-matrix team
+**Maintainer:** nutanix-docs-matrix team
 
 **Last Updated:** 2025-10-18
 **Version:** 1.0.0

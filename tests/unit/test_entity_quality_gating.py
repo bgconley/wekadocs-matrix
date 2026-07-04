@@ -55,9 +55,8 @@ class TestExpandedExclusionList:
             "select",
             "run",
             "enter",
-            "WEKA",
-            "weka",
-            "WekaFS",
+            "Nutanix",
+            "nutanix",
         ],
     )
     def test_generic_terms_excluded(self, term: str):
@@ -70,18 +69,20 @@ class TestExpandedExclusionList:
             "NFS",
             "SMB",
             "S3",
-            "POSIX",
-            "inode",
+            "Prism Central",
+            "NCI",
+            "AOS",
+            "AHV",
             "metadata",
             "tiering",
             "snapshot",
             "AWS",
             "Azure",
             "GCP",
-            "weka fs",
+            "ncli cluster",
             "mount",
             "stripe-width",
-            "backend server",
+            "Nutanix Files",
         ],
     )
     def test_discriminative_terms_preserved(self, term: str):
@@ -148,7 +149,7 @@ class TestExtractLabelName:
     """Tests for label name extraction from descriptive labels."""
 
     def test_strips_examples(self):
-        assert extract_label_name("COMMAND (e.g. weka fs, mount)") == "COMMAND"
+        assert extract_label_name("COMMAND (e.g. ncli, acli)") == "COMMAND"
 
     def test_plain_label(self):
         assert extract_label_name("PROTOCOL") == "PROTOCOL"
@@ -162,7 +163,7 @@ class TestStructuralEntityQualityGate:
         assert normalize_entity_name("**Before you begin**") == "Before you begin"
 
     def test_normalize_strips_backticks(self):
-        assert normalize_entity_name("`weka fs`") == "weka fs"
+        assert normalize_entity_name("`ncli cluster`") == "ncli cluster"
 
     def test_normalize_collapses_whitespace(self):
         assert normalize_entity_name("  foo   bar \n baz ") == "foo bar baz"
@@ -223,8 +224,8 @@ class TestStructuralExtractorQuality:
     def test_structural_entities_have_type_and_source(self):
         cmd_section = {
             "id": "s2",
-            "text": "`weka fs status`",
-            "code_blocks": ["weka fs status"],
+            "text": "`ncli cluster status`",
+            "code_blocks": ["ncli cluster status"],
         }
         cmds, _ = extract_commands(cmd_section)
         assert cmds, "Expected at least one command entity"

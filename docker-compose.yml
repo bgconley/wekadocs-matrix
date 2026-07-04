@@ -5,9 +5,9 @@
 version: '3.8'
 
 networks:
-  weka-net:
+  nutanix-net:
     driver: bridge
-    name: weka-net
+    name: nutanix-net
 
 volumes:
   neo4j-data:
@@ -20,9 +20,9 @@ volumes:
 services:
   neo4j:
     image: neo4j:2025.10.1-enterprise
-    container_name: weka-neo4j
+    container_name: nutanix-neo4j
     networks:
-      - weka-net
+      - nutanix-net
     ports:
       - "7474:7474"  # HTTP
       - "7687:7687"  # Bolt
@@ -61,9 +61,9 @@ services:
 
   qdrant:
     image: qdrant/qdrant:v1.16.0
-    container_name: weka-qdrant
+    container_name: nutanix-qdrant
     networks:
-      - weka-net
+      - nutanix-net
     ports:
       - "6333:6333"  # HTTP API
       - "6334:6334"  # gRPC
@@ -90,9 +90,9 @@ services:
 
   redis:
     image: redis:7.2-alpine
-    container_name: weka-redis
+    container_name: nutanix-redis
     networks:
-      - weka-net
+      - nutanix-net
     ports:
       - "6379:6379"
     volumes:
@@ -127,9 +127,9 @@ services:
     build:
       context: .
       dockerfile: docker/mcp-server.Dockerfile
-    container_name: weka-mcp-server
+    container_name: nutanix-mcp-server
     networks:
-      - weka-net
+      - nutanix-net
     ports:
       - "${MCP_PORT:-8000}:8000"
     extra_hosts:
@@ -199,7 +199,7 @@ services:
       # Auth & observability
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
-      - OTEL_SERVICE_NAME=weka-mcp-server
+      - OTEL_SERVICE_NAME=nutanix-mcp-server
       - OTEL_TRACES_EXPORTER=otlp
       - OTEL_METRICS_EXPORTER=none
       - OTEL_LOGS_EXPORTER=otlp
@@ -231,10 +231,10 @@ services:
     build:
       context: .
       dockerfile: docker/ingestion-worker.Dockerfile
-    container_name: weka-ingestion-worker
+    container_name: nutanix-ingestion-worker
     command: python -m src.ingestion.worker
     networks:
-      - weka-net
+      - nutanix-net
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -318,7 +318,7 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
       # OTEL Observability (Phase LGTM)
-      - OTEL_SERVICE_NAME=weka-ingestion-worker
+      - OTEL_SERVICE_NAME=nutanix-ingestion-worker
       - OTEL_TRACES_EXPORTER=otlp
       - OTEL_METRICS_EXPORTER=none
       - OTEL_LOGS_EXPORTER=otlp
@@ -345,10 +345,10 @@ services:
     build:
       context: .
       dockerfile: docker/ingestion-service.Dockerfile
-    container_name: weka-ingestion-service
+    container_name: nutanix-ingestion-service
     command: python -m src.ingestion.auto.service
     networks:
-      - weka-net
+      - nutanix-net
     ports:
       - "8081:8081"  # Health/metrics/ready endpoints
     extra_hosts:
@@ -431,7 +431,7 @@ services:
       - CACHE_NS=rag:v1
       - CACHE_REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       # OTEL Observability (Phase LGTM)
-      - OTEL_SERVICE_NAME=weka-ingestion-service
+      - OTEL_SERVICE_NAME=nutanix-ingestion-service
       - OTEL_TRACES_EXPORTER=otlp
       - OTEL_METRICS_EXPORTER=none
       - OTEL_LOGS_EXPORTER=otlp
@@ -458,9 +458,9 @@ services:
   # Forwards logs, traces, and metrics to GCP LGTM stack via Tailscale
   alloy:
     image: grafana/alloy:v1.4.0
-    container_name: weka-alloy
+    container_name: nutanix-alloy
     networks:
-      - weka-net
+      - nutanix-net
     ports:
       - "12345:12345"  # Alloy UI
       - "4317:4317"    # OTLP gRPC
@@ -474,7 +474,7 @@ services:
       - --storage.path=/var/lib/alloy
       - /etc/alloy/config.alloy
     environment:
-      - HOSTNAME=${HOSTNAME:-wekadocs-dev}
+      - HOSTNAME=${HOSTNAME:-nutanixdocs-dev}
       # GCP LGTM endpoints (via Tailscale)
       - LOKI_ENDPOINT=${LOKI_ENDPOINT:-http://10.10.0.5:3100/loki/api/v1/push}
       - TEMPO_ENDPOINT=${TEMPO_ENDPOINT:-10.10.0.5:4317}

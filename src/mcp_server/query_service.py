@@ -37,6 +37,7 @@ from src.query.retrieval_types import ChunkResult
 from src.query.session_tracker import SessionTracker
 from src.shared.config import get_config, get_embedding_plan, get_embedding_settings
 from src.shared.connections import get_connection_manager
+from src.shared.domain import get_domain_config
 from src.shared.observability import get_logger
 from src.shared.observability.metrics import (
     mcp_search_response_size_bytes,
@@ -59,9 +60,10 @@ except ImportError:
     import uuid
 
 logger = get_logger(__name__)
+_domain = get_domain_config()
 
 # LGTM Phase 4: Tracer for MCP server spans
-_tracer = trace.get_tracer("wekadocs.mcp") if OTEL_AVAILABLE else None
+_tracer = trace.get_tracer("nutanixdocs.mcp") if OTEL_AVAILABLE else None
 
 
 class QueryService:
@@ -668,7 +670,11 @@ class QueryService:
                             "role": "system",
                             "content": (
                                 "You are a query reformulator for a technical documentation "
-                                "search system about WEKA (a distributed file system). "
+                                "search system about Nutanix products and services, including "
+                                "NCP, NCI, AOS, AHV, Prism, Nutanix Central, NUS, Files, "
+                                "Objects, Volumes, NCM, NDB, NKP, NC2, NAI, Flow, Move, "
+                                "disaster recovery, networking, security, and lifecycle "
+                                "operations. "
                                 "Rewrite the user's input as a clear, natural language question. "
                                 "Output ONLY the rewritten question, nothing else. "
                                 "If the input is already a well-formed question, return it unchanged."
@@ -727,12 +733,12 @@ class QueryService:
         }
 
         if any(kw in lowered for kw in error_keywords):
-            return f"How do I troubleshoot {query} in WEKA?"
+            return f"How do I troubleshoot {query} in {_domain.product_name}?"
         if any(kw in lowered for kw in procedure_keywords):
-            return f"What are the steps to {query} in WEKA?"
+            return f"What are the steps to {query} in {_domain.product_name}?"
         if any(kw in lowered for kw in config_keywords):
-            return f"How do I configure {query} in WEKA?"
-        return f"Explain {query} in the context of WEKA documentation."
+            return f"How do I configure {query} in {_domain.product_name}?"
+        return f"Explain {query} in the context of {_domain.product_name} documentation."
 
     def search(
         self,

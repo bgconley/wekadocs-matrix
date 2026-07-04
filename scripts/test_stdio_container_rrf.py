@@ -9,7 +9,7 @@ Usage:
     python scripts/test_stdio_container_rrf.py
 
 This script:
-1. Spawns the STDIO server via 'docker exec -i weka-mcp-server python -m src.mcp_server.stdio_server'
+1. Spawns the STDIO server via 'docker exec -i nutanix-mcp-server python -m src.mcp_server.stdio_server'
 2. Performs the MCP protocol handshake (initialize → initialized)
 3. Calls the search_sections tool with a test query
 4. Validates that RRF fusion fields are present in the response
@@ -145,7 +145,7 @@ def main():
         "docker",
         "exec",
         "-i",
-        "weka-mcp-server",
+        "nutanix-mcp-server",
         "python",
         "-m",
         "src.mcp_server.stdio_server",
@@ -203,7 +203,7 @@ def main():
 
         # Step 3: Call search_sections tool
         print(f"\n{BOLD}Step 3: Calling search_sections tool{RESET}")
-        test_query = "WEKA filesystem configuration"
+        test_query = "Nutanix filesystem configuration"
         send_jsonrpc(
             proc,
             "tools/call",

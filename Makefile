@@ -13,12 +13,12 @@ test-phase-6: up
 # Neo4j Cypher MCP server controls
 NEO4J_CYPHER_MCP_COMPOSE := scripts/neo4j/neo4j-cypher-mcp/docker-compose.yml
 
-.PHONY: weka-net
-weka-net:
-	@docker network inspect weka-net >/dev/null 2>&1 || docker network create weka-net
+.PHONY: nutanix-net
+nutanix-net:
+	@docker network inspect nutanix-net >/dev/null 2>&1 || docker network create nutanix-net
 
 .PHONY: neo4j-cypher-mcp-up
-neo4j-cypher-mcp-up: weka-net
+neo4j-cypher-mcp-up: nutanix-net
 	@echo "Starting Neo4j Cypher MCP server..."
 	docker compose -f $(NEO4J_CYPHER_MCP_COMPOSE) --env-file .env up -d
 

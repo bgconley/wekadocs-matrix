@@ -1,11 +1,11 @@
-# Tailored for wekadocs-matrix: runs the Neo4j Cypher MCP server
+# Tailored for nutanix-docs-matrix: runs the Neo4j Cypher MCP server
 # on the same Docker network as your database so it can use Bolt
 # directly without exposing extra ports.
 
 networks:
-  weka-net:
+  nutanix-net:
     external: true
-    name: weka-net
+    name: nutanix-net
 
 services:
   neo4j-cypher-mcp:
@@ -15,9 +15,9 @@ services:
       context: https://github.com/neo4j-contrib/mcp-neo4j.git#main:servers/mcp-neo4j-cypher
       dockerfile: Dockerfile
     image: mcp-neo4j-cypher:local
-    container_name: weka-neo4j-cypher-mcp
+    container_name: nutanix-neo4j-cypher-mcp
     networks:
-      - weka-net
+      - nutanix-net
     environment:
       # Use the existing network-attached Neo4j container.
       # Prefer the service name 'neo4j' for cross-project reliability.
@@ -40,7 +40,7 @@ services:
     # restart: unless-stopped
 
 # Notes
-# - Ensure the external network exists: `docker network ls | grep weka-net`
-#   If missing, create it: `docker network create weka-net`
+# - Ensure the external network exists: `docker network ls | grep nutanix-net`
+#   If missing, create it: `docker network create nutanix-net`
 # - The credentials come from your repo .env (NEO4J_USER/NEO4J_PASSWORD).
 # - If your DB enforces TLS or is remote, set NEO4J_URI to bolt+s:// or neo4j+s://.

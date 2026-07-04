@@ -395,7 +395,9 @@ class ProviderFactory:
             from src.providers.rerank.jina import JinaRerankProvider
 
             api_key = kwargs.get("api_key") or os.getenv("JINA_API_KEY")
-            return JinaRerankProvider(model=model, api_key=api_key, **kwargs)
+            # JinaRerankProvider does not accept 'instruction' — filter it out
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k in {"api_key", "timeout"}}
+            return JinaRerankProvider(model=model, api_key=api_key, **filtered_kwargs)
 
         elif provider == "local-reranker-service":
             from src.providers.rerank.local_reranker_service import (

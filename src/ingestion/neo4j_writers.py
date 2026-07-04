@@ -321,7 +321,7 @@ class Neo4jWriter:
     ENTITY_LABEL_ALLOWLIST = frozenset(
         {
             "Entity",  # Base/fallback label
-            "Command",  # CLI commands (weka fs snapshot, etc.)
+            "Command",  # CLI commands (nutanix fs snapshot, etc.)
             "Configuration",  # Config parameters
             "Procedure",  # Multi-step procedures
             "Step",  # Individual steps within procedures

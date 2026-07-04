@@ -6,7 +6,7 @@ set -euo pipefail
 
 NEW_IMAGE="${1:-}"
 AUTO_ROLLBACK="${2:-}"
-NAMESPACE="wekadocs"
+NAMESPACE="nutanixdocs"
 CANARY_DEPLOYMENT="mcp-server-canary"
 STABLE_DEPLOYMENT="mcp-server-blue"
 

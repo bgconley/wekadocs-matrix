@@ -1,10 +1,10 @@
-# WekaDocs Matrix Configuration - Development Environment
+# Nutanix Docs Matrix Configuration - Development Environment
 # This is the single source of truth for all configuration values
 # Eliminates phantom defaults and hardcoded values throughout the codebase
 
 # Application metadata
 app:
-  name: wekadocs-matrix
+  name: nutanix-docs-matrix
   environment: development
   log_level: INFO
   version: "2.0.0"
@@ -154,10 +154,10 @@ search:
       batch_size: 2        # Conservative for shared 3090 VRAM
       max_tokens_total: 8192
       max_tokens_per_doc: 6000
-      instruction: "Judge whether the document is relevant to the search query about WEKA distributed file system. Match the specificity of the query — if the query asks about a specific subsystem (metadata, filesystem internals, tiering, snapshots), prioritize documentation about that subsystem over general overviews. Consider system architecture, filesystem internals, data management concepts, metadata handling, configuration procedures, CLI commands, parameter references, and step-by-step instructions as highly relevant. Introductory overviews and general summaries are less relevant than specific technical content. Answer only yes or no."
+      instruction: "Judge whether the document is relevant to the search query about Nutanix technical documentation. Match the specificity of the query: if it asks about NCP, NCI, AOS, AHV, Prism, Nutanix Central, NUS, Files, Objects, Volumes, NCM, NDB, NKP, NC2, NAI, Flow, Move, disaster recovery, networking, security, lifecycle operations, APIs, or CLI commands, prioritize documentation about that exact product, component, or workflow over broad overviews. Answer only yes or no."
       instructions_by_type:
-        subsystem_architecture: "Judge whether the document is relevant to the query about WEKA internal subsystem architecture (metadata, inodes, tiering, data protection, filesystem internals). Prioritize deep technical documentation about the specific subsystem over general overviews or cloud deployment guides. Cloud deployment workflows (AWS, Azure, GCP, Terraform, CycleCloud) are NOT relevant unless the query explicitly mentions those platforms. Answer only yes or no."
-        resource_sizing: "Judge whether the document is relevant to the query about WEKA resource sizing and capacity planning (containers, drives, compute, frontend, CPU, memory requirements). Prioritize sizing tables, minimum/maximum requirements, capacity formulas, and container composition details. Cloud deployment workflows are NOT relevant unless the query explicitly mentions cloud platforms. Answer only yes or no."
+        subsystem_architecture: "Judge whether the document is relevant to the query about Nutanix platform or subsystem architecture, including NCP, NCI, AOS, AHV, Prism, NUS, NCM, NDB, NKP, NC2, NAI, Flow, disaster recovery, storage services, networking, security, or lifecycle internals. Prioritize deep technical documentation about the specific subsystem over general overview pages. Answer only yes or no."
+        resource_sizing: "Judge whether the document is relevant to the query about Nutanix resource sizing, capacity planning, configuration maximums, licensing tiers, node counts, CPU, memory, storage, performance, GPU resources, cloud capacity, or cluster requirements. Prioritize sizing tables, limits, formulas, and deployment requirements. Answer only yes or no."
 
     # Signal-diverse rerank pool: ensures reranker sees candidates from every signal source
     # Requires feature_flags.signal_diverse_rerank_pool: true AND this section enabled
@@ -436,7 +436,7 @@ cache:
   l2:
     enabled: true
     ttl_seconds: 3600
-    key_prefix: "weka:cache:v1"
+    key_prefix: "nutanix:cache:v1"
 
   # Phase 7E-3: Cache invalidation configuration
   # Reference: Canonical Spec L3184-3281 (epoch), L3116-3183 (scan)
@@ -518,20 +518,22 @@ ner:
   # Env var GLINER_SERVICE_URL overrides this (see config.py:1603)
   service_url: "http://10.25.0.50:9002"
   # Entity exclusions: terms too common to be useful (filtered post-extraction)
-  # Note: "WEKA" and variants are excluded in src/providers/ner/labels.py
+  # Note: broad vendor aliases are excluded in src/providers/ner/labels.py
   labels:
-    # Refined WEKA entity types (v2) - optimized for retrieval value
-    # 10 focused types mapped to specific query patterns
-    - "COMMAND (e.g. weka fs, weka nfs permission add, mount)"
-    - "PARAMETER (e.g. --json, num_cores, memory_mb, stripe-width)"
-    - "COMPONENT (e.g. backend server, frontend process, drive process)"
-    - "PROTOCOL (e.g. NFS, SMB, S3, POSIX)"
-    - "CLOUD_PROVIDER (e.g. AWS, Azure, GCP, OCI)"
-    - "STORAGE_CONCEPT (e.g. tiering, snapshot, object store, SSD capacity)"
-    - "VERSION (e.g. 4.4, 4.4.x, v4.3)"
-    - "PROCEDURE_STEP (e.g. Select Save, Run the command, Click Apply)"
-    - "ERROR (e.g. error code 10054, Connection refused, timeout)"
-    - "CAPACITY_METRIC (e.g. GB, TB, IOPS, latency, throughput)"
+    # Nutanix entity types optimized for retrieval value.
+    - "PRODUCT (e.g. Nutanix Cloud Platform, NCI, NCM, NUS, NDB, NKP, NC2, NAI)"
+    - "COMPONENT (e.g. AOS, AHV, Prism Central, Files, Objects, Volumes, Flow)"
+    - "PLATFORM (e.g. on-premises, AWS, Azure, Google Cloud, OVHcloud, edge)"
+    - "VERSION (e.g. AOS 7.3, PC 2024.x, NAI 2.7)"
+    - "COMMAND (e.g. ncli, acli, kubectl, nutanix command-line operations)"
+    - "API (e.g. Prism v4 API, REST endpoint, category API)"
+    - "PROTOCOL (e.g. NFS, SMB, S3, iSCSI, CSI, COSI)"
+    - "STORAGE_CONCEPT (e.g. storage container, snapshot, replication, tiering)"
+    - "CLOUD_PROVIDER (e.g. AWS, Azure, Google Cloud, OVHcloud)"
+    - "DEPLOYMENT_MODEL (e.g. NCI, NC2, GC2, NCI-Edge, NCI-VDI)"
+    - "ERROR (e.g. alert, error code, failed task, health check failure)"
+    - "METRIC (e.g. IOPS, latency, throughput, CPU, memory, usable TiB)"
+    - "PROCEDURE_STEP (e.g. click Save, run the command, create a cluster)"
 
 # Testing helpers
 use_mock_embeddings: false

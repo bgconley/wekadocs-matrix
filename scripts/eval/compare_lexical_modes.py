@@ -4,7 +4,7 @@ Compare BM25 (Neo4j full‑text) vs BGE-M3 sparse (Qdrant) lexical retrieval.
 
 Runs both modes against a small gold set and reports recall/MRR/latency,
 using the existing HybridRetriever pipeline. Designed to work with the
-sample_ingest docs without requiring schema changes.
+Nutanix sample ingest docs without requiring schema changes.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gold",
         type=Path,
-        default=Path("docs/sample_ingest/gold_sparse_vs_bm25.yaml"),
+        default=Path("docs/nutanix_sample_ingest/gold_sparse_vs_bm25.yaml"),
         help="YAML gold file with queries and expected_doc_ids",
     )
     parser.add_argument("--top-k", type=int, default=20, help="Top-K results to fetch")

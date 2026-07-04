@@ -1,4 +1,4 @@
-# WekaDocs GraphRAG MCP - Monitoring Runbook
+# Nutanix Docs GraphRAG MCP - Monitoring Runbook
 
 **Phase 5, Task 5.2 — Monitoring & Observability**
 **Version:** 1.0
@@ -6,7 +6,7 @@
 
 ## Overview
 
-This runbook provides step-by-step procedures for diagnosing and responding to alerts from the WekaDocs GraphRAG MCP monitoring system.
+This runbook provides step-by-step procedures for diagnosing and responding to alerts from the Nutanix Docs GraphRAG MCP monitoring system.
 
 ## Quick Reference
 
@@ -50,7 +50,7 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 2. Review OpenTelemetry traces in your OTLP backend (New Relic by default)
    ```bash
-   # Use New Relic Distributed tracing UI for service=weka-mcp-server
+   # Use New Relic Distributed tracing UI for service=nutanix-mcp-server
    ```
 
 3. Check for slow Cypher queries
@@ -60,7 +60,7 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 4. Verify Neo4j connection pool
    ```bash
-   docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD \
+   docker exec nutanix-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD \
      "CALL dbms.listConnections() YIELD connectionId, connectTime, connector"
    ```
 
@@ -100,7 +100,7 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 2. Review application logs
    ```bash
-   docker logs weka-mcp-server --since 10m | grep -i error
+   docker logs nutanix-mcp-server --since 10m | grep -i error
    ```
 
 3. Check dependency health
@@ -110,8 +110,8 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 4. Verify database connectivity
    ```bash
-   docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "RETURN 1"
-   docker exec weka-redis redis-cli ping
+   docker exec nutanix-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "RETURN 1"
+   docker exec nutanix-redis redis-cli ping
    curl http://localhost:6333/health
    ```
 
@@ -158,7 +158,7 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 2. Identify missing vectors
    ```bash
-   docker exec weka-mcp-server python3 -c "
+   docker exec nutanix-mcp-server python3 -c "
    from src.ingestion.reconcile import check_drift
    drift = check_drift()
    print(f'Missing in vector store: {len(drift.missing_in_vector)}')
@@ -168,19 +168,19 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 3. Check reconciliation logs
    ```bash
-   docker logs weka-ingestion-worker --since 24h | grep reconciliation
+   docker logs nutanix-ingestion-worker --since 24h | grep reconciliation
    ```
 
 **Mitigation:**
 
 - **Immediate:** Trigger manual reconciliation
   ```bash
-  docker exec weka-ingestion-worker python3 -m src.ingestion.reconcile --repair
+  docker exec nutanix-ingestion-worker python3 -m src.ingestion.reconcile --repair
   ```
 
 - **Short-term:** Verify embedding service is healthy
   ```bash
-  docker exec weka-mcp-server python3 -c "
+  docker exec nutanix-mcp-server python3 -c "
   from src.shared.embeddings import get_embedder
   embedder = get_embedder()
   vec = embedder.encode('test')
@@ -219,7 +219,7 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 4. Verify Neo4j indexes
    ```bash
-   docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD \
+   docker exec nutanix-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD \
      "CALL db.indexes() YIELD name, state, populationPercent WHERE state <> 'ONLINE'"
    ```
 
@@ -227,7 +227,7 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 - **Vector slow:** Check Qdrant collection size and consider sharding
   ```bash
-  curl http://localhost:6333/collections/weka_sections
+  curl http://localhost:6333/collections/nutanix_sections
   ```
 
 - **Graph slow:** Add missing indexes (see Phase 4, Task 4.2)
@@ -262,12 +262,12 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 2. Verify cache size
    ```bash
-   docker exec weka-redis redis-cli INFO memory
+   docker exec nutanix-redis redis-cli INFO memory
    ```
 
 3. Check for cache churn (rapid evictions)
    ```bash
-   docker exec weka-redis redis-cli INFO stats | grep evicted_keys
+   docker exec nutanix-redis redis-cli INFO stats | grep evicted_keys
    ```
 
 **Mitigation:**
@@ -290,7 +290,7 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 - **Query patterns changed:** Run cache warmer
   ```bash
-  docker exec weka-mcp-server python3 -m src.ops.warmers.query_warmer
+  docker exec nutanix-mcp-server python3 -m src.ops.warmers.query_warmer
   ```
 
 **Resolution Criteria:** Hit rate > 85% sustained for 30 minutes
@@ -313,12 +313,12 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 2. Check ingestion worker health
    ```bash
-   docker logs weka-ingestion-worker --since 10m
+   docker logs nutanix-ingestion-worker --since 10m
    ```
 
 3. Verify Neo4j write performance
    ```bash
-   docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD \
+   docker exec nutanix-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD \
      "CALL dbms.queryJmx('org.neo4j:*') YIELD attributes WHERE attributes.Name = 'TransactionsCommitted'"
    ```
 
@@ -359,17 +359,17 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 1. Check container status
    ```bash
-   docker ps --filter name=weka-mcp-server
+   docker ps --filter name=nutanix-mcp-server
    ```
 
 2. Review recent logs
    ```bash
-   docker logs weka-mcp-server --tail 100
+   docker logs nutanix-mcp-server --tail 100
    ```
 
 3. Check resource constraints
    ```bash
-   docker stats --no-stream weka-mcp-server
+   docker stats --no-stream nutanix-mcp-server
    ```
 
 **Mitigation:**
@@ -410,12 +410,12 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 1. **Container/Pod status**
    ```bash
    docker ps | grep neo4j
-   docker logs weka-neo4j --tail=200
+   docker logs nutanix-neo4j --tail=200
    ```
 
 2. **Process & ports**
    ```bash
-   docker exec weka-neo4j ss -lntp | grep -E '7474|7687'
+   docker exec nutanix-neo4j ss -lntp | grep -E '7474|7687'
    ```
 
 3. **Disk / memory / heap**
@@ -424,25 +424,25 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
    df -h
 
    # Check Neo4j logs for OOM or pagecache errors
-   docker exec weka-neo4j cat /logs/neo4j.log | tail -100
-   docker exec weka-neo4j cat /logs/debug.log | tail -100
+   docker exec nutanix-neo4j cat /logs/neo4j.log | tail -100
+   docker exec nutanix-neo4j cat /logs/debug.log | tail -100
    ```
 
 4. **Bolt connectivity**
    ```bash
-   docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "RETURN 1"
+   docker exec nutanix-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "RETURN 1"
    ```
 
 5. **Cluster (if applicable)**
    ```bash
-   docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "CALL dbms.cluster.overview()"
+   docker exec nutanix-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "CALL dbms.cluster.overview()"
    ```
 
 **Immediate Mitigation:**
 
 - **Single node:** Restart service
   ```bash
-  docker restart weka-neo4j
+  docker restart nutanix-neo4j
   ```
 
 - **Cluster:** Restart **followers** first; avoid leader restart until quorum confirmed
@@ -456,18 +456,18 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 - **Clear stuck transactions**
   ```bash
-  docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "CALL dbms.listQueries()"
-  docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "CALL dbms.killQuery('<query-id>')"
+  docker exec nutanix-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "CALL dbms.listQueries()"
+  docker exec nutanix-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "CALL dbms.killQuery('<query-id>')"
   ```
 
 - **Free disk:** Remove old logs and snapshots
   ```bash
-  docker exec weka-neo4j find /logs -name "*.log.*" -mtime +7 -delete
+  docker exec nutanix-neo4j find /logs -name "*.log.*" -mtime +7 -delete
   ```
 
 - **Verify memory settings:** Ensure `NEO4J_dbms_memory_*` envs match capacity
   ```bash
-  docker exec weka-neo4j env | grep NEO4J_dbms_memory
+  docker exec nutanix-neo4j env | grep NEO4J_dbms_memory
   ```
 
 **Long-Term Fix:**
@@ -491,41 +491,41 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 1. **Container/Pod status**
    ```bash
    docker ps | grep qdrant
-   docker logs weka-qdrant --tail=200
+   docker logs nutanix-qdrant --tail=200
    ```
 
 2. **Process & ports**
    ```bash
-   docker exec weka-qdrant netstat -lntp | grep -E '6333|6334'
+   docker exec nutanix-qdrant netstat -lntp | grep -E '6333|6334'
    ```
 
 3. **Health endpoint**
    ```bash
    curl http://localhost:6333/health
-   curl http://localhost:6333/collections/weka_sections
+   curl http://localhost:6333/collections/nutanix_sections
    ```
 
 4. **Disk space & storage**
    ```bash
    df -h
-   docker exec weka-qdrant du -sh /qdrant/storage/*
+   docker exec nutanix-qdrant du -sh /qdrant/storage/*
    ```
 
 5. **Memory usage**
    ```bash
-   docker stats --no-stream weka-qdrant
+   docker stats --no-stream nutanix-qdrant
    ```
 
 **Immediate Mitigation:**
 
 - **Container stopped:** Restart service
   ```bash
-  docker restart weka-qdrant
+  docker restart nutanix-qdrant
   ```
 
 - **Disk full:** Free up space or increase volume size
   ```bash
-  docker volume inspect wekadocs-matrix_qdrant_data
+  docker volume inspect nutanix-docs-matrix_qdrant_data
   ```
 
 - **Reduce load:** Enable graph-only mode temporarily
@@ -540,7 +540,7 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 - **Collection corrupted:** Re-create collection
   ```bash
-  curl -X DELETE http://localhost:6333/collections/weka_sections
+  curl -X DELETE http://localhost:6333/collections/nutanix_sections
   # Then trigger re-indexing via ingestion
   ```
 
@@ -577,43 +577,43 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 1. **Container/Pod status**
    ```bash
    docker ps | grep redis
-   docker logs weka-redis --tail=200
+   docker logs nutanix-redis --tail=200
    ```
 
 2. **Process & ports**
    ```bash
-   docker exec weka-redis netstat -lntp | grep 6379
+   docker exec nutanix-redis netstat -lntp | grep 6379
    ```
 
 3. **Redis connectivity**
    ```bash
-   docker exec weka-redis redis-cli ping
-   docker exec weka-redis redis-cli INFO server
+   docker exec nutanix-redis redis-cli ping
+   docker exec nutanix-redis redis-cli INFO server
    ```
 
 4. **Memory usage & evictions**
    ```bash
-   docker exec weka-redis redis-cli INFO memory
-   docker exec weka-redis redis-cli INFO stats | grep evicted
+   docker exec nutanix-redis redis-cli INFO memory
+   docker exec nutanix-redis redis-cli INFO stats | grep evicted
    ```
 
 5. **Persistence (if enabled)**
    ```bash
-   docker exec weka-redis redis-cli INFO persistence
-   docker exec weka-redis ls -lh /data/
+   docker exec nutanix-redis redis-cli INFO persistence
+   docker exec nutanix-redis ls -lh /data/
    ```
 
 **Immediate Mitigation:**
 
 - **Container stopped:** Restart service
   ```bash
-  docker restart weka-redis
+  docker restart nutanix-redis
   ```
 
 - **Memory maxed out:** Flush old keys or increase maxmemory
   ```bash
   # Temporary: flush least-recently-used keys
-  docker exec weka-redis redis-cli --scan --pattern "weka:cache:*" | head -1000 | xargs docker exec -i weka-redis redis-cli DEL
+  docker exec nutanix-redis redis-cli --scan --pattern "nutanix:cache:*" | head -1000 | xargs docker exec -i nutanix-redis redis-cli DEL
   ```
 
 - **Graceful degradation:** Application continues with L1 cache only (in-process)
@@ -630,13 +630,13 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 
 - **Clear stale cache entries**
   ```bash
-  docker exec weka-redis redis-cli FLUSHDB
+  docker exec nutanix-redis redis-cli FLUSHDB
   # Note: Will cause temporary cache miss spike
   ```
 
 - **Check for memory leaks:** Monitor key count growth
   ```bash
-  docker exec weka-redis redis-cli DBSIZE
+  docker exec nutanix-redis redis-cli DBSIZE
   ```
 
 **Long-Term Fix:**
@@ -645,7 +645,7 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 - Implement cache key TTL policies to prevent unbounded growth
 - Add monitoring for Redis slow log
   ```bash
-  docker exec weka-redis redis-cli SLOWLOG GET 10
+  docker exec nutanix-redis redis-cli SLOWLOG GET 10
   ```
 - Consider Redis persistence (RDB/AOF) for critical cache data
 
@@ -663,8 +663,8 @@ This runbook provides step-by-step procedures for diagnosing and responding to a
 ## Escalation Contacts
 
 - **On-call Engineer:** PagerDuty integration (TBD)
-- **Platform Team:** Slack #wekadocs-platform
-- **Data Team:** Slack #wekadocs-data
+- **Platform Team:** Slack #nutanix-docs-platform
+- **Data Team:** Slack #nutanixdocs-data
 
 ## Post-Incident Review
 

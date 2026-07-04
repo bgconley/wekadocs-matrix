@@ -1,5 +1,5 @@
 // ============================================================================
-// WekaDocs GraphRAG Schema v2.1 - CLEAN STATE BACKUP
+// Nutanix Docs GraphRAG Schema v2.1 - CLEAN STATE BACKUP
 // ============================================================================
 // BACKUP METADATA:
 //   Created:     2025-11-05
@@ -570,8 +570,8 @@ SET sv.version = 'v2.1',
 // 6. Begin data ingestion with improved chunk sizes
 //
 // For troubleshooting:
-// - Neo4j logs: docker logs weka-neo4j
-// - Qdrant logs: docker logs weka-qdrant
+// - Neo4j logs: docker logs nutanix-neo4j
+// - Qdrant logs: docker logs nutanix-qdrant
 // - Schema validation: scripts/verify_embedding_fields.py
 //
 // REFORM NOTE:

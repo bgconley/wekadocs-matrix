@@ -172,7 +172,7 @@ class EntityLinker:
     # Common entity patterns
     ENTITY_PATTERNS = {
         "error_code": r"\b[EW]\d{3,5}\b",  # E123, W4567
-        "command": r"\b(?:weka|fs|snap|nfs|smb)\s+[a-z_-]+\b",
+        "command": r"\b(?:ncli|acli|kubectl|nutanix|prism|nkp|nc2|nai|fs|snap|nfs|smb)\s+[a-z_-]+\b",
         "config": r"\b[A-Z_]{3,}\b",  # CONFIG_NAME
         "component": r"\b(?:cluster|node|client|backend|frontend)\b",
     }

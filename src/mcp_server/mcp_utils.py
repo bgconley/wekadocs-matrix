@@ -26,6 +26,7 @@ from src.services.context_assembler import (
 from src.services.context_budget_manager import BudgetExceeded
 from src.shared.config import get_config
 from src.shared.connections import get_connection_manager
+from src.shared.domain import get_domain_config
 from src.shared.observability import get_logger
 from src.shared.observability.metrics import (
     cursor_returned_total,
@@ -49,6 +50,7 @@ except Exception:
 from src.shared.observability.retrieval_diagnostics import RetrievalDiagnosticEmitter
 
 logger = get_logger(__name__)
+_domain = get_domain_config()
 
 _DIAGNOSTIC_EMITTER = RetrievalDiagnosticEmitter()
 
@@ -92,9 +94,13 @@ MCP_TOOL_PROFILE = os.getenv("MCP_TOOL_PROFILE", "production")
 _config = get_config()
 _neo4j_disabled = getattr(getattr(_config, "hybrid", None), "neo4j_disabled", False)
 
-RETRIEVAL_PLAYBOOK_URI = "wekadocs://retrieval_playbook"
-SCRATCH_RESOURCE_TEMPLATE = "wekadocs://scratch/{session_id}/{passage_id}"
-DIAGNOSTICS_RESOURCE_TEMPLATE = "wekadocs://diagnostics/{date}/{diagnostic_id}"
+RETRIEVAL_PLAYBOOK_URI = f"{_domain.uri_scheme}://retrieval_playbook"
+SCRATCH_RESOURCE_TEMPLATE = (
+    f"{_domain.uri_scheme}://scratch/{{session_id}}/{{passage_id}}"
+)
+DIAGNOSTICS_RESOURCE_TEMPLATE = (
+    f"{_domain.uri_scheme}://diagnostics/{{date}}/{{diagnostic_id}}"
+)
 
 
 def _encode_cursor(offset: int) -> str:
@@ -272,7 +278,7 @@ def _graph_disabled_payload(extra: Optional[dict[str, Any]] = None) -> dict:
 
 def _normalize_scope(scope: Optional[dict]) -> dict:
     normalized = dict(scope or {})
-    default_project = getattr(_config.app, "name", "wekadocs-matrix")
+    default_project = getattr(_config.app, "name", _domain.app_name)
     default_env = getattr(_config.app, "environment", "development")
 
     project_id = normalized.get("project_id")
@@ -560,7 +566,7 @@ class Deps:
 
 
 def _parse_scratch_uri(uri: str) -> Optional[tuple[str, str]]:
-    prefix = "wekadocs://scratch/"
+    prefix = f"{_domain.uri_scheme}://scratch/"
     if not uri.startswith(prefix):
         return None
     remainder = uri[len(prefix) :]
@@ -571,7 +577,7 @@ def _parse_scratch_uri(uri: str) -> Optional[tuple[str, str]]:
 
 
 def _parse_diagnostics_uri(uri: str) -> Optional[tuple[str, str]]:
-    prefix = "wekadocs://diagnostics/"
+    prefix = f"{_domain.uri_scheme}://diagnostics/"
     if not uri.startswith(prefix):
         return None
     remainder = uri[len(prefix) :]
@@ -582,7 +588,7 @@ def _parse_diagnostics_uri(uri: str) -> Optional[tuple[str, str]]:
 
 
 def _diagnostics_uri(date: str, diagnostic_id: str) -> str:
-    return f"wekadocs://diagnostics/{date}/{diagnostic_id}"
+    return f"{_domain.uri_scheme}://diagnostics/{date}/{diagnostic_id}"
 
 
 def _retrieval_playbook_path() -> str:

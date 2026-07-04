@@ -177,10 +177,10 @@ def measure_reranker_latency(
         return None
 
     # Generate synthetic candidates
-    query = "How do I create a filesystem snapshot in WEKA?"
+    query = "How do I create a filesystem snapshot in Nutanix?"
     candidates = [
         {
-            "text": f"Document {i}: WEKA filesystem operations include snapshots, "
+            "text": f"Document {i}: Nutanix filesystem operations include snapshots, "
             f"tiering, and data protection features for enterprise storage."
         }
         for i in range(num_candidates)

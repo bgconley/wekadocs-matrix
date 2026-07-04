@@ -814,8 +814,8 @@ def graph_retrieval_channel(
         precision_anchors = list(intent.primary_anchors)
 
     # Union and deduplicate (case-insensitive), then filter domain-generic
-    # entities that would match too broadly (e.g., "weka", "cluster",
-    # "weka cluster"). Uses the same exclusion list as ingestion.
+    # entities that would match too broadly (e.g., "nutanix", "cluster",
+    # "nutanix cluster"). Uses the same exclusion list as ingestion.
     from src.providers.ner.labels import is_excluded_entity
 
     seen_lower: set = set()
@@ -827,7 +827,7 @@ def graph_retrieval_channel(
         if low and low not in seen_lower:
             seen_lower.add(low)
             # Exclude domain-generic terms and their compounds
-            # Split compounds: "weka cluster" → check "weka" and "cluster"
+            # Split compounds: "nutanix cluster" -> check each word.
             words = low.split()
             if not is_excluded_entity(e) and not any(
                 is_excluded_entity(w) for w in words

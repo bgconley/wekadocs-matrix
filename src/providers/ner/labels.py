@@ -10,7 +10,7 @@ Including examples in parentheses (e.g. ...) helps the model understand
 what kind of entities to extract.
 
 This module provides:
-- Default domain-specific labels for WEKA documentation
+- Default domain-specific labels for Nutanix documentation
 - Utility functions to retrieve labels from config or defaults
 """
 
@@ -22,32 +22,27 @@ from src.shared.observability import get_logger
 
 logger = get_logger(__name__)
 
-# Default WEKA domain-specific entity labels (v2 - refined for retrieval)
+# Default Nutanix domain-specific entity labels (v2 - refined for retrieval)
 # These are used if config.ner.labels is empty
 #
 # Design rationale:
-# - 10 focused entity types optimized for retrieval value
-# - COMMAND: Direct CLI lookup for "how do I..." queries
-# - PARAMETER: Configuration queries for flags and settings
-# - COMPONENT: Architecture questions (backend, frontend, drives)
-# - PROTOCOL: Protocol-specific filtering (NFS, SMB, S3)
-# - CLOUD_PROVIDER: Deployment context (AWS, Azure, GCP)
-# - STORAGE_CONCEPT: Conceptual queries (tiering, snapshots)
-# - VERSION: Version-specific filtering (4.4, 4.4.x)
-# - PROCEDURE_STEP: Procedural extraction for how-to guides
-# - ERROR: Troubleshooting (error codes, failure messages)
-# - CAPACITY_METRIC: Sizing/performance queries (GB, TB, IOPS)
+# - Product/component/platform labels preserve Nutanix-specific semantics.
+# - COMMAND/API labels support operational and developer-doc lookup.
+# - Storage, deployment, error, metric, and procedure labels improve filters.
 DEFAULT_LABELS: List[str] = [
-    "COMMAND (e.g. weka fs, weka nfs permission add, mount)",
-    "PARAMETER (e.g. --json, num_cores, memory_mb, stripe-width)",
-    "COMPONENT (e.g. backend server, frontend process, drive process)",
-    "PROTOCOL (e.g. NFS, SMB, S3, POSIX)",
-    "CLOUD_PROVIDER (e.g. AWS, Azure, GCP, OCI)",
-    "STORAGE_CONCEPT (e.g. tiering, snapshot, object store, SSD capacity)",
-    "VERSION (e.g. 4.4, 4.4.x, v4.3)",
-    "PROCEDURE_STEP (e.g. Select Save, Run the command, Click Apply)",
-    "ERROR (e.g. error code 10054, Connection refused, timeout)",
-    "CAPACITY_METRIC (e.g. GB, TB, IOPS, latency, throughput)",
+    "PRODUCT (e.g. Nutanix Cloud Platform, NCI, NCM, NUS, NDB, NKP, NC2, NAI)",
+    "COMPONENT (e.g. AOS, AHV, Prism Central, Files, Objects, Volumes, Flow)",
+    "PLATFORM (e.g. on-premises, AWS, Azure, Google Cloud, OVHcloud, edge)",
+    "VERSION (e.g. AOS 7.3, PC 2024.x, NAI 2.7)",
+    "COMMAND (e.g. ncli, acli, kubectl, nutanix command-line operations)",
+    "API (e.g. Prism v4 API, REST endpoint, category API)",
+    "PROTOCOL (e.g. NFS, SMB, S3, iSCSI, CSI, COSI)",
+    "STORAGE_CONCEPT (e.g. storage container, snapshot, replication, tiering)",
+    "CLOUD_PROVIDER (e.g. AWS, Azure, Google Cloud, OVHcloud)",
+    "DEPLOYMENT_MODEL (e.g. NCI, NC2, GC2, NCI-Edge, NCI-VDI)",
+    "ERROR (e.g. alert, error code, failed task, health check failure)",
+    "METRIC (e.g. IOPS, latency, throughput, CPU, memory, usable TiB)",
+    "PROCEDURE_STEP (e.g. click Save, run the command, create a cluster)",
 ]
 
 # Entities to exclude from enrichment (too common, pollutes queries)
@@ -55,11 +50,8 @@ DEFAULT_LABELS: List[str] = [
 # Case-insensitive matching via is_excluded_entity() — lowercase entries suffice.
 ENTITY_EXCLUSIONS: set[str] = {
     # Brand terms
-    "weka",
-    "WEKA",
-    "Weka",
-    "WekaFS",
-    "wekafs",
+    "nutanix",
+    "Nutanix",
     # Generic domain vocabulary — high document frequency, low discriminative value
     "system",
     "server",
@@ -136,7 +128,7 @@ def extract_label_name(label: str) -> str:
     Extract the clean label name from a descriptive label.
 
     Example:
-        "weka_software_component (e.g. backend, frontend)" -> "weka_software_component"
+        "PRODUCT (e.g. NCI, NKP)" -> "PRODUCT"
 
     Args:
         label: Full label string with optional examples
@@ -162,7 +154,7 @@ def is_excluded_entity(entity_text: str) -> bool:
     """
     Check if an entity should be excluded from enrichment.
 
-    Some terms are so common in the domain (e.g., "WEKA") that including
+    Some terms are so common in the domain (e.g., "Nutanix") that including
     them as entities would pollute embeddings and queries. This function
     checks against the exclusion list.
 

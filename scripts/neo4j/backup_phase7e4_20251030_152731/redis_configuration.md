@@ -95,10 +95,10 @@ protected-mode yes
 ### Full Backup
 ```bash
 # Create point-in-time backup
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD --rdb /data/backup_$(date +%Y%m%d_%H%M%S).rdb BGSAVE
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD --rdb /data/backup_$(date +%Y%m%d_%H%M%S).rdb BGSAVE
 
 # Export specific database
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD -n 0 --rdb /data/db0_export.rdb BGSAVE
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD -n 0 --rdb /data/db0_export.rdb BGSAVE
 ```
 
 ### Restore from Backup
@@ -107,7 +107,7 @@ docker exec weka-redis redis-cli -a $REDIS_PASSWORD -n 0 --rdb /data/db0_export.
 docker-compose stop redis
 
 # Copy backup to data directory
-docker cp backup.rdb weka-redis:/data/dump.rdb
+docker cp backup.rdb nutanix-redis:/data/dump.rdb
 
 # Start Redis (will auto-load dump.rdb)
 docker-compose start redis
@@ -117,45 +117,45 @@ docker-compose start redis
 
 ```bash
 # Flush test database only (SAFE)
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD -n 1 FLUSHDB ASYNC
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD -n 1 FLUSHDB ASYNC
 
 # Flush specific pattern (CAREFUL)
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD --scan --pattern "cache:*" | xargs -L 1 docker exec weka-redis redis-cli -a $REDIS_PASSWORD DEL
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD --scan --pattern "cache:*" | xargs -L 1 docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD DEL
 
 # Flush all databases (DANGEROUS - requires confirmation)
-# docker exec weka-redis redis-cli -a $REDIS_PASSWORD FLUSHALL
+# docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD FLUSHALL
 ```
 
 ## Health Checks
 
 ```bash
 # Basic connectivity
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD ping
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD ping
 
 # Memory usage
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD INFO memory
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD INFO memory
 
 # Key statistics
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD INFO keyspace
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD INFO keyspace
 
 # Check replication (if configured)
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD INFO replication
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD INFO replication
 ```
 
 ## Monitoring Queries
 
 ```bash
 # Top keys by memory usage
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD --bigkeys
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD --bigkeys
 
 # Real-time command monitoring
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD MONITOR
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD MONITOR
 
 # Slow queries log
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD SLOWLOG GET 10
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD SLOWLOG GET 10
 
 # Client connections
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD CLIENT LIST
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD CLIENT LIST
 ```
 
 ## Integration Notes

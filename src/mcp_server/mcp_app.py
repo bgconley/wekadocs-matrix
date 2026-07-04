@@ -12,19 +12,20 @@ import inspect
 import json
 import os
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any, Optional
 
 import mcp.types as types
 from mcp.server.lowlevel.server import Server
 
 from src.mcp_server.mcp_tools import (
-    DIAGNOSTICS_RESOURCE_TEMPLATE,
     PROMPT_DEFINITIONS,
     _tool_specs,
 )
 from src.mcp_server.mcp_utils import (
     _DIAGNOSTIC_EMITTER,
     DIAGNOSTICS_RESOURCES_ENABLED,
+    DIAGNOSTICS_RESOURCE_TEMPLATE,
     LEGACY_SEARCH_DOCUMENTATION_ENABLED,
     MCP_TOOL_PROFILE,
     RETRIEVAL_PLAYBOOK_URI,
@@ -42,11 +43,14 @@ from src.mcp_server.mcp_utils import (
 from src.mcp_server.retrieval_trace import (
     append_followup_and_write,
 )
+from src.shared.domain import get_domain_config
 from src.shared.observability import get_logger
 
 logger = get_logger(__name__)
+_domain = get_domain_config()
 
 
+@asynccontextmanager
 async def lifespan(server: Server) -> AsyncIterator[Deps]:
     """
     Lifespan context manager for dependency injection.
@@ -72,7 +76,7 @@ async def lifespan(server: Server) -> AsyncIterator[Deps]:
 # ── MCP instructions (profile-aware) ──────────────────────────────────
 
 PRODUCTION_INSTRUCTIONS = (
-    "You are connected to the WEKA documentation knowledge base. "
+    "You are connected to the Nutanix documentation knowledge base. "
     "Start with kb.retrieve_evidence to get an evidence pack for any question. "
     "The evidence pack includes quotes with confidence scores, document context "
     "(doc_tag, parent_path), and coverage metadata showing retrieval depth. "
@@ -88,7 +92,7 @@ PRODUCTION_INSTRUCTIONS = (
 )
 
 ANALYST_INSTRUCTIONS = (
-    "You are connected to the WEKA documentation knowledge base with full tool access. "
+    "You are connected to the Nutanix documentation knowledge base with full tool access. "
     "For most queries, start with kb.retrieve_evidence for a server-built evidence pack "
     "with retrieval-score-based confidence and coverage metadata. "
     "Use kb.search for browsing candidates, graph.* tools for structural exploration "
@@ -100,17 +104,11 @@ ANALYST_INSTRUCTIONS = (
     "clearly state that you could not find documentation for it."
 )
 
-# Select instructions based on tool profile
+# Select instructions based on tool profile (also defined in mcp_tools.py)
 _instructions = (
     PRODUCTION_INSTRUCTIONS
     if MCP_TOOL_PROFILE == "production"
     else ANALYST_INSTRUCTIONS
-)
-logger.info(
-    "MCP instructions mode",
-    neo4j_disabled=_neo4j_disabled,
-    profile=MCP_TOOL_PROFILE,
-    mode="production" if MCP_TOOL_PROFILE == "production" else "analyst",
 )
 
 
@@ -194,7 +192,7 @@ TOOL_PROFILES: dict[str, Optional[set[str]]] = {
 
 
 def build_mcp_server() -> Server:
-    server = Server("wekadocs", instructions=_instructions, lifespan=lifespan)
+    server = Server(_domain.app_name, instructions=_instructions, lifespan=lifespan)
     all_specs = _tool_specs()
 
     # Apply tool profile filtering

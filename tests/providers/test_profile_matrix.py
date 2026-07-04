@@ -10,9 +10,10 @@ from src.providers.factory import ProviderFactory
 from src.shared import config as config_module
 from src.shared.config import get_embedding_settings
 
+# Profile names updated to match actual config (qwen3_0_6b replaced bge_m3)
 PROFILE_CASES = [  # pragma: allowlist secret
     ("jina_v3", "jina-ai", 1024),
-    ("bge_m3", "bge-m3-service", 1024),
+    ("qwen3_0_6b", "qwen3", 1024),
     ("st_minilm", "sentence-transformers", 384),
 ]
 
@@ -37,11 +38,10 @@ def test_get_embedding_settings_resolves_profiles(
         "EMBEDDINGS_PROFILE": profile,  # pragma: allowlist secret
         "EMBEDDING_PROFILES_PATH": str(_write_manifest_without_plan(tmp_path)),
     }
-    if profile == "bge_m3":
+    if profile == "qwen3_0_6b":
         env.update(
             {
-                "BGE_M3_API_URL": "http://127.0.0.1:9000",  # pragma: allowlist secret
-                "BGE_M3_CLIENT_PATH": "/tmp",  # pragma: allowlist secret
+                "EMBEDDING_BASE_URL": "http://127.0.0.1:9000",  # pragma: allowlist secret
             }
         )
     with patch.dict(os.environ, env, clear=True):

@@ -10,6 +10,8 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
+from src.shared.domain import get_domain_config
+
 
 @dataclass
 class ScratchEntry:
@@ -36,7 +38,7 @@ class ScratchStore:
 
     @staticmethod
     def build_uri(session_id: str, passage_id: str) -> str:
-        return f"wekadocs://scratch/{session_id}/{passage_id}"
+        return f"{get_domain_config().uri_scheme}://scratch/{session_id}/{passage_id}"
 
     async def put(
         self, session_id: str, passage_id: str, payload: Dict[str, Any]

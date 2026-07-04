@@ -122,11 +122,11 @@ ingest:
     debounce_seconds: 3
     poll_interval: 5
 
-  tag: "wekadocs"
+  tag: "nutanixdocs"
   concurrency: 4
 
   sample_queries:
-    wekadocs:
+    nutanixdocs:
       - "How do I configure a cluster?"
 
   backpressure:

@@ -1,0 +1,15 @@
+- query: "How do I configure Prism Central authentication?"
+  expected_doc_ids:
+    - prism-central-authentication
+
+- query: "How do I deploy NKP clusters with GitOps?"
+  expected_doc_ids:
+    - nkp-gitops-cluster-deployment
+
+- query: "How do I configure Nutanix Files SMB shares?"
+  expected_doc_ids:
+    - nutanix-files-smb-shares
+
+- query: "How do I monitor NCI cluster health with NCC?"
+  expected_doc_ids:
+    - nci-ncc-health-checks

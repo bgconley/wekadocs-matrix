@@ -3,7 +3,7 @@
 # @called-by: parsers/__init__.py (default engine)
 # =============================================================================
 """
-markdown-it-py based parser for WekaDocs RAG pipeline.
+markdown-it-py based parser for Nutanix Docs RAG pipeline.
 
 This module provides an AST-based markdown parser using markdown-it-py,
 replacing the legacy markdown + BeautifulSoup approach.
@@ -28,7 +28,7 @@ New Metadata Fields (per section):
     - has_table: Boolean flag for table-heavy sections
     - has_code: Boolean flag for code-containing sections
 
-Author: WekaDocs Team
+Author: Nutanix Docs Team
 Created: 2024-12-10
 """
 
@@ -109,7 +109,7 @@ def _compute_checksum(text: str) -> str:
 
 def create_parser() -> MarkdownIt:
     """
-    Create configured markdown-it-py parser with WEKA-appropriate settings.
+    Create configured markdown-it-py parser with Nutanix-appropriate settings.
 
     Uses 'gfm-like' preset for GitHub Flavored Markdown support:
     - Tables

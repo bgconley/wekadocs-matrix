@@ -30,7 +30,7 @@ NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "testpassword123")
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
-QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "weka_sections_v2")
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "nutanix_sections_v2")
 
 # Canonical values
 CANONICAL_VERSION = "jina-embeddings-v3"

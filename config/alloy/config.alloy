@@ -1,5 +1,5 @@
 // config/alloy/config.alloy
-// Grafana Alloy configuration for WekaDocs-Matrix Observability
+// Grafana Alloy configuration for Nutanix Docs-Matrix Observability
 // Canonical plan reference: lines 694-887
 
 // ============================================================================
@@ -15,23 +15,23 @@ logging {
 // DOCKER LOG DISCOVERY AND COLLECTION
 // ============================================================================
 
-discovery.docker "wekadocs_containers" {
+discovery.docker "nutanixdocs_containers" {
   host = "unix:///var/run/docker.sock"
 
   filter {
     name   = "name"
-    values = ["weka-*"]  // Only discover weka containers
+    values = ["nutanix-*"]  // Only discover nutanix containers
   }
 }
 
 // Collect Docker container logs
-loki.source.docker "wekadocs_logs" {
+loki.source.docker "nutanixdocs_logs" {
   host       = "unix:///var/run/docker.sock"
-  targets    = discovery.docker.wekadocs_containers.targets
+  targets    = discovery.docker.nutanixdocs_containers.targets
   forward_to = [loki.process.add_labels.receiver]
 
   labels = {
-    "project" = "wekadocs-matrix",
+    "project" = "nutanix-docs-matrix",
     "env"     = "development",
   }
 
@@ -66,7 +66,7 @@ loki.process "add_labels" {
   // Detect database logs by container name pattern and add log_type label
   // Neo4j, Qdrant, Redis logs are NOT JSON - handle gracefully
   stage.match {
-    selector = "{container=~\"weka-(neo4j|qdrant|redis)\"}"
+    selector = "{container=~\"nutanix-(neo4j|qdrant|redis)\"}"
 
     stage.static_labels {
       values = {
@@ -77,7 +77,7 @@ loki.process "add_labels" {
 
   // Application logs (mcp-server, ingestion-worker, ingestion-service) ARE JSON
   stage.match {
-    selector = "{container=~\"weka-(mcp-server|ingestion-worker|ingestion-service)\"}"
+    selector = "{container=~\"nutanix-(mcp-server|ingestion-worker|ingestion-service)\"}"
 
     stage.static_labels {
       values = {
@@ -190,7 +190,7 @@ prometheus.scrape "qdrant_metrics" {
   targets = [{
     __address__ = "qdrant:6333",
     job         = "qdrant",
-    service     = "weka-qdrant",
+    service     = "nutanix-qdrant",
   }]
 
   metrics_path    = "/metrics"

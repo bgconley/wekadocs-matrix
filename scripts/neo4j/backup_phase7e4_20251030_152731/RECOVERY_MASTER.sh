@@ -80,14 +80,14 @@ if [ "$SKIP_BACKUP" = false ]; then
     execute mkdir -p "$BACKUP_DIR"
 
     # Neo4j backup
-    execute docker exec weka-neo4j cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" \
+    execute docker exec nutanix-neo4j cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" \
         "SHOW CONSTRAINTS; SHOW INDEXES;" > "$BACKUP_DIR/neo4j_schema_before.txt" 2>/dev/null || true
 
     # Qdrant backup
     execute curl -sS "$QDRANT/collections" > "$BACKUP_DIR/qdrant_collections_before.json" 2>/dev/null || true
 
     # Redis info
-    execute docker exec weka-redis redis-cli -a "$REDIS_PASSWORD" INFO keyspace > "$BACKUP_DIR/redis_keyspace_before.txt" 2>/dev/null || true
+    execute docker exec nutanix-redis redis-cli -a "$REDIS_PASSWORD" INFO keyspace > "$BACKUP_DIR/redis_keyspace_before.txt" 2>/dev/null || true
 
     echo -e "${GREEN}✓ Backup completed${NC}"
 else
@@ -103,13 +103,13 @@ echo -e "${GREEN}✓ Services stopped${NC}"
 echo -e "\n${BLUE}Step 3: Applying Neo4j schema...${NC}"
 if [ "$DRY_RUN" = false ]; then
     # Copy DDL to container
-    docker cp "$SCRIPT_DIR/neo4j_complete_ddl.cypher" weka-neo4j:/tmp/recovery_ddl.cypher
+    docker cp "$SCRIPT_DIR/neo4j_complete_ddl.cypher" nutanix-neo4j:/tmp/recovery_ddl.cypher
 
     # Execute DDL
-    docker exec weka-neo4j cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" -f /tmp/recovery_ddl.cypher
+    docker exec nutanix-neo4j cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" -f /tmp/recovery_ddl.cypher
 
     # Verify
-    SCHEMA_VERSION=$(docker exec weka-neo4j cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" \
+    SCHEMA_VERSION=$(docker exec nutanix-neo4j cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" \
         "MATCH (sv:SchemaVersion {id: 'singleton'}) RETURN sv.version" --format plain 2>/dev/null | tail -1)
 
     if [ "$SCHEMA_VERSION" = "v2.1" ]; then
@@ -133,7 +133,7 @@ fi
 
 # Step 5: Redis cleanup (optional - only test DB)
 echo -e "\n${BLUE}Step 5: Cleaning Redis test database...${NC}"
-execute docker exec weka-redis redis-cli -a "$REDIS_PASSWORD" -n 1 FLUSHDB ASYNC
+execute docker exec nutanix-redis redis-cli -a "$REDIS_PASSWORD" -n 1 FLUSHDB ASYNC
 echo -e "${GREEN}✓ Redis test DB flushed${NC}"
 
 # Step 6: Restart application services
@@ -167,9 +167,9 @@ done
 echo -e "\n${BLUE}Step 7: Running verification checks...${NC}"
 if [ "$DRY_RUN" = false ]; then
     # Neo4j checks
-    CONSTRAINTS=$(docker exec weka-neo4j cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" \
+    CONSTRAINTS=$(docker exec nutanix-neo4j cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" \
         "SHOW CONSTRAINTS YIELD name RETURN count(*) as count" --format plain 2>/dev/null | tail -1)
-    INDEXES=$(docker exec weka-neo4j cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" \
+    INDEXES=$(docker exec nutanix-neo4j cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" \
         "SHOW INDEXES YIELD name RETURN count(*) as count" --format plain 2>/dev/null | tail -1)
 
     echo "  Neo4j: $CONSTRAINTS constraints, $INDEXES indexes"
@@ -179,7 +179,7 @@ if [ "$DRY_RUN" = false ]; then
     echo "  Qdrant: $COLLECTIONS collections"
 
     # Redis check
-    REDIS_PING=$(docker exec weka-redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null)
+    REDIS_PING=$(docker exec nutanix-redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null)
     echo "  Redis: $REDIS_PING"
 
     # MCP health

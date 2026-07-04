@@ -93,7 +93,7 @@ def enrich_chunks_with_entities(chunks: List[Dict[str, Any]]) -> None:
         )
         return
 
-    # Filter out excluded entities (e.g., "WEKA" - too common, pollutes queries)
+    # Filter out excluded entities (e.g., "Nutanix" - too common, pollutes queries)
     excluded_count = 0
     filtered_entities_list = []
     for entities in entities_list:

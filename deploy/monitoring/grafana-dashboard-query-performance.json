@@ -1,7 +1,7 @@
 {
   "dashboard": {
-    "title": "WekaDocs GraphRAG MCP - Query Performance",
-    "tags": ["wekadocs", "mcp", "query", "performance"],
+    "title": "Nutanix Docs GraphRAG MCP - Query Performance",
+    "tags": ["nutanixdocs", "mcp", "query", "performance"],
     "timezone": "utc",
     "schemaVersion": 27,
     "version": 1,

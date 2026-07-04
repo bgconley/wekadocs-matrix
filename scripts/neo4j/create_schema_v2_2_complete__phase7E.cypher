@@ -7,7 +7,7 @@
 // ============================================================================
 
 // ============================================================================
-// WekaDocs GraphRAG Schema v2.2 — COMPLETE Standalone DDL (Phase‑7E Ready)
+// Nutanix Docs GraphRAG Schema v2.2 — COMPLETE Standalone DDL (Phase‑7E Ready)
 // ============================================================================
 // Generated: 2025-10-29T00:41:14.368931Z
 // Target: Neo4j 5+ (Community or Enterprise)

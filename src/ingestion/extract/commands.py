@@ -45,7 +45,7 @@ def extract_commands(section: Dict[str, any]) -> Tuple[List[Dict], List[Dict]]:
     commands.extend(inline_commands)
     mentions.extend(inline_mentions)
 
-    # Pattern 3: Command documentation patterns (e.g., "The `weka` command...")
+    # Pattern 3: Command documentation patterns (e.g., "The `ncli` command...")
     doc_commands, doc_mentions = _extract_documented_commands(text, section_id)
     commands.extend(doc_commands)
     mentions.extend(doc_mentions)
@@ -186,7 +186,10 @@ def _looks_like_command(line: str) -> bool:
 
     # Common command patterns
     command_starters = [
-        "weka",
+        "ncli",
+        "acli",
+        "nutanix",
+        "kubectl",
         "kubectl",
         "docker",
         "git",

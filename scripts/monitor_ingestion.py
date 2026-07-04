@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Real-time ingestion monitor for WekaDocs production document ingestion.
+Real-time ingestion monitor for Nutanix Docs production document ingestion.
 Tracks file drops, processing status, and database updates.
 """
 
@@ -50,7 +50,7 @@ def count_files_in_directory(path: str) -> Dict[str, int]:
 def get_neo4j_counts() -> Dict[str, int]:
     """Get current node counts from Neo4j."""
     counts = {}
-    cmd = '''docker exec weka-neo4j cypher-shell -u neo4j -p testpassword123 "MATCH (n) RETURN labels(n)[0] as label, count(*) as count ORDER BY count DESC"'''
+    cmd = '''docker exec nutanix-neo4j cypher-shell -u neo4j -p testpassword123 "MATCH (n) RETURN labels(n)[0] as label, count(*) as count ORDER BY count DESC"'''
     output = run_command(cmd)
     if output:
         for line in output.split("\n")[1:]:  # Skip header
@@ -92,19 +92,19 @@ def get_redis_queue_status() -> Dict[str, int]:
     stats = {"pending": 0, "processing": 0, "failed": 0}
 
     # Check pending queue
-    cmd = 'docker exec weka-redis redis-cli -a testredis123 LLEN "ingestion:queue:pending" 2>/dev/null'
+    cmd = 'docker exec nutanix-redis redis-cli -a testredis123 LLEN "ingestion:queue:pending" 2>/dev/null'
     output = run_command(cmd)
     if output and output.isdigit():
         stats["pending"] = int(output)
 
     # Check processing set
-    cmd = 'docker exec weka-redis redis-cli -a testredis123 SCARD "ingestion:queue:processing" 2>/dev/null'
+    cmd = 'docker exec nutanix-redis redis-cli -a testredis123 SCARD "ingestion:queue:processing" 2>/dev/null'
     output = run_command(cmd)
     if output and output.isdigit():
         stats["processing"] = int(output)
 
     # Check failed queue
-    cmd = 'docker exec weka-redis redis-cli -a testredis123 LLEN "ingestion:queue:failed" 2>/dev/null'
+    cmd = 'docker exec nutanix-redis redis-cli -a testredis123 LLEN "ingestion:queue:failed" 2>/dev/null'
     output = run_command(cmd)
     if output and output.isdigit():
         stats["failed"] = int(output)
@@ -114,7 +114,7 @@ def get_redis_queue_status() -> Dict[str, int]:
 
 def get_worker_logs(lines: int = 5) -> List[str]:
     """Get recent worker logs."""
-    cmd = f"docker logs weka-ingestion-worker --tail {lines} 2>&1"
+    cmd = f"docker logs nutanix-ingestion-worker --tail {lines} 2>&1"
     output = run_command(cmd)
     if output:
         return output.split("\n")
@@ -139,14 +139,14 @@ def display_status(
 
     # Header
     print("=" * 80)
-    print(f"🔍 WEKADOCS INGESTION MONITOR - {format_timestamp()}")
+    print(f"🔍 NUTANIXDOCS INGESTION MONITOR - {format_timestamp()}")
     print(f"   Runtime: {str(datetime.now() - start_time).split('.')[0]}")
     print("=" * 80)
 
     # Ingest directory status
     print("\n📁 INGEST DIRECTORY (/data/ingest):")
     file_counts = count_files_in_directory(
-        "/Users/brennanconley/vibecode/wekadocs-matrix/data/ingest"
+        "/Users/brennanconley/vibecode/nutanix-docs-matrix/data/ingest"
     )
     print(f"   Total Files: {file_counts['total']}")
     print(
@@ -206,7 +206,7 @@ def display_status(
 
 def main():
     """Main monitoring loop."""
-    print("Starting WekaDocs Ingestion Monitor...")
+    print("Starting Nutanix Docs Ingestion Monitor...")
     print("Collecting initial baseline...")
 
     # Get initial counts

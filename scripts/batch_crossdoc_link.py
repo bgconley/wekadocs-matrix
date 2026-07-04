@@ -286,7 +286,7 @@ def relink_all_documents(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Batch cross-document linking for WekaDocs",
+        description="Batch cross-document linking for Nutanix Docs",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

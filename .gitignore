@@ -16,8 +16,12 @@ __pycache__/
 .serena/
 
 # Large data directories (not tracked in git)
-data/ingest/
+data/ingest/*
+!data/ingest/nutanix/
+!data/ingest/nutanix/.gitkeep
+data/archive/
 docs/sample_ingest/
+docs/archive/
 
 # Reports - cleanup and eval artifacts
 reports/cleanup/
@@ -83,3 +87,4 @@ infra/terraform/environments/dev/terraform.tfvars
 *.bak
 .aider*
 .venv_py311/
+.gitnexus

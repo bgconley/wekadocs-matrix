@@ -54,8 +54,8 @@ def test_jina_embedding_generation(provider):
 
     test_texts = [
         "How do I configure NFS for high-throughput workloads?",
-        "What are the prerequisites for installing Weka on RHEL 8?",
-        "Troubleshooting network connectivity issues in a Weka cluster",
+        "What are the prerequisites for installing Nutanix on RHEL 8?",
+        "Troubleshooting network connectivity issues in a Nutanix cluster",
     ]
 
     try:
@@ -97,7 +97,7 @@ def test_jina_query_embedding(provider):
     print("TEST 3: Query Embedding (retrieval.query task)")
     print("=" * 70)
 
-    query = "How do I upgrade Weka to version 5.0?"
+    query = "How do I upgrade Nutanix to version 5.0?"
 
     try:
         print("Generating query embedding...")

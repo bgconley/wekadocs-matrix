@@ -4,7 +4,7 @@
 # =============================================================================
 # Implements Phase 5, Task 5.2 (Monitoring & observability)
 # See: /docs/spec.md §7 (Observability & SLOs)
-# Prometheus metrics for WekaDocs GraphRAG MCP
+# Prometheus metrics for Nutanix Docs GraphRAG MCP
 
 from typing import Callable
 
@@ -488,8 +488,8 @@ connection_pool_idle = Gauge(
 
 # ===== Service info =====
 service_info = Info(
-    "wekadocs_mcp",
-    "WekaDocs GraphRAG MCP service information",
+    "nutanixdocs_mcp",
+    "Nutanix Docs GraphRAG MCP service information",
 )
 
 

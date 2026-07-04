@@ -31,8 +31,8 @@ bash RECOVERY_MASTER.sh --skip-backup
 
 1. **Neo4j Recovery**
 ```bash
-docker cp neo4j_complete_ddl.cypher weka-neo4j:/tmp/
-docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD -f /tmp/neo4j_complete_ddl.cypher
+docker cp neo4j_complete_ddl.cypher nutanix-neo4j:/tmp/
+docker exec nutanix-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD -f /tmp/neo4j_complete_ddl.cypher
 ```
 
 2. **Qdrant Recovery**
@@ -43,7 +43,7 @@ bash qdrant_collections_setup.sh
 3. **Redis Recovery**
 ```bash
 # Only if needed - Redis is ephemeral cache
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD -n 1 FLUSHDB ASYNC
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD -n 1 FLUSHDB ASYNC
 ```
 
 ## 📊 Database Specifications
@@ -76,14 +76,14 @@ docker exec weka-redis redis-cli -a $REDIS_PASSWORD -n 1 FLUSHDB ASYNC
 ### Check Neo4j Schema
 ```bash
 # Verify SchemaVersion
-docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD \
+docker exec nutanix-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD \
   "MATCH (sv:SchemaVersion {id: 'singleton'}) RETURN sv.version"
 
 # Count constraints and indexes
-docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD \
+docker exec nutanix-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD \
   "SHOW CONSTRAINTS YIELD name RETURN count(*) as constraints"
 
-docker exec weka-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD \
+docker exec nutanix-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD \
   "SHOW INDEXES YIELD name RETURN count(*) as indexes"
 ```
 
@@ -99,10 +99,10 @@ curl -sS http://localhost:6333/collections/chunks | jq '.result.config.params.ve
 ### Check Redis
 ```bash
 # Test connectivity
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD ping
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD ping
 
 # Check keyspace
-docker exec weka-redis redis-cli -a $REDIS_PASSWORD INFO keyspace
+docker exec nutanix-redis redis-cli -a $REDIS_PASSWORD INFO keyspace
 ```
 
 ### Check MCP Server Health
@@ -185,6 +185,6 @@ For issues with recovery:
 
 ---
 
-**Backup Location:** `/Users/brennanconley/vibecode/wekadocs-matrix/scripts/neo4j/backup_phase7e4_20251030_152731/`
+**Backup Location:** `/Users/brennanconley/vibecode/nutanix-docs-matrix/scripts/neo4j/backup_phase7e4_20251030_152731/`
 **Git Commit:** (add commit hash after committing)
 **Created By:** Recovery process after Phase 7E-4 integration

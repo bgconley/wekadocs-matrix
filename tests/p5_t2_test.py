@@ -88,7 +88,7 @@ class TestPrometheusMetrics:
         response = requests.get("http://localhost:8000/metrics")
         metrics_text = response.text
 
-        assert "wekadocs_mcp_info" in metrics_text
+        assert "nutanixdocs_mcp_info" in metrics_text
         assert 'version="0.1.0"' in metrics_text
         assert "environment=" in metrics_text
 
@@ -376,7 +376,7 @@ class TestMonitoringRunbook:
         with open("deploy/monitoring/RUNBOOK.md") as f:
             content = f.read()
             assert len(content) > 1000  # Substantive content
-            assert "# WekaDocs GraphRAG MCP - Monitoring Runbook" in content
+            assert "# Nutanix Docs GraphRAG MCP - Monitoring Runbook" in content
 
     def test_runbook_covers_all_critical_alerts(self):
         """Verify runbook has procedures for all critical alerts"""

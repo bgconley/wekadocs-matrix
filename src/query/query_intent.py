@@ -39,6 +39,31 @@ SUBSYSTEM_TERMS: FrozenSet[str] = frozenset(
         "inode",
         "internals",
         "filesystem internals",
+        "aos",
+        "ahv",
+        "prism",
+        "prism central",
+        "prism element",
+        "nutanix central",
+        "nci",
+        "ncp",
+        "nus",
+        "files",
+        "objects",
+        "volumes",
+        "ncm",
+        "ndb",
+        "nkp",
+        "nc2",
+        "nai",
+        "flow",
+        "move",
+        "disaster recovery",
+        "data services",
+        "cloud native aos",
+        "data lens",
+        "microsegmentation",
+        "lifecycle",
         "tiering",
         "snapshots",
         "limitations",
@@ -78,17 +103,43 @@ SIZING_TERMS: FrozenSet[str] = frozenset(
         "resource allocation",
         "minimum requirements",
         "maximum capacity",
+        "node count",
+        "cluster requirements",
+        "configuration maximums",
+        "license tier",
+        "licensing",
+        "gpu",
+        "usable tib",
     }
 )
 
 # ── Anchor / modifier split ───────────────────────────────────────────
-# Anchors name the specific WEKA subsystem or resource.
+# Anchors name the specific Nutanix subsystem or resource.
 # Modifiers describe what the user wants to know about them.
 
 SUBSYSTEM_ANCHORS: FrozenSet[str] = frozenset(
     {
         "metadata",
         "inode",
+        "aos",
+        "ahv",
+        "prism",
+        "prism central",
+        "nutanix central",
+        "nci",
+        "ncp",
+        "nus",
+        "files",
+        "objects",
+        "volumes",
+        "ncm",
+        "ndb",
+        "nkp",
+        "nc2",
+        "nai",
+        "flow",
+        "move",
+        "disaster recovery",
         "tiering",
         "snapshots",
         "prefetch",
@@ -126,6 +177,13 @@ SIZING_ANCHORS: FrozenSet[str] = frozenset(
         "ram",
         "cpu",
         "cores",
+        "node count",
+        "cluster requirements",
+        "configuration maximums",
+        "license tier",
+        "licensing",
+        "gpu",
+        "usable tib",
     }
 )
 
@@ -145,7 +203,7 @@ SIZING_MODIFIERS: FrozenSet[str] = frozenset(
 # ── CLI patterns (migrated from hybrid_retrieval.py:2593) ────────────
 
 _CLI_PATTERNS = [
-    re.compile(r"\bweka\s+\w+"),
+    re.compile(r"\b(?:ncli|acli|kubectl|nutanix)\s+\w+"),
     re.compile(r"--[a-z][\w-]+"),
     re.compile(r"\s-[a-z]\b"),
     re.compile(r"\bcli\b"),

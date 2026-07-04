@@ -250,7 +250,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "{container=\"weka-neo4j\"}",
+          "expr": "{container=\"nutanix-neo4j\"}",
           "refId": "A"
         }
       ],
@@ -274,7 +274,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "{container=\"weka-qdrant\"}",
+          "expr": "{container=\"nutanix-qdrant\"}",
           "refId": "A"
         }
       ],
@@ -298,7 +298,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "{container=\"weka-redis\"}",
+          "expr": "{container=\"nutanix-redis\"}",
           "refId": "A"
         }
       ],
@@ -308,13 +308,13 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["wekadocs", "system", "health"],
+  "tags": ["nutanixdocs", "system", "health"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "WekaDocs - System Health",
-  "uid": "wekadocs-health",
+  "title": "Nutanix Docs - System Health",
+  "uid": "nutanixdocs-health",
   "version": 1,
   "weekStart": ""
 }

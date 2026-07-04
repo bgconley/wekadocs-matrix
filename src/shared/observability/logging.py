@@ -55,7 +55,7 @@ def _setup_otel_logs(log_level: str) -> None:
         from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
         from opentelemetry.sdk.resources import Resource
 
-        service_name = os.getenv("OTEL_SERVICE_NAME", "weka-mcp-server")
+        service_name = os.getenv("OTEL_SERVICE_NAME", "nutanix-mcp-server")
         environment = os.getenv("ENV", "development")
 
         resource = Resource.create(
@@ -156,12 +156,12 @@ def setup_logging(log_level: str = "INFO") -> None:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 
     Note:
-        When WEKADOCS_STDIO_MODE=1, skips stdout logging configuration.
+        When NUTANIXDOCS_STDIO_MODE=1, skips stdout logging configuration.
         This allows STDIO MCP server to maintain clean stdout for JSON-RPC.
     """
     # Skip stdout logging config when running in STDIO mode
     # STDIO server handles its own stderr-only logging in bootstrap
-    if not os.environ.get("WEKADOCS_STDIO_MODE"):
+    if not os.environ.get("NUTANIXDOCS_STDIO_MODE"):
         # Configure standard library logging
         logging.basicConfig(
             format="%(message)s",

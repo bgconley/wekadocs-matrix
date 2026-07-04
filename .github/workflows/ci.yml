@@ -1,4 +1,4 @@
-name: WekaDocs GraphRAG MCP CI/CD
+name: Nutanix Docs GraphRAG MCP CI/CD
 
 on:
   push:
@@ -254,7 +254,7 @@ jobs:
       - name: Deploy to staging
         run: |
           kubectl apply -k deploy/k8s/overlays/staging
-          kubectl rollout status deployment/mcp-server-blue -n wekadocs --timeout=5m
+          kubectl rollout status deployment/mcp-server-blue -n nutanixdocs --timeout=5m
 
   deploy-production:
     name: Deploy to Production (Canary)

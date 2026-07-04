@@ -168,7 +168,7 @@ for idx, (issue, description) in enumerate(issues, 1):
 
 # Write file
 output_path = (
-    "/Users/brennanconley/vibecode/wekadocs-matrix/data/ingest/test-truly-massive.md"
+    "/Users/brennanconley/vibecode/nutanix-docs-matrix/data/ingest/test-truly-massive.md"
 )
 with open(output_path, "w") as f:
     f.write(content)

@@ -118,12 +118,12 @@ class DatabaseCleaner:
         "GhostDocument",  # Placeholder for missing referenced docs
         "Error",  # Error tracking nodes
         "QueryFeedback",  # User feedback on queries
-        # Domain-specific entity types discovered in WEKA docs
+        # Domain-specific entity types discovered in Nutanix docs
         "CapacityMetric",  # Storage capacity metrics
         "CloudProvider",  # AWS, Azure, GCP references
         "ProcedureStep",  # Sub-steps within Procedure nodes
         "Protocol",  # Network/storage protocols (NFS, SMB, etc.)
-        "StorageConcept",  # WEKA-specific storage concepts
+        "StorageConcept",  # Nutanix-specific storage concepts
         "Version",  # Software version references
     }
 

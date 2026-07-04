@@ -1,4 +1,4 @@
-// WekaDocs Schema v2.1 - Complete DDL (Community Edition Compatible)
+// Nutanix Docs Schema v2.1 - Complete DDL (Community Edition Compatible)
 // Phase 7C, Task 7C.3: Schema v2.1 activation with 1024-D vector indices
 //
 // COMMUNITY EDITION ADAPTATION:

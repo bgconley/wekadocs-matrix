@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: wekadocs
+  name: nutanixdocs
   labels:
-    app.kubernetes.io/name: wekadocs-graphrag-mcp
-    app.kubernetes.io/part-of: wekadocs-platform
+    app.kubernetes.io/name: nutanix-docs-matrix
+    app.kubernetes.io/part-of: nutanix-docs-platform

@@ -2,7 +2,7 @@
 """
 Quick integration test for doc_title vector query integration.
 
-Tests that the sec_001 query ("Enforce security and compliance in WEKA")
+Tests that the sec_001 query ("Enforce security and compliance in Nutanix")
 now ranks better with doc_title vectors enabled.
 
 Usage:
@@ -71,7 +71,7 @@ def test_sec_001_query():
     )
 
     # Test query
-    query = "Enforce security and compliance in WEKA"
+    query = "Enforce security and compliance in Nutanix"
     expected_title = "Enforce security and compliance"
 
     print(f"\n{'=' * 70}")

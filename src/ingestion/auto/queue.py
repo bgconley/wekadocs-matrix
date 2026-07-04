@@ -208,7 +208,7 @@ class JobQueue:
         Args:
             source_uri: File path or URL
             checksum: SHA-256 checksum for duplicate detection
-            tag: Ingestion tag (e.g., 'wekadocs')
+            tag: Ingestion tag (e.g., 'nutanixdocs')
             timestamp: Enqueue timestamp (defaults to current time)
 
         Returns:

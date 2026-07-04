@@ -4,11 +4,11 @@
 
 set -euo pipefail
 
-NAMESPACE="wekadocs"
+NAMESPACE="nutanixdocs"
 BACKUP_DIR="${1:-/backups/$(date +%Y%m%d-%H%M%S)}"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
-echo "=== WekaDocs Backup ==="
+echo "=== Nutanix Docs Backup ==="
 echo "Timestamp: $TIMESTAMP"
 echo "Backup location: $BACKUP_DIR"
 echo ""
@@ -29,7 +29,7 @@ echo "✓ Neo4j backup complete"
 echo "Backing up Qdrant..."
 QDRANT_POD=$(kubectl get pods -n ${NAMESPACE} -l app=qdrant -o jsonpath='{.items[0].metadata.name}')
 kubectl exec -n ${NAMESPACE} ${QDRANT_POD} -- \
-  curl -X POST "http://localhost:6333/collections/weka_sections/snapshots" 2>/dev/null || true
+  curl -X POST "http://localhost:6333/collections/nutanix_sections/snapshots" 2>/dev/null || true
 sleep 5
 SNAPSHOT_NAME=$(kubectl exec -n ${NAMESPACE} ${QDRANT_POD} -- \
   ls -t /qdrant/storage/snapshots/ 2>/dev/null | head -1)

@@ -6,7 +6,7 @@
 NER (Named Entity Recognition) provider package.
 GLiNER integration for zero-shot entity extraction.
 
-This package provides domain-specific entity extraction for WEKA documentation
+This package provides domain-specific entity extraction for Nutanix documentation
 to enhance retrieval quality through entity-aware embeddings and boosting.
 """
 

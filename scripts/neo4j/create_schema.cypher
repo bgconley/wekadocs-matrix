@@ -111,7 +111,7 @@ FOR (c:Component) ON (c.name);
 MERGE (sv:SchemaVersion {id: 'singleton'})
 SET sv.version = 'v1',
     sv.updated_at = datetime(),
-    sv.description = 'WekaDocs GraphRAG schema v1'
+    sv.description = 'Nutanix Docs GraphRAG schema v1'
 RETURN sv;
 
 // ============================================================================

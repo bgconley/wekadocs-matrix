@@ -1,13 +1,13 @@
-# Dashboard provisioning configuration for WekaDocs-Matrix LGTM stack
+# Dashboard provisioning configuration for Nutanix Docs-Matrix LGTM stack
 # This file tells Grafana where to find dashboard JSON files
 
 apiVersion: 1
 
 providers:
-  - name: 'WekaDocs Dashboards'
+  - name: 'Nutanix Docs Dashboards'
     orgId: 1
-    folder: 'WekaDocs'
-    folderUid: 'wekadocs'
+    folder: 'Nutanix Docs'
+    folderUid: 'nutanixdocs'
     type: file
     disableDeletion: false
     updateIntervalSeconds: 30

@@ -47,7 +47,7 @@ def seed_graph():
         qdrant_client = QdrantClient(host=qdrant_host, port=qdrant_port)
 
         # Create collection
-        collection_name = "weka_sections"  # Hardcoded for now
+        collection_name = "nutanix_sections"  # Hardcoded for now
         embedding_dims = config.embedding.dims
 
         try:
@@ -73,9 +73,9 @@ def seed_graph():
     documents = [
         {
             "id": deterministic_id("doc", "install-guide"),
-            "source_uri": "docs://weka/install-guide.md",
+            "source_uri": "docs://nutanix/install-guide.md",
             "source_type": "markdown",
-            "title": "WekaFS Installation Guide",
+            "title": "Nutanix Installation Guide",
             "version": "4.2",
             "checksum": "abc123",
             "last_edited": "2024-01-15T00:00:00Z",
@@ -90,7 +90,7 @@ def seed_graph():
             "title": "Prerequisites",
             "anchor": "prerequisites",
             "order": 1,
-            "text": "Before installing WekaFS, ensure your system meets minimum requirements: 8 CPUs, 64GB RAM, fast NVMe storage.",
+            "text": "Before installing Nutanix, ensure your system meets minimum requirements: 8 CPUs, 64GB RAM, fast NVMe storage.",
             "tokens": 20,
         },
         {
@@ -100,7 +100,7 @@ def seed_graph():
             "title": "Installation Steps",
             "anchor": "installation",
             "order": 2,
-            "text": "Run weka cluster create to initialize a new cluster. Configure network settings and storage tiers.",
+            "text": "Run nutanix cluster create to initialize a new cluster. Configure network settings and storage tiers.",
             "tokens": 18,
         },
         {
@@ -110,7 +110,7 @@ def seed_graph():
             "title": "Troubleshooting",
             "anchor": "troubleshooting",
             "order": 3,
-            "text": "If installation fails with E1001, check network connectivity. Use weka status to verify cluster health.",
+            "text": "If installation fails with E1001, check network connectivity. Use nutanix status to verify cluster health.",
             "tokens": 19,
         },
         {
@@ -127,14 +127,14 @@ def seed_graph():
 
     commands = [
         {
-            "id": deterministic_id("command", "weka cluster create"),
-            "name": "weka cluster create",
-            "description": "Create a new WekaFS cluster",
+            "id": deterministic_id("command", "nutanix cluster create"),
+            "name": "nutanix cluster create",
+            "description": "Create a new Nutanix cluster",
             "category": "cluster",
         },
         {
-            "id": deterministic_id("command", "weka status"),
-            "name": "weka status",
+            "id": deterministic_id("command", "nutanix status"),
+            "name": "nutanix status",
             "description": "Check cluster status and health",
             "category": "monitoring",
         },
@@ -273,7 +273,7 @@ def seed_graph():
         """,
             sec_id=sections[1]["id"],
             cmd_id=commands[0]["id"],
-        )  # Installation → weka cluster create
+        )  # Installation → nutanix cluster create
 
         session.run(
             """
@@ -283,7 +283,7 @@ def seed_graph():
         """,
             sec_id=sections[2]["id"],
             cmd_id=commands[1]["id"],
-        )  # Troubleshooting → weka status
+        )  # Troubleshooting → nutanix status
 
         session.run(
             """
@@ -353,7 +353,7 @@ def seed_graph():
                 )
             )
 
-        collection_name = "weka_sections"  # Hardcoded for now
+        collection_name = "nutanix_sections"  # Hardcoded for now
         qdrant_client.upsert(collection_name=collection_name, points=points)
         print(f"✅ Inserted {len(points)} vectors into Qdrant")
 

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 TARGET_VERSION="${1:-}"
-NAMESPACE="wekadocs"
+NAMESPACE="nutanixdocs"
 SERVICE_NAME="mcp-server"
 
 if [[ -z "$TARGET_VERSION" ]]; then

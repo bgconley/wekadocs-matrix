@@ -5,7 +5,7 @@
 from pydantic import BaseModel, ConfigDict
 
 
-class WekaBaseModel(BaseModel):
+class NutanixBaseModel(BaseModel):
     model_config = ConfigDict(
         protected_namespaces=(),  # allow fields like model_name
         arbitrary_types_allowed=True,

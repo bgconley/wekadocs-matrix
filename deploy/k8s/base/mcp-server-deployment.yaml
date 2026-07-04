@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: mcp-server
-  namespace: wekadocs
+  namespace: nutanixdocs
   labels:
     app: mcp-server
 spec:
@@ -19,7 +19,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mcp-server-blue
-  namespace: wekadocs
+  namespace: nutanixdocs
   labels:
     app: mcp-server
     version: blue
@@ -41,7 +41,7 @@ spec:
     spec:
       containers:
       - name: mcp-server
-        image: wekadocs-mcp-server:latest
+        image: nutanixdocs-mcp-server:latest
         ports:
         - containerPort: 8000
           name: http
@@ -55,7 +55,7 @@ spec:
         - name: NEO4J_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: wekadocs-secrets
+              name: nutanixdocs-secrets
               key: neo4j-password
         - name: REDIS_URL
           value: "redis://redis:6379"
@@ -64,7 +64,7 @@ spec:
         - name: JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: wekadocs-secrets
+              name: nutanixdocs-secrets
               key: jwt-secret
         volumeMounts:
         - name: config
@@ -91,4 +91,4 @@ spec:
       volumes:
       - name: config
         configMap:
-          name: wekadocs-config
+          name: nutanixdocs-config

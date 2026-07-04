@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Evaluation harness for wekadocs-matrix hybrid retrieval.
+Evaluation harness for nutanix-docs-matrix hybrid retrieval.
 
 Loads a gold set (YAML list of {query, expected_section_ids, filters})
 and executes each query through HybridRetriever, emitting per-query metrics

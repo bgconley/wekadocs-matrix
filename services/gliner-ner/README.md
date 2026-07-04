@@ -2,7 +2,7 @@ GLiNER Service Management
 
   Start the Service
 
-  cd /Users/brennanconley/vibecode/wekadocs-matrix/services/gliner-ner
+  cd /Users/brennanconley/vibecode/nutanix-docs-matrix/services/gliner-ner
   ./run.sh
 
   Options:

@@ -24,7 +24,7 @@ QUERIES = [
     "How do I configure a cluster?",
     "What are the system requirements?",
     "Troubleshoot performance issues",
-    "Explain WekaFS architecture",
+    "Explain Nutanix architecture",
     "How do I upgrade the system?",
 ]
 

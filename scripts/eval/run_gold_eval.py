@@ -4,7 +4,7 @@ CLI to evaluate retrieval against a gold set with human-readable doc_tags.
 Gold YAML schema (list of cases):
   - query: "text"
     expected_doc_tags:
-      - "monitor-the-weka-cluster_snapshot-management"
+      - "monitor-the-nutanix-cluster_snapshot-management"
       - "operation-guide_events_events-list"
 
 This script resolves doc_tags -> document_ids via Qdrant payloads, runs the

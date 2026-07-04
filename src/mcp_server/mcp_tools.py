@@ -92,6 +92,7 @@ from src.mcp_server.tool_schemas import (  # noqa: F401
 )
 from src.query.traversal import TraversalService
 from src.shared.connections import get_connection_manager
+from src.shared.domain import get_domain_config
 from src.shared.observability import get_logger
 from src.shared.observability.metrics import (
     excerpt_truncations_total,
@@ -99,13 +100,14 @@ from src.shared.observability.metrics import (
 )
 
 logger = get_logger(__name__)
+_domain = get_domain_config()
 
 # Production: evidence-pack-first workflow with 3 tools.
 # Analyst: full tool access with evidence pack as recommended start.
 # Legacy instructions retained for reference but no longer active.
 
 PRODUCTION_INSTRUCTIONS = (
-    "You are connected to the WEKA documentation knowledge base. "
+    "You are connected to the Nutanix documentation knowledge base. "
     "Start with kb.retrieve_evidence to get an evidence pack for any question. "
     "The evidence pack includes quotes with confidence scores, document context "
     "(doc_tag, parent_path), and coverage metadata showing retrieval depth. "
@@ -121,7 +123,7 @@ PRODUCTION_INSTRUCTIONS = (
 )
 
 ANALYST_INSTRUCTIONS = (
-    "You are connected to the WEKA documentation knowledge base with full tool access. "
+    "You are connected to the Nutanix documentation knowledge base with full tool access. "
     "For most queries, start with kb.retrieve_evidence for a server-built evidence pack "
     "with retrieval-score-based confidence and coverage metadata. "
     "Use kb.search for browsing candidates, graph.* tools for structural exploration "
@@ -138,12 +140,6 @@ _instructions = (
     PRODUCTION_INSTRUCTIONS
     if MCP_TOOL_PROFILE == "production"
     else ANALYST_INSTRUCTIONS
-)
-logger.info(
-    "MCP instructions mode",
-    neo4j_disabled=_neo4j_disabled,
-    profile=MCP_TOOL_PROFILE,
-    mode="production" if MCP_TOOL_PROFILE == "production" else "analyst",
 )
 
 KB_SEARCH_DESCRIPTION = (

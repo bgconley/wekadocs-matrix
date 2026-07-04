@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-NAMESPACE="wekadocs"
+NAMESPACE="nutanixdocs"
 DRILL_START=$(date +%s)
 BACKUP_DIR="/tmp/dr-drill-$(date +%Y%m%d-%H%M%S)"
 

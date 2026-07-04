@@ -1,13 +1,13 @@
 COMPOSE := docker-compose.yml
 ENV_FILE ?= ../../../.env
-NETWORK := weka-net
+NETWORK := nutanix-net
 
-.PHONY: weka-net
-weka-net:
+.PHONY: nutanix-net
+nutanix-net:
 	@docker network inspect $(NETWORK) >/dev/null 2>&1 || docker network create $(NETWORK)
 
 .PHONY: up
-up: weka-net
+up: nutanix-net
 	@echo "Starting Neo4j Cypher MCP server..."
 	docker compose -f $(COMPOSE) --env-file $(ENV_FILE) up -d
 

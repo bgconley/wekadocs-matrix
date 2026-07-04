@@ -2,4 +2,4 @@
 # @status: ACTIVE
 # @called-by: (top-level package)
 # =============================================================================
-# WekaDocs GraphRAG MCP Server package
+# Nutanix Docs GraphRAG MCP Server package
