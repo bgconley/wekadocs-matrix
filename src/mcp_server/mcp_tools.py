@@ -15,6 +15,10 @@ from uuid import uuid4
 
 import mcp.types as types
 
+from src.evidence.coverage import mark_budget_state
+from src.evidence.models import EvidenceRequest
+from src.evidence.serializers import evidence_package_to_mcp_payload
+from src.evidence.service import EvidenceService
 from src.mcp_server.mcp_search import (
     _emit_diagnostics,
     _expand_evidence_with_structure,
@@ -53,7 +57,6 @@ from src.mcp_server.mcp_utils import (
 )
 from src.mcp_server.retrieval_trace import (
     RetrievalTraceBuilder,
-    TraceQuote,
     set_active_trace,
     write_trace,
 )
@@ -1132,6 +1135,27 @@ async def kb_extract_evidence(
     return finalized
 
 
+def _write_evidence_trace(package) -> str:
+    trace = RetrievalTraceBuilder(
+        trace_id=uuid4().hex,
+        session_id=package.request.session_id,
+    )
+    trace.record_evidence_package(package)
+    write_trace(trace)
+    set_active_trace(package.request.session_id, trace)
+    return trace.trace_id
+
+
+def _build_evidence_service() -> EvidenceService:
+    return EvidenceService(
+        search_candidates=_kb_search_candidates,
+        extract_quotes=_extract_evidence_from_passages,
+        expand_with_graph=_expand_evidence_with_structure,
+        live_validation_available=False,
+        enhancer=None,
+    )
+
+
 async def kb_retrieve_evidence(
     question: str,
     top_k: int = KB_SEARCH_DEFAULT_TOP_K,
@@ -1153,7 +1177,6 @@ async def kb_retrieve_evidence(
     searches much deeper than the number of quotes returned — retrieval_depth
     controls internal search depth while max_quotes controls output size.
     """
-
     deps = _get_deps(ctx)
     if not deps.scratch:
         raise RuntimeError("ScratchStore not initialized")
@@ -1163,12 +1186,11 @@ async def kb_retrieve_evidence(
     except ValueError as exc:
         return _error_payload("SCOPE_VIOLATION", str(exc))
 
-    # Backward compat: if caller passes top_k but not max_quotes, use top_k
-    # as max_quotes (legacy behavior where top_k controlled output size).
+    effective_session = _resolve_session_id(ctx, session_id)
+
     if top_k != KB_SEARCH_DEFAULT_TOP_K and max_quotes == 6:
         max_quotes = top_k
 
-    # Clamp retrieval depth: search deep internally, return few quotes
     internal_fetch_k = max(
         max_quotes,
         min(
@@ -1177,249 +1199,81 @@ async def kb_retrieve_evidence(
         ),
     )
 
-    effective_session = _resolve_session_id(ctx, session_id)
-
-    # Override options to allow deep retrieval without per-doc dedup cap
     evidence_options = dict(options or {})
-    evidence_options.setdefault("max_per_doc", 5)  # allow depth within documents
-
     if graph_enrichment is None:
-        graph_enrichment_enabled = _coerce_bool(
+        graph_enabled = _coerce_bool(
             evidence_options.get("graph_enrichment"),
             default=KB_EVIDENCE_GRAPH_EXPANSION_ENABLED,
         )
     else:
-        graph_enrichment_enabled = _coerce_bool(graph_enrichment, default=False)
+        graph_enabled = _coerce_bool(graph_enrichment, default=False)
 
-    # ── Retrieval trace (always-on) ──────────────────────────────────
-    trace = RetrievalTraceBuilder(trace_id=uuid4().hex, session_id=effective_session)
-
-    search_payload, diagnostic_context = await _kb_search_candidates(
-        query=question,
-        top_k=internal_fetch_k,
-        cursor=None,
-        page_size=internal_fetch_k,
-        scope=scope,
-        filters=filters,
-        options=evidence_options,
-        deps=deps,
-        effective_session=effective_session,
-        _fetch_k_override=internal_fetch_k,
-    )
-
-    # Trace: record query (reformulation data comes from metrics)
-    search_metrics = search_payload.get("metrics") or {}
-    trace.record_query(
-        client_query=search_metrics.get("query_rewrite_original", question),
-        reformulated=search_metrics.get("query_rewrite_result", question),
-        method=(
-            search_metrics.get("query_rewrite_method", "passthrough")
-            if search_metrics.get("query_rewrite_applied")
-            else "passthrough"
-        ),
-        latency_ms=search_metrics.get("query_rewrite_latency_ms", 0),
-        dual_query_active=bool(search_metrics.get("dual_query_active")),
-    )
-
-    # Trace: record signal pool state
-    signal_pool_active = bool(
-        search_metrics.get(
-            "signal_pool_used", search_metrics.get("signal_pool_enabled", False)
-        )
-    )
-    trace.record_signal_pool(
-        enabled=signal_pool_active,
-        pool_size=int(search_metrics.get("signal_pool_size", 0)),
-        slot_fills=search_metrics.get("signal_pool_slot_fills", {}),
-        degraded=bool(search_metrics.get("signal_pool_degraded")),
-    )
-
-    # Trace: record reranker
-    trace.record_reranker(
-        model=search_metrics.get("reranker_model", "unknown"),
-        instruction=search_metrics.get("reranker_instruction"),
-        input_count=int(search_metrics.get("reranker_input_count", 0)),
-        output_count=len(search_payload.get("results", [])),
-        latency_ms=search_metrics.get(
-            "reranker_time_ms", search_metrics.get("rerank_time_ms", 0)
-        ),
-        top_results=[
-            {
-                "chunk_id": r.get("section_id", ""),
-                "score": r.get("score", 0),
-                "heading": r.get("title", ""),
-                "rank": r.get("rank", 0),
-                "original_rank": idx + 1,
-            }
-            for idx, r in enumerate(search_payload.get("results", [])[:10])
-        ],
-    )
-
-    # Trace: record appendix (full text of top 20 for deep inspection)
-    trace.record_appendix_chunks(
-        [
-            {
-                "chunk_id": r.get("section_id", ""),
-                "rerank_score": r.get("score"),
-                "doc_tag": r.get("doc_tag"),
-                "parent_path_norm": None,  # not in result dict, available in scratch
-                "heading": r.get("title", ""),
-                "text": "",  # populated from scratch below
-            }
-            for r in search_payload.get("results", [])[:20]
-        ]
-    )
-
-    passage_ids = [item["passage_id"] for item in search_payload["results"]]
-
-    # Populate appendix full text from scratch
-    for idx, pid in enumerate(passage_ids[:20]):
-        entry = await deps.scratch.get(effective_session, pid)
-        if entry and idx < len(trace._appendix_chunks):
-            trace._appendix_chunks[idx]["text"] = entry.get("text", "")
-            trace._appendix_chunks[idx]["parent_path_norm"] = entry.get(
-                "parent_path_norm"
-            )
-
-    # Optional graph enrichment: expand top passages with structural neighbors
-    section_ids = [
-        item["section_id"]
-        for item in search_payload["results"]
-        if item.get("section_id")
-    ]
-    graph_passage_ids: list[str] = []
-    if graph_enrichment_enabled:
-        graph_passage_ids = await _expand_evidence_with_structure(
-            section_ids=section_ids,
-            deps=deps,
-            effective_session=effective_session,
-        )
-    passage_ids.extend(graph_passage_ids)
-    graph_expansion_applied = graph_enrichment_enabled and len(graph_passage_ids) > 0
-
-    # Trace: record RELATED_TO expansion
-    trace.record_related_to_expansion(
-        seed_docs=int(search_metrics.get("related_to_seed_docs", 0)),
-        related_docs_found=int(search_metrics.get("related_to_docs_found", 0)),
-        chunks_added=int(search_metrics.get("related_to_chunks_added", 0)),
-        avg_edge_score=float(search_metrics.get("related_to_avg_edge_score", 0)),
-        blended_count=int(search_metrics.get("related_to_blended", 0)),
-        blend_lambda=float(search_metrics.get("related_to_lambda", 0)),
-    )
-
-    # Trace: record graph enrichment
-    trace.record_graph_enrichment(
-        seeds=min(10, len(section_ids)) if graph_enrichment_enabled else 0,
-        neighbors_added=len(graph_passage_ids),
-        neighbor_details=[],  # detail populated if we add tracking to _expand_evidence
-    )
-
-    # Trace: stage snapshots (pipeline observability)
-    stage_snapshots = {}
-    for key in (
-        "snapshot_post_fusion",
-        "snapshot_post_entity_boost",
-        "snapshot_post_structural_boost",
-        "snapshot_post_colbert",
-        "snapshot_post_reranker",
-    ):
-        if key in search_metrics:
-            stage_snapshots[key.replace("snapshot_", "")] = search_metrics[key]
-    if stage_snapshots:
-        trace.record_stage_snapshots(stage_snapshots)
-
-    # Trace: ColBERT observability
-    trace.record_colbert(
-        applied=bool(search_metrics.get("colbert_rerank_applied")),
-        runtime_available=bool(search_metrics.get("colbert_runtime_available", False)),
-        query_embedding_ok=bool(
-            search_metrics.get("colbert_query_embedding_ok", False)
-        ),
-        rank_deltas=search_metrics.get("colbert_rank_delta_top10"),
-        candidates=int(search_metrics.get("colbert_candidates", 0)),
-        hydrated=int(search_metrics.get("colbert_hydrated", 0)),
-        latency_ms=search_metrics.get("colbert_rerank_time_ms", 0),
-    )
-
-    quotes = await _extract_evidence_from_passages(
+    request = EvidenceRequest(
         question=question,
-        passage_ids=passage_ids,
+        session_id=effective_session,
+        top_k=top_k,
         max_quotes=max_quotes,
         max_quote_tokens=max_quote_tokens,
         include_context_tokens=include_context_tokens,
-        deps=deps,
-        effective_session=effective_session,
+        retrieval_depth=internal_fetch_k,
+        graph_enrichment=graph_enabled,
+        scope=scope,
+        filters=filters,
+        options=evidence_options,
+        response_mode="evidence_only",
     )
 
-    # Build coverage metadata
-    search_results = search_payload.get("results", [])
-    unique_docs = {r.get("doc_tag") for r in search_results if r.get("doc_tag")}
-    docs_with_evidence = {q.get("doc_tag") for q in quotes if q.get("doc_tag")}
-    coverage = {
-        "documents_searched": len(unique_docs),
-        "documents_with_evidence": len(docs_with_evidence),
-        "retrieval_depth": len(search_results),
-        "reranker_applied": bool(search_metrics.get("reranker_applied")),
-        "signal_pool_active": signal_pool_active,
-        "graph_expansion_applied": graph_expansion_applied,
-    }
+    package = await _build_evidence_service().build_package(request=request, deps=deps)
 
-    # Trace: record evidence pack
-    trace.record_evidence_pack(
-        quotes=[
-            TraceQuote(
-                rank=q.get("rank", 0),
-                confidence=q.get("confidence", 0),
-                doc_tag=q.get("doc_tag"),
-                parent_path=q.get("parent_path"),
-                source=q.get("source", ""),
-                text=q.get("quote", ""),
-            )
-            for q in quotes
-        ],
-        coverage=coverage,
-    )
-
-    # Write trace and set as active for follow-up correlation
-    write_trace(trace)
-    set_active_trace(effective_session, trace)
-
-    payload = {"quotes": quotes, "coverage": coverage}
+    payload = evidence_package_to_mcp_payload(package)
     budget = _new_budget()
-    tokens_estimate, bytes_estimate, budget_partial, budget_reason = _apply_budget(
+    tokens_estimate, bytes_estimate, partial, reason = _apply_budget(
         payload, budget, "snippets"
     )
-    limit_reason = budget_reason if budget_partial else "none"
+    limit_reason = reason if partial else "none"
+
+    mark_budget_state(
+        package.coverage,
+        package.gaps,
+        partial=partial,
+        limit_reason=limit_reason,
+    )
+    payload["coverage"] = package.coverage.model_dump()
+    payload["gaps"] = [gap.model_dump() for gap in package.gaps]
+
+    package.trace_id = _write_evidence_trace(package)
+
+    diagnostic = await _emit_diagnostics(
+        tool_name="kb_retrieve_evidence",
+        ctx=ctx,
+        session_id=effective_session,
+        diagnostic_context=package.diagnostic_context or {},
+        tokens_estimate=tokens_estimate,
+        bytes_estimate=bytes_estimate,
+        partial=partial,
+        limit_reason=limit_reason,
+    )
+    if diagnostic and diagnostic.get("diagnostic_id"):
+        payload["diagnostic_id"] = diagnostic["diagnostic_id"]
+        payload["diagnostic_hint"] = (
+            f"See retrieval diagnostics {diagnostic['diagnostic_id']}"
+        )
+        if DIAGNOSTICS_RESOURCES_ENABLED and diagnostic.get("date"):
+            payload["diagnostic_uri"] = _diagnostics_uri(
+                diagnostic["date"],
+                diagnostic["diagnostic_id"],
+            )
+
     finalized = _finalize_payload(
         "kb_retrieve_evidence",
         payload,
         tokens=tokens_estimate,
         bytes_=bytes_estimate,
-        partial=budget_partial,
+        partial=partial,
         limit_reason=limit_reason,
         session_id=effective_session,
     )
-    diagnostic = await _emit_diagnostics(
-        tool_name="kb_retrieve_evidence",
-        ctx=ctx,
-        session_id=effective_session,
-        diagnostic_context=diagnostic_context,
-        tokens_estimate=tokens_estimate,
-        bytes_estimate=bytes_estimate,
-        partial=budget_partial,
-        limit_reason=limit_reason,
-    )
-    if diagnostic:
-        diagnostic_id = diagnostic.get("diagnostic_id")
-        if diagnostic_id:
-            finalized["diagnostic_id"] = diagnostic_id
-            finalized["diagnostic_hint"] = f"See retrieval diagnostics {diagnostic_id}"
-            if DIAGNOSTICS_RESOURCES_ENABLED and diagnostic.get("date"):
-                finalized["diagnostic_uri"] = _diagnostics_uri(
-                    diagnostic["date"], diagnostic_id
-                )
-    # Add trace_id to response for correlation
-    finalized["trace_id"] = trace.trace_id
+    finalized["trace_id"] = package.trace_id
 
     return finalized
 

@@ -23,9 +23,7 @@ def test_no_deprecated_alias_leaks_into_curated_profiles():
 
 
 @pytest.mark.asyncio
-async def test_retrieve_evidence_current_shape(evidence_fake_ctx):
-    # CHARACTERIZATION of the CURRENT tool (pre-refactor). This MUST pass against
-    # today's code; Task 8 intentionally supersedes it with the enriched shape.
+async def test_retrieve_evidence_enriched_shape(evidence_fake_ctx):
     payload = await mcp_tools.kb_retrieve_evidence(
         question="How do I configure authentication?",
         ctx=evidence_fake_ctx,
@@ -35,23 +33,19 @@ async def test_retrieve_evidence_current_shape(evidence_fake_ctx):
     assert {
         "quotes",
         "coverage",
+        "gaps",
+        "package_id",
+        "normalized_query",
+        "trace_id",
         "session_id",
         "partial",
         "limit_reason",
         "meta",
-        "trace_id",
     } <= payload.keys()
-    assert "gaps" not in payload
-    assert "package_id" not in payload
-    assert "normalized_query" not in payload
-    assert set(payload["coverage"].keys()) == {
-        "documents_searched",
-        "documents_with_evidence",
-        "retrieval_depth",
-        "reranker_applied",
-        "signal_pool_active",
-        "graph_expansion_applied",
-    }
+    assert [key for key, value in payload.items() if value is None] == []
+    coverage = payload["coverage"]
+    assert {"partial", "limit_reason"} <= coverage.keys()
+    assert payload["partial"] == coverage["partial"]
     assert payload[
         "quotes"
     ], "fixture must return >=1 quote or these asserts are vacuous"
@@ -66,6 +60,7 @@ async def test_retrieve_evidence_current_shape(evidence_fake_ctx):
             "confidence",
             "source",
             "rank",
+            "quote_id",
         } <= quote.keys()
     assert "retrieval_metrics" not in payload
     assert "diagnostic_context" not in payload
