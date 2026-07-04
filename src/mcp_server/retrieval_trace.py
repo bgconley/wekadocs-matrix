@@ -12,7 +12,7 @@ kb.read_excerpt) append to the same trace via session correlation.
 Trace access:
   - File: logs/retrieval_traces/<timestamp>_<trace_id>.txt
   - JSON sidecar: logs/retrieval_traces/<timestamp>_<trace_id>.json
-  - MCP resource: wekadocs://traces/latest, wekadocs://traces/<trace_id>
+  - MCP resource: nutanixdocs://traces/latest, nutanixdocs://traces/<trace_id>
 """
 
 from __future__ import annotations
@@ -24,6 +24,8 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+from src.evidence.models import EvidencePackage
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +186,108 @@ class RetrievalTraceBuilder:
             "quotes": quotes,
             "coverage": coverage,
         }
+
+    def record_evidence_package(self, package: EvidencePackage) -> None:
+        m = package.retrieval_metrics or {}
+        self.record_query(
+            client_query=m.get("query_rewrite_original", package.request.question),
+            reformulated=package.normalized_query,
+            method=(
+                m.get("query_rewrite_method", "passthrough")
+                if m.get("query_rewrite_applied")
+                else "passthrough"
+            ),
+            latency_ms=m.get("query_rewrite_latency_ms", 0),
+            dual_query_active=bool(m.get("dual_query_active")),
+        )
+        self.record_signal_pool(
+            enabled=bool(
+                m.get("signal_pool_used", m.get("signal_pool_enabled", False))
+            ),
+            pool_size=int(m.get("signal_pool_size", 0)),
+            slot_fills=m.get("signal_pool_slot_fills", {}),
+            degraded=bool(m.get("signal_pool_degraded")),
+        )
+        snapshot = m.get("_result_snapshot", [])
+        self.record_reranker(
+            model=m.get("reranker_model", "unknown"),
+            instruction=m.get("reranker_instruction"),
+            input_count=int(m.get("reranker_input_count", 0)),
+            output_count=int(m.get("_result_count", len(snapshot))),
+            latency_ms=m.get("reranker_time_ms", m.get("rerank_time_ms", 0)),
+            top_results=[
+                {
+                    "chunk_id": r.get("section_id", ""),
+                    "score": r.get("score", 0),
+                    "heading": r.get("title", ""),
+                    "rank": r.get("rank", 0),
+                    "original_rank": i + 1,
+                }
+                for i, r in enumerate(snapshot[:10])
+            ],
+        )
+        self.record_appendix_chunks(
+            [
+                {
+                    "chunk_id": c.get("chunk_id", ""),
+                    "rerank_score": c.get("rerank_score"),
+                    "doc_tag": c.get("doc_tag"),
+                    "parent_path_norm": c.get("parent_path_norm"),
+                    "heading": c.get("heading", ""),
+                    "text": c.get("text", ""),
+                }
+                for c in m.get("_appendix_chunks", [])
+            ]
+        )
+        self.record_related_to_expansion(
+            seed_docs=int(m.get("related_to_seed_docs", 0)),
+            related_docs_found=int(m.get("related_to_docs_found", 0)),
+            chunks_added=int(m.get("related_to_chunks_added", 0)),
+            avg_edge_score=float(m.get("related_to_avg_edge_score", 0)),
+            blended_count=int(m.get("related_to_blended", 0)),
+            blend_lambda=float(m.get("related_to_lambda", 0)),
+        )
+        self.record_graph_enrichment(
+            seeds=int(m.get("_graph_seed_count", 0)),
+            neighbors_added=int(m.get("_graph_neighbors_added", 0)),
+            neighbor_details=[],
+        )
+        snapshots = {
+            k.replace("snapshot_", ""): m[k]
+            for k in (
+                "snapshot_post_fusion",
+                "snapshot_post_entity_boost",
+                "snapshot_post_structural_boost",
+                "snapshot_post_colbert",
+                "snapshot_post_reranker",
+            )
+            if k in m
+        }
+        if snapshots:
+            self.record_stage_snapshots(snapshots)
+        self.record_colbert(
+            applied=bool(m.get("colbert_rerank_applied")),
+            runtime_available=bool(m.get("colbert_runtime_available", False)),
+            query_embedding_ok=bool(m.get("colbert_query_embedding_ok", False)),
+            rank_deltas=m.get("colbert_rank_delta_top10"),
+            candidates=int(m.get("colbert_candidates", 0)),
+            hydrated=int(m.get("colbert_hydrated", 0)),
+            latency_ms=m.get("colbert_rerank_time_ms", 0),
+        )
+        self.record_evidence_pack(
+            quotes=[
+                TraceQuote(
+                    rank=q.rank,
+                    confidence=q.confidence,
+                    doc_tag=q.doc_tag,
+                    parent_path=" > ".join(q.parent_path),
+                    source=q.source,
+                    text=q.text,
+                )
+                for q in package.quotes
+            ],
+            coverage=package.coverage.model_dump(),
+        )
 
     def record_appendix_chunks(self, chunks: List[Dict[str, Any]]) -> None:
         """Store full text of top reranked candidates for the appendix."""
