@@ -7,6 +7,7 @@ Tests for MCP tool profile filtering: production, analyst, full.
 """
 
 
+from src.mcp_server import tool_schemas
 from src.mcp_server.mcp_app import TOOL_PROFILES, _tool_specs
 
 
@@ -113,3 +114,15 @@ class TestToolSpecIntegrity:
             assert (
                 "." not in alias["name"]
             ), f"Alias '{alias['name']}' uses dot notation"
+
+    def test_retrieve_evidence_schema_comes_from_schema_module(self):
+        retrieve_spec = next(
+            spec for spec in _tool_specs() if spec["name"] == "kb.retrieve_evidence"
+        )
+        assert retrieve_spec["input_schema"] is tool_schemas.KB_RETRIEVE_INPUT_SCHEMA
+        assert (
+            tool_schemas.KB_RETRIEVE_INPUT_SCHEMA["properties"]["response_mode"][
+                "default"
+            ]
+            == "evidence_only"
+        )
