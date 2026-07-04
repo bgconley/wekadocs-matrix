@@ -16,6 +16,7 @@ from uuid import uuid4
 import mcp.types as types
 
 from src.evidence.coverage import mark_budget_state
+from src.evidence.enhancer import FakeEvidenceEnhancer
 from src.evidence.models import EvidenceRequest
 from src.evidence.serializers import evidence_package_to_mcp_payload
 from src.evidence.service import EvidenceService
@@ -29,6 +30,7 @@ from src.mcp_server.mcp_search import (
 from src.mcp_server.mcp_utils import (
     DEFAULT_PAGE_SIZE,
     DIAGNOSTICS_RESOURCES_ENABLED,
+    KB_EVIDENCE_DRAFT_ENABLED,
     KB_EVIDENCE_GRAPH_EXPANSION_ENABLED,
     KB_EVIDENCE_INTERNAL_FETCH_K,
     KB_EVIDENCE_MAX_FETCH_K,
@@ -360,6 +362,17 @@ KB_RETRIEVE_INPUT_SCHEMA = {
         "graph_enrichment": {
             "type": "boolean",
             "description": "Enable evidence-only structural graph expansion (default false for precision mode).",
+        },
+        "response_mode": {
+            "type": "string",
+            "enum": ["evidence_only", "evidence_plus_draft"],
+            "default": "evidence_only",
+            "description": (
+                "Return evidence only (default), or evidence plus a "
+                "citation-preserving draft answer. Draft mode is experimental "
+                "and active only when the server sets KB_EVIDENCE_DRAFT_ENABLED; "
+                "otherwise the server returns evidence only."
+            ),
         },
         "top_k": {
             "type": "integer",
@@ -1146,13 +1159,14 @@ def _write_evidence_trace(package) -> str:
     return trace.trace_id
 
 
-def _build_evidence_service() -> EvidenceService:
+def _build_evidence_service(response_mode: str) -> EvidenceService:
+    drafting = response_mode == "evidence_plus_draft" and KB_EVIDENCE_DRAFT_ENABLED
     return EvidenceService(
         search_candidates=_kb_search_candidates,
         extract_quotes=_extract_evidence_from_passages,
         expand_with_graph=_expand_evidence_with_structure,
         live_validation_available=False,
-        enhancer=None,
+        enhancer=FakeEvidenceEnhancer() if drafting else None,
     )
 
 
@@ -1167,6 +1181,7 @@ async def kb_retrieve_evidence(
     scope: Optional[dict[str, Any]] = None,
     filters: Optional[dict[str, Any]] = None,
     options: Optional[dict[str, Any]] = None,
+    response_mode: str = "evidence_only",
     session_id: Optional[str] = None,
     ctx: Any | None = None,
 ) -> dict:
@@ -1220,10 +1235,17 @@ async def kb_retrieve_evidence(
         scope=scope,
         filters=filters,
         options=evidence_options,
-        response_mode="evidence_only",
+        response_mode=(
+            "evidence_plus_draft"
+            if response_mode == "evidence_plus_draft"
+            else "evidence_only"
+        ),
     )
 
-    package = await _build_evidence_service().build_package(request=request, deps=deps)
+    package = await _build_evidence_service(request.response_mode).build_package(
+        request=request,
+        deps=deps,
+    )
 
     payload = evidence_package_to_mcp_payload(package)
     budget = _new_budget()

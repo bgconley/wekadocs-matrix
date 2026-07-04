@@ -126,6 +126,12 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
+KB_EVIDENCE_DRAFT_ENABLED = _coerce_bool(
+    os.getenv("KB_EVIDENCE_DRAFT_ENABLED"),
+    default=False,
+)
+
+
 def _new_budget(
     token_budget: int = MAX_TOKENS_PER_TURN, byte_budget: int = MAX_RESPONSE_BYTES
 ) -> ContextBudgetManager:

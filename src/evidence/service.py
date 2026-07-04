@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any, Optional
 
+from pydantic import ValidationError
+
 from src.evidence.coverage import build_coverage, identify_gaps
-from src.evidence.models import EvidencePackage, EvidenceRequest
+from src.evidence.models import EvidenceGap, EvidencePackage, EvidenceRequest
 from src.evidence.quotes import normalize_quote_payloads
 
 SearchCandidatesFn = Callable[..., Awaitable[tuple[dict[str, Any], dict[str, Any]]]]
@@ -110,7 +112,7 @@ class EvidenceService:
         metrics["_graph_seed_count"] = graph_seed_count
         metrics["_graph_neighbors_added"] = graph_neighbors_added
 
-        return EvidencePackage(
+        package = EvidencePackage(
             request=request,
             normalized_query=metrics.get("query_rewrite_result") or request.question,
             quotes=quotes,
@@ -119,6 +121,23 @@ class EvidenceService:
             retrieval_metrics=metrics,
             diagnostic_context=diagnostic_context,
         )
+        if request.response_mode == "evidence_plus_draft" and self._enhancer:
+            package = await self._safe_enhance(package)
+        return package
 
     async def _safe_enhance(self, package: EvidencePackage) -> EvidencePackage:
+        try:
+            return await self._enhancer.enhance(package)
+        except ValidationError:
+            package.answer_draft = None
+            package.gaps.append(
+                EvidenceGap(
+                    kind="uncited_draft_rejected",
+                    message=(
+                        "Draft answer rejected: one or more claims were not "
+                        "grounded in retrieved quotes."
+                    ),
+                    severity="warning",
+                )
+            )
         return package

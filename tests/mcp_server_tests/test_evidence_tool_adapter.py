@@ -1,3 +1,5 @@
+import pytest
+
 from src.evidence.models import (
     EvidenceCoverage,
     EvidencePackage,
@@ -5,6 +7,7 @@ from src.evidence.models import (
     EvidenceRequest,
 )
 from src.evidence.serializers import evidence_package_to_mcp_payload
+from src.mcp_server import mcp_tools
 
 
 def _package(**over):
@@ -66,3 +69,40 @@ def test_payload_includes_diagnostics_and_draft_only_when_present():
 
     assert payload["diagnostic_id"] == "diag-1"
     assert payload["diagnostic_uri"].endswith("diag-1")
+
+
+@pytest.mark.asyncio
+async def test_draft_request_degrades_to_evidence_only_when_gate_disabled(
+    evidence_fake_ctx, monkeypatch
+):
+    monkeypatch.setattr(mcp_tools, "KB_EVIDENCE_DRAFT_ENABLED", False, raising=False)
+
+    payload = await mcp_tools.kb_retrieve_evidence(
+        question="How do I deploy NAI?",
+        ctx=evidence_fake_ctx,
+        session_id="draft-off",
+        response_mode="evidence_plus_draft",
+    )
+
+    assert "answer_draft" not in payload
+    assert payload["quotes"]
+
+
+@pytest.mark.asyncio
+async def test_draft_request_returns_only_cited_claims_when_gate_enabled(
+    evidence_fake_ctx, monkeypatch
+):
+    monkeypatch.setattr(mcp_tools, "KB_EVIDENCE_DRAFT_ENABLED", True, raising=False)
+
+    payload = await mcp_tools.kb_retrieve_evidence(
+        question="How do I deploy NAI?",
+        ctx=evidence_fake_ctx,
+        session_id="draft-on",
+        response_mode="evidence_plus_draft",
+    )
+
+    quote_ids = {quote["quote_id"] for quote in payload["quotes"]}
+    claims = payload["answer_draft"]["claims"]
+    assert claims
+    for claim in claims:
+        assert set(claim["quote_ids"]) <= quote_ids
