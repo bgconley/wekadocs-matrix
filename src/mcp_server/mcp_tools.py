@@ -27,8 +27,9 @@ from src.mcp_server.mcp_search import (
     _infer_source_tags,
     _kb_search_candidates,
 )
-from src.mcp_server.mcp_utils import (
+from src.mcp_server.mcp_utils import (  # noqa: F401 - compatibility re-export
     DEFAULT_PAGE_SIZE,
+    DIAGNOSTICS_RESOURCE_TEMPLATE,
     DIAGNOSTICS_RESOURCES_ENABLED,
     KB_EVIDENCE_DRAFT_ENABLED,
     KB_EVIDENCE_GRAPH_EXPANSION_ENABLED,

@@ -338,6 +338,7 @@ class CompatQdrantClient(QdrantClient):
                 return None
         return None
 
+
 class ConnectionManager:
     """Manages connections to Neo4j, Qdrant, and Redis"""
 
