@@ -8,9 +8,9 @@
 >
 > **PREREQUISITE: re-index GitNexus before starting.** The index is stale (indexed at `cbdb11b`, HEAD is well ahead). Run `npx gitnexus analyze` first, or every `gitnexus impact` step below reports against old code. Do this AFTER Slice B removes `patched/` so the re-index is collision-free.
 
-**Goal:** Turn `src/ingestion/atomic.py` (2,417 lines) into a thin orchestrator by lifting each inline stage into `src/ingestion/stages/*`, with **zero behavior change per commit**, guarded by an offline characterization pin.
+**Goal:** Turn `src/ingestion/atomic.py` (2,417 lines) into a thin orchestrator by lifting each inline stage into `src/ingestion/stages/*`, with **zero intended behavior change per commit**, guarded by an offline orchestration pin plus stage-specific and live gates.
 
-**Architecture:** Strangler-fig decomposition mirroring the successful `3fa1bb9` precedent (which already extracted the Neo4j/Qdrant writers with backward-compat re-exports). Extract **leaf-first** — `link → parse → chunk → enrich → write → embed` — keeping the coordinator's public signature frozen and a re-export for every moved symbol. A new offline pin (fake Neo4j/Qdrant + stub embedder) is the fast inner-loop gate; the live docker integration suite is the outer gate.
+**Architecture:** Strangler-fig decomposition mirroring the successful `3fa1bb9` precedent (which already extracted the Neo4j/Qdrant writers with backward-compat re-exports). Extract **leaf-first** — `link → parse → chunk → enrich → write → embed` — keeping the coordinator's public signature frozen and a re-export for every moved symbol. A new offline orchestration pin (DummyDriver/DummyQdrant + monkeypatched coordinator stages) is the fast seam-level inner-loop gate; stage-specific focused checks and the live docker integration suite guard the internals.
 
 **Tech Stack:** Python 3.11, pytest with fakes, existing `Neo4jWriter`/`QdrantWriter`/`chunk_assembler`/`parsers` collaborators, GitNexus.
 
@@ -251,7 +251,7 @@ Note in the task log: these run only with Neo4j+Qdrant(+GLiNER) up (`SKIP_INTEGR
 ```bash
 git add tests/ingestion/test_atomic_characterization.py
 git commit -m "test(p4.0): offline characterization pin for atomic ingestion" \
-  -m "Phase 4.0 — offline pin (fake Neo4j/Qdrant + stub embedder) for atomic ingest."
+  -m "Phase 4.0 — offline orchestration pin for atomic ingest seam."
 ```
 
 ---
@@ -292,7 +292,7 @@ git commit -m "feat(p4.0): scaffold ingestion stages package + IngestionTrace" \
 
 1. **GitNexus impact** on the method being moved: `npx gitnexus impact <method> --direction upstream --include-tests --repo wekadocs-matrix` — report blast radius (expected LOW/internal; the real gate is the pin).
 2. **Extract** the method body into the new `stages/<name>.py` behind the stable interface below; leave a thin delegating call in `atomic.py` (or call the stage fn directly from the orchestrator). Preserve the shared-`sections` mutation contract exactly.
-3. **Re-run the offline pin** — must stay green (byte-for-byte behavior).
+3. **Re-run the offline pin** — must stay green for the coordinator seam (call order, shared `sections` mutation, embedding handoff, result contract). Add or keep focused checks for the moved stage body when the extraction touches parse/chunk/enrich/embed/write internals.
 4. **`compileall` + ruff** on `src/ingestion/`.
 5. **Commit** (one stage per commit) using the two-`-m` form — `-m "<title>"` then `-m "Phase 4.0 — <recap>"` — since gitlint B8 requires a `Phase 4.0` body line (an empty body fails the commit-msg hook).
 
@@ -381,14 +381,14 @@ git push origin wip/weka-to-nutanix-migration
 - `src/ingestion/atomic.py` is a thin orchestrator (stage-call sequence + result contract + re-exports), materially smaller than 2,417 lines.
 - Each of `parse/chunk/enrich/embed/write/link` logic lives in `src/ingestion/stages/*` behind a stable function interface.
 - The 5 frozen public-contract items are unchanged; the 6 re-exports still import from `src.ingestion.atomic`.
-- The offline characterization pin passed after **every** extraction commit (no behavior change), and the live integration gate passed once before and once after the series.
+- The offline characterization pin passed after **every** extraction commit, proving the coordinator seam stayed intact; stage-specific focused checks covered moved internals where practical, and the live integration gate passed once before and once after the series.
 - `IngestionTrace` events replace silent ingest fallbacks (Task 8), attached at `result.stats["trace"]`.
 - The pre-existing `F401` ruff error in `atomic.py` is resolved via `# noqa`/`__all__`, not by deleting re-exports.
 - Branch pushed.
 
 ## Self-Review
 
-- Strangler discipline: pin → impact → extract-behind-interface → re-run pin → commit, one stage per commit, leaf-first.
+- Strangler discipline: pin → impact → extract-behind-interface → re-run seam pin + focused stage checks → commit, one stage per commit, leaf-first.
 - Behavior additivity is isolated to Task 8; Tasks 2–7 are pure moves.
 - The #1 trap (shared `sections` mutation of `_mentions`/`_embedding_text`/`was_truncated`) is called out per relevant stage.
 - Dependency on Slice B (remove `patched/atomic_patched_v3.py`) is stated up front.
