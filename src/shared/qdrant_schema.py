@@ -1,6 +1,6 @@
 # =============================================================================
 # @status: ACTIVE
-# @called-by: build_graph.py, hybrid_retrieval.py
+# @called-by: query/hybrid_retrieval.py (validate_qdrant_schema), scripts/validate_profile_storage.py
 # =============================================================================
 from __future__ import annotations
 

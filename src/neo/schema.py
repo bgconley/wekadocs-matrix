@@ -1,6 +1,6 @@
 # =============================================================================
 # @status: ACTIVE
-# @called-by: graph_service.py, explain_guard.py
+# @called-by: services/graph_service.py (feeds ExplainGuard rel-type allow-list)
 # =============================================================================
 """
 Shared Neo4j schema metadata.

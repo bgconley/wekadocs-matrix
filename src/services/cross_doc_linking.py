@@ -1,6 +1,6 @@
 # =============================================================================
 # @status: ACTIVE
-# @called-by: atomic.py
+# @called-by: atomic.py, ingestion/neo4j_writers.py, scripts/backfill_cross_doc_edges.py, scripts/batch_crossdoc_link.py
 # =============================================================================
 """
 Cross-document linking service for Phase 3.5 semantic similarity edges.

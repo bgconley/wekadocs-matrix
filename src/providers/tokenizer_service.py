@@ -1,6 +1,6 @@
 # =============================================================================
 # @status: ACTIVE
-# @called-by: hybrid_retrieval.py, atomic.py
+# @called-by: widely used (13+ importers across query/, ingestion/, mcp_server/, providers/) - see importer graph
 # =============================================================================
 """
 Tokenizer service for accurate token counting and text splitting.
