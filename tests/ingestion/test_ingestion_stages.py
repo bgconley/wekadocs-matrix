@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from src.ingestion.stages.chunk import assemble_chunks
+from src.ingestion.stages.enrich import merge_section_mentions
 from src.ingestion.stages.parse import parse_document
 
 
@@ -81,3 +82,30 @@ def test_assemble_chunks_preserves_document_identity_and_token_totals():
     ]
     assert document["total_tokens"] == 12
     assert document["doc_id"] == "doc-nutanix-files"
+
+
+def test_merge_section_mentions_preserves_gliner_and_filters_structural_noise():
+    sections = [
+        {
+            "id": "chunk-1",
+            "original_section_ids": ["source-section-1"],
+            "_mentions": [{"entity_id": "gliner-files", "source": "gliner"}],
+        }
+    ]
+    entities = {
+        "struct-files": {"id": "struct-files", "name": "Nutanix Files"},
+        "gliner-files": {"id": "gliner-files", "name": "Nutanix Files"},
+        "noise-data": {"id": "noise-data", "name": "data"},
+    }
+    mentions = [
+        {"section_id": "source-section-1", "entity_id": "struct-files"},
+        {"section_id": "source-section-1", "entity_id": "gliner-files"},
+        {"section_id": "chunk-1", "entity_id": "noise-data"},
+    ]
+
+    merge_section_mentions(sections, entities, mentions)
+
+    assert sections[0]["_mentions"] == [
+        {"entity_id": "gliner-files", "source": "gliner"},
+        {"section_id": "source-section-1", "entity_id": "struct-files"},
+    ]

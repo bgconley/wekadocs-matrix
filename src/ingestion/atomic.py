@@ -24,7 +24,6 @@ import os
 import random
 import time
 import uuid
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
@@ -119,6 +118,11 @@ from src.ingestion.saga import (  # noqa: E402
     ValidationResult,
 )
 from src.ingestion.stages.chunk import assemble_chunks  # noqa: E402
+from src.ingestion.stages.enrich import (  # noqa: E402
+    enrich_chunks_with_gliner,
+    extract_and_enrich,
+    merge_section_mentions,
+)
 from src.ingestion.stages.link import (  # noqa: E402
     create_cross_doc_links,
     get_document_count,
@@ -389,71 +393,7 @@ class AtomicIngestionCoordinator:
             references = prepared.get("references", [])  # Phase 3: Cross-doc refs
             document_id = document["id"]
 
-            # Structural entity quality gate: filter noisy regex-extracted entities
-            # at the merge point (upstream of entity-sparse vector generation and
-            # Neo4j MENTIONS creation).
-            from src.providers.ner.labels import is_excluded_structural_entity
-
-            # Attach mentions to sections for entity-sparse embedding generation
-            # Build section_id → mentions mapping (mirrors build_graph.py:454 logic)
-            mentions_by_section: Dict[str, List[Dict]] = defaultdict(list)
-            for mention in mentions:
-                # Section→Entity mentions have section_id key
-                section_id = mention.get("section_id")
-                if section_id:
-                    mentions_by_section[section_id].append(mention)
-
-            # Attach _mentions to each section
-            # Note: Chunk assembly creates new section IDs; original IDs are stored
-            # in 'original_section_ids'. Check both current ID and originals.
-            for section in sections:
-                section_mentions = []
-                # Check current section ID
-                section_id = section.get("id")
-                if section_id and section_id in mentions_by_section:
-                    section_mentions.extend(mentions_by_section[section_id])
-                # Check original section IDs (from chunk assembly)
-                original_ids = section.get("original_section_ids", [])
-                for orig_id in original_ids:
-                    if orig_id in mentions_by_section:
-                        section_mentions.extend(mentions_by_section[orig_id])
-                # Merge structural mentions with any existing GLiNER mentions
-                # GLiNER adds _mentions in _prepare_ingestion; preserve them here
-                existing_gliner_mentions = section.get("_mentions", [])
-
-                # Deduplicate by entity_id across both sources to avoid double-counting
-                seen_entity_ids = set()
-                merged_mentions = []
-
-                # Add GLiNER mentions first (they're higher quality - model-extracted)
-                for m in existing_gliner_mentions:
-                    eid = m.get("entity_id")
-                    if eid and eid not in seen_entity_ids:
-                        seen_entity_ids.add(eid)
-                        merged_mentions.append(m)
-
-                # Then add structural mentions (regex-extracted)
-                for m in section_mentions:
-                    eid = m.get("entity_id")
-                    if not eid or eid in seen_entity_ids:
-                        continue
-
-                    # Structural mention dicts do not carry a name; resolve via
-                    # the entities dict produced by structural extractors.
-                    entity_name = ""
-                    entity_data = (
-                        entities.get(eid) if isinstance(entities, dict) else None
-                    )
-                    if isinstance(entity_data, dict):
-                        entity_name = entity_data.get("name", "") or ""
-
-                    if is_excluded_structural_entity(entity_name):
-                        continue
-
-                    seen_entity_ids.add(eid)
-                    merged_mentions.append(m)
-
-                section["_mentions"] = merged_mentions
+            merge_section_mentions(sections, entities, mentions)
 
             # LGTM Phase 4: Verbose log event 2 - document_parsed
             logger.info(
@@ -720,7 +660,6 @@ class AtomicIngestionCoordinator:
             Dict with document, sections, entities, mentions, and builder
         """
         from src.ingestion.build_graph import GraphBuilder
-        from src.ingestion.extract import extract_entities
 
         parsed = parse_document(
             source_uri,
@@ -733,98 +672,19 @@ class AtomicIngestionCoordinator:
         document = parsed["document"]
         sections = parsed["sections"]
 
-        # Extract entities
-        entities, mentions = extract_entities(sections)
-
-        # Phase 3: Extract cross-document references
-        # Import here to avoid circular imports
-        from src.ingestion.extract.references import (
-            create_reference_edge,
-            extract_chunk_references,
-            extract_references,
+        enrichment = extract_and_enrich(
+            document=document,
+            sections=sections,
+            content=content,
+            format=format,
+            config=config,
         )
-
-        # CRITICAL: Extract hyperlink references from RAW markdown content
-        # The markdown parser converts [Title](file.md) to HTML, then BeautifulSoup
-        # extracts only the display text, losing the link URL entirely.
-        # We must extract markdown hyperlinks BEFORE HTML conversion.
-        raw_content_refs = []
-        if format == "markdown" and content:
-            # Use document ID as synthetic chunk ID for document-level references
-            # This associates hyperlink references with the document rather than
-            # a specific section (since we can't map character positions to sections)
-            doc_chunk_id = document["id"]
-
-            # Extract references from raw markdown content
-            raw_refs = extract_references(content, doc_chunk_id)
-
-            # Convert to edge format
-            for ref in raw_refs:
-                # Only include hyperlink references from raw content
-                # (other patterns like see_also/related work fine on plain text)
-                if ref.reference_type == "hyperlink":
-                    edge = create_reference_edge(
-                        source_chunk_id=doc_chunk_id,
-                        target_doc_id=None,  # Will be resolved in Neo4j transaction
-                        target_hint=ref.target_hint,
-                        reference_type=ref.reference_type,
-                        reference_text=ref.reference_text,
-                        confidence=ref.confidence,
-                    )
-                    raw_content_refs.append(edge)
-
-            logger.debug(
-                "hyperlinks_extracted_from_raw_markdown",
-                hyperlink_count=len(raw_content_refs),
-                document_id=document["id"],
-            )
-
-        # Respect feature flag
-        references_cfg = getattr(config, "references", None)
-        if references_cfg and getattr(references_cfg, "enabled", False):
-            # Extract reference patterns from text (see_also, related, refer_to)
-            # Works on plain text without needing markdown link syntax
-            reference_edges, ref_resolved, ref_unresolved = extract_chunk_references(
-                sections,
-                known_doc_titles=None,  # Target resolution happens in Neo4j transaction
-            )
-        else:
-            reference_edges, ref_resolved, ref_unresolved = [], 0, 0
-
-        # Merge hyperlinks from raw content with other references from sections
-        # Deduplicate by target_hint to avoid double-counting
-        existing_hints = {e.get("target_hint", "").lower() for e in reference_edges}
-        for edge in raw_content_refs:
-            if edge.get("target_hint", "").lower() not in existing_hints:
-                reference_edges.append(edge)
-                existing_hints.add(edge.get("target_hint", "").lower())
-
-        logger.debug(
-            "references_extracted_from_sections",
-            total_references=len(reference_edges),
-            hyperlinks_from_raw=len(raw_content_refs),
-            local_resolved=ref_resolved,
-            pending_neo4j_resolution=ref_unresolved,
-        )
+        entities = enrichment["entities"]
+        mentions = enrichment["mentions"]
+        reference_edges = enrichment["references"]
 
         sections = assemble_chunks(document, sections, config)
-
-        # Phase 2 GLiNER: Enrich chunks with named entities (gated by config)
-        # This adds entity_metadata, _embedding_text, and _mentions to each chunk
-        # Phase 3.5: GLiNER entities are now written to Neo4j (Entity nodes + MENTIONS)
-        if getattr(config, "ner", None) and getattr(config.ner, "enabled", False):
-            try:
-                from src.ingestion.extract.ner_gliner import enrich_chunks_with_entities
-
-                enrich_chunks_with_entities(sections)
-            except Exception as e:
-                # Non-blocking: GLiNER failure should not abort ingestion
-                logger.warning(
-                    "gliner_enrichment_failed_non_blocking",
-                    error=str(e),
-                    document_id=document.get("id"),
-                    section_count=len(sections),
-                )
+        enrich_chunks_with_gliner(document=document, sections=sections, config=config)
 
         # Create builder (without writing)
         builder = GraphBuilder(self.neo4j_driver, config, self.qdrant_client)
