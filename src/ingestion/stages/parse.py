@@ -18,6 +18,7 @@ def parse_document(
     *,
     embedding_model: Optional[str] = None,
     embedding_version: Optional[str] = None,
+    trace=None,
 ) -> Dict[str, Any]:
     """Parse a source document and attach ingestion metadata."""
     from src.ingestion.parsers import parse_markdown
@@ -92,6 +93,13 @@ def parse_document(
                 source_uri=source_uri,
                 error=str(e),
             )
+            if trace:
+                trace.add_event(
+                    stage="parse",
+                    kind="fallback",
+                    message="doc_tag_extraction_fallback",
+                    data={"source_uri": source_uri, "error": str(e)},
+                )
 
     document["doc_tag"] = doc_tag
     document["doc_category"] = doc_category

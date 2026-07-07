@@ -127,6 +127,7 @@ from src.ingestion.stages.link import (  # noqa: E402
     get_document_count,
 )
 from src.ingestion.stages.parse import parse_document  # noqa: E402
+from src.ingestion.stages.trace import IngestionTrace  # noqa: E402
 from src.ingestion.stages.write import execute_saga  # noqa: E402
 
 __all__ = [
@@ -320,6 +321,7 @@ class AtomicIngestionCoordinator:
         """
         start_time = time.time()
         saga_id = str(uuid.uuid4())
+        ingestion_trace = IngestionTrace()
 
         # LGTM Phase 4: Extract feature flags for observability
         feature_flags = {}
@@ -376,6 +378,7 @@ class AtomicIngestionCoordinator:
                 format,
                 embedding_model=embedding_model,
                 embedding_version=embedding_version,
+                trace=ingestion_trace,
             )
             parse_time_ms = (time.time() - parse_start) * 1000
 
@@ -443,6 +446,7 @@ class AtomicIngestionCoordinator:
                         success=False,
                         document_id=document_id,
                         saga_id=saga_id,
+                        stats={"trace": ingestion_trace.to_dict()},
                         validation=validation,
                         error=f"Validation failed: {validation.errors}",
                         duration_ms=int((time.time() - start_time) * 1000),
@@ -453,6 +457,7 @@ class AtomicIngestionCoordinator:
                         success=False,
                         document_id=document_id,
                         saga_id=saga_id,
+                        stats={"trace": ingestion_trace.to_dict()},
                         validation=validation,
                         error=f"Strict mode validation warnings: {validation.warnings}",
                         duration_ms=int((time.time() - start_time) * 1000),
@@ -463,7 +468,11 @@ class AtomicIngestionCoordinator:
             # Phase 3: Compute embeddings BEFORE any writes
             embed_start = time.time()
             embeddings = self._compute_embeddings(
-                document, sections, entities, prepared["builder"]
+                document,
+                sections,
+                entities,
+                prepared["builder"],
+                trace=ingestion_trace,
             )
             embed_time_ms = (time.time() - embed_start) * 1000
 
@@ -528,6 +537,7 @@ class AtomicIngestionCoordinator:
                 references=references,
                 embeddings=embeddings,
                 builder=prepared["builder"],
+                trace=ingestion_trace,
             )
             saga_time_ms = (time.time() - saga_start) * 1000
 
@@ -541,6 +551,7 @@ class AtomicIngestionCoordinator:
                 stats = saga_result.get("stats", {})
                 if stats is None:
                     stats = {}
+                stats["trace"] = ingestion_trace.to_dict()
                 logger.info(
                     "ingestion_complete",
                     doc_id=document_id,
@@ -601,7 +612,10 @@ class AtomicIngestionCoordinator:
                     success=False,
                     document_id=document_id,
                     saga_id=saga_id,
-                    stats=saga_result.get("stats", {}),
+                    stats={
+                        **(saga_result.get("stats", {}) or {}),
+                        "trace": ingestion_trace.to_dict(),
+                    },
                     validation=validation,
                     error=saga_result.get("error"),
                     duration_ms=duration_ms,
@@ -629,6 +643,7 @@ class AtomicIngestionCoordinator:
                 success=False,
                 document_id="unknown",
                 saga_id=saga_id,
+                stats={"trace": ingestion_trace.to_dict()},
                 error=str(e),
                 duration_ms=duration_ms,
             )
@@ -645,6 +660,7 @@ class AtomicIngestionCoordinator:
         *,
         embedding_model: Optional[str] = None,
         embedding_version: Optional[str] = None,
+        trace=None,
     ) -> Dict[str, Any]:
         """
         Prepare all data for ingestion without writing to any store.
@@ -660,6 +676,7 @@ class AtomicIngestionCoordinator:
             format,
             embedding_model=embedding_model,
             embedding_version=embedding_version,
+            trace=trace,
         )
         config = parsed["config"]
         document = parsed["document"]
@@ -671,13 +688,19 @@ class AtomicIngestionCoordinator:
             content=content,
             format=format,
             config=config,
+            trace=trace,
         )
         entities = enrichment["entities"]
         mentions = enrichment["mentions"]
         reference_edges = enrichment["references"]
 
         sections = assemble_chunks(document, sections, config)
-        enrich_chunks_with_gliner(document=document, sections=sections, config=config)
+        enrich_chunks_with_gliner(
+            document=document,
+            sections=sections,
+            config=config,
+            trace=trace,
+        )
 
         # Create builder (without writing)
         builder = GraphBuilder(self.neo4j_driver, config, self.qdrant_client)
@@ -697,6 +720,8 @@ class AtomicIngestionCoordinator:
         sections: List[Dict],
         entities: Dict,
         builder,
+        *,
+        trace=None,
     ) -> Dict[str, Any]:
         """
         Compute all embeddings before any writes with production-grade batching.
@@ -710,6 +735,7 @@ class AtomicIngestionCoordinator:
             entities,
             builder,
             self.config,
+            trace=trace,
         )
 
     def _execute_atomic_saga(
@@ -722,6 +748,8 @@ class AtomicIngestionCoordinator:
         references: List[Dict],  # Phase 3: Cross-document REFERENCES
         embeddings: Dict,
         builder,
+        *,
+        trace=None,
     ) -> Dict[str, Any]:
         """
         Execute the atomic saga with Neo4j and Qdrant writes.
@@ -747,6 +775,7 @@ class AtomicIngestionCoordinator:
             neo4j_writer=self.neo4j_writer,
             qdrant_writer=self.qdrant_writer,
             config=self.config,
+            trace=trace,
         )
 
 

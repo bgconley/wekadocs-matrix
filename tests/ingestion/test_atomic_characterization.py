@@ -66,9 +66,17 @@ def test_atomic_ingestion_orchestrates_prepare_embed_saga_and_result_contract(
         *,
         embedding_model=None,
         embedding_version=None,
+        trace=None,
     ):
         calls.append(("prepare", source_uri, fmt, embedding_model, embedding_version))
         assert "Nutanix Files" in content
+        assert trace is not None
+        trace.add_event(
+            stage="prepare",
+            kind="fallback",
+            message="test_prepare_fallback",
+            data={"source_uri": source_uri},
+        )
         return {
             "document": document,
             "sections": sections,
@@ -78,10 +86,11 @@ def test_atomic_ingestion_orchestrates_prepare_embed_saga_and_result_contract(
             "builder": builder,
         }
 
-    def fake_compute(doc, stage_sections, stage_entities, stage_builder):
+    def fake_compute(doc, stage_sections, stage_entities, stage_builder, *, trace=None):
         calls.append(("embed", doc["id"], [s["id"] for s in stage_sections]))
         assert stage_builder is builder
         assert stage_entities is entities
+        assert trace is not None
         merged_ids = {m["entity_id"] for m in stage_sections[0]["_mentions"]}
         assert merged_ids == {"gliner-files", "struct-files"}
         return {
@@ -128,6 +137,7 @@ def test_atomic_ingestion_orchestrates_prepare_embed_saga_and_result_contract(
     assert result.document_id == "doc-nutanix-files"
     assert result.neo4j_committed is True
     assert result.qdrant_committed is True
+    assert result.stats["trace"]["events"][0]["message"] == "test_prepare_fallback"
     assert result.stats["sections_upserted"] == 1
     assert result.stats["vectors_upserted"] == 1
     assert calls == [

@@ -106,6 +106,17 @@ def enrich_chunks_with_gliner(
                 document_id=document.get("id"),
                 section_count=len(sections),
             )
+            if trace:
+                trace.add_event(
+                    stage="enrich",
+                    kind="fallback",
+                    message="gliner_enrichment_failed_non_blocking",
+                    data={
+                        "document_id": document.get("id"),
+                        "section_count": len(sections),
+                        "error": str(e),
+                    },
+                )
 
 
 def merge_section_mentions(

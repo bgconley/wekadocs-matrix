@@ -256,6 +256,7 @@ def execute_saga(
             document=document,
             sections=sections,
             embeddings=embeddings,
+            trace=trace,
         )
         if cross_doc_stats:
             stats["cross_doc_linking"] = cross_doc_stats
@@ -286,6 +287,13 @@ def execute_saga(
                     saga_id=saga_id,
                     document_id=document_id,
                 )
+                if trace:
+                    trace.add_event(
+                        stage="write",
+                        kind="compensation",
+                        message="neo4j_transaction_rolled_back",
+                        data={"saga_id": saga_id, "document_id": document_id},
+                    )
                 neo4j_rolled_back = True
             except Exception as rollback_err:
                 logger.error(
@@ -293,6 +301,13 @@ def execute_saga(
                     saga_id=saga_id,
                     error=str(rollback_err),
                 )
+                if trace:
+                    trace.add_event(
+                        stage="write",
+                        kind="error",
+                        message="neo4j_rollback_failed",
+                        data={"saga_id": saga_id, "error": str(rollback_err)},
+                    )
 
         if written_qdrant_points:
             try:
@@ -303,12 +318,29 @@ def execute_saga(
                     saga_id=saga_id,
                     points_cleaned=len(written_qdrant_points),
                 )
+                if trace:
+                    trace.add_event(
+                        stage="write",
+                        kind="compensation",
+                        message="qdrant_compensation_completed",
+                        data={
+                            "saga_id": saga_id,
+                            "points_cleaned": len(written_qdrant_points),
+                        },
+                    )
             except Exception as qdrant_err:
                 logger.error(
                     "qdrant_compensation_failed",
                     saga_id=saga_id,
                     error=str(qdrant_err),
                 )
+                if trace:
+                    trace.add_event(
+                        stage="write",
+                        kind="error",
+                        message="qdrant_compensation_failed",
+                        data={"saga_id": saga_id, "error": str(qdrant_err)},
+                    )
 
         compensated = neo4j_rolled_back or qdrant_cleaned_up
 
@@ -331,3 +363,10 @@ def execute_saga(
                     saga_id=saga_id,
                     error=str(session_err),
                 )
+                if trace:
+                    trace.add_event(
+                        stage="write",
+                        kind="error",
+                        message="neo4j_session_close_failed",
+                        data={"saga_id": saga_id, "error": str(session_err)},
+                    )

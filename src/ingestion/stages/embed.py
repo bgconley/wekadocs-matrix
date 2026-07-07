@@ -18,6 +18,16 @@ from src.shared.observability import get_logger
 logger = get_logger(__name__)
 
 
+def _add_trace_event(trace, *, kind: str, message: str, data: Optional[Dict] = None):
+    if trace:
+        trace.add_event(
+            stage="embed",
+            kind=kind,
+            message=message,
+            data=data or {},
+        )
+
+
 def compute_embeddings(
     document: Dict[str, Any],
     sections: List[Dict[str, Any]],
@@ -43,8 +53,6 @@ def compute_embeddings(
         - entities: Dict[entity_id -> [...]] (reserved for future)
         - stats: Dict with sparse coverage and batch metrics
     """
-    _ = trace
-
     # Build entity_id → name lookup for entity-sparse generation
     # Entities is a Dict[entity_id → entity_dict] with 'id' and 'name' fields
     entity_id_to_name: Dict[str, str] = {}
@@ -76,6 +84,16 @@ def compute_embeddings(
                         entity_label=entity.get("label", "unknown"),
                         fallback_field=fallback_field,
                         fallback_value_preview=ename[:40] if ename else "",
+                    )
+                    _add_trace_event(
+                        trace,
+                        kind="fallback",
+                        message="entity_missing_name_field_using_fallback",
+                        data={
+                            "entity_id": eid[:16] if eid else "unknown",
+                            "entity_label": entity.get("label", "unknown"),
+                            "fallback_field": fallback_field,
+                        },
                     )
             if eid and ename:
                 entity_id_to_name[eid] = ename
@@ -146,6 +164,12 @@ def compute_embeddings(
         tokenizer = TokenizerService()
     except Exception as e:
         logger.warning("tokenizer_init_failed", error=str(e))
+        _add_trace_event(
+            trace,
+            kind="fallback",
+            message="tokenizer_init_failed",
+            data={"error": str(e)},
+        )
         tokenizer = None
     # Per-input token limit for embedding requests.
     # Prefer BGE-M3 safe limit (e.g., 8000) if set; fall back to legacy EMBEDDING_MAX_TOKENS.
@@ -161,6 +185,12 @@ def compute_embeddings(
         embedding_dims = getattr(builder.embedding_settings, "dimensions", 1024)
     if embedding_dims is None:
         embedding_dims = 1024  # Default fallback
+        _add_trace_event(
+            trace,
+            kind="fallback",
+            message="embedding_dims_defaulted",
+            data={"embedding_dims": embedding_dims},
+        )
 
     # Check embedding capabilities
     qdrant_cfg = getattr(config.search.vector, "qdrant", None)
@@ -246,6 +276,12 @@ def compute_embeddings(
             doc_title = doc_id.split("/")[-1].replace("-", " ").replace("_", " ")
         else:
             doc_title = doc_id
+        _add_trace_event(
+            trace,
+            kind="fallback",
+            message="doc_title_derived_from_id",
+            data={"doc_id": doc_id, "doc_title": doc_title},
+        )
 
     for section in sections:
         section_id = section.get("id")
@@ -447,6 +483,12 @@ def compute_embeddings(
             reason="supports_sparse=True but embedder lacks embed_sparse method",
             embedder_type=type(builder.embedder).__name__,
         )
+        _add_trace_event(
+            trace,
+            kind="fallback",
+            message="sparse_capability_mismatch",
+            data={"embedder_type": type(builder.embedder).__name__},
+        )
         supports_sparse = False
 
     if supports_colbert and not has_colbert_method:
@@ -454,6 +496,12 @@ def compute_embeddings(
             "colbert_capability_mismatch",
             reason="supports_colbert=True but embedder lacks embed_colbert method",
             embedder_type=type(builder.embedder).__name__,
+        )
+        _add_trace_event(
+            trace,
+            kind="fallback",
+            message="colbert_capability_mismatch",
+            data={"embedder_type": type(builder.embedder).__name__},
         )
         supports_colbert = False
 
@@ -580,6 +628,16 @@ def compute_embeddings(
                         batch_index=batch_idx,
                         batch_size=len(batch_content),
                     )
+                    _add_trace_event(
+                        trace,
+                        kind="fallback",
+                        message="sparse_embedding_batch_failed_inserting_placeholders",
+                        data={
+                            "batch_index": batch_idx,
+                            "batch_size": len(batch_content),
+                            "error": str(exc),
+                        },
+                    )
                     # Insert None placeholders to maintain index alignment
                     # Only this batch's chunks lose sparse; others continue normally
                     sparse_embeddings.extend([None] * len(batch_content))
@@ -597,6 +655,16 @@ def compute_embeddings(
                     batch_index=batch_idx,
                     batch_size=len(batch_doc_title),
                 )
+                _add_trace_event(
+                    trace,
+                    kind="fallback",
+                    message="doc_title_sparse_embedding_batch_failed_inserting_placeholders",
+                    data={
+                        "batch_index": batch_idx,
+                        "batch_size": len(batch_doc_title),
+                        "error": str(exc),
+                    },
+                )
                 # Insert None placeholders to maintain index alignment
                 doc_title_sparse_embeddings.extend([None] * len(batch_doc_title))
 
@@ -612,6 +680,16 @@ def compute_embeddings(
                     error=str(exc),
                     batch_index=batch_idx,
                     batch_size=len(batch_title),
+                )
+                _add_trace_event(
+                    trace,
+                    kind="fallback",
+                    message="title_sparse_embedding_batch_failed_inserting_placeholders",
+                    data={
+                        "batch_index": batch_idx,
+                        "batch_size": len(batch_title),
+                        "error": str(exc),
+                    },
                 )
                 # Insert None placeholders to maintain index alignment
                 title_sparse_embeddings.extend([None] * len(batch_title))
@@ -685,6 +763,16 @@ def compute_embeddings(
                     batch_index=batch_idx,
                     batch_size=len(batch_indices),
                 )
+                _add_trace_event(
+                    trace,
+                    kind="fallback",
+                    message="entity_sparse_embedding_batch_failed_inserting_placeholders",
+                    data={
+                        "batch_index": batch_idx,
+                        "batch_size": len(batch_indices),
+                        "error": str(exc),
+                    },
+                )
                 # Insert None placeholders to maintain index alignment
                 entity_sparse_embeddings.extend([None] * len(batch_indices))
 
@@ -700,6 +788,16 @@ def compute_embeddings(
                     error=str(exc),
                     batch_index=batch_idx,
                     batch_size=len(batch_content),
+                )
+                _add_trace_event(
+                    trace,
+                    kind="fallback",
+                    message="colbert_embedding_batch_failed_inserting_placeholders",
+                    data={
+                        "batch_index": batch_idx,
+                        "batch_size": len(batch_content),
+                        "error": str(exc),
+                    },
                 )
                 # Insert None placeholders to maintain index alignment
                 colbert_embeddings.extend([None] * len(batch_content))
@@ -871,6 +969,16 @@ def compute_embeddings(
                     section_id=section_id,
                     heading=section.get("heading"),
                     token_count=section.get("token_count", 0),
+                )
+                _add_trace_event(
+                    trace,
+                    kind="fallback",
+                    message="non_stub_content_chunk_missing_sparse_vector",
+                    data={
+                        "section_id": section_id,
+                        "heading": section.get("heading"),
+                        "token_count": section.get("token_count", 0),
+                    },
                 )
 
         # -----------------------------------------------------------
