@@ -843,7 +843,7 @@ docker exec -e REDIS_PASSWORD="..." weka-ingestion-worker \
 docker compose ps
 
 # Queues
-export REDIS_PASSWORD="testredis123"
+export REDIS_PASSWORD="testredis123"  # pragma: allowlist secret
 docker exec weka-redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning \
   LLEN ingest:pending
 docker exec weka-redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning \
@@ -859,7 +859,7 @@ docker logs weka-ingestion-worker --tail 20
 ### Test Reaper
 ```bash
 # Create fake stale job
-export REDIS_PASSWORD="testredis123"
+export REDIS_PASSWORD="testredis123"  # pragma: allowlist secret
 docker exec weka-redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning \
   LPUSH "ingest:processing" \
   '{"job_id":"test","kind":"file","path":"/tmp/test.md","attempts":0}'
@@ -876,11 +876,11 @@ docker logs weka-ingestion-worker --tail 5
 ### Test CLI
 ```bash
 # Dry run
-docker exec -e REDIS_PASSWORD="testredis123" weka-ingestion-worker \
+docker exec -e REDIS_PASSWORD="testredis123" weka-ingestion-worker \  # pragma: allowlist secret
   python3 -m src.ingestion.auto.cli clean --dry-run
 
 # Clean
-docker exec -e REDIS_PASSWORD="testredis123" weka-ingestion-worker \
+docker exec -e REDIS_PASSWORD="testredis123" weka-ingestion-worker \  # pragma: allowlist secret
   python3 -m src.ingestion.auto.cli clean --yes
 ```
 

@@ -243,8 +243,8 @@ python3 -m src.ingestion.auto.cli report JOB_ID --json
 ### Test Commands
 ```bash
 # Run Phase 6.3 tests
-export NEO4J_PASSWORD="testpassword123"
-export REDIS_PASSWORD="testredis123"
+export NEO4J_PASSWORD="testpassword123"  # pragma: allowlist secret
+export REDIS_PASSWORD="testredis123"  # pragma: allowlist secret
 python3 -m pytest tests/p6_t3_test.py -v --tb=short
 
 # Run specific test

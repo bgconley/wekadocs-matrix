@@ -556,7 +556,7 @@ docker compose ps
 curl http://localhost:8000/health
 
 # 2. Verify data
-export NEO4J_PASSWORD="testpassword123"
+export NEO4J_PASSWORD="testpassword123"  # pragma: allowlist secret
 docker exec weka-neo4j cypher-shell -u neo4j -p "${NEO4J_PASSWORD}" \
   "MATCH (n) RETURN labels(n)[0] as label, count(n) ORDER BY count DESC LIMIT 10"
 

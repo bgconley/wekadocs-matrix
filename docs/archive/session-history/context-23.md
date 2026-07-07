@@ -262,8 +262,8 @@ r.sadd(checksum_key, checksum)
 ### Run Tests
 ```bash
 # Single test file
-export NEO4J_PASSWORD="testpassword123"
-export REDIS_PASSWORD="testredis123"
+export NEO4J_PASSWORD="testpassword123"  # pragma: allowlist secret
+export REDIS_PASSWORD="testredis123"  # pragma: allowlist secret
 pytest tests/p6_t1_test.py -v --tb=short
 
 # Full Phase 6
@@ -400,8 +400,8 @@ curl http://localhost:8081/metrics
 **Resume Point:**
 ```bash
 cd /Users/brennanconley/vibecode/wekadocs-matrix
-export NEO4J_PASSWORD="testpassword123"
-export REDIS_PASSWORD="testredis123"
+export NEO4J_PASSWORD="testpassword123"  # pragma: allowlist secret
+export REDIS_PASSWORD="testredis123"  # pragma: allowlist secret
 pytest tests/p6_t1_test.py -v
 ```
 

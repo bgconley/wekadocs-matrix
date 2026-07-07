@@ -319,8 +319,8 @@ pytest tests/p6_*.py -v --tb=short
 ### Run Task 6.4 Tests
 
 ```bash
-export NEO4J_PASSWORD="testpassword123"
-export REDIS_PASSWORD="testredis123"
+export NEO4J_PASSWORD="testpassword123"  # pragma: allowlist secret
+export REDIS_PASSWORD="testredis123"  # pragma: allowlist secret
 pytest tests/p6_t4_test.py -v --tb=short
 ```
 

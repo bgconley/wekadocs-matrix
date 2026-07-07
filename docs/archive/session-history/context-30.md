@@ -572,7 +572,7 @@ curl -X POST http://localhost:8000/mcp/tools/call \
 
 ### Check Graph Stats
 ```bash
-export NEO4J_PASSWORD="testpassword123"
+export NEO4J_PASSWORD="testpassword123"  # pragma: allowlist secret
 docker exec weka-neo4j cypher-shell -u neo4j -p "$NEO4J_PASSWORD" \
   "MATCH ()-[r]->() RETURN type(r), count(r) ORDER BY count(r) DESC"
 ```

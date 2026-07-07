@@ -330,7 +330,7 @@ EOF
 ./scripts/ingestctl status --json
 
 # Verify in Neo4j
-export NEO4J_PASSWORD="testpassword123"
+export NEO4J_PASSWORD="testpassword123"  # pragma: allowlist secret
 docker exec weka-neo4j cypher-shell -u neo4j -p "$NEO4J_PASSWORD" \
   "MATCH (d:Document) WHERE d.source_uri CONTAINS 'test-doc.md' RETURN d LIMIT 1;"
 ```
@@ -512,7 +512,7 @@ curl http://localhost:8081/health
 ./scripts/ingestctl status --json
 
 # 3. Check graph
-export NEO4J_PASSWORD="testpassword123"
+export NEO4J_PASSWORD="testpassword123"  # pragma: allowlist secret
 docker exec weka-neo4j cypher-shell -u neo4j -p "$NEO4J_PASSWORD" \
   "MATCH (d:Document) RETURN count(d) as doc_count;"
 

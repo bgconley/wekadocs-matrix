@@ -117,8 +117,8 @@ Successfully implemented Phase 6 Task 6.3 (CLI & Progress UI) from scratch, crea
 
 ### Environment Variables Required
 ```bash
-export NEO4J_PASSWORD="testpassword123"
-export REDIS_PASSWORD="testredis123"
+export NEO4J_PASSWORD="testpassword123"  # pragma: allowlist secret
+export REDIS_PASSWORD="testredis123"  # pragma: allowlist secret
 export REDIS_URI="redis://localhost:6379"
 ```
 
@@ -460,7 +460,7 @@ pytest tests/p6_t4_test.py -v  # Task 6.4 (all skipped)
 
 ### Use CLI
 ```bash
-export REDIS_PASSWORD="testredis123"
+export REDIS_PASSWORD="testredis123"  # pragma: allowlist secret
 python3 scripts/ingestctl --help
 python3 scripts/ingestctl ingest docs/guide.md --dry-run
 python3 scripts/ingestctl status --json

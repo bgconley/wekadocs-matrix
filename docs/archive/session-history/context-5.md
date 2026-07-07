@@ -209,13 +209,13 @@ Implemented end-to-end connector infrastructure for ingesting documentation from
 **Environment Variables**:
 ```bash
 # GitHub API access
-export GITHUB_TOKEN="ghp_xxxxxxxxxxxx"
+export GITHUB_TOKEN="ghp_xxxxxxxxxxxx"  # pragma: allowlist secret
 
 # Webhook security
-export GITHUB_WEBHOOK_SECRET="your-secret-key"
+export GITHUB_WEBHOOK_SECRET="your-secret-key"  # pragma: allowlist secret
 
 # Redis authentication
-export REDIS_PASSWORD="your-redis-password"
+export REDIS_PASSWORD="your-redis-password"  # pragma: allowlist secret
 ```
 
 **Connector Config Example**:

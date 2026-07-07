@@ -302,8 +302,8 @@ weka-ingestion-worker:    Up 25 hours
 ### Resume Testing
 ```bash
 cd /Users/brennanconley/vibecode/wekadocs-matrix
-export NEO4J_PASSWORD="testpassword123"
-export REDIS_PASSWORD="testredis123"
+export NEO4J_PASSWORD="testpassword123"  # pragma: allowlist secret
+export REDIS_PASSWORD="testredis123"  # pragma: allowlist secret
 
 # Run Phase 6.1 tests
 pytest tests/p6_t1_test.py -v

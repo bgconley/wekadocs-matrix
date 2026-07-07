@@ -1,8 +1,8 @@
 # WekaDocs Matrix Codebase Cleanup: Comprehensive Documentation
 
-**Date:** 2026-06-04  
-**Duration:** Full session  
-**Objective:** Systematic cleanup and refactoring of the WekaDocs Matrix codebase  
+**Date:** 2026-06-04
+**Duration:** Full session
+**Objective:** Systematic cleanup and refactoring of the WekaDocs Matrix codebase
 **Final Status:** ✅ All phases complete, all goals achieved
 
 ---
@@ -100,8 +100,8 @@ The analysis employed a multi-faceted approach:
 
 ## Phase 1: Dead File Deletion
 
-**Objective:** Remove files with zero live imports and no production usage  
-**Duration:** Single session  
+**Objective:** Remove files with zero live imports and no production usage
+**Duration:** Single session
 **Impact:** -9,051 LOC, -35 files
 
 ### Approach
@@ -170,8 +170,8 @@ After deletion:
 
 ## Phase 2: Dead Method Removal
 
-**Objective:** Remove unused methods from files with mixed live/dead code  
-**Duration:** Single session  
+**Objective:** Remove unused methods from files with mixed live/dead code
+**Duration:** Single session
 **Impact:** -986 LOC, 180+ methods removed
 
 ### Approach
@@ -245,8 +245,8 @@ After removal:
 
 ## Phase 3: Dead Code Block Removal
 
-**Objective:** Remove commented-out code, unused imports, and other dead code blocks  
-**Duration:** Single session  
+**Objective:** Remove commented-out code, unused imports, and other dead code blocks
+**Duration:** Single session
 **Impact:** -3,609 LOC
 
 ### Types of Dead Code Removed
@@ -306,8 +306,8 @@ After cleanup:
 
 ## Phase 4: Code Structure Improvements
 
-**Objective:** Eliminate code duplication and unify design patterns  
-**Duration:** Single session  
+**Objective:** Eliminate code duplication and unify design patterns
+**Duration:** Single session
 **Impact:** -210 LOC (net), improved maintainability
 
 ### Part 4.1: Embedding Provider Consolidation
@@ -324,13 +324,13 @@ Created `base_chonkie_adapter.py` (209 LOC) with shared functionality:
 class BaseChonkieAdapter:
     def __init__(self, model_name, dimensions):
         # Common initialization
-    
+
     def tokenize(self, text):
         # Shared tokenization logic
-    
+
     def embed_batch(self, texts):
         # Shared batch embedding logic
-    
+
     def calculate_similarities(self, embeddings):
         # Shared similarity calculation
 ```
@@ -342,7 +342,7 @@ class BaseChonkieAdapter:
 class Qwen3Adapter(BaseChonkieAdapter):
     def __init__(self):
         super().__init__('Qwen/Qwen3-Embedding-0.6B', 768)
-    
+
     def embed(self, text):
         # Qwen3-specific embedding logic
 ```
@@ -352,7 +352,7 @@ class Qwen3Adapter(BaseChonkieAdapter):
 class ArcticAdapter(BaseChonkieAdapter):
     def __init__(self):
         super().__init__('Snowflake/snowflake-arctic-embed-m-v1.5', 768)
-    
+
     def embed(self, text):
         # Arctic-specific embedding logic
 ```
@@ -384,14 +384,14 @@ class CircuitBreaker:
         self.failures = 0
         self.state = 'closed'
         self.last_failure_time = None
-    
+
     def call(self, func, *args, **kwargs):
         if self.state == 'open':
             if self.recovered():
                 self.state = 'closed'
             else:
                 raise CircuitBreakerOpenError()
-        
+
         try:
             result = func(*args, **kwargs)
             self.on_success()
@@ -399,16 +399,16 @@ class CircuitBreaker:
         except Exception as e:
             self.on_failure()
             raise
-    
+
     def on_success(self):
         self.failures = 0
-    
+
     def on_failure(self):
         self.failures += 1
         self.last_failure_time = time.time()
         if self.failures >= self.failure_threshold:
             self.state = 'open'
-    
+
     def recovered(self):
         if self.last_failure_time is None:
             return True
@@ -518,8 +518,8 @@ After decomposition:
 
 ## Phase 5: Large Function Decomposition
 
-**Objective:** Break down monolithic functions into smaller, focused units  
-**Duration:** Single session  
+**Objective:** Break down monolithic functions into smaller, focused units
+**Duration:** Single session
 **Impact:** Improved readability and maintainability
 
 This phase was partially completed during Phase 4.3 when atomic.py and mcp_app.py were decomposed. The remaining large functions were identified but not all were decomposed in this session.
@@ -544,8 +544,8 @@ The remaining large functions would benefit from decomposition but require caref
 
 ## Phase 6: Test Suite Hygiene
 
-**Objective:** Restore test suite reliability and achieve ≥70% pass rate  
-**Duration:** Extended session with multiple passes  
+**Objective:** Restore test suite reliability and achieve ≥70% pass rate
+**Duration:** Extended session with multiple passes
 **Impact:** 97.01% pass rate (574 tests passing)
 
 ### Initial Test State
@@ -693,23 +693,23 @@ Skipped: 3 (0.41%)
 The 19 remaining failures are all pre-existing issues unrelated to the cleanup work:
 
 #### GLiNER Service Tests (4 failures)
-**Root Cause:** Missing ML model and dependencies in test environment  
-**Location:** `tests/providers/test_gliner_service.py`  
+**Root Cause:** Missing ML model and dependencies in test environment
+**Location:** `tests/providers/test_gliner_service.py`
 **Resolution:** Would require installing GLiNER model and dependencies
 
 #### Schema Cleanup Tests (9 failures)
-**Root Cause:** Tests expect dead relationship types to be removed from schema  
-**Location:** `tests/neo/neo4j/test_schema_cleanup.py`  
+**Root Cause:** Tests expect dead relationship types to be removed from schema
+**Location:** `tests/neo/neo4j/test_schema_cleanup.py`
 **Resolution:** Would require removing dead relationship types from schema.py and health.py, or deleting the aspirational tests
 
 #### Profile Matrix Tests (1 failure)
-**Root Cause:** Test expects `embedding_model == "bge_m3"` but actual is `qwen3_0_6b`  
-**Location:** `tests/providers/test_profile_matrix.py`  
+**Root Cause:** Test expects `embedding_model == "bge_m3"` but actual is `qwen3_0_6b`
+**Location:** `tests/providers/test_profile_matrix.py`
 **Resolution:** Update test assertion to expect `qwen3_0_6b`
 
 #### Guardrails Tests (2 failures)
-**Root Cause:** Tests don't pass `embedding_settings` with proper capabilities, so guardrails never raise  
-**Location:** `tests/query/test_guardrails_modes.py`  
+**Root Cause:** Tests don't pass `embedding_settings` with proper capabilities, so guardrails never raise
+**Location:** `tests/query/test_guardrails_modes.py`
 **Resolution:** Update tests to provide embedding_settings with `supports_sparse` and `supports_colbert` capabilities
 
 #### Contracts Tests (3 failures)
@@ -718,11 +718,11 @@ The 19 remaining failures are all pre-existing issues unrelated to the cleanup w
 - `test_streamable_kb_search_contract`: Field name changed from `kb_search` to `search_sections`
 - `test_streamable_stdio_schema_parity`: Same field name change
 
-**Location:** 
+**Location:**
 - `tests/neo/neo4j/test_cypher_policy.py`
 - `tests/mcp_server/test_streamable_contracts.py`
 
-**Resolution:** 
+**Resolution:**
 - Update Cypher policy test to allow `properties()` function
 - Update contract tests to use `search_sections` field name
 
@@ -730,14 +730,14 @@ The 19 remaining failures are all pre-existing issues unrelated to the cleanup w
 
 ## Phase 7: Documentation and Status Update
 
-**Objective:** Create comprehensive documentation of all changes and final status  
-**Duration:** Single session  
+**Objective:** Create comprehensive documentation of all changes and final status
+**Duration:** Single session
 **Impact:** Complete audit trail of all work
 
 ### Documents Created
 
 #### 1. STATUS.md
-**Purpose:** Living document tracking cleanup progress across all phases  
+**Purpose:** Living document tracking cleanup progress across all phases
 **Content:**
 - Cumulative metrics table
 - Phase-by-phase completion status
@@ -751,7 +751,7 @@ The 19 remaining failures are all pre-existing issues unrelated to the cleanup w
 - Files created, modified, and deleted
 
 #### 2. REPO-MAP.md
-**Purpose:** Comprehensive file inventory with LOC counts and status indicators  
+**Purpose:** Comprehensive file inventory with LOC counts and status indicators
 **Content:**
 - Every file in src/ with line count
 - Status indicators (ACTIVE, DEAD, MIXED)
@@ -764,7 +764,7 @@ The 19 remaining failures are all pre-existing issues unrelated to the cleanup w
 - Identified dead code inventory
 
 #### 3. ARCHITECTURE.md
-**Purpose:** System architecture documentation with Mermaid diagrams  
+**Purpose:** System architecture documentation with Mermaid diagrams
 **Content:**
 - High-level system diagram
 - Ingestion pipeline flow
@@ -779,7 +779,7 @@ The 19 remaining failures are all pre-existing issues unrelated to the cleanup w
 - Module interaction patterns
 
 #### 4. DEAD-CODE-MAP.md
-**Purpose:** Detailed inventory of all dead code with priority levels  
+**Purpose:** Detailed inventory of all dead code with priority levels
 **Content:**
 - Priority 1: Zero callers, zero tests (safe to delete)
 - Priority 2: Zero callers, has tests (delete with tests)
@@ -791,7 +791,7 @@ The 19 remaining failures are all pre-existing issues unrelated to the cleanup w
 - Impact assessment for each file
 
 #### 5. AUDIT-VERIFICATION.md
-**Purpose:** Audit findings and verification results  
+**Purpose:** Audit findings and verification results
 **Content:**
 - Initial audit findings
 - Verification of dead code status
@@ -805,7 +805,7 @@ The 19 remaining failures are all pre-existing issues unrelated to the cleanup w
 - Monolithic functions requiring decomposition
 
 #### 6. DEV-HISTORY.md
-**Purpose:** Historical development context  
+**Purpose:** Historical development context
 **Content:**
 - Project evolution over time
 - Major refactoring decisions
@@ -819,7 +819,7 @@ The 19 remaining failures are all pre-existing issues unrelated to the cleanup w
 - Lessons learned from refactoring
 
 #### 7. REFACTOR-PLAN.md
-**Purpose:** Original refactoring plan (now replaced by CLEANUP-PLAN)  
+**Purpose:** Original refactoring plan (now replaced by CLEANUP-PLAN)
 **Content:**
 - Initial refactoring objectives
 - Planned cleanup phases
@@ -829,7 +829,7 @@ The 19 remaining failures are all pre-existing issues unrelated to the cleanup w
 **Note:** This document was superseded by CLEANUP-PLAN after analysis revealed additional opportunities.
 
 #### 8. CLEANUP-PLAN.md
-**Purpose:** Final comprehensive cleanup plan with execution details  
+**Purpose:** Final comprehensive cleanup plan with execution details
 **Content:**
 - 7-phase cleanup strategy
 - Detailed phase breakdowns
@@ -1192,10 +1192,10 @@ The WekaDocs Matrix codebase cleanup successfully achieved all defined objective
 
 ### Key Achievements Revisited
 
-✅ **Code Reduction:** Removed 14,431 lines of code (-21.0%)  
-✅ **Test Suite Restoration:** Achieved 97.01% pass rate (target: ≥70%)  
-✅ **Code Quality:** Eliminated all 47 Ruff warnings  
-✅ **Architecture Improvement:** Decomposed monoliths, unified patterns  
+✅ **Code Reduction:** Removed 14,431 lines of code (-21.0%)
+✅ **Test Suite Restoration:** Achieved 97.01% pass rate (target: ≥70%)
+✅ **Code Quality:** Eliminated all 47 Ruff warnings
+✅ **Architecture Improvement:** Decomposed monoliths, unified patterns
 ✅ **Documentation:** Created 8 comprehensive documents
 
 ### Impact on Development Velocity

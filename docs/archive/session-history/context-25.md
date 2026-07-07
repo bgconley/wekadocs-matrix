@@ -289,8 +289,8 @@ docker compose restart ingestion-service
 ### 7. Final Test Results (✅ Complete)
 
 ```bash
-export NEO4J_PASSWORD="testpassword123"
-export REDIS_PASSWORD="testredis123"
+export NEO4J_PASSWORD="testpassword123"  # pragma: allowlist secret
+export REDIS_PASSWORD="testredis123"  # pragma: allowlist secret
 pytest tests/p6_t1_test.py -v --junitxml=reports/phase-6/p6_t1_junit.xml
 ```
 
@@ -503,8 +503,8 @@ ingest:state:{job_id} (HASH): Full state for each job
 ### Validate Full Phase 6
 ```bash
 cd /Users/brennanconley/vibecode/wekadocs-matrix
-export NEO4J_PASSWORD="testpassword123"
-export REDIS_PASSWORD="testredis123"
+export NEO4J_PASSWORD="testpassword123"  # pragma: allowlist secret
+export REDIS_PASSWORD="testredis123"  # pragma: allowlist secret
 
 # Run all Phase 6 tests
 pytest tests/p6_*.py -v --junitxml=reports/phase-6/junit_all.xml

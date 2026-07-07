@@ -308,8 +308,8 @@ Status:                green
 
 ### Run Task 6.3 Tests
 ```bash
-export NEO4J_PASSWORD="testpassword123"
-export REDIS_PASSWORD="testredis123"
+export NEO4J_PASSWORD="testpassword123"  # pragma: allowlist secret
+export REDIS_PASSWORD="testredis123"  # pragma: allowlist secret
 pytest tests/p6_t3_test.py -v
 
 # Expected: 17 passed, 4 skipped in ~75s
@@ -330,7 +330,7 @@ curl http://localhost:8081/health  # Ingestion service
 
 ### Check Graph Stats
 ```bash
-export NEO4J_PASSWORD="testpassword123"
+export NEO4J_PASSWORD="testpassword123"  # pragma: allowlist secret
 python3 -c "
 from neo4j import GraphDatabase
 import os

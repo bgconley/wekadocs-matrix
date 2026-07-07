@@ -1,8 +1,8 @@
 # Dead Code Audit Report — `reports/codepath-map.txt`
 
-**Scope:** Every `[DEAD]` claim in `/Users/brennanconley/vibecode/wekadocs-matrix/reports/codepath-map.txt`  
-**Date:** 2026‑06‑20  
-**Method:** Static import scanning via `ctx_grep` across `src/`, `tests/`, and `scripts/`. Cross-referenced with `ACTIVE CODE PATH MAP` in the same file.  
+**Scope:** Every `[DEAD]` claim in `/Users/brennanconley/vibecode/wekadocs-matrix/reports/codepath-map.txt`
+**Date:** 2026‑06‑20
+**Method:** Static import scanning via `ctx_grep` across `src/`, `tests/`, and `scripts/`. Cross-referenced with `ACTIVE CODE PATH MAP` in the same file.
 **Constraint:** Read‑only analysis only. No source files, configs, or VCS history were modified.
 
 ---
