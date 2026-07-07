@@ -1,0 +1,180 @@
+# docpipe — Design Review & Reference Specification
+
+_A retroactive "what good looks like" specification for the docpipe PDF→Markdown
+extraction pipeline, plus an adversarial review of the current implementation
+against it. Derived from the 2023–2026 document-AI literature, not from the
+implementers' priors._
+
+**Method.** A multi-agent workflow: 4 web/arXiv research agents (SOTA systems,
+VLM transcription best-practices, RAG+evaluation methodology, Qwen-VL fitness) and
+6 code-review dimensions ran in parallel; every review finding was then handed to
+an independent skeptic agent instructed to *refute* it, and only survivors are
+recorded. A synthesis pass produced the ideal spec, the artifact spec, and the gap
+analysis. (68 agents; ~3.8M tokens. One transient API drop crashed the first run —
+it was resumed from cache.)
+
+---
+
+## The documents
+
+| Document | What it is |
+|---|---|
+| **[IDEAL_SPEC.md](IDEAL_SPEC.md)** | The prescriptive reference design — 9 dimensions, RFC-2119 requirements (`R<dim>.<n>`), each with a rationale grounded in cited research. "What a solid docpipe *should* be." |
+| **[ARTIFACT_SPEC.md](ARTIFACT_SPEC.md)** | The expected output contract — exact frontmatter schema, heading/code/table/figure fidelity rules, a **golden annotated `.md` skeleton**, and a 4-tier per-artifact QA acceptance checklist with metrics (TEDS, text-layer recall, Presence/Absence tests). "What we expect out of the artifacts." |
+| **[GAP_ANALYSIS.md](GAP_ANALYSIS.md)** | Dimension-by-dimension scorecard of the current code vs. the ideal spec, the consolidated **P0/P1/P2 roadmap**, and the overall verdict. |
+| **[FINDINGS.md](FINDINGS.md)** | All **49 adversarially-verified** code-review findings (9 high / 23 medium / 17 low), with failure scenarios and fixes. |
+| **[RESEARCH.md](RESEARCH.md)** | The four cited research reports (SOTA survey, best-practices, RAG/eval, Qwen fitness). The evidence base. |
+
+---
+
+## Resolution log
+
+- **2026-07-07 — Cluster 1 (fence-awareness): RESOLVED.** Findings **#2, #3, #22,
+  #31, #40** fixed via a shared `docpipe/fences.py` fence-state primitive
+  (`iter_lines_with_fence_state` / `open_fence_at_end`). `demote_extra_h1s`,
+  `first_h1_text`, and `balance_fences` are now fence-aware — `balance_fences`
+  acts only on an odd/dangling fence count, so a `#`/`##` comment inside a
+  balanced block is never mistaken for a heading; `stitch._merge_seam`
+  newline-joins an open-fence seam and keeps real hyphens (`read-only`, not
+  `readonly`). TDD: 5 failing tests written first → 9 tests added (**41 pass**),
+  `pyright docpipe/` clean, and finding #2's exact failure verified resolved
+  through the real downstream parser (**4 corrupt sections → 1 intact section**,
+  commands retained as `code_blocks`).
+- **P0 remaining:** Cluster 2 (payload-validation gate — #1/#6/#9/#24/#27),
+  Cluster 3 (fail-soft orchestration — #7/#15/#25/#26/#28/#29/#30).
+
+## Executive verdict
+
+**The architecture is sound.** Single-VLM full-page transcription, one page per
+request, Markdown out, over a resumable manifest/cache — this is *literally the
+olmOCR reference architecture* (arXiv:2502.18443), and it is the correct choice
+for this single-column, screenshot- and CLI-dense, contract-bound, **one-time**
+corpus. The stage decomposition, offline-by-default posture, content-addressed
+cache (with `prompt_version` in the key), probe-don't-hardcode endpoint handling,
+and the contract-tuned prompt are all real and well-executed. **Every gap is
+fixable within the existing stage boundaries — none requires re-architecting.**
+
+**Qwen3.6-27B is the right engine — conditionally, and the conditions are not yet
+met.** On pure OCR-per-parameter, specialists beat it: OmniDocBench places
+MinerU2.5 (1.2B) at 90.67 and PaddleOCR-VL (0.9B) at 92.56, *above* Qwen3-VL-235B
+(89.15). But a general VLM is justified here for four reasons a specialist cannot
+satisfy: (i) it **describes** figures for retrieval (specialists only *box* them);
+(ii) it is **steerable to the exact downstream contract** — ATX + top-level GFM +
+fenced code + single H1 — whereas the leaderboard winners emit HTML/OTSL/DocTags
+that our parser *silently drops*; (iii) it does CLI-vs-prose + cross-page seam
+judgment; (iv) one-model operational simplicity. Throughput is irrelevant at 936
+one-time pages. **However**, the literature makes that choice explicitly
+conditional on two things the code lacks: **text-layer anchoring** (the #1
+anti-hallucination lever, olmOCR) and **repetition/determinism hardening** — the
+sampler currently runs bare `temperature=0` with no penalties, the exact config
+Holtzman et al. (arXiv:1904.09751) show degenerates into repetition, and FP8+MTP
+already voids the determinism rationale. Landing those two is what *earns* the 27B
+its justification and retires the #1 risk: hallucinated CLI flags feeding GraphRAG.
+
+**The holdbacks are a well-bounded set of data-loss/liveness bugs and two missing
+quality layers** — not architecture.
+
+---
+
+## Scorecard (see GAP_ANALYSIS.md for justifications)
+
+| # | Dimension | Rating |
+|---|-----------|--------|
+| 1 | Architecture & stage decomposition | **PARTIAL** — anchoring stage absent |
+| 2 | Rasterization strategy | **PARTIAL** — DPI-not-patch-aligned; escalation dead/defective |
+| 3 | Model & prompt strategy | **PARTIAL** — strong prompt; anchoring + sampler hardening missing |
+| 4 | Model / endpoint choice | **PARTIAL** — engine sound; text-layer arbiter advisory-only |
+| 5 | Concurrency & throughput | **FULLY MET** (design) — bugs are robustness-within-the-design |
+| 6 | Resumability & caching | **PARTIAL** — page-level excellent; manifest reuse is size-based |
+| 7 | Validation / QA gates | **MISSING** — no fail-closed contract gate; heuristics only |
+| 8 | Evaluation harness & metrics | **MISSING** — no unit-test/TEDS eval suite |
+| 9 | Output artifact contract | **PARTIAL** — design met; runtime output violated by the P0 bugs |
+
+**1 fully met · 6 partial · 2 missing.**
+
+---
+
+## The P0 roadmap (correctness / data-loss / liveness)
+
+These matter most because this is a **one-time 936-page build** — a silent drop or
+a hang is maximally costly. All are addressable without changing the design.
+
+- **P0-1 — Truncated & empty output cached as `status=ok` forever.** Re-check
+  `truncated` after the token-bump; treat still-truncated **or** empty content as a
+  retryable failure, not `write_success`. *(convert.py — 3 findings converge here.)*
+- **P0-2 — Fence-unaware clean passes shatter code blocks.** `demote_extra_h1s`,
+  `balance_fences`, `first_h1_text` all treat `#`/`##` **inside** a ```` ``` ````
+  block as headings — a bash comment becomes a false chunk boundary or the doc
+  title. Add a shared open-fence line-state and skip fenced regions. *(clean.py — I
+  flagged the seed of this earlier; the review found the full cluster.)*
+- **P0-3 — Furniture stripping deletes real content.** `_FURNITURE_BAND_RE` matches
+  a **table row whose last cell is a number** (RF values, ports, node maxima — the
+  corpus's highest-value facts). Exclude structural lines (headings, table rows,
+  fences) from furniture classification. *(stitch.py)*
+- **P0-4 — Seam repair is structure-state-blind.** `_merge_seam` can graft a
+  different table's rows under a header, break a split table with a blank line, and
+  fuse two separate code blocks losing the language. Track open-fence/open-table
+  state across the fold. *(stitch.py — 5 findings)*
+- **P0-5 — Manifest stale-reuse serves old transcriptions.** Same-size in-place edit
+  is skipped (size-only fast-path); rehash or also require matching mtime. *(manifest.py)*
+- **P0-6 — Slug collision silently overwrites a whole doc.** Two same-named PDFs in
+  different dirs clobber to one `.md`. Disambiguate `output_path`. *(output.py)*
+- **P0-7 — "Complete" judged from the sidecar alone.** A torn/0-byte `.md` beside an
+  intact `ok` sidecar ships as complete. Require `md_path.is_file()` + length check. *(validate.py/output.py)*
+- **P0-8 — Worker death hangs the whole run.** If `write_failure` raises (disk full)
+  inside the worker's `except`, `queue.join()` wedges forever. Guard the handler. *(convert.py)*
+- **P0-9 — One dead endpoint / bad PDF / moved source aborts the build.** `probe_models`
+  is all-or-nothing; `scan_pdf` and per-doc `page_text` are unguarded. Make failover
+  actually engage. *(vlm_client.py, manifest.py, output.py)*
+
+**P1** closes the spec gaps (anchoring, sampler hardening, Tier-0 contract gate,
+eval harness, rasterization fidelity). **P2** is polish (dead config, DX, tests).
+Full detail in [GAP_ANALYSIS.md](GAP_ANALYSIS.md).
+
+---
+
+## External review cross-check (2026-07-07)
+
+A second independent review was run against the same code. It **corroborates** this
+review (all its valid findings map to items already here — convergent validation)
+and adds one empirically-measured data point worth elevating. Rolled in:
+
+- **Elevated → top of P1: command-structure loss on cheat-sheet pages (verified).**
+  Parsing the sample `5c` output through the repo's own `markdown_it_parser` yields
+  **1 of 22 sections with `code_blocks`**; every `manage_ovs`/`ovs-vsctl` reference
+  parsed as prose. Since `extract_commands()` Pattern 1 reads only
+  `section["code_blocks"]`, those ~20 command groups never become `Command` graph
+  nodes — and prompt-strengthening (v2) did **not** fix it. **P1-5 (deterministic
+  Stage-4 bare-CLI fencing pass) is the model-independent fix and moves to the top
+  of P1.**
+- **Rolled in — QA flags must feed retry, not just telemetry.** `assess_page()`
+  detects empty/garbled/short pages but assembly only *reports* them. Route Tier-1
+  QA flags (empty/garbled) to retry/quarantine (pairs with P0-1 and IDEAL_SPEC R7.5).
+- **Rolled in — strengthen the live smoke test** to a full-pipeline 2–3 page
+  `convert` (manifest→…→output+coverage), not a single `VLMPool.chat()` call.
+- **Already covered:** manifest size-only reuse = **P0-5**; previous-page continuity
+  = **P1-5** (structure-aware tail) + **P0-4** (authoritative stitch). Note: per the
+  anchoring literature (R3.3), the text-layer "fallback" the external review flags is
+  actually the *better* input — the fix is P0-4 + first-class anchoring (P1-1), not
+  forcing generated-markdown context.
+- **Settled decision, not a defect:** Oxcart-only defaults / no `weight` routing. The
+  Blackbird-primary, dual-saturation language in the original brief was superseded by
+  the decision to target Oxcart. (`weight` is dead config regardless — delete it, P2-1.)
+
+## Definition of "corpus-ready"
+
+A build is corpus-ready when **(A)** Tier-0 contract-conformance pass rate = 100%
+(fail-closed); **(B)** the olmOCR-bench-style unit-test pass-fraction meets target,
+broken down by content type; **(C)** zero boilerplate leaks; **(D)** table-validity
+and text-heavy-page text-layer recall clear their floors, quarantines triaged;
+**(E)** every page is either transcribed or explicitly recorded failed — none
+silently dropped.
+
+---
+
+## Recommended next step
+
+Execute **P0** (data-loss/liveness) before running the full 936-page build — those
+bugs would bake silent corruption into a one-time corpus. Then **P1-1 (anchoring)**
+and **P1-2 (sampler hardening)**, which are what the engine choice presupposes and
+which retire the top hallucination risk. P2 is optional polish.

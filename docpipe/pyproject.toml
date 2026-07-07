@@ -1,0 +1,44 @@
+[project]
+name = "docpipe"
+version = "0.1.0"
+description = "Nutanix documentation PDF -> Markdown extraction pipeline (Qwen3.6-27B VLM, visual transcription)"
+requires-python = ">=3.11"
+authors = [{ name = "wekadocs-matrix" }]
+readme = "README.md"
+
+# Kept deliberately self-contained and decoupled from the RAG repo's requirements.txt.
+# fitz(PyMuPDF), Pillow and the openai SDK are importable in the repo venv but UNDECLARED
+# anywhere, so docpipe declares what it needs. Gateway calls use httpx (repo convention:
+# REST-via-httpx, not vendor SDKs) so the openai package is intentionally NOT a dependency.
+dependencies = [
+    "PyMuPDF==1.28.0",       # import name: fitz -- PDF rasterization
+    "Pillow>=10,<13",        # image post-processing / inspect command
+    "httpx>=0.27.0",         # OpenAI-compatible /v1/chat/completions client (async)
+    "pydantic>=2.7,<3",      # config models (honors the repo's <3 cap)
+    "markdown-it-py>=3.0.0",  # structural lint against the same parser lib ingestion uses
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==7.4.4",
+    "pytest-asyncio==0.23.3",
+]
+
+[project.scripts]
+docpipe = "docpipe.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["docpipe*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "--strict-markers -ra"
+markers = [
+    "live: test hits the real VLM endpoints (skipped unless DOCPIPE_LIVE=1)",
+]

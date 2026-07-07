@@ -1,0 +1,75 @@
+from docpipe.stitch import _merge_seam, stitch_pages, strip_page_furniture
+
+
+def test_dehyphenation_keeps_real_hyphen():
+    # Finding #40: at a page seam a trailing hyphen is far more likely a real
+    # compound than a soft-wrap, so keep it rather than corrupt the term.
+    assert (
+        _merge_seam("Configure the read-", "only volume.")
+        == "Configure the read-only volume."
+    )
+    assert "highavailability" not in _merge_seam("Enable high-", "availability mode.")
+    # fragments are still joined onto one line (not split into two paragraphs)
+    assert "\n\n" not in _merge_seam("Set the con-", "figuration value.")
+
+
+def test_open_fence_seam_joins_with_newline():
+    # Finding #31: commands continued inside an OPEN fence across a page seam must
+    # not be prose-welded onto one line.
+    merged = _merge_seam("```bash\nncli storage list", "ncli storage get\n```")
+    assert "ncli storage list ncli storage get" not in merged  # not welded
+    assert "ncli storage list\nncli storage get" in merged  # separate lines
+    assert merged.count("```") == 2
+
+
+def test_fence_reopen_merged_into_one_block():
+    acc = "```bash\nncli storage list\n```"
+    nxt = "```bash\nncli storage get\n```"
+    merged = _merge_seam(acc, nxt)
+    assert merged == "```bash\nncli storage list\nncli storage get\n```"
+    assert merged.count("```") == 2  # exactly one fenced block, not two
+
+
+def test_table_header_dedup_across_seam():
+    acc = "| A | B |\n|---|---|\n| 1 | 2 |"
+    nxt = "| A | B |\n|---|---|\n| 3 | 4 |"
+    merged = _merge_seam(acc, nxt)
+    assert merged.count("| A | B |") == 1
+    assert "| 1 | 2 |" in merged and "| 3 | 4 |" in merged
+
+
+def test_paragraph_join_midsentence():
+    assert (
+        _merge_seam("This sentence continues", "onto the next page.")
+        == "This sentence continues onto the next page."
+    )
+
+
+def test_heading_boundary_not_joined():
+    # A heading on the next page must remain its own block.
+    merged = _merge_seam("Some prose that trails off", "## Next Section")
+    assert "## Next Section" in merged
+    assert merged.endswith("## Next Section")
+    assert "\n\n## Next Section" in merged
+
+
+def test_furniture_and_page_numbers_stripped():
+    pages = [
+        "Nutanix AHV Guide\n# Host Networking\nReal body one.\nAHV | Networking | 11",
+        "Nutanix AHV Guide\n## Details\nReal body two.\nAHV | Networking | 12",
+        "Nutanix AHV Guide\n## More\nReal body three.\nAHV | Networking | 13",
+        "Nutanix AHV Guide\n## End\nReal body four.\nAHV | Networking | 14",
+    ]
+    cleaned = strip_page_furniture(pages)
+    joined = "\n".join(cleaned)
+    assert "Nutanix AHV Guide" not in joined  # repeated header removed
+    assert "AHV | Networking |" not in joined  # footer band removed
+    assert "Real body one." in joined  # real content kept
+    assert "# Host Networking" in joined
+
+
+def test_stitch_pages_end_to_end():
+    out = stitch_pages(["# Title\n\nIntro para", "## Section\n\nBody"])
+    assert out.startswith("# Title")
+    assert "## Section" in out
+    assert out.endswith("\n")

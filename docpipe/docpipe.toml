@@ -1,0 +1,52 @@
+# docpipe configuration.
+#
+# Every key is optional; anything omitted uses the built-in default (which already
+# matches the live lab environment). Precedence: these values < DOCPIPE_* env vars
+# < CLI flags. The served model id is probed from /v1/models when `model_id` is unset
+# -- do not hardcode it.
+
+input_dir = "ETL-for-corpus"
+work_dir  = ".docpipe_work"
+figures   = "enriched"          # enriched | minimal | skip
+# model_id = "qwen36-27b-fp8-oxcart"   # leave unset to auto-probe
+
+[rasterize]
+dpi          = 200              # US-Letter@200 -> ~1700x2200 px, ~3-5K image tokens/page
+max_long_px  = 2000             # clamp long side (server pixel bounds are not exposed)
+escalate_dpi = 300              # higher-fidelity retry DPI for garbled pages
+
+[convert]
+temperature      = 0.0
+max_tokens       = 6000         # dense spec tables run long
+timeout_s        = 240
+max_retries      = 4
+prev_tail_chars  = 800          # ~200 tokens of previous-page continuity context
+disable_thinking = true         # suppress reasoning tokens (verified on both engines)
+
+[output]
+# Scratch default: OUTSIDE the git-tracked data/ingest/nutanix/ carve-out.
+# Point this at data/ingest/nutanix when the corpus is ready for ingestion.
+dir    = "ETL-for-corpus/transformed-corpus"
+layout = "per-doc"              # per-doc: <out>/<slug>/<slug>.md   |   flat: <out>/<slug>.md
+
+# Two OpenAI-compatible Qwen3.6-27B-FP8 endpoints. Both cap at max_running=4;
+# inflight is set a shade above that to keep each server's batch full without
+# pointless deep queuing.
+#
+# Oxcart (pinned-stable vLLM) is the DEFAULT target. Blackbird (dev-nightly
+# SGLang, lower latency but unpinned) is configured but DISABLED by default.
+# Run both with `--endpoint all`, or Blackbird alone with `--endpoint blackbird`.
+[[endpoints]]
+name     = "oxcart"
+base_url = "http://oxcart.lan.conley.ai:18002"
+bearer   = "EMPTY"              # sent as: Authorization: Bearer EMPTY
+inflight = 6
+weight   = 1.0
+enabled  = true
+
+[[endpoints]]
+name     = "blackbird"
+base_url = "http://blackbird.lan.conley.ai:18002"
+inflight = 6
+weight   = 1.2
+enabled  = false
