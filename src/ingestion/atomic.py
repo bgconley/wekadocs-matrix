@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import os
 import random
-import re
 import time
 import uuid
 from collections import defaultdict
@@ -123,6 +122,7 @@ from src.ingestion.stages.link import (  # noqa: E402
     create_cross_doc_links,
     get_document_count,
 )
+from src.ingestion.stages.parse import parse_document  # noqa: E402
 from src.providers.factory import ProviderFactory  # noqa: E402
 from src.providers.tokenizer_service import TokenizerService  # noqa: E402
 from src.shared.chunk_utils import validate_chunk_schema  # noqa: E402
@@ -718,112 +718,20 @@ class AtomicIngestionCoordinator:
         Returns:
             Dict with document, sections, entities, mentions, and builder
         """
-        from pathlib import Path
-
         from src.ingestion.build_graph import GraphBuilder
         from src.ingestion.chunk_assembler import get_chunk_assembler
         from src.ingestion.extract import extract_entities
-        from src.ingestion.parsers import parse_markdown  # Router selects engine
-        from src.ingestion.parsers.html import parse_html
-        from src.shared.config import get_config, get_settings
 
-        # Deep copy config to avoid mutating the global singleton when applying
-        # per-request embedding overrides. This ensures thread safety and
-        # prevents cross-request interference in concurrent workers.
-        # See: Phase 1 bug fix for config singleton mutation
-        config = get_config().model_copy(deep=True)
-        _ = get_settings()  # Validates settings load; value unused
-
-        # Apply optional overrides with explicit logging
-        if embedding_model:
-            try:
-                config.embedding.embedding_model = embedding_model
-                logger.debug("embedding_model_override_applied", model=embedding_model)
-            except AttributeError as e:
-                logger.warning(
-                    "embedding_model_override_failed",
-                    model=embedding_model,
-                    error=str(e),
-                )
-        if embedding_version:
-            try:
-                config.embedding.version = embedding_version
-                logger.debug(
-                    "embedding_version_override_applied", version=embedding_version
-                )
-            except AttributeError as e:
-                logger.warning(
-                    "embedding_version_override_failed",
-                    version=embedding_version,
-                    error=str(e),
-                )
-
-        # Parse document
-        if format == "markdown":
-            result = parse_markdown(source_uri, content)
-        elif format == "html":
-            result = parse_html(source_uri, content)
-        else:
-            raise ValueError(f"Unsupported format: {format}")
-
-        document = result["Document"]
-        sections = result["Sections"]
-
-        # Extract doc_tag and snapshot_scope
-        # Priority:
-        # 1. Explicit DocTag: header in content
-        # 2. First-level directory under data/ingest/ (category from path)
-        # 3. Filename with __ separator (scope__slug pattern)
-        # 4. Filename stem as fallback
-        doc_tag = None
-        snapshot_scope = None
-        doc_category = None  # New: category from directory path
-
-        m = re.search(r"DocTag:\s*([A-Za-z0-9_\-]+)", content or "", flags=re.I)
-        if m:
-            doc_tag = m.group(1)
-        else:
-            try:
-                source_path = Path(
-                    source_uri.replace("file://", "") if source_uri else ""
-                )
-                fname = source_path.name
-                stem = Path(fname).stem
-
-                # NEW: Extract category from directory path relative to data/ingest/
-                # e.g., /app/data/ingest/nutanix-platform/overview.md -> category="nutanix-platform"
-                # e.g., /app/data/ingest/aws-solutions/sagemaker/guide.md → category="aws-solutions"
-                path_parts = source_path.parts
-                for i, part in enumerate(path_parts):
-                    if part == "ingest" or part.endswith("ingest"):
-                        # First directory after "ingest" is the category
-                        if i + 1 < len(path_parts) - 1:  # Not the filename itself
-                            doc_category = path_parts[i + 1]
-                        break
-
-                if "__" in stem:
-                    scope_part, slug_part = stem.split("__", 1)
-                    snapshot_scope = scope_part
-                    doc_tag = slug_part
-                else:
-                    # Use category from path if available, otherwise filename
-                    doc_tag = doc_category if doc_category else stem
-            except (ValueError, AttributeError) as e:
-                logger.debug(
-                    "doc_tag_extraction_fallback",
-                    source_uri=source_uri,
-                    error=str(e),
-                )
-                # doc_tag remains None, which is acceptable
-
-        document["doc_tag"] = doc_tag
-        document["doc_category"] = doc_category  # New: category from directory path
-        document["snapshot_scope"] = snapshot_scope
-
-        for section in sections:
-            section["doc_tag"] = doc_tag
-            section["doc_category"] = doc_category
-            section["snapshot_scope"] = snapshot_scope
+        parsed = parse_document(
+            source_uri,
+            content,
+            format,
+            embedding_model=embedding_model,
+            embedding_version=embedding_version,
+        )
+        config = parsed["config"]
+        document = parsed["document"]
+        sections = parsed["sections"]
 
         # Extract entities
         entities, mentions = extract_entities(sections)
