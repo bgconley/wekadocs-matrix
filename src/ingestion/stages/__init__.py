@@ -1,6 +1,7 @@
 """Ingestion pipeline stages."""
 
 from src.ingestion.stages.chunk import assemble_chunks
+from src.ingestion.stages.embed import compute_embeddings
 from src.ingestion.stages.enrich import (
     enrich_chunks_with_gliner,
     extract_and_enrich,
@@ -12,6 +13,7 @@ from src.ingestion.stages.write import execute_saga
 
 __all__ = [
     "assemble_chunks",
+    "compute_embeddings",
     "enrich_chunks_with_gliner",
     "extract_and_enrich",
     "execute_saga",

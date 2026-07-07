@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import src.ingestion.stages.embed as embed_stage
 from src.ingestion.stages.chunk import assemble_chunks
+from src.ingestion.stages.embed import compute_embeddings
 from src.ingestion.stages.enrich import merge_section_mentions
 from src.ingestion.stages.parse import parse_document
 from src.ingestion.stages.write import execute_saga
@@ -224,3 +226,70 @@ def test_execute_saga_commits_neo4j_after_qdrant_and_links_after_commit():
     assert events.index("qdrant_upsert") < events.index("neo4j_commit")
     assert events.index("neo4j_commit") < events.index("cross_doc_linking")
     assert events[-1] == "session_close"
+
+
+def test_compute_embeddings_assembles_dense_vectors_with_batch_stats(monkeypatch):
+    monkeypatch.setattr(
+        embed_stage,
+        "TokenizerService",
+        lambda: SimpleNamespace(count_tokens=lambda text: len(text.split())),
+    )
+
+    class FakeEmbedder:
+        provider_name = "fake"
+        task = "retrieval"
+
+        def embed_documents(self, texts):
+            return [[float(len(text)), 0.2, 0.3] for text in texts]
+
+    class FakeBuilder:
+        embedder = FakeEmbedder()
+        embedding_plan = None
+        embedding_settings = None
+        embedding_dims = 3
+
+        def _build_section_text_for_embedding(self, section):
+            return section["text"]
+
+        def _build_title_text_for_embedding(self, section):
+            return section["heading"]
+
+    config = SimpleNamespace(
+        search=SimpleNamespace(
+            vector=SimpleNamespace(
+                primary="neo4j",
+                dual_write=False,
+                qdrant=SimpleNamespace(
+                    enable_sparse=False,
+                    enable_colbert=False,
+                    sparse_strict_mode=False,
+                ),
+            )
+        )
+    )
+    section = {
+        "id": "chunk-1",
+        "document_id": "doc-nutanix-files",
+        "level": 2,
+        "order": 1,
+        "original_section_ids": ["source-section-1"],
+        "is_combined": False,
+        "is_split": False,
+        "token_count": 4,
+        "heading": "Nutanix Files",
+        "text": "Nutanix Files supports SMB.",
+    }
+
+    result = compute_embeddings(
+        {"id": "doc-nutanix-files", "title": "Nutanix Files"},
+        [section],
+        {},
+        FakeBuilder(),
+        config,
+    )
+
+    assert result["sections"]["chunk-1"]["content"] == [27.0, 0.2, 0.3]
+    assert result["sections"]["chunk-1"]["title"] == [13.0, 0.2, 0.3]
+    assert result["sections"]["chunk-1"]["doc_title"] == [13.0, 0.2, 0.3]
+    assert result["stats"]["batch_count"] == 1
+    assert result["stats"]["total_tokens_processed"] == 4
