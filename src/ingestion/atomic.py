@@ -118,6 +118,7 @@ from src.ingestion.saga import (  # noqa: E402
     SagaContext,
     ValidationResult,
 )
+from src.ingestion.stages.chunk import assemble_chunks  # noqa: E402
 from src.ingestion.stages.link import (  # noqa: E402
     create_cross_doc_links,
     get_document_count,
@@ -719,7 +720,6 @@ class AtomicIngestionCoordinator:
             Dict with document, sections, entities, mentions, and builder
         """
         from src.ingestion.build_graph import GraphBuilder
-        from src.ingestion.chunk_assembler import get_chunk_assembler
         from src.ingestion.extract import extract_entities
 
         parsed = parse_document(
@@ -807,21 +807,7 @@ class AtomicIngestionCoordinator:
             pending_neo4j_resolution=ref_unresolved,
         )
 
-        # Assemble chunks
-        assembler = get_chunk_assembler(
-            getattr(config.ingestion, "chunk_assembly", None)
-        )
-        sections = assembler.assemble(document["id"], sections)
-
-        # Set document tokens
-        doc_total_tokens = sum(int(s.get("token_count", 0)) for s in sections)
-        document["total_tokens"] = doc_total_tokens
-        document.setdefault("doc_id", document.get("id"))
-
-        for section in sections:
-            section.setdefault("document_id", document["id"])
-            section.setdefault("doc_id", document.get("doc_id"))
-            section["document_total_tokens"] = doc_total_tokens
+        sections = assemble_chunks(document, sections, config)
 
         # Phase 2 GLiNER: Enrich chunks with named entities (gated by config)
         # This adds entity_metadata, _embedding_text, and _mentions to each chunk

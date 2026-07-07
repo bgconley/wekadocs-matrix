@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+from src.ingestion.stages.chunk import assemble_chunks
 from src.ingestion.stages.parse import parse_document
 
 
@@ -40,3 +43,41 @@ def test_parse_document_uses_filename_scope_when_no_explicit_doc_tag():
     assert document["doc_tag"] == "files"
     assert document["doc_category"] == "nutanix-platform"
     assert document["snapshot_scope"] == "scope"
+
+
+def test_assemble_chunks_preserves_document_identity_and_token_totals():
+    class FakeAssembler:
+        def assemble(self, document_id, raw_sections):
+            assert document_id == "doc-nutanix-files"
+            assert [section["id"] for section in raw_sections] == ["source-section-1"]
+            return [
+                {"id": "chunk-1", "token_count": 7},
+                {"id": "chunk-2", "token_count": 5, "document_id": "existing-doc"},
+            ]
+
+    document = {"id": "doc-nutanix-files", "title": "Nutanix Files"}
+    sections = [{"id": "source-section-1", "text": "Nutanix Files"}]
+    config = SimpleNamespace(
+        ingestion=SimpleNamespace(chunk_assembly=SimpleNamespace(assembler="fake"))
+    )
+
+    assembled = assemble_chunks(document, sections, config, assembler=FakeAssembler())
+
+    assert assembled == [
+        {
+            "id": "chunk-1",
+            "token_count": 7,
+            "document_id": "doc-nutanix-files",
+            "doc_id": "doc-nutanix-files",
+            "document_total_tokens": 12,
+        },
+        {
+            "id": "chunk-2",
+            "token_count": 5,
+            "document_id": "existing-doc",
+            "doc_id": "doc-nutanix-files",
+            "document_total_tokens": 12,
+        },
+    ]
+    assert document["total_tokens"] == 12
+    assert document["doc_id"] == "doc-nutanix-files"
