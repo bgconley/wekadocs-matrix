@@ -110,26 +110,38 @@ def retry_with_backoff(
     return decorator
 
 
-from src.ingestion.neo4j_writers import Neo4jWriter  # noqa: E402
-from src.ingestion.qdrant_writers import QdrantWriter  # noqa: E402
-
 # Backward-compatible re-exports for tests that import from atomic
 from src.ingestion.neo4j_writers import ALLOWED_ENTITY_RELATIONSHIP_TYPES  # noqa: E402
+from src.ingestion.neo4j_writers import Neo4jWriter  # noqa: E402
+from src.ingestion.qdrant_writers import QdrantWriter  # noqa: E402
 from src.ingestion.saga import (  # noqa: E402
     IngestionValidator,
     SagaContext,
     ValidationResult,
 )
+from src.ingestion.stages.link import (  # noqa: E402
+    create_cross_doc_links,
+    get_document_count,
+)
 from src.providers.factory import ProviderFactory  # noqa: E402
 from src.providers.tokenizer_service import TokenizerService  # noqa: E402
-from src.services.cross_doc_linking import (  # noqa: E402
-    CrossDocLinker,
-)
 from src.shared.chunk_utils import validate_chunk_schema  # noqa: E402
 from src.shared.embedding_fields import (  # noqa: E402
     canonicalize_embedding_metadata,
     validate_embedding_metadata,
 )
+
+__all__ = [
+    "ALLOWED_ENTITY_RELATIONSHIP_TYPES",
+    "AtomicIngestionCoordinator",
+    "AtomicIngestionResult",
+    "IngestionValidator",
+    "Neo4jWriter",
+    "QdrantWriter",
+    "SagaContext",
+    "ValidationResult",
+    "ingest_document_atomic",
+]
 
 # LGTM Phase 4: OTEL tracing for ingestion pipeline observability
 try:
@@ -247,14 +259,7 @@ class AtomicIngestionCoordinator:
 
     def _get_document_count(self) -> int:
         """Get total document count for corpus size check."""
-        try:
-            with self.neo4j_driver.session() as session:
-                result = session.run("MATCH (d:Document) RETURN count(d) as count")
-                record = result.single()
-                return record["count"] if record else 0
-        except Exception as e:
-            logger.warning("cross_doc_get_count_failed", error=str(e))
-            return 0
+        return get_document_count(self.neo4j_driver)
 
     def _create_cross_doc_links(
         self,
@@ -278,115 +283,15 @@ class AtomicIngestionCoordinator:
         Returns:
             Dict with linking stats, or None if skipped/failed
         """
-        # Check if cross_doc_linking is configured and enabled
-        linking_config = getattr(
-            getattr(self.config, "ingestion", None),
-            "cross_doc_linking",
-            None,
+        return create_cross_doc_links(
+            neo4j_driver=self.neo4j_driver,
+            qdrant_client=self.qdrant_client,
+            config=self.config,
+            document_id=document_id,
+            document=document,
+            sections=sections,
+            embeddings=embeddings,
         )
-        if not linking_config:
-            return {"skipped": True, "reason": "not_configured"}
-
-        if not linking_config.enabled:
-            return {"skipped": True, "reason": "disabled"}
-
-        if not self.qdrant_client:
-            return {"skipped": True, "reason": "no_qdrant_client"}
-
-        # Check corpus size (need at least min_corpus_size documents)
-        doc_count = self._get_document_count()
-        if doc_count < linking_config.min_corpus_size:
-            logger.debug(
-                "cross_doc_linking_skipped_corpus_small",
-                document_id=document_id,
-                doc_count=doc_count,
-                min_required=linking_config.min_corpus_size,
-            )
-            return {"skipped": True, "reason": f"corpus_too_small:{doc_count}"}
-
-        # Extract doc_title vectors from embeddings (same for all sections)
-        doc_title_vector = None
-        doc_title_sparse = None
-
-        section_embeddings = embeddings.get("sections", {})
-        if section_embeddings:
-            # Get the first section's vectors (all sections have same doc_title)
-            first_section_id = next(iter(section_embeddings.keys()), None)
-            if first_section_id:
-                section_emb = section_embeddings[first_section_id]
-                doc_title_vector = section_emb.get("doc_title")
-                doc_title_sparse = section_emb.get("doc_title_sparse")
-
-        if not doc_title_vector:
-            logger.debug(
-                "cross_doc_linking_skipped_no_vector",
-                document_id=document_id,
-            )
-            return {"skipped": True, "reason": "no_doc_title_vector"}
-
-        try:
-            start_time = time.time()
-
-            linker = CrossDocLinker(
-                neo4j_driver=self.neo4j_driver,
-                qdrant_client=self.qdrant_client,
-                config=linking_config,
-            )
-
-            result = linker.link_document(
-                doc_id=document_id,
-                doc_title=document.get("title", ""),
-                doc_title_vector=doc_title_vector,
-                doc_title_sparse=doc_title_sparse,
-            )
-
-            duration_ms = int((time.time() - start_time) * 1000)
-
-            # LGTM Phase 4: Verbose log event 7 - cross_doc_linking_complete
-            # Enhanced with sample_edges per canonical plan
-            sample_edges = []
-            if hasattr(result, "edges") and result.edges:
-                sample_edges = [
-                    {
-                        "target": getattr(e, "target_doc_id", None),
-                        "score": getattr(e, "score", None),
-                        "colbert_score": getattr(e, "colbert_score", None),
-                    }
-                    for e in result.edges[:3]
-                ]
-            logger.info(
-                "cross_doc_linking_complete",
-                doc_id=document_id,
-                edges_created=result.edges_created,
-                edges_updated=result.edges_updated,
-                candidates_evaluated=result.candidates_found,
-                pruned_count=result.candidates_found - result.edges_created,
-                method=result.method,
-                colbert_reranked=getattr(result, "colbert_reranked", False),
-                duration_ms=duration_ms,
-                sample_edges=sample_edges,
-                skipped=result.skipped,
-                skip_reason=result.skip_reason,
-            )
-
-            return {
-                "edges_created": result.edges_created,
-                "edges_updated": result.edges_updated,
-                "candidates_found": result.candidates_found,
-                "method": result.method,
-                "duration_ms": duration_ms,
-                "skipped": result.skipped,
-                "skip_reason": result.skip_reason,
-            }
-
-        except Exception as e:
-            # Cross-doc linking failure should NOT fail ingestion
-            logger.warning(
-                "cross_doc_linking_failed",
-                document_id=document_id,
-                error=str(e),
-            )
-            return {"skipped": True, "reason": f"error:{str(e)[:100]}"}
 
     def ingest_document_atomic(
         self,
