@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from src.ingestion.stages.chunk import assemble_chunks
 from src.ingestion.stages.enrich import merge_section_mentions
 from src.ingestion.stages.parse import parse_document
+from src.ingestion.stages.write import execute_saga
 
 
 def test_parse_document_applies_doc_metadata_and_embedding_overrides():
@@ -109,3 +110,117 @@ def test_merge_section_mentions_preserves_gliner_and_filters_structural_noise():
         {"entity_id": "gliner-files", "source": "gliner"},
         {"section_id": "source-section-1", "entity_id": "struct-files"},
     ]
+
+
+def test_execute_saga_commits_neo4j_after_qdrant_and_links_after_commit():
+    events = []
+
+    class FakeTx:
+        def __init__(self):
+            self._closed = False
+
+        def commit(self):
+            events.append("neo4j_commit")
+            self._closed = True
+
+        def rollback(self):
+            events.append("neo4j_rollback")
+            self._closed = True
+
+        def closed(self):
+            return self._closed
+
+    class FakeSession:
+        def __init__(self):
+            self.tx = FakeTx()
+
+        def begin_transaction(self):
+            events.append("neo4j_begin")
+            return self.tx
+
+        def close(self):
+            events.append("session_close")
+
+    class FakeDriver:
+        def session(self):
+            events.append("session_open")
+            return FakeSession()
+
+    class FakeNeo4jWriter:
+        def _neo4j_upsert_document(self, tx, document):
+            assert not tx.closed()
+            events.append("neo4j_document")
+
+        def _neo4j_upsert_sections(self, tx, document_id, sections):
+            assert not tx.closed()
+            events.append("neo4j_sections")
+            return len(sections)
+
+        def _neo4j_upsert_entities(self, tx, entities):
+            assert not tx.closed()
+            events.append("neo4j_entities")
+            return len(entities)
+
+        def _neo4j_create_mentions(self, tx, mentions):
+            assert not tx.closed()
+            events.append("neo4j_mentions")
+
+        def _neo4j_create_references(self, tx, references):
+            assert not tx.closed()
+            events.append("neo4j_references")
+            return len(references)
+
+        def _neo4j_upsert_embedding_metadata(self, tx, sections, embeddings, builder):
+            assert not tx.closed()
+            events.append("neo4j_embedding_metadata")
+            return len(sections)
+
+    class FakeQdrantWriter:
+        def _qdrant_upsert_vectors(self, document, sections, embeddings, builder):
+            assert "neo4j_commit" not in events
+            events.append("qdrant_upsert")
+            return len(sections)
+
+        def _compensate_qdrant(self, points, builder):
+            events.append("qdrant_compensate")
+
+    def fake_structural_edges(tx, document_id, *, skip_has_chunk):
+        assert not tx.closed()
+        events.append("structural_edges")
+        return {"stats": {"NEXT_CHUNK": 0}, "warnings": []}
+
+    def fake_cross_doc_linker(**kwargs):
+        assert "neo4j_commit" in events
+        events.append("cross_doc_linking")
+        return {"skipped": True, "reason": "test"}
+
+    result = execute_saga(
+        saga_id="saga-test",
+        document={"id": "doc-nutanix-files"},
+        sections=[{"id": "chunk-1", "_mentions": []}],
+        entities={},
+        mentions=[],
+        references=[],
+        embeddings={"sections": {"chunk-1": {"content": [0.1]}}},
+        builder=SimpleNamespace(collection_name="test-collection"),
+        neo4j_driver=FakeDriver(),
+        qdrant_client=object(),
+        neo4j_writer=FakeNeo4jWriter(),
+        qdrant_writer=FakeQdrantWriter(),
+        config=SimpleNamespace(
+            search=SimpleNamespace(
+                vector=SimpleNamespace(
+                    primary="qdrant",
+                    dual_write=False,
+                    qdrant=SimpleNamespace(collection_name="test-collection"),
+                )
+            )
+        ),
+        structural_edges_builder=fake_structural_edges,
+        cross_doc_linker=fake_cross_doc_linker,
+    )
+
+    assert result["success"] is True
+    assert events.index("qdrant_upsert") < events.index("neo4j_commit")
+    assert events.index("neo4j_commit") < events.index("cross_doc_linking")
+    assert events[-1] == "session_close"
