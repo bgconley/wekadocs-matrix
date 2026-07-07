@@ -23,44 +23,44 @@ os.environ.setdefault("HF_TOKENIZER_ID", "jinaai/jina-embeddings-v3")
 
 # Sample texts with varying chars/token ratios
 SAMPLE_PROSE = """
-The WEKA distributed file system provides high-performance storage for
+The Nutanix Unified Storage platform provides high-performance storage for
 enterprise workloads. It supports both NFS and S3 protocols, enabling
 seamless integration with existing applications. The system automatically
 balances data across nodes to ensure optimal performance and reliability.
-Configuration is managed through the weka CLI tool, which provides
+Configuration is managed through the nCLI tool, which provides
 comprehensive options for cluster setup, monitoring, and maintenance.
 """
 
 SAMPLE_CLI_HEAVY = """
-weka cluster status --json
-weka fs create myfs --total-capacity 10TiB --ssd-capacity 1TiB
-mount -t wekafs backend1/myfs /mnt/weka
-chmod 755 /mnt/weka/data
-weka local resources --cores 4 --memory 32GiB
-weka cluster drive add /dev/nvme0n1 /dev/nvme0n2 /dev/nvme0n3
-weka alerts list --severity error --since 24h
+ncli cluster get output=json
+ncli files create name=myfs total-capacity=10TiB ssd-capacity=1TiB
+mount -t nfs backend1/myfs /mnt/nutanix
+chmod 755 /mnt/nutanix/data
+ncli cluster resources update cores=4 memory=32GiB
+ncli storage drive add devices=/dev/nvme0n1,/dev/nvme0n2,/dev/nvme0n3
+ncli alerts list severity=error since=24h
 """
 
 SAMPLE_CODE = """
 #!/bin/bash
 set -euo pipefail
 
-# Configure WEKA mount
-MOUNT_POINT="/mnt/weka"
-FS_NAME="${WEKA_FS:-default}"
+# Configure Nutanix mount
+MOUNT_POINT="/mnt/nutanix"
+FS_NAME="${NUTANIX_FS:-default}"
 
 if [ ! -d "$MOUNT_POINT" ]; then
     mkdir -p "$MOUNT_POINT"
 fi
 
-mount -t wekafs "backend1/$FS_NAME" "$MOUNT_POINT" \\
+mount -t nfs "backend1/$FS_NAME" "$MOUNT_POINT" \\
     --mount-option "num_cores=2"
 
 echo "Mounted $FS_NAME at $MOUNT_POINT"
 """
 
 SAMPLE_MIXED = """
-# Installing WEKA on Ubuntu 22.04
+# Installing Nutanix tools on Ubuntu 22.04
 
 Prerequisites:
 - Kernel version 5.15 or higher
@@ -72,15 +72,15 @@ Prerequisites:
 Run the following commands:
 
 ```bash
-curl -O https://get.weka.io/dist/v4/install.sh
+curl -O https://portal.nutanix.com/downloads/nutanix-tools/install.sh
 chmod +x install.sh
 sudo ./install.sh --cluster-name my-cluster
 ```
 
 After installation, verify with:
 ```
-weka status
-weka cluster nodes
+ncli cluster get
+ncli cluster nodes
 ```
 """
 
@@ -292,7 +292,7 @@ class TestVariableTokenLength:
 
     def test_cli_commands_chars_per_token(self):
         """CLI commands have ~2.2-3.5 chars/token (lots of special chars)."""
-        text = "weka cluster status --json --verbose --format=table"
+        text = "ncli cluster get output=json --verbose --format=table"
         tokens = self.tokenizer.encode(text)
         chars_per_token = len(text) / len(tokens)
 

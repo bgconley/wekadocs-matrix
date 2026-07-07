@@ -5,15 +5,15 @@ doc_id: "test-snapshots-001"
 
 ## Overview
 
-WEKA filesystems support point-in-time snapshots for data protection.
+Nutanix Files shares support point-in-time snapshots for data protection.
 Snapshots capture the state of your filesystem at a specific moment.
 
 ## Creating Snapshots
 
-Use the `weka fs snapshot create` command to create a snapshot:
+Use the Prism Central workflow or nCLI to create a snapshot:
 
 ```bash
-weka fs snapshot create --filesystem my-fs --name daily-backup
+ncli files snapshot create share=my-share name=daily-backup
 ```
 
 This creates a snapshot named "daily-backup" of the filesystem.

@@ -193,12 +193,12 @@ def capture_logs(prod_env: Dict[str, Any]):
 
     # Build container list from env or use defaults aligning to production stack
     default_containers = [
-        "weka-neo4j",
-        "weka-qdrant",
-        "weka-redis",
-        "weka-mcp-server",
-        "weka-ingestion-service",
-        "weka-ingestion-worker",
+        "nutanix-neo4j",
+        "nutanix-qdrant",
+        "nutanix-redis",
+        "nutanix-mcp-server",
+        "nutanix-ingestion-service",
+        "nutanix-ingestion-worker",
     ]
     env_val = os.environ.get("E2E_LOG_CONTAINERS")
     container_names = (

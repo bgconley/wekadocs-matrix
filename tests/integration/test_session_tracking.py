@@ -148,12 +148,12 @@ class TestEntityFocusExtraction:
         # Create session and query
         session_tracker.create_session(test_session_id)
         query_id = session_tracker.create_query(
-            test_session_id, "How do I configure NFS for Weka?", 1
+            test_session_id, "How do I configure NFS for Nutanix Files?", 1
         )
 
         # Extract focused entities
         focused_entities = session_tracker.extract_focused_entities(
-            query_id=query_id, query_text="How do I configure NFS for Weka?"
+            query_id=query_id, query_text="How do I configure NFS for Nutanix Files?"
         )
 
         # Should extract some entities (NFS-related, configuration-related)
@@ -280,7 +280,7 @@ class TestAnswerProvenance:
         )
 
         # Create answer with supporting sections
-        answer_text = "To configure NFS for Weka, follow these steps..."
+        answer_text = "To configure NFS for Nutanix Files, follow these steps..."
         supporting_section_ids = ["sec-nfs-1", "sec-nfs-2", "sec-nfs-3"]
 
         answer_id = session_tracker.create_answer(
@@ -350,7 +350,7 @@ class TestCompleteSessionFlow:
 
         # Turn 1: Initial query about NFS
         response1 = query_service.search(
-            query="How do I configure NFS for Weka?",
+            query="How do I configure NFS for Nutanix Files?",
             session_id=test_session_id,
             turn=1,
             top_k=5,
@@ -379,7 +379,7 @@ class TestCompleteSessionFlow:
 
             record = result.single()
             assert record is not None
-            assert record["query_text"] == "How do I configure NFS for Weka?"
+            assert record["query_text"] == "How do I configure NFS for Nutanix Files?"
             # With real data, we'd expect focused entities and answer
 
         # Turn 2: Follow-up about performance

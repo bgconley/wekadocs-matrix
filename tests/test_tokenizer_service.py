@@ -77,9 +77,9 @@ class TestHuggingFaceTokenizerBackend:
     def test_count_tokens_technical(self, backend):
         """Test token counting on technical documentation."""
         text = """
-        Configure the WekaFS cluster using the following command:
+        Configure the Nutanix cluster using the following command:
 
-        weka cluster create --name=production --nodes=10 --failure-domain=rack
+        ncli cluster create name=production nodes=10 failure-domain=rack
 
         Parameters:
         - name: Cluster identifier (alphanumeric)
@@ -97,9 +97,9 @@ class TestHuggingFaceTokenizerBackend:
         """Test token counting on dense reference table."""
         text = """| Command | Description | Flags |
 |---------|-------------|-------|
-| weka cluster create | Create new cluster | --name, --nodes |
-| weka fs create | Create filesystem | --name, --capacity |
-| weka user add | Add user | --username, --role |"""
+| ncli cluster create | Create new cluster | name, nodes |
+| ncli files create | Create file share | name, capacity |
+| ncli user add | Add user | username, role |"""
 
         token_count = backend.count_tokens(text)
 
@@ -109,7 +109,9 @@ class TestHuggingFaceTokenizerBackend:
 
     def test_encode_decode_roundtrip(self, backend):
         """Test encoding and decoding preserves text."""
-        original = "Testing encode/decode roundtrip with technical terms like WekaFS."
+        original = (
+            "Testing encode/decode roundtrip with technical terms like Nutanix Files."
+        )
 
         tokens = backend.encode(original)
         decoded = backend.decode(tokens)
@@ -523,13 +525,13 @@ class TestProductionScenarios:
         for i in range(200):
             commands.append(
                 f"""
-### Command {i}: weka-command-{i}
+### Command {i}: ncli-command-{i}
 
-Description: This command performs operation {i} on the WekaFS cluster.
+Description: This command performs operation {i} on the Nutanix cluster.
 
 **Syntax:**
 ```bash
-weka command-{i} [--flag1 VALUE] [--flag2 VALUE]
+ncli command-{i} flag1=VALUE flag2=VALUE
 ```
 
 **Parameters:**
@@ -541,10 +543,10 @@ weka command-{i} [--flag1 VALUE] [--flag2 VALUE]
 **Examples:**
 ```bash
 # Example 1
-weka command-{i} --flag1=production --flag2=100
+ncli command-{i} flag1=production flag2=100
 
 # Example 2
-weka command-{i} --flag1=test
+ncli command-{i} flag1=test
 ```
 """
             )
@@ -572,7 +574,7 @@ weka command-{i} --flag1=test
     def test_technical_documentation_token_density(self, service):
         """Test token counting on real technical documentation patterns."""
         # Pattern 1: Command examples
-        cmd_text = "weka cluster create --name=prod --nodes=10 --failure-domain=rack"
+        cmd_text = "ncli cluster create name=prod nodes=10 failure-domain=rack"
         cmd_tokens = service.count_tokens(cmd_text)
         cmd_ratio = len(cmd_text) / cmd_tokens if cmd_tokens > 0 else 0
 
@@ -582,9 +584,7 @@ weka command-{i} --flag1=test
         config_ratio = len(config_text) / config_tokens if config_tokens > 0 else 0
 
         # Pattern 3: Table row
-        table_text = (
-            "| weka fs create | Create filesystem | --name, --capacity, --thin |"
-        )
+        table_text = "| ncli files create | Create file share | name, capacity, thin |"
         table_tokens = service.count_tokens(table_text)
         table_ratio = len(table_text) / table_tokens if table_tokens > 0 else 0
 
@@ -605,7 +605,7 @@ weka command-{i} --flag1=test
         original = " ".join(
             [
                 f"Section {i}: This is detailed content about topic {i}. "
-                f"It includes multiple sentences and technical details like WekaFS, "
+                f"It includes multiple sentences and technical details like Nutanix Files, "
                 f"configuration parameters, and command examples. "
                 for i in range(500)
             ]

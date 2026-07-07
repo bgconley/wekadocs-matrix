@@ -61,7 +61,7 @@ def _seed_advanced_graph(s):
     MERGE (s2:Step {id:$s2, order:2, instruction:'Apply fix'})
     MERGE (p)-[:CONTAINS_STEP {order:1}]->(s1)
     MERGE (p)-[:CONTAINS_STEP {order:2}]->(s2)
-    MERGE (cmd:Command {id:$cmd, name:'weka diag', cli_syntax:'weka diag'})
+    MERGE (cmd:Command {id:$cmd, name:'ncli diag', cli_syntax:'ncli diag'})
     MERGE (s1)-[:EXECUTES]->(cmd)
     """,
         e=f"{TEST_NS}:err",
@@ -128,4 +128,4 @@ def test_troubleshooting_path_query(neo4j_driver):
         steps = rec["steps"]
         assert len(steps) >= 2
         assert steps[0]["order"] == 1, "Steps must be in order."
-        assert steps[0]["cmd"] == "weka diag", "First step should execute 'weka diag'."
+        assert steps[0]["cmd"] == "ncli diag", "First step should execute 'ncli diag'."

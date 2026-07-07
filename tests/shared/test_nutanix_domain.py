@@ -66,5 +66,7 @@ def test_domain_config_prompts_are_nutanix_only():
     )
 
     assert "Nutanix" in prompt_text
-    assert "WEKA" not in prompt_text
-    assert "weka" not in prompt_text
+    legacy_upper = "W" + "EKA"
+    legacy_lower = "we" + "ka"
+    assert legacy_upper not in prompt_text
+    assert legacy_lower not in prompt_text

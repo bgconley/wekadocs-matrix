@@ -41,12 +41,12 @@ class TestPrecisionRetrievalLive:
 
     def test_metadata_architecture_returns_subsystem_docs(self):
         """
-        Query: 'how is metadata managed and architected on a weka cluster'
+        Query: 'how is metadata managed and architected on Nutanix Cloud Platform'
         Expected: top 5 results include deeply nested metadata/filesystem docs,
         not general overviews or cloud deployment docs.
         """
         # results, metrics = self.retriever.retrieve(
-        #     "how is metadata managed and architected on a weka cluster",
+        #     "how is metadata managed and architected on Nutanix Cloud Platform",
         #     top_k=20,
         # )
         # assert metrics["query_type"] == "subsystem_architecture"
@@ -62,12 +62,12 @@ class TestPrecisionRetrievalLive:
 
     def test_container_sizing_returns_sizing_tables(self):
         """
-        Query: 'How do I appropriately size the weka drives, compute, and frontends containers?'
+        Query: 'How do I appropriately size Nutanix storage, compute, and AHV resources?'
         Expected: top 5 results include chunks with sizing tables from
-        core WEKA planning/sizing docs.
+        core Nutanix planning/sizing docs.
         """
         # results, metrics = self.retriever.retrieve(
-        #     "How do I appropriately size the weka drives, compute, and frontends containers?",
+        #     "How do I appropriately size Nutanix storage, compute, and AHV resources?",
         #     top_k=20,
         # )
         # assert metrics["query_type"] == "resource_sizing"
@@ -77,7 +77,7 @@ class TestPrecisionRetrievalLive:
     def test_structural_expansion_skipped_for_precision(self):
         """Verify metrics confirm structural expansion was skipped for precision queries."""
         # results, metrics = self.retriever.retrieve(
-        #     "WEKA inode management internals", top_k=10
+        #     "Nutanix Files metadata management internals", top_k=10
         # )
         # assert metrics.get("pre_rerank_structural_expansion_applied") is False
         pass
@@ -85,7 +85,7 @@ class TestPrecisionRetrievalLive:
     def test_colbert_status_visible_in_metrics(self):
         """Verify ColBERT runtime status is captured in metrics."""
         # results, metrics = self.retriever.retrieve(
-        #     "WEKA metadata architecture", top_k=10
+        #     "Nutanix metadata architecture", top_k=10
         # )
         # assert "colbert_runtime_available" in metrics
         # assert "colbert_query_embedding_ok" in metrics

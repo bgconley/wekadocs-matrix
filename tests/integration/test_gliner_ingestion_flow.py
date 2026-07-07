@@ -32,7 +32,7 @@ class TestGLiNEREnrichmentIntegration:
         chunks = [
             {
                 "id": "chunk1",
-                "text": "Configure NFS exports on RHEL 8 using the weka fs mount command.",
+                "text": "Configure NFS exports on RHEL 8 using the ncli files mount command.",
                 "title": "NFS Configuration",
             },
             {
@@ -60,7 +60,7 @@ class TestGLiNEREnrichmentIntegration:
             assert "entity_values" in chunk["entity_metadata"]
             assert "entity_values_normalized" in chunk["entity_metadata"]
 
-        # Chunk 1 should have entities (NFS, RHEL, weka fs mount)
+        # Chunk 1 should have entities (NFS, RHEL, ncli files mount)
         chunk1 = chunks[0]
         assert (
             chunk1["entity_metadata"]["entity_count"] > 0
@@ -96,16 +96,16 @@ class TestGLiNEREnrichmentIntegration:
 
         # Chunk with pre-existing mention from regex extractor
         existing_mention = {
-            "name": "weka fs",
+            "name": "ncli files",
             "type": "Command",
-            "entity_id": "cmd:weka_fs",
+            "entity_id": "cmd:ncli_files",
             "source": "regex",
         }
 
         chunks = [
             {
                 "id": "chunk1",
-                "text": "Use weka fs mount to attach the filesystem on RHEL.",
+                "text": "Use ncli files mount to attach the share on RHEL.",
                 "_mentions": [existing_mention],
             }
         ]
@@ -117,7 +117,7 @@ class TestGLiNEREnrichmentIntegration:
         # Original mention should still be present
         regex_mentions = [m for m in mentions if m.get("source") == "regex"]
         assert len(regex_mentions) == 1
-        assert regex_mentions[0]["name"] == "weka fs"
+        assert regex_mentions[0]["name"] == "ncli files"
 
         # GLiNER mentions should be added (if any entities found)
         gliner_mentions = [m for m in mentions if m.get("source") == "gliner"]
@@ -200,8 +200,8 @@ class TestNeo4jMentionsFilterLogic:
             # Structural mention (should be written to Neo4j)
             {
                 "section_id": "chunk1",
-                "entity_id": "cmd:weka_fs",
-                "name": "weka fs",
+                "entity_id": "cmd:ncli_files",
+                "name": "ncli files",
                 "type": "Command",
                 "source": "regex",
             },
@@ -254,7 +254,7 @@ class TestNeo4jMentionsFilterLogic:
 
         # Verify the expected mentions are present
         names = [m["name"] for m in passed_mentions]
-        assert "weka fs" in names
+        assert "ncli files" in names
         assert "--net-apply" in names
         assert "Installation" in names
         assert "RHEL" not in names  # GLiNER entity should be filtered

@@ -29,7 +29,7 @@ class TestMarkdownParser:
 
         doc = result["Document"]
         assert doc["source_type"] == "markdown"
-        assert doc["title"] == "Getting Started with WekaFS"
+        assert doc["title"] == "Getting Started with Nutanix Files"
         assert len(doc["id"]) == 64  # SHA-256 hash
 
         sections = result["Sections"]
@@ -83,7 +83,7 @@ class TestMarkdownParser:
 
         # Verify code blocks contain expected commands
         all_code = "\n".join("\n".join(s["code_blocks"]) for s in sections_with_code)
-        assert "weka" in all_code.lower()
+        assert "nutanix" in all_code.lower()
 
     def test_anchor_generation(self, sample_docs_path):
         """Test that anchors are generated for sections."""
@@ -138,7 +138,7 @@ class TestHTMLParser:
 
         doc = result["Document"]
         assert doc["source_type"] == "html"
-        assert "WekaFS" in doc["title"]
+        assert "Nutanix Files" in doc["title"]
 
         sections = result["Sections"]
         assert len(sections) > 0

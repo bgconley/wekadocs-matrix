@@ -13,7 +13,7 @@ They provide hands-off data protection with configurable retention.
 Create a policy with the following command:
 
 ```bash
-weka fs snapshot policy create --name hourly --schedule "0 * * * *" --retain 24
+ncli files snapshot-policy create name=hourly schedule="0 * * * *" retain=24
 ```
 
 This creates an hourly snapshot policy that retains the last 24 snapshots.

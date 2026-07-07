@@ -57,7 +57,7 @@ def vector_store(config, neo4j_driver):
         host = os.getenv("QDRANT_HOST", "localhost")
         port = int(os.getenv("QDRANT_PORT", 6333))
         client = QdrantClient(host=host, port=port)
-        collection_name = "weka_sections"  # Default from config
+        collection_name = "nutanix_sections"  # Default from config
         return QdrantVectorStore(client, collection_name)
     else:
         index_name = "section_embeddings"  # Default from config
@@ -95,7 +95,7 @@ class TestVectorSearch:
 
     def test_vector_search_respects_k(self, vector_store, embedder):
         """Test that vector search respects k limit."""
-        query_vector = embedder.encode("weka").tolist()
+        query_vector = embedder.encode("nutanix").tolist()
         results = vector_store.search(query_vector, k=3)
 
         assert len(results) <= 3

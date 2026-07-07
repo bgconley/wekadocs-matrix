@@ -57,19 +57,19 @@ class TestGLiNERLiveModel:
         assert service._device in ("mps", "cuda", "cpu")
         print(f"\n  Device detected: {service._device}")
 
-    def test_extract_weka_entities(self):
-        """Verify extraction works with WEKA-specific text."""
+    def test_extract_nutanix_entities(self):
+        """Verify extraction works with Nutanix-specific text."""
         from src.providers.ner.gliner_service import GLiNERService
         from src.providers.ner.labels import get_default_labels
 
         service = GLiNERService()
         labels = get_default_labels()
 
-        # Real WEKA documentation text
+        # Real Nutanix documentation text
         text = """
-        To mount WEKA filesystem on RHEL 8, install the weka-agent package
-        and configure NFS exports. Use the weka fs mount command with
-        --net-apply option. Check /var/log/weka for errors.
+        To mount Nutanix Files on RHEL 8, install the Nutanix client package
+        and configure NFS exports. Use the ncli files mount command with
+        --net-apply option. Check /var/log/nutanix for errors.
         """
 
         entities = service.extract_entities(text, labels)
@@ -86,7 +86,7 @@ class TestGLiNERLiveModel:
         entity_texts_lower = {e.text.lower() for e in entities}
 
         # Should recognize at least some of these
-        expected_finds = ["weka", "rhel", "nfs"]
+        expected_finds = ["nutanix", "rhel", "nfs"]
         found_any = any(exp in entity_texts_lower for exp in expected_finds)
 
         print(f"  Labels found: {entity_labels}")
@@ -105,7 +105,7 @@ class TestGLiNERLiveModel:
 
         texts = [
             "Mount NFS share on Ubuntu 22.04 LTS",
-            "Configure AWS S3 backend for WEKA cluster",
+            "Configure Nutanix Objects S3 endpoint for Nutanix cluster",
             "Check IOPS performance with fio benchmark",
         ]
 
@@ -202,7 +202,7 @@ class TestGLiNERModelPerformance:
         _ = service.extract_entities("warmup text", labels)
 
         # Measure extraction time
-        text = "Configure WEKA cluster with NFS exports on RHEL 8 servers."
+        text = "Configure Nutanix cluster with NFS exports on RHEL 8 servers."
 
         start = time.perf_counter()
         _ = service.extract_entities(text, labels)
@@ -228,7 +228,7 @@ class TestGLiNERModelPerformance:
 
         # Create batch of realistic texts
         texts = [
-            f"Document {i}: Configure WEKA backend {i} with NFS mount on host-{i}"
+            f"Document {i}: Configure Nutanix Files endpoint {i} with NFS mount on host-{i}"
             for i in range(32)
         ]
 

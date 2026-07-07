@@ -29,44 +29,44 @@ GOLDEN_SET_QUERIES = [
     {
         "id": 1,
         "category": "installation",
-        "query": "How do I install Weka on Ubuntu?",
+        "query": "How do I deploy Nutanix Cloud Platform software?",
         "expected_sections": (3, 5),
     },
     {
         "id": 2,
         "category": "installation",
-        "query": "What are the hardware requirements for Weka?",
+        "query": "What are the hardware requirements for Nutanix Cloud Platform?",
         "expected_sections": (2, 4),
     },
     {
         "id": 3,
         "category": "installation",
-        "query": "How do I set up a Weka cluster?",
+        "query": "How do I set up a Nutanix cluster?",
         "expected_sections": (4, 6),
     },
     {
         "id": 4,
         "category": "installation",
-        "query": "How do I configure Weka licensing?",
+        "query": "How do I configure Nutanix licensing?",
         "expected_sections": (2, 3),
     },
     # Configuration & Management (5-8)
     {
         "id": 5,
         "category": "configuration",
-        "query": "How do I create a filesystem in Weka?",
+        "query": "How do I create a Nutanix Files share?",
         "expected_sections": (3, 5),
     },
     {
         "id": 6,
         "category": "configuration",
-        "query": "How do I manage users and permissions in Weka?",
+        "query": "How do I manage users and permissions in Nutanix?",
         "expected_sections": (3, 4),
     },
     {
         "id": 7,
         "category": "configuration",
-        "query": "How do I configure networking for Weka?",
+        "query": "How do I configure networking for Nutanix?",
         "expected_sections": (4, 6),
     },
     {
@@ -79,7 +79,7 @@ GOLDEN_SET_QUERIES = [
     {
         "id": 9,
         "category": "operations",
-        "query": "How do I monitor Weka cluster health?",
+        "query": "How do I monitor Nutanix cluster health?",
         "expected_sections": (4, 6),
     },
     {
@@ -97,14 +97,14 @@ GOLDEN_SET_QUERIES = [
     {
         "id": 12,
         "category": "operations",
-        "query": "How do I collect and analyze Weka logs?",
+        "query": "How do I collect and analyze Nutanix logs?",
         "expected_sections": (3, 4),
     },
     # Performance & Optimization (13-16)
     {
         "id": 13,
         "category": "performance",
-        "query": "How do I optimize SSD performance in Weka?",
+        "query": "How do I optimize storage performance in Nutanix?",
         "expected_sections": (4, 5),
     },
     {
@@ -141,13 +141,13 @@ GOLDEN_SET_QUERIES = [
     {
         "id": 19,
         "category": "advanced",
-        "query": "How do I use the Weka REST API?",
+        "query": "How do I use the Nutanix v4 APIs?",
         "expected_sections": (4, 6),
     },
     {
         "id": 20,
         "category": "advanced",
-        "query": "How do I upgrade Weka to a new version?",
+        "query": "How do I upgrade Nutanix software to a new version?",
         "expected_sections": (4, 6),
     },
 ]

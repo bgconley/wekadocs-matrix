@@ -31,10 +31,12 @@ class TestCommandExtraction:
         commands = [e for e in entities.values() if e["label"] == "Command"]
         assert len(commands) > 0
 
-        # Should find weka commands
+        # Should find Nutanix commands
         command_names = [c["name"] for c in commands]
-        weka_commands = [c for c in command_names if "weka" in c.lower()]
-        assert len(weka_commands) > 0
+        nutanix_commands = [
+            c for c in command_names if "nutanix" in c.lower() or "ncli" in c.lower()
+        ]
+        assert len(nutanix_commands) > 0
 
     def test_commands_have_mentions(self, sample_sections):
         """Test that commands have MENTIONS relationships."""
@@ -95,9 +97,9 @@ class TestConfigurationExtraction:
         configs = [e for e in entities.values() if e["label"] == "Configuration"]
         assert len(configs) > 0
 
-        # Should find weka.conf
+        # Should find nutanix.conf
         config_names = [c["name"] for c in configs]
-        assert any("weka.conf" in name for name in config_names)
+        assert any("nutanix.conf" in name for name in config_names)
 
     def test_extracts_config_parameters(self, sample_sections):
         """Test extraction of configuration parameters."""
@@ -124,7 +126,7 @@ class TestConfigurationExtraction:
             "id": "test-env-section",
             "document_id": "test-doc",
             "title": "Environment Variables",
-            "text": "Set $WEKA_HOME and ${MAX_MEMORY} before starting.",
+            "text": "Set $NUTANIX_HOME and ${MAX_MEMORY} before starting.",
             "tokens": 10,
             "checksum": "abc123",
             "anchor": "env",
@@ -140,7 +142,7 @@ class TestConfigurationExtraction:
         config_names = [c["name"] for c in configs]
 
         # Should find env vars
-        assert "WEKA_HOME" in config_names or "MAX_MEMORY" in config_names
+        assert "NUTANIX_HOME" in config_names or "MAX_MEMORY" in config_names
 
 
 class TestProcedureExtraction:

@@ -276,7 +276,7 @@ def test_h3_ingestion_with_provider():
 
         # Test 3: Generate test embeddings
         print("Test 3: Generate test embeddings...")
-        test_text = "This is a test document about Weka filesystem configuration."
+        test_text = "This is a test document about Nutanix Files configuration."
         embeddings = provider.embed_documents([test_text])
 
         assert len(embeddings) == 1

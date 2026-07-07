@@ -95,7 +95,7 @@ Set `cluster.size` to 3 nodes.
 
 ### Commands
 ```bash
-weka cluster create
+ncli cluster create
 ```
 """
 

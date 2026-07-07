@@ -18,7 +18,7 @@ class TestIntentClassifier:
         classifier = IntentClassifier()
         assert classifier.classify("find documentation about installation") == "search"
         assert classifier.classify("show me all configurations") == "search"
-        assert classifier.classify("search for WekaFS documentation") == "search"
+        assert classifier.classify("search for Nutanix Files documentation") == "search"
 
     def test_classify_troubleshoot_intent(self):
         classifier = IntentClassifier()
@@ -56,9 +56,9 @@ class TestEntityLinker:
 
     def test_link_command(self):
         linker = EntityLinker()
-        entities = linker.link("Run weka cluster create to initialize")
+        entities = linker.link("Run ncli cluster create to initialize")
         assert "command_name" in entities
-        assert "weka cluster" in entities["command_name"]
+        assert "ncli cluster" in entities["command_name"]
 
     def test_link_component(self):
         linker = EntityLinker()

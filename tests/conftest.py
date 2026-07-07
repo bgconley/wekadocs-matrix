@@ -136,7 +136,7 @@ def setup_tracing():
     # Create a basic TracerProvider for tests (no exporter needed)
     resource = Resource.create(
         {
-            "service.name": "wekadocs-mcp-test",
+            "service.name": "nutanix-mcp-test",
             "service.version": "0.1.0-test",
         }
     )

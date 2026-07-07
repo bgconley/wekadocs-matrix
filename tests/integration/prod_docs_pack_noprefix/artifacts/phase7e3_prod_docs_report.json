@@ -99,8 +99,8 @@
     },
     {
       "tag": "PRODPACK-02",
-      "src_uri": "tests://prodpack/PRODPACK-02/weka-filesystems-and-object-stores_attaching-detaching-object-stores-to-from-filesystems_attaching-detaching-object-stores-to-from-filesystems-1.md",
-      "filename": "weka-filesystems-and-object-stores_attaching-detaching-object-stores-to-from-filesystems_attaching-detaching-object-stores-to-from-filesystems-1.md",
+      "src_uri": "tests://prodpack/PRODPACK-02/nutanix-files-and-object-stores_attaching-detaching-object-stores-to-from-filesystems_attaching-detaching-object-stores-to-from-filesystems-1.md",
+      "filename": "nutanix-files-and-object-stores_attaching-detaching-object-stores-to-from-filesystems_attaching-detaching-object-stores-to-from-filesystems-1.md",
       "query": "How do I attach or detach an object store from a filesystem PRODPACK-02",
       "ingestion": {
         "document_id": "bcf1fc4ea7d5067a9b6a34722fcc153c22f6499af24b452e32404ff3f881a431",

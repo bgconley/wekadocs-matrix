@@ -66,9 +66,9 @@ class TestComputeParentPathDepth:
         # We test the actual behavior
         assert result >= 1  # At minimum, it's one heading
 
-    def test_real_weka_path(self):
-        """Test with realistic WEKA documentation path."""
-        path = "WEKA System Overview > Planning > Networking Requirements"
+    def test_real_nutanix_path(self):
+        """Test with realistic Nutanix documentation path."""
+        path = "Nutanix Cloud Platform Overview > Planning > Networking Requirements"
         assert compute_parent_path_depth(path) == 3
 
 

@@ -1,4 +1,4 @@
-# Baseline Query Set for WekaDocs GraphRAG
+# Baseline Query Set for Nutanix Docs GraphRAG
 # Phase 0: Establishes representative queries for quality metrics (MRR, NDCG@10)
 #
 # Query Types:
@@ -21,7 +21,7 @@ queries:
   - id: proc_001
     text: "How do I create a filesystem snapshot?"
     type: procedural
-    expected_topics: ["snapshot", "weka fs snapshot", "create"]
+    expected_topics: ["Nutanix Files", "snapshot", "create"]
     difficulty: easy
 
   - id: proc_002
@@ -55,7 +55,7 @@ queries:
     difficulty: hard
 
   - id: proc_007
-    text: "How to upgrade WEKA software version?"
+    text: "How to upgrade Nutanix software version?"
     type: procedural
     expected_topics: ["upgrade", "version", "software"]
     difficulty: hard
@@ -68,7 +68,7 @@ queries:
 
   # === TROUBLESHOOTING QUERIES ===
   - id: trouble_001
-    text: "weka cluster container failure error"
+    text: "Nutanix cluster service failure error"
     type: troubleshooting
     expected_topics: ["container", "failure", "error", "cluster"]
     difficulty: hard
@@ -129,7 +129,7 @@ queries:
     difficulty: easy
 
   - id: ref_004
-    text: "Minimum hardware requirements for WEKA cluster"
+    text: "Minimum hardware requirements for Nutanix Cloud Platform"
     type: reference
     expected_topics: ["hardware", "requirements", "minimum", "CPU", "memory"]
     difficulty: medium
@@ -141,51 +141,51 @@ queries:
     difficulty: medium
 
   - id: ref_006
-    text: "Supported Linux distributions for WEKA"
+    text: "Supported operating systems for Nutanix"
     type: reference
     expected_topics: ["Linux", "distribution", "supported", "OS"]
     difficulty: easy
 
   # === CONCEPTUAL QUERIES (Architecture/Design) ===
   - id: concept_001
-    text: "How does WEKA tiering work?"
+    text: "How does Nutanix Objects lifecycle tiering work?"
     type: conceptual
     expected_topics: ["tiering", "architecture", "hot", "cold", "object store"]
     difficulty: medium
 
   - id: concept_002
-    text: "What is the WEKA data protection model?"
+    text: "What is the Nutanix data protection model?"
     type: conceptual
     expected_topics: ["protection", "redundancy", "stripe", "parity"]
     difficulty: hard
 
   - id: concept_003
-    text: "Explain WEKA cluster architecture"
+    text: "Explain Nutanix Cloud Platform architecture"
     type: conceptual
     expected_topics: ["cluster", "architecture", "backend", "frontend", "client"]
     difficulty: hard
 
   - id: concept_004
-    text: "How does WEKA handle data distribution?"
+    text: "How does Nutanix AOS handle data distribution?"
     type: conceptual
     expected_topics: ["distribution", "stripe", "chunk"]
     difficulty: hard
 
   - id: concept_005
-    text: "What is a WEKA container?"
+    text: "What is a Nutanix Controller VM?"
     type: conceptual
     expected_topics: ["container", "process", "backend"]
     difficulty: medium
 
   # === NAVIGATIONAL QUERIES ===
   - id: nav_001
-    text: "WEKA CLI command reference"
+    text: "Nutanix nCLI command reference"
     type: navigational
     expected_topics: ["CLI", "command", "reference"]
     difficulty: easy
 
   - id: nav_002
-    text: "API documentation for WEKA"
+    text: "API documentation for Nutanix"
     type: navigational
     expected_topics: ["API", "REST", "documentation"]
     difficulty: easy
@@ -198,33 +198,33 @@ queries:
 
   # === COMMAND QUERIES (CLI Usage) ===
   - id: cmd_001
-    text: "weka fs tier status command"
+    text: "Nutanix Objects lifecycle status command"
     type: command
-    expected_topics: ["weka fs tier", "status"]
+    expected_topics: ["Nutanix Objects", "lifecycle", "status"]
     difficulty: easy
 
   - id: cmd_002
-    text: "How to use weka cluster status"
+    text: "How to use nCLI cluster status"
     type: command
-    expected_topics: ["weka cluster", "status"]
+    expected_topics: ["nCLI", "cluster", "status"]
     difficulty: easy
 
   - id: cmd_003
-    text: "weka fs snapshot list options"
+    text: "Nutanix Files snapshot list options"
     type: command
-    expected_topics: ["weka fs snapshot", "list", "options"]
+    expected_topics: ["Nutanix Files", "snapshot", "list", "options"]
     difficulty: easy
 
   - id: cmd_004
-    text: "weka events show command parameters"
+    text: "Prism Central events show command parameters"
     type: command
-    expected_topics: ["weka events", "show", "parameters"]
+    expected_topics: ["Prism Central", "events", "show", "parameters"]
     difficulty: medium
 
   - id: cmd_005
-    text: "weka alerts mute syntax"
+    text: "Prism Central alerts mute syntax"
     type: command
-    expected_topics: ["weka alerts", "mute"]
+    expected_topics: ["Prism Central", "alerts", "mute"]
     difficulty: medium
 
   # === MULTI-TOPIC QUERIES (Cross-document) ===

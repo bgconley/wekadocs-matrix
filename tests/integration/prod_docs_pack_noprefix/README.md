@@ -11,7 +11,7 @@ during the test. Your app does **not** rely on filename prefixes; tags are not d
 prod_docs_pack_noprefix/
   docs/
     additional-protocols_s3_s3-information-lifecycle-management_s3-information-lifecycle-management.md
-    weka-filesystems-and-object-stores_attaching-detaching-object-stores-to-from-filesystems_attaching-detaching-object-stores-to-from-filesystems-1.md
+    nutanix-files-and-object-stores_attaching-detaching-object-stores-to-from-filesystems_attaching-detaching-object-stores-to-from-filesystems-1.md
   tests/test_phase7e3_prod_docs_pack.py
   runner/prod_docs_runner.py
   artifacts/

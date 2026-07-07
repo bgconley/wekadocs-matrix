@@ -5,7 +5,7 @@ doc_id: "test-tiering-001"
 
 ## Overview
 
-WEKA tiering allows automatic data movement between hot and cold storage tiers.
+Nutanix Objects lifecycle policies support data movement between active and object storage tiers.
 This reduces costs while maintaining performance for frequently accessed data.
 
 ## Configuration Steps
@@ -13,7 +13,7 @@ This reduces costs while maintaining performance for frequently accessed data.
 Use the following command to configure tiering:
 
 ```bash
-weka fs tier create --name archive-tier --backend s3://bucket
+ncli objects lifecycle-policy create name=archive-tier target=s3://bucket
 ```
 
 ## Related Topics

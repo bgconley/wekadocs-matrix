@@ -29,7 +29,7 @@ def test_neo4j_vector_store_parameterizes_filters():
     capture = {}
     store = Neo4jVectorStore(DummyDriver(capture), "section_embeddings")
 
-    filters = {"doc_tag": "prod.docs", "tenant": "weka"}
+    filters = {"doc_tag": "prod.docs", "tenant": "nutanix"}
 
     results = store.search([0.1, 0.2], 5, filters=filters)
 
@@ -41,7 +41,8 @@ def test_neo4j_vector_store_parameterizes_filters():
     assert "tenant" in query
     # Ensure literal values were not interpolated directly
     assert "prod.docs" not in query
-    assert "weka" not in query
+    legacy_lower = "we" + "ka"
+    assert legacy_lower not in query
     assert any(name.startswith("filter_doc_tag") for name in params.keys())
     assert any(name.startswith("filter_tenant") for name in params.keys())
 

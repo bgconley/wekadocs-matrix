@@ -69,7 +69,7 @@ def test_embedding_provider():
 
         # Test document embedding
         test_docs = [
-            "This is a test document about Weka filesystem.",
+            "This is a test document about Nutanix Files.",
             "Another document discussing storage configuration.",
         ]
 
@@ -89,7 +89,7 @@ def test_embedding_provider():
         print(f"  - Each has {len(doc_embeddings[0])} dimensions")
 
         # Test query embedding
-        test_query = "How do I configure NFS for Weka?"
+        test_query = "How do I configure NFS for Nutanix Files?"
         query_embedding = provider.embed_query(test_query)
 
         assert len(query_embedding) == provider.dims, "Wrong query dimensions"

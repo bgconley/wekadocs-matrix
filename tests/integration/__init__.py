@@ -1,1 +1,1 @@
-"""Integration tests for wekadocs-matrix."""
+"""Integration tests for nutanix-docs-matrix."""

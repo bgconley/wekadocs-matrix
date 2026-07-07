@@ -1,0 +1,47 @@
+# Minimal eval query set with gold section IDs
+queries:
+  - id: procedural_1
+    text: "Steps to configure S3 bucket lifecycle"
+    expected_type: procedural
+    expected_section_ids:
+      - b281c152061fc1b7801c337e
+      - f3691c6c5434537f936f039a
+      - bdfef5297ed827c87dd7ba2e
+      - ee070f6c7968158e8df9fe95
+      - 83c3eb8063d9f2dac474a32f
+  - id: troubleshooting_1
+    text: "error mounting nfs client not working"
+    expected_type: troubleshooting
+    expected_section_ids:
+      - 93ff5d9ac0a2c9a7226367cf
+      - 742b44d53cf447c57d4e2259
+      - c65324ca869912cbc1b1141b
+      - f406d0e7560d3e7f6013b6f2
+      - 581624fa27ac45345fd88838
+  - id: reference_1
+    text: "what is Nutanix Files snapshot policy"
+    expected_type: reference
+    expected_section_ids:
+      - 6576b8139c19b02b13c25bc3
+      - cd2a393c98f9f8920b4ab09f
+      - 033c7fa84c15a69769594bce
+      - 6d31024a5e8bc37b217324d5
+      - 1988b5eb3290771357b4a344
+  - id: navigational_1
+    text: "where is nfs export configuration"
+    expected_type: navigational
+    expected_section_ids:
+      - 3bb87483a8402dc0ad842a7c
+      - c01e28b9a83c77017064ff7a
+      - 581624fa27ac45345fd88838
+      - f406d0e7560d3e7f6013b6f2
+      - 93ff5d9ac0a2c9a7226367cf
+  - id: conceptual_1
+    text: "explain Nutanix data protection"
+    expected_type: conceptual
+    expected_section_ids:
+      - 1afb7b324127ed383d825a62
+      - 9290d2c8b0858d9e239879b3
+      - 79710a715d44316faf02a610
+      - 2047546e041ec86b07e19c37
+      - fd16417ebe179f697fec5db4

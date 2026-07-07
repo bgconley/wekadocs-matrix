@@ -225,7 +225,7 @@ class TestRerankerBatchLatency:
         # Generate 50 candidate documents
         candidates = [
             {
-                "text": f"Document {i} about WEKA filesystem operations including snapshots, tiering, and data protection."
+                "text": f"Document {i} about Nutanix Files operations including snapshots, object lifecycle tiering, and data protection."
             }
             for i in range(50)
         ]

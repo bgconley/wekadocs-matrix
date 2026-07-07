@@ -9,7 +9,7 @@ Tests cover:
 - Code block and table handling
 - Edge cases and error handling
 
-Author: WekaDocs Team
+Author: Nutanix Docs Team
 Created: 2024-12-10
 """
 

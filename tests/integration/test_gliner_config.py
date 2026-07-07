@@ -38,13 +38,12 @@ class TestNERConfigIntegration:
         assert hasattr(ner, "batch_size")
         assert hasattr(ner, "labels")
 
-    def test_config_ner_default_disabled(self):
-        """Verify NER is disabled by default."""
+    def test_config_ner_enabled_in_development(self):
+        """Verify NER is enabled in development config."""
         from src.shared.config import load_config
 
         config, _ = load_config()
-        # Development config should have enabled: false
-        assert config.ner.enabled is False
+        assert config.ner.enabled is True
 
     def test_config_ner_model_name(self):
         """Verify model name is set correctly."""
@@ -84,8 +83,8 @@ class TestNERConfigIntegration:
 
         assert isinstance(labels, list)
         assert len(labels) > 0
-        # Should have WEKA-specific labels
-        assert any("weka" in label.lower() for label in labels)
+        # Should have Nutanix-specific labels
+        assert any("nutanix" in label.lower() for label in labels)
 
     def test_config_ner_labels_have_examples(self):
         """Verify labels include example hints for zero-shot."""
@@ -105,18 +104,21 @@ class TestNERConfigIntegration:
         config, _ = load_config()
         labels_str = " ".join(config.ner.labels).lower()
 
-        # Check for expected domain-specific types
+        # Check for expected Nutanix domain-specific types
         expected_types = [
-            "software_component",
-            "operating_system",
-            "hardware",
-            "filesystem",
-            "cloud",
-            "cli_command",
+            "product",
+            "component",
+            "platform",
+            "version",
+            "command",
+            "api",
             "protocol",
+            "storage",
+            "cloud provider",
+            "deployment",
             "error",
-            "performance",
-            "path",
+            "metric",
+            "procedure",
         ]
 
         found = [t for t in expected_types if t in labels_str]
@@ -136,7 +138,7 @@ class TestLabelsHelperIntegration:
         assert isinstance(labels, list)
         assert len(labels) > 0
         # Should match what's in config
-        assert any("weka" in label.lower() for label in labels)
+        assert any("nutanix" in label.lower() for label in labels)
 
     def test_get_label_names_clean(self):
         """Verify get_label_names returns clean names."""

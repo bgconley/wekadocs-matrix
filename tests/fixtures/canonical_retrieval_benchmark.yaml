@@ -13,7 +13,7 @@ queries:
     label: Metadata Architecture
     category: architecture
     difficulty: medium
-    text: "how is metadata managed and architected on a weka cluster"
+    text: "how is metadata managed and architected on Nutanix Cloud Platform"
     rationale: "Primary metadata architecture sentinel. Historically good when architecture retrieval is healthy."
     acceptance:
       rules:
@@ -37,7 +37,7 @@ queries:
     label: Metadata Limitations
     category: reference
     difficulty: easy
-    text: "what are the metadata limitations in WEKA filesystems"
+    text: "what are the metadata limitations in Nutanix Files"
     rationale: "Reference-style metadata query tied to an exact corpus heading."
     acceptance:
       rules:
@@ -51,7 +51,7 @@ queries:
     label: Dedicated Backend Configuration
     category: configuration
     difficulty: medium
-    text: "How do I configure a dedicated backend in WEKA?"
+    text: "How do I configure dedicated Nutanix cluster resources?"
     rationale: "Configuration benchmark grounded in the exact dedicated-backend heading."
     acceptance:
       rules:
@@ -65,7 +65,7 @@ queries:
     label: Container Sizing
     category: sizing
     difficulty: medium
-    text: "How do I appropriately size the weka drives, compute, and frontends containers?"
+    text: "How do I appropriately size Nutanix storage, compute, and AHV resources?"
     rationale: "Stable sizing prompt used in prior graph/specificity attribution runs."
     acceptance:
       rules:
@@ -73,7 +73,7 @@ queries:
           within: 5
           any_of:
             - "Backend CPU usage"
-            - "Plan the WEKA system hardware requirements"
+            - "Plan Nutanix Cloud Platform hardware requirements"
             - "Example 2: a server with a limited number of cores"
             - "Client's memory requirements"
           min_matches: 2
@@ -88,7 +88,7 @@ queries:
     label: Minimum Hardware Requirements
     category: reference
     difficulty: medium
-    text: "What are the minimum hardware requirements for a WEKA cluster?"
+    text: "What are the minimum hardware requirements for a Nutanix cluster?"
     rationale: "Known weak prompt retained intentionally so regressions and fixes are visible."
     acceptance:
       rules:
@@ -96,7 +96,7 @@ queries:
           within: 5
           any_of:
             - "Server minimum requirements"
-            - "Minimal server configuration for a WEKA cluster"
+            - "Minimal server configuration for a Nutanix cluster"
           min_matches: 1
           note: "At least one minimum-requirements section appears in the top 5."
 
@@ -104,18 +104,18 @@ queries:
     label: Cluster Drive CLI
     category: command
     difficulty: easy
-    text: "How do I use the weka cluster drive command?"
+    text: "How do I use nCLI storage commands?"
     rationale: "Command-usage sentinel for exact CLI retrieval quality."
     acceptance:
       rules:
         - kind: heading_contains
           within: 5
-          any_of: ["weka cluster drive"]
+          any_of: ["ncli storage"]
           min_matches: 3
           note: "Top 5 should be dominated by cluster-drive command sections."
         - kind: doc_tag_equals
           within: 5
-          any_of: ["getting-started-with-weka"]
+          any_of: ["getting-started-with-nutanix"]
           min_matches: 3
           note: "At least three of the top 5 results should come from the CLI guide."
 
@@ -123,7 +123,7 @@ queries:
     label: Cluster Expansion
     category: procedural
     difficulty: easy
-    text: "How do I expand storage capacity in a WEKA cluster?"
+    text: "How do I expand storage capacity in a Nutanix cluster?"
     rationale: "Procedural query that should consistently hit expansion docs."
     acceptance:
       rules:
@@ -137,44 +137,44 @@ queries:
     label: Deduplication / Data Reduction
     category: conceptual
     difficulty: easy
-    text: "what is WEKA deduplication"
+    text: "what is Nutanix data reduction"
     rationale: "Reference/conceptual benchmark for data-reduction terminology."
     acceptance:
       rules:
         - kind: heading_contains
           within: 5
           any_of:
-            - "Data reduction **in WEKA filesystems**"
+            - "Data reduction **in Nutanix Files**"
             - "How data reduction operates"
           min_matches: 1
           note: "Data reduction guidance should appear in the top 5."
 
-  - id: local_weka_home_ports_01
-    label: Local WEKA Home Ports
+  - id: nutanix_central_ports_01
+    label: Nutanix Central Ports
     category: reference
     difficulty: medium
-    text: "What ports are required for Local WEKA Home?"
-    rationale: "Ports benchmark grounded in the Local WEKA Home deployment docs."
+    text: "What ports are required for Nutanix Central?"
+    rationale: "Ports benchmark grounded in the Nutanix Central deployment docs."
     acceptance:
       rules:
         - kind: heading_contains
           within: 5
           any_of:
-            - "Deploy Local WEKA Home v3.0 or higher"
-            - "Change the Local WEKA Home listening ports"
+            - "Deploy Nutanix Central"
+            - "Change Nutanix Central listening ports"
           min_matches: 1
-          note: "Local WEKA Home deployment/ports guidance should appear in the top 5."
+          note: "Nutanix Central deployment/ports guidance should appear in the top 5."
 
   - id: gui_overview_01
-    label: WEKA GUI Overview
+    label: Prism Central UI Overview
     category: navigational
     difficulty: easy
-    text: "How do I manage the system using the WEKA GUI?"
+    text: "How do I manage the system using Prism Central?"
     rationale: "GUI/admin query with a canonical exact heading in the corpus."
     acceptance:
       rules:
         - kind: heading_contains
           within: 3
-          any_of: ["WEKA GUI overview"]
+          any_of: ["Prism Central overview"]
           min_matches: 1
-          note: "WEKA GUI overview should appear in the top 3."
+          note: "Prism Central overview should appear in the top 3."

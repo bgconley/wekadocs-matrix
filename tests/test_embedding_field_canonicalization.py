@@ -70,7 +70,7 @@ def test_no_legacy_embedding_model_in_qdrant():
     """Ensure no Qdrant points have legacy embedding_model field."""
     qdrant_host = os.getenv("QDRANT_HOST", "localhost")
     qdrant_port = int(os.getenv("QDRANT_PORT", "6333"))
-    collection_name = os.getenv("QDRANT_COLLECTION", "weka_sections_v2")
+    collection_name = os.getenv("QDRANT_COLLECTION", "nutanix_sections_v2")
 
     client = QdrantClient(host=qdrant_host, port=qdrant_port)
 

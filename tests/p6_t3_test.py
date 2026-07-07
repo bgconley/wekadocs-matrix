@@ -19,6 +19,8 @@ from pathlib import Path
 import pytest
 import redis
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 # Test fixtures
 @pytest.fixture
@@ -39,7 +41,7 @@ This is a test document for CLI ingestion tests.
 ## Getting Started
 Run the following command:
 ```bash
-weka cluster create
+ncli cluster create
 ```
 
 ## Configuration
@@ -108,7 +110,7 @@ def run_cli(args, timeout=60):
         text=True,
         timeout=timeout,
         env=env,
-        cwd="/Users/brennanconley/vibecode/wekadocs-matrix",
+        cwd=str(REPO_ROOT),
     )
 
     # Filter out log lines from stdout (structured logging messages)

@@ -11,11 +11,11 @@ Using the CLI, you can:
 
 ## **Attach an object store bucket** to a filesystem
 
-**Command:** `weka fs tier s3 attach`
+**Command:** `ncli files object-store attach`
 
 To attach an object store to a filesystem, use the following command:
 
-`weka fs tier s3 attach <fs-name> <obs-name> [--mode mode]`
+`ncli files object-store attach share=<share-name> object-store=<object-store-name> mode=<mode>`
 
 **Parameters**
 
@@ -27,11 +27,11 @@ To attach an object store to a filesystem, use the following command:
 
 ## **Detach an object store bucket** from a filesystem
 
-**Command:** `weka fs tier s3 detach`
+**Command:** `ncli files object-store detach`
 
 To detach an object store from a filesystem, use the following command:
 
-`weka fs tier s3 detach <fs-name> <obs-name>`
+`ncli files object-store detach share=<share-name> object-store=<object-store-name>`
 
 **Parameters**
 
@@ -40,4 +40,4 @@ To detach an object store from a filesystem, use the following command:
  | fs-name* | Name of the filesystem to be detached from the object store |
  | obs-name* | Name of the object store to be detached |
 
-Note: To [recover from a snapshot](../../snap-to-obj#creating-a-filesystem-from-a-snapshot-using-the-cli) uploaded when two `local` object stores have been attached, use the `--additional-obs` parameter in the `weka fs download` command. The primary object store should be the one where the locator has been uploaded to
+Note: To [recover from a snapshot](../../snap-to-obj#creating-a-filesystem-from-a-snapshot-using-the-cli) uploaded when two `local` object stores have been attached, use the `additional-object-store` parameter in the `ncli files snapshot restore` command. The primary object store should be the one where the locator has been uploaded to

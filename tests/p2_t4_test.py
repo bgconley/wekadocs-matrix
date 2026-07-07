@@ -40,7 +40,7 @@ def sample_ranked_results():
             score=0.85,
             distance=1,
             metadata={
-                "name": "weka cluster create",
+                "name": "ncli cluster create",
                 "description": "Create a new cluster",
                 "updated_at": "2024-01-10T00:00:00Z",
             },
@@ -248,10 +248,10 @@ class TestMarkdownResponse:
         """Test that Markdown includes the original query."""
         builder = ResponseBuilder()
         response = builder.build_response(
-            "how to install weka", "search", sample_ranked_results, {}
+            "how to install nutanix", "search", sample_ranked_results, {}
         )
 
-        assert "how to install weka" in response.answer_markdown
+        assert "how to install nutanix" in response.answer_markdown
 
     def test_markdown_contains_intent(self, sample_ranked_results):
         """Test that Markdown includes intent."""
@@ -353,7 +353,7 @@ class TestEndToEnd:
     def test_complete_response_generation(self, sample_ranked_results):
         """Test complete response generation."""
         response = build_response(
-            query="how to install weka",
+            query="how to install nutanix",
             intent="search",
             ranked_results=sample_ranked_results,
             timing={"vector_time_ms": 50, "graph_time_ms": 100, "total_time_ms": 150},

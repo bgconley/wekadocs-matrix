@@ -6,7 +6,7 @@ doc_id: "test-dr-001"
 ## Overview
 
 Disaster recovery ensures business continuity when primary systems fail.
-WEKA supports multiple DR strategies using snapshots and replication.
+Nutanix supports multiple DR strategies using snapshots and replication.
 
 ## DR Strategies
 

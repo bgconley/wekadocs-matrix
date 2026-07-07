@@ -57,8 +57,8 @@ class TestPhase7CQueryPath:
 
 ## Prerequisites
 
-Before configuring NFS for Weka, ensure the following:
-- Weka cluster version 4.2 or higher
+Before configuring NFS for Nutanix Files, ensure the following:
+- Nutanix cluster version meets the Files NFS requirements
 - NFS client packages installed
 - Network connectivity between client and cluster
 
@@ -66,10 +66,10 @@ Before configuring NFS for Weka, ensure the following:
 
 ### Step 1: Enable NFS Protocol
 
-To enable the NFS protocol on your Weka cluster:
+To enable the NFS protocol for Nutanix Files:
 
 ```bash
-weka nfs enable
+ncli files nfs enable
 ```
 
 ### Step 2: Create NFS Export
@@ -77,7 +77,7 @@ weka nfs enable
 Create an NFS export for your filesystem:
 
 ```bash
-weka nfs export create --name my-export --filesystem my-fs --path /data
+ncli files nfs export create name=my-export share=my-share path=/data
 ```
 
 ### Step 3: Mount on Client
@@ -85,7 +85,7 @@ weka nfs export create --name my-export --filesystem my-fs --path /data
 Mount the NFS export on your client:
 
 ```bash
-mount -t nfs weka-cluster:/my-export /mnt/weka
+mount -t nfs nutanix-files:/my-export /mnt/nutanix
 ```
 
 ## Performance Tuning
@@ -102,7 +102,7 @@ For optimal NFS performance:
 If you experience connection timeouts:
 1. Check network connectivity
 2. Verify firewall rules allow NFS ports (2049, 111)
-3. Check Weka cluster status with `weka status`
+3. Check Nutanix cluster status in Prism Central or with `ncli cluster get`
 """
 
         # Ingest with real embeddings
@@ -149,7 +149,7 @@ If you experience connection timeouts:
         query_service = QueryService()
 
         # Execute query that should match our test document
-        query = "How do I configure NFS for Weka?"
+        query = "How do I configure NFS for Nutanix Files?"
 
         start_time = time.time()
         response = query_service.search(
@@ -350,12 +350,12 @@ class TestPhase7CSessionTracking:
         # Create session and query
         session_tracker.create_session(session_id)
         query_id = session_tracker.create_query(
-            session_id, "How do I configure NFS for Weka?", turn=1
+            session_id, "How do I configure NFS for Nutanix Files?", turn=1
         )
 
         # Extract focused entities
         focused_entities = session_tracker.extract_focused_entities(
-            query_id, "How do I configure NFS for Weka?"
+            query_id, "How do I configure NFS for Nutanix Files?"
         )
 
         # Note: This may return empty list if no entities match
