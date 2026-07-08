@@ -16,12 +16,14 @@ max_long_px  = 2000             # clamp long side (server pixel bounds are not e
 escalate_dpi = 300              # higher-fidelity retry DPI for garbled pages
 
 [convert]
-temperature      = 0.0
-max_tokens       = 6000         # dense spec tables run long
-timeout_s        = 240
-max_retries      = 4
-prev_tail_chars  = 800          # ~200 tokens of previous-page continuity context
-disable_thinking = true         # suppress reasoning tokens (verified on both engines)
+temperature       = 0.1         # mild nonzero sampling helps retry escape loops
+top_p             = 0.9
+frequency_penalty = 0.2         # mild repetition guard; keep CLI/table repeats intact
+max_tokens        = 6000        # dense spec tables run long
+timeout_s         = 240
+max_retries       = 4
+prev_tail_chars   = 800         # ~200 tokens of previous-page continuity context
+disable_thinking  = true        # suppress reasoning tokens (verified on both engines)
 
 [output]
 # Scratch default: OUTSIDE the git-tracked data/ingest/nutanix/ carve-out.

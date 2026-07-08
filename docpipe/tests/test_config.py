@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 import docpipe.config as config_mod
@@ -49,6 +51,16 @@ def test_env_dpi_must_be_positive_integer(monkeypatch):
     monkeypatch.setenv("DOCPIPE_DPI", "0")
     with pytest.raises(ValueError, match="DOCPIPE_DPI.*positive integer"):
         config_mod.load()
+
+
+def test_shipped_toml_keeps_engine_sampler_hardened():
+    cfg_path = Path(__file__).resolve().parents[1] / "docpipe.toml"
+
+    cfg = config_mod.load(cfg_path)
+
+    assert cfg.convert.temperature == pytest.approx(0.1)
+    assert cfg.convert.top_p == pytest.approx(0.9)
+    assert cfg.convert.frequency_penalty == pytest.approx(0.2)
 
 
 def test_partial_toml_endpoint_merges_with_curated_defaults(tmp_path):
