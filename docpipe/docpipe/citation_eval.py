@@ -360,7 +360,9 @@ def mcp_tool_call(
     if parsed.get("error"):
         raise RuntimeError(f"MCP tool call returned error: {parsed['error']}")
     result = parsed.get("result")
-    return result if isinstance(result, dict) else parsed
+    payload = result if isinstance(result, dict) else parsed
+    _raise_for_tool_error(payload)
+    return payload
 
 
 def _parse_mcp_response(body: str) -> Any:
@@ -398,8 +400,22 @@ def run_evaluation(
                 retrieval_depth=retrieval_depth,
             ),
         )
+        _raise_for_tool_error(payload)
         cases.append(evaluate_payload(question, payload))
     return CitationReport(cases)
+
+
+def _raise_for_tool_error(payload: dict[str, Any]) -> None:
+    if not payload.get("isError"):
+        return
+    messages: list[str] = []
+    content = payload.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                messages.append(item["text"])
+    detail = "; ".join(messages) if messages else json.dumps(payload, sort_keys=True)
+    raise RuntimeError(f"MCP tool returned error: {detail}")
 
 
 def _build_parser() -> argparse.ArgumentParser:

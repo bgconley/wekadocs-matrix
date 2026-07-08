@@ -265,3 +265,45 @@ def test_main_writes_report_from_mcp_payloads(tmp_path, monkeypatch, capsys):
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["pass_fraction"] == 1.0
     assert report["cases"][0]["id"] == "cite-ahv-admin-show-uplinks"
+
+
+def test_main_treats_mcp_tool_error_as_gateway_failure(tmp_path, monkeypatch, capsys):
+    spec = tmp_path / "citation.json"
+    spec.write_text(
+        """
+{
+  "questions": [
+    {
+      "id": "cite-ahv-admin-show-uplinks",
+      "question": "Which command shows OVS uplinks on the local AHV host?",
+      "expected_sources": [
+        {
+          "source_pdf": "5c-book-of-ahv-administration.pdf",
+          "slug": "5c-book-of-ahv-administration",
+          "must_cite_text": "manage_ovs show_uplinks"
+        }
+      ],
+      "must_answer_contain": ["manage_ovs show_uplinks"]
+    }
+  ]
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    report_path = tmp_path / "report.json"
+
+    def fake_call_tool(**_kwargs):
+        return {
+            "content": [{"type": "text", "text": "[Errno 111] Connection refused"}],
+            "isError": True,
+        }
+
+    monkeypatch.setattr(citation_eval, "mcp_tool_call", fake_call_tool)
+
+    rc = main(["--spec", str(spec), "--report", str(report_path)])
+
+    assert rc == 2
+    assert not report_path.exists()
+    err = capsys.readouterr().err
+    assert "citation-eval gateway error" in err
+    assert "Connection refused" in err
