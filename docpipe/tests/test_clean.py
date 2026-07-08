@@ -121,6 +121,47 @@ def test_clean_document_preserves_fenced_comments_end_to_end():
     assert "acli net.create vlan0 vlan=0" in md  # command still inside code
 
 
+def test_clean_document_fences_unfenced_cli_command_groups():
+    md, _title = clean_document(
+        "# AHV Commands\n\n"
+        "Use the following commands.\n\n"
+        "ncli storage list\n"
+        "ncli storage get name=default\n\n"
+        "nutanix@cvm$ manage_ovs show_bridges\n"
+        "<acropolis> ovs-vsctl show\n"
+        "ncli> cluster info\n"
+        "$ ssh nutanix@example\n\n"
+        "A price like $5 is prose, not a shell prompt.\n",
+        _rec(),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=200),
+    )
+    body = md.split("---\n", 2)[2]
+
+    assert "```bash\nncli storage list\nncli storage get name=default\n```" in body
+    assert (
+        "```bash\n"
+        "nutanix@cvm$ manage_ovs show_bridges\n"
+        "<acropolis> ovs-vsctl show\n"
+        "ncli> cluster info\n"
+        "$ ssh nutanix@example\n"
+        "```" in body
+    )
+    assert "A price like $5 is prose" in body
+
+
+def test_clean_document_does_not_refence_existing_cli_blocks():
+    md, _title = clean_document(
+        "# AHV Commands\n\n```bash\nncli storage list\n```\n\nDone.",
+        _rec(),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=200),
+    )
+    body = md.split("---\n", 2)[2]
+
+    assert body.count("```bash") == 1
+    assert body.count("```") == 2
+    assert "```bash\n```bash" not in body
+
+
 def test_clean_document_contract():
     md, title = clean_document(
         "# Hello World\n\nbody\n\n\n\n\nmore",

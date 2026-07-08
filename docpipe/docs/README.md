@@ -40,8 +40,25 @@ it was resumed from cache.)
   `pyright docpipe/` clean, and finding #2's exact failure verified resolved
   through the real downstream parser (**4 corrupt sections → 1 intact section**,
   commands retained as `code_blocks`).
-- **P0 remaining:** Cluster 2 (payload-validation gate — #1/#6/#9/#24/#27),
-  Cluster 3 (fail-soft orchestration — #7/#15/#25/#26/#28/#29/#30).
+- **2026-07-07 — Cluster 2 (payload-validation gate): RESOLVED.** Findings
+  **#1, #6, #9, #24, #27** fixed fail-closed: empty/still-truncated model
+  responses retry/fail instead of caching `ok`, and `is_done` /
+  `document_coverage` now require a valid non-empty `.md` whose length matches
+  the sidecar. TDD: async converter harness + artifact/coverage tests.
+- **2026-07-07 — Cheap fail-soft slice: RESOLVED.** Findings **#15, #26, #28,
+  #29** fixed: `/v1/models` probing skips dead endpoints and resolves from any
+  live endpoint, all-dead resolution raises `VLMError`, pending conversion with
+  zero runnable endpoints fails fast, and one bad PDF no longer aborts manifest
+  discovery.
+- **2026-07-07 — P1-5/R3.9 bare-CLI fencing: RESOLVED.** `clean_document` now
+  deterministically wraps unfenced `ncli`/`acli`/`ncli>`/`nutanix@`/
+  `<acropolis>`/`$ ` command groups in top-level `bash` fences, while skipping
+  existing fences. This closes the proven command-structure-loss fix; the
+  structure-aware `prev_tail` half of P1-5/R3.8 remains open.
+- **Remaining gating work:** the rest of Cluster 3 / fail-soft orchestration
+  (notably #7/#25/#30), the still-open P0 roadmap items outside the resolved
+  clusters, then P1-5/R3.8 structure-aware `prev_tail`, P1-1 anchoring, and P1-2
+  sampler hardening.
 
 ## Executive verdict
 

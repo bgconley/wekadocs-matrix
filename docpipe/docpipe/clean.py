@@ -28,6 +28,7 @@ _H1_RE = re.compile(r"^# +(\S.*?)\s*$")
 _ANY_H1_RE = re.compile(r"^# +(?=\S)")
 _MULTI_BLANK_RE = re.compile(r"\n{3,}")
 _H2PLUS_RE = re.compile(r"^#{2,6}\s")
+_BARE_CLI_RE = re.compile(r"^\s*(?:nutanix@|<acropolis>|ncli\s|acli\s|ncli>|\$\s).+")
 
 
 @dataclass
@@ -115,6 +116,29 @@ def balance_fences(body: str) -> str:
     return "\n".join(lines)
 
 
+def fence_bare_cli_commands(body: str) -> str:
+    """Fence unfenced command-looking lines for downstream command extraction."""
+
+    out: list[str] = []
+    in_cli_block = False
+    for line, in_code in iter_lines_with_fence_state(body):
+        is_cli = (
+            not in_code
+            and not is_fence_line(line)
+            and _BARE_CLI_RE.match(line) is not None
+        )
+        if is_cli and not in_cli_block:
+            out.append("```bash")
+            in_cli_block = True
+        elif in_cli_block and not is_cli:
+            out.append("```")
+            in_cli_block = False
+        out.append(line)
+    if in_cli_block:
+        out.append("```")
+    return "\n".join(out)
+
+
 def _yaml_scalar(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -165,6 +189,7 @@ def clean_document(
     body = collapse_blanks(stitched_body)
     title = resolve_title(body, record)
     body = ensure_title_h1(body, title)
+    body = fence_bare_cli_commands(body)
     body = balance_fences(body)
     body = collapse_blanks(body)
     frontmatter = build_frontmatter(record, title, run)
