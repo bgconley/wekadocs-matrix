@@ -96,7 +96,10 @@ it was resumed from cache.)
   genuinely higher token ceiling and refuse shorter retry output; and
   `_prev_tail` sidecar reads are executor-backed, guarded, and fall back to
   native PDF text on read faults. TDD: 5 behavior tests written RED first, then
-  green against the real converter loop.
+  green against the real converter loop. Follow-up validation found and fixed a
+  `--endpoint all` livelock in the #13 anti-affinity predicate: once every active
+  endpoint has tried a page, workers now stop deferring and allow the remaining
+  per-endpoint retry budget to make progress.
 - **2026-07-07 — Review correction pass: RESOLVED.** The external follow-up's
   three corrections are reflected in code/status: finding **#5** is fully closed
   by the relocation path refresh, the finding **#4** single-page fallback

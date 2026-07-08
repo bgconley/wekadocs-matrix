@@ -392,3 +392,47 @@ async def test_retryable_endpoint_failure_can_fail_over_to_second_endpoint(
     assert summary.converted == 1
     assert summary.failed == 0
     assert pool.calls == [("oxcart", None), ("blackbird", None)]
+
+
+def test_retry_deferral_stops_after_every_endpoint_has_tried_page(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.convert.max_retries = 4
+    conv = Converter(cfg, _pool(FakePool([])), "model")
+    conv._active_endpoint_names = {"oxcart", "blackbird"}
+    rec = _rec(tmp_path)
+    job = PageJob(rec.sha256, rec.pdf_path, 1, rec.page_count)
+    job.failed_endpoints.update({"oxcart", "blackbird"})
+    job.endpoint_attempts.update({"oxcart": 1, "blackbird": 1})
+
+    assert not conv._should_defer_to_untried_endpoint(job, "oxcart")
+    assert not conv._should_defer_to_untried_endpoint(job, "blackbird")
+
+
+@pytest.mark.asyncio
+async def test_retryable_endpoint_failures_do_not_livelock_after_all_endpoints_tried(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "docpipe.convert.render_page_data_url",
+        lambda *args, **kwargs: "data:image/png;base64,AAA=",
+    )
+    cfg = _cfg(tmp_path)
+    cfg.convert.max_retries = 2
+    cfg.convert.backoff_base_s = 0
+    for ep in cfg.endpoints:
+        ep.enabled = ep.name in {"oxcart", "blackbird"}
+        ep.inflight = 1
+    pool = MultiEndpointPool(
+        {
+            "oxcart": [_http_error(503, retryable=True), _result("# ok")],
+            "blackbird": [_http_error(503, retryable=True), _result("# ok")],
+        }
+    )
+    conv = Converter(cfg, _pool(pool), "model")
+
+    summary = await asyncio.wait_for(conv.run([_rec(tmp_path)]), timeout=0.2)
+
+    assert summary.converted == 1
+    assert summary.failed == 0
+    assert len(pool.calls) == 3
+    assert {endpoint for endpoint, _ in pool.calls[:2]} == {"oxcart", "blackbird"}

@@ -236,9 +236,8 @@ class Converter:
     def _should_defer_to_untried_endpoint(self, job: PageJob, endpoint: str) -> bool:
         if endpoint not in job.failed_endpoints:
             return False
-        max_attempts = self.config.convert.max_retries
         return any(
-            job.endpoint_attempts.get(other, 0) < max_attempts
+            other not in job.failed_endpoints
             for other in self._active_endpoint_names
             if other != endpoint
         )
