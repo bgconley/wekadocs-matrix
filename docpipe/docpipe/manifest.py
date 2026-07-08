@@ -187,11 +187,21 @@ def build(input_dir: Path, work_dir: Path) -> list[DocRecord]:
             rel = str(pdf.relative_to(input_dir.resolve()))
         except ValueError:
             rel = pdf.name
-        # Fast-path reuse: same rel_path AND unchanged size => trust cached sha/pages.
+        # Fast-path reuse only when same rel_path, size, and content hash match.
         prev = prev_by_path.get(rel)
-        if prev is not None and prev.size_bytes == pdf.stat().st_size:
-            records.append(prev)
-            continue
+        size_bytes = pdf.stat().st_size
+        if prev is not None and prev.size_bytes == size_bytes:
+            try:
+                current_sha = sha256_file(pdf)
+            except Exception as exc:
+                logger.warning(
+                    "skipping pdf after hash failure",
+                    extra={"fields": {"path": str(pdf), "error": str(exc)}},
+                )
+                continue
+            if prev.sha256 == current_sha:
+                records.append(prev)
+                continue
         try:
             rec = scan_pdf(pdf, input_dir.resolve())
         except Exception as exc:

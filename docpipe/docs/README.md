@@ -59,6 +59,10 @@ it was resumed from cache.)
   fixed: footer-band removal now requires a recurring page-edge band key, so
   real table rows ending in numeric cells (for example, capacity limits) survive
   while recurring footer bands like `AHV | Networking | 11/12` still drop.
+- **2026-07-07 — P0 manifest stale-reuse: RESOLVED.** Finding **#32 / P0-5**
+  fixed: manifest fast-path reuse now requires same `rel_path`, same byte size,
+  and the same current `sha256`, so same-size content edits are rescanned and
+  cannot serve stale page artifacts under the old cache key.
 - **2026-07-07 — P1-5/R3.9 bare-CLI fencing: RESOLVED.** `clean_document` now
   deterministically wraps unfenced `ncli`/`acli`/`ncli>`/`nutanix@`/
   `<acropolis>`/`$ ` command groups in top-level `bash` fences, while skipping

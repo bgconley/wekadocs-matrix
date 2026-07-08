@@ -61,3 +61,48 @@ def test_build_skips_pdf_that_fails_scan(tmp_path, monkeypatch):
 
     assert [record.rel_path for record in records] == ["good.pdf"]
     assert list(manifest.load_manifest(work_dir)) == ["cafebabe"]
+
+
+def test_build_rescans_same_size_pdf_when_content_hash_changes(tmp_path, monkeypatch):
+    input_dir = tmp_path / "input"
+    work_dir = tmp_path / "work"
+    input_dir.mkdir()
+    pdf = input_dir / "guide.pdf"
+    pdf.write_bytes(b"%PDF-1.7\nold\n")
+    old_size = pdf.stat().st_size
+    old = DocRecord(
+        pdf_path=str(pdf),
+        rel_path="guide.pdf",
+        sha256="oldsha",
+        size_bytes=old_size,
+        page_count=1,
+        slug="guide",
+        title=None,
+        doc_version=None,
+        product=None,
+    )
+    manifest.write_manifest(work_dir, [old])
+    pdf.write_bytes(b"%PDF-1.7\nnew\n")
+    assert pdf.stat().st_size == old_size
+    scanned: list[str] = []
+
+    def fake_scan_pdf(path: Path, root: Path) -> DocRecord:
+        scanned.append(path.name)
+        return DocRecord(
+            pdf_path=str(path),
+            rel_path="guide.pdf",
+            sha256="newsha",
+            size_bytes=path.stat().st_size,
+            page_count=1,
+            slug="guide",
+            title=None,
+            doc_version=None,
+            product=None,
+        )
+
+    monkeypatch.setattr(manifest, "scan_pdf", fake_scan_pdf)
+
+    records = manifest.build(input_dir, work_dir)
+
+    assert scanned == ["guide.pdf"]
+    assert [record.sha256 for record in records] == ["newsha"]
