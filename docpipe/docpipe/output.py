@@ -54,12 +54,15 @@ def assemble_document(
     model_id: str,
     *,
     dpi: Optional[int] = None,
+    prompt_version: Optional[str] = None,
     allow_incomplete: bool = False,
     qa_overlap: bool = True,
 ) -> DocResult:
     work_dir = Path(config.work_dir)
     dpi = dpi or config.rasterize.dpi
-    cov = document_coverage(work_dir, record, dpi, model_id)
+    cov = document_coverage(
+        work_dir, record, dpi, model_id, prompt_version=prompt_version
+    )
 
     result = DocResult(
         sha256=record.sha256,
@@ -90,9 +93,16 @@ def assemble_document(
     page_md: list[str] = []
     endpoints_used: set[str] = set()
     for page_no in cov.ok_pages:
-        md = artifacts.read_md(work_dir, record.sha256, page_no, dpi, model_id) or ""
+        md = (
+            artifacts.read_md(
+                work_dir, record.sha256, page_no, dpi, model_id, prompt_version
+            )
+            or ""
+        )
         page_md.append(md)
-        meta = artifacts.read_meta(work_dir, record.sha256, page_no, dpi, model_id)
+        meta = artifacts.read_meta(
+            work_dir, record.sha256, page_no, dpi, model_id, prompt_version
+        )
         if meta and meta.endpoint:
             endpoints_used.add(meta.endpoint)
         tl = None
@@ -152,6 +162,7 @@ def assemble_all(
     model_id: str,
     *,
     dpi: Optional[int] = None,
+    prompt_version: Optional[str] = None,
     allow_incomplete: bool = False,
     qa_overlap: bool = True,
 ) -> list[DocResult]:
@@ -185,6 +196,7 @@ def assemble_all(
                 assembly_rec,
                 model_id,
                 dpi=dpi,
+                prompt_version=prompt_version,
                 allow_incomplete=allow_incomplete,
                 qa_overlap=qa_overlap,
             )

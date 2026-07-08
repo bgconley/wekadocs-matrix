@@ -105,18 +105,26 @@ class DocCoverage:
 
 
 def document_coverage(
-    work_dir: Path, record: DocRecord, dpi: int, model_id: str
+    work_dir: Path,
+    record: DocRecord,
+    dpi: int,
+    model_id: str,
+    prompt_version: Optional[str] = None,
 ) -> DocCoverage:
     cov = DocCoverage(
         sha256=record.sha256, slug=record.slug, page_count=record.page_count
     )
     for page_no in range(1, record.page_count + 1):
-        meta = artifacts.read_meta(work_dir, record.sha256, page_no, dpi, model_id)
+        meta = artifacts.read_meta(
+            work_dir, record.sha256, page_no, dpi, model_id, prompt_version
+        )
         if meta is None:
             cov.missing_pages.append(page_no)
         elif (
             meta.status == "ok"
-            and artifacts.read_md(work_dir, record.sha256, page_no, dpi, model_id)
+            and artifacts.read_md(
+                work_dir, record.sha256, page_no, dpi, model_id, prompt_version
+            )
             is not None
         ):
             cov.ok_pages.append(page_no)

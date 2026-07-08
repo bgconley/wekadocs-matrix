@@ -59,6 +59,10 @@ def _load_config(args: argparse.Namespace) -> Config:
                 e.enabled = True
         else:
             names = {n.strip() for n in target.split(",") if n.strip()}
+            if not names:
+                raise SystemExit(
+                    f"no endpoints selected by --endpoint; known: {sorted(known)}"
+                )
             unknown = names - known
             if unknown:
                 raise SystemExit(
@@ -75,7 +79,7 @@ def _select_records(records: list, only: Optional[str], limit: Optional[int]) ->
         records = [
             r for r in records if needle in r.slug.lower() or r.sha256.startswith(only)
         ]
-    if limit:
+    if limit is not None:
         records = records[:limit]
     return records
 
@@ -97,6 +101,10 @@ async def _run_pipeline(
     if not records:
         print("no PDFs found to process", file=sys.stderr)
         return 2
+    if not cfg.active_endpoints:
+        raise SystemExit(
+            "no active endpoints configured; enable an endpoint or remove DOCPIPE_DISABLE"
+        )
 
     t0 = time.monotonic()
     async with VLMPool(cfg) as pool:
@@ -162,14 +170,16 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 2
     records = _select_records(records, getattr(args, "only", None), None)
 
-    rows = []
+    rows: list[tuple[str, int, int, int, int, int | str, str, str]] = []
     for rec in records:
         keysets = artifacts.discover_keysets(work, rec.sha256)
         if not keysets:
-            rows.append((rec.slug, rec.page_count, 0, 0, rec.page_count, "-", "-"))
+            rows.append((rec.slug, rec.page_count, 0, 0, rec.page_count, "-", "-", "-"))
             continue
-        for dpi, model_id in keysets:
-            cov = document_coverage(work, rec, dpi, model_id)
+        for dpi, model_id, prompt_version in keysets:
+            cov = document_coverage(
+                work, rec, dpi, model_id, prompt_version=prompt_version
+            )
             rows.append(
                 (
                     rec.slug,
@@ -178,7 +188,8 @@ def cmd_status(args: argparse.Namespace) -> int:
                     len(cov.failed_pages),
                     len(cov.missing_pages),
                     dpi,
-                    model_id.split("-")[0],
+                    prompt_version,
+                    model_id,
                 )
             )
 
@@ -187,25 +198,32 @@ def cmd_status(args: argparse.Namespace) -> int:
             json.dumps(
                 [
                     {
-                        "slug": r[0],
-                        "pages": r[1],
-                        "ok": r[2],
-                        "failed": r[3],
-                        "missing": r[4],
-                        "dpi": r[5],
-                        "model": r[6],
+                        "slug": slug,
+                        "pages": pages,
+                        "ok": ok,
+                        "failed": fail,
+                        "missing": miss,
+                        "dpi": dpi,
+                        "prompt_version": prompt_version,
+                        "model": model,
                     }
-                    for r in rows
+                    for slug, pages, ok, fail, miss, dpi, prompt_version, model in rows
                 ],
                 indent=2,
             )
         )
         return 0
 
-    print(f"{'document':<40} {'pages':>6} {'ok':>6} {'fail':>5} {'miss':>5} {'dpi':>5}")
-    print("-" * 74)
-    for slug, pages, ok, fail, miss, dpi, _model in rows:
-        print(f"{slug:<40} {pages:>6} {ok:>6} {fail:>5} {miss:>5} {str(dpi):>5}")
+    print(
+        f"{'document':<40} {'pages':>6} {'ok':>6} {'fail':>5} "
+        f"{'miss':>5} {'dpi':>5} {'prompt':>8} model"
+    )
+    print("-" * 118)
+    for slug, pages, ok, fail, miss, dpi, prompt_version, model in rows:
+        print(
+            f"{slug:<40} {pages:>6} {ok:>6} {fail:>5} "
+            f"{miss:>5} {str(dpi):>5} {prompt_version:>8} {model}"
+        )
     return 0
 
 

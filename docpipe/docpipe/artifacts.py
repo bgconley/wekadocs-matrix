@@ -2,13 +2,13 @@
 
 Each converted page is persisted as a Markdown file plus a JSON sidecar under::
 
-    <work_dir>/pages/<sha256>/d<dpi>_<model-slug>/<page:05d>.md
-                                                 /<page:05d>.json
+    <work_dir>/pages/<sha256>/d<dpi>_<model-slug>_p<prompt-version>/<page:05d>.md
+                                                                 /<page:05d>.json
 
-Encoding ``dpi`` and ``model_id`` into the path makes them part of the cache key,
-so a DPI bump or a model change is a natural cache MISS (re-convert) while an
-unchanged re-run is a HIT (instant). A page in ``status="failed"`` state is what
-``retry-failed`` scans for.
+Encoding ``dpi``, ``model_id``, and ``prompt_version`` into the path makes them
+part of the cache key, so a DPI bump, model change, or prompt change is a natural
+cache MISS (re-convert) while an unchanged re-run is a HIT (instant). A page in
+``status="failed"`` state is what ``retry-failed`` scans for.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ class PageMeta:
     dpi: int
     model_id: str
     status: str  # "ok" | "failed"
+    prompt_version: str = PROMPT_VERSION
     char_len: int = 0
     endpoint: Optional[str] = None
     image_tokens: Optional[int] = None
@@ -40,50 +41,93 @@ class PageMeta:
     updated_at: float = 0.0
 
 
-def _page_dir(work_dir: Path, sha256: str, dpi: int, model_id: str) -> Path:
+def _page_dir(
+    work_dir: Path,
+    sha256: str,
+    dpi: int,
+    model_id: str,
+    prompt_version: Optional[str] = None,
+) -> Path:
     # PROMPT_VERSION is part of the key so a prompt change is a cache miss.
-    return work_dir / "pages" / sha256 / f"d{dpi}_{slugify(model_id)}_p{PROMPT_VERSION}"
+    version = prompt_version or PROMPT_VERSION
+    return work_dir / "pages" / sha256 / f"d{dpi}_{slugify(model_id)}_p{version}"
 
 
-def md_path(work_dir: Path, sha256: str, page_no: int, dpi: int, model_id: str) -> Path:
-    return _page_dir(work_dir, sha256, dpi, model_id) / f"{page_no:05d}.md"
+def md_path(
+    work_dir: Path,
+    sha256: str,
+    page_no: int,
+    dpi: int,
+    model_id: str,
+    prompt_version: Optional[str] = None,
+) -> Path:
+    return (
+        _page_dir(work_dir, sha256, dpi, model_id, prompt_version) / f"{page_no:05d}.md"
+    )
 
 
 def meta_path(
-    work_dir: Path, sha256: str, page_no: int, dpi: int, model_id: str
+    work_dir: Path,
+    sha256: str,
+    page_no: int,
+    dpi: int,
+    model_id: str,
+    prompt_version: Optional[str] = None,
 ) -> Path:
-    return _page_dir(work_dir, sha256, dpi, model_id) / f"{page_no:05d}.json"
+    return (
+        _page_dir(work_dir, sha256, dpi, model_id, prompt_version)
+        / f"{page_no:05d}.json"
+    )
 
 
 def read_meta(
-    work_dir: Path, sha256: str, page_no: int, dpi: int, model_id: str
+    work_dir: Path,
+    sha256: str,
+    page_no: int,
+    dpi: int,
+    model_id: str,
+    prompt_version: Optional[str] = None,
 ) -> Optional[PageMeta]:
-    p = meta_path(work_dir, sha256, page_no, dpi, model_id)
+    p = meta_path(work_dir, sha256, page_no, dpi, model_id, prompt_version)
     if not p.is_file():
         return None
     try:
-        return PageMeta(**json.loads(p.read_text(encoding="utf-8")))
+        data = json.loads(p.read_text(encoding="utf-8"))
+        data.setdefault("prompt_version", prompt_version or PROMPT_VERSION)
+        return PageMeta(**data)
     except (json.JSONDecodeError, TypeError):
         return None
 
 
-def is_done(work_dir: Path, sha256: str, page_no: int, dpi: int, model_id: str) -> bool:
-    """True iff the page has an ``ok`` artifact for exactly this (dpi, model_id)."""
+def is_done(
+    work_dir: Path,
+    sha256: str,
+    page_no: int,
+    dpi: int,
+    model_id: str,
+    prompt_version: Optional[str] = None,
+) -> bool:
+    """True iff the page has an ``ok`` artifact for exactly this keyset."""
 
-    m = read_meta(work_dir, sha256, page_no, dpi, model_id)
+    m = read_meta(work_dir, sha256, page_no, dpi, model_id, prompt_version)
     if m is None or m.status != "ok":
         return False
-    return read_md(work_dir, sha256, page_no, dpi, model_id) is not None
+    return read_md(work_dir, sha256, page_no, dpi, model_id, prompt_version) is not None
 
 
 def read_md(
-    work_dir: Path, sha256: str, page_no: int, dpi: int, model_id: str
+    work_dir: Path,
+    sha256: str,
+    page_no: int,
+    dpi: int,
+    model_id: str,
+    prompt_version: Optional[str] = None,
 ) -> Optional[str]:
-    p = md_path(work_dir, sha256, page_no, dpi, model_id)
+    p = md_path(work_dir, sha256, page_no, dpi, model_id, prompt_version)
     if not p.is_file():
         return None
     text = p.read_text(encoding="utf-8")
-    meta = read_meta(work_dir, sha256, page_no, dpi, model_id)
+    meta = read_meta(work_dir, sha256, page_no, dpi, model_id, prompt_version)
     if meta is None or meta.status != "ok":
         return None
     if not text.strip():
@@ -116,6 +160,7 @@ def write_success(
         dpi=dpi,
         model_id=model_id,
         status="ok",
+        prompt_version=PROMPT_VERSION,
         char_len=len(markdown),
         endpoint=endpoint,
         image_tokens=image_tokens,
@@ -149,6 +194,7 @@ def write_failure(
         dpi=dpi,
         model_id=model_id,
         status="failed",
+        prompt_version=PROMPT_VERSION,
         char_len=0,
         error=error[:2000],
         attempts=attempts,
@@ -165,33 +211,56 @@ def write_failure(
 
 
 def iter_page_meta(
-    work_dir: Path, sha256: str, dpi: int, model_id: str
+    work_dir: Path,
+    sha256: str,
+    dpi: int,
+    model_id: str,
+    prompt_version: Optional[str] = None,
 ) -> Iterator[PageMeta]:
-    d = _page_dir(work_dir, sha256, dpi, model_id)
+    d = _page_dir(work_dir, sha256, dpi, model_id, prompt_version)
     if not d.is_dir():
         return
     for jp in sorted(d.glob("*.json")):
         try:
-            yield PageMeta(**json.loads(jp.read_text(encoding="utf-8")))
+            data = json.loads(jp.read_text(encoding="utf-8"))
+            data.setdefault("prompt_version", prompt_version or PROMPT_VERSION)
+            yield PageMeta(**data)
         except (json.JSONDecodeError, TypeError):
             continue
 
 
-def discover_keysets(work_dir: Path, sha256: str) -> list[tuple[int, str]]:
-    """Return the (dpi, model_id) keysets present for a doc (for ``status`` without probing)."""
+def _prompt_version_from_keyset_dir(path: Path) -> Optional[str]:
+    marker = "_p"
+    if marker not in path.name:
+        return None
+    return path.name.rsplit(marker, 1)[1] or None
+
+
+def discover_keysets(work_dir: Path, sha256: str) -> list[tuple[int, str, str]]:
+    """Return the (dpi, model_id, prompt_version) keysets present for a doc."""
 
     d = work_dir / "pages" / sha256
-    out: list[tuple[int, str]] = []
+    out: list[tuple[int, str, str]] = []
+    seen: set[tuple[int, str, str]] = set()
     if not d.is_dir():
         return out
     for sub in sorted(d.iterdir()):
         if not sub.is_dir():
             continue
+        dir_prompt = _prompt_version_from_keyset_dir(sub)
         for jp in sorted(sub.glob("*.json")):
             try:
-                m = PageMeta(**json.loads(jp.read_text(encoding="utf-8")))
+                data = json.loads(jp.read_text(encoding="utf-8"))
+                prompt_version = data.get("prompt_version") or dir_prompt
+                if not prompt_version:
+                    continue
+                data.setdefault("prompt_version", prompt_version)
+                m = PageMeta(**data)
             except (json.JSONDecodeError, TypeError):
                 continue
-            out.append((m.dpi, m.model_id))
+            key = (m.dpi, m.model_id, prompt_version)
+            if key not in seen:
+                seen.add(key)
+                out.append(key)
             break  # one meta is enough to identify the keyset
     return out

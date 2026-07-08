@@ -1,3 +1,5 @@
+import pytest
+
 import docpipe.config as config_mod
 
 
@@ -37,3 +39,48 @@ def test_disable_env(monkeypatch):
     assert by["oxcart"].enabled is False
     # oxcart disabled + blackbird default-off -> nothing active.
     assert cfg.active_endpoints == []
+
+
+def test_env_dpi_must_be_positive_integer(monkeypatch):
+    monkeypatch.setenv("DOCPIPE_DPI", "300dpi")
+    with pytest.raises(ValueError, match="DOCPIPE_DPI.*positive integer"):
+        config_mod.load()
+
+    monkeypatch.setenv("DOCPIPE_DPI", "0")
+    with pytest.raises(ValueError, match="DOCPIPE_DPI.*positive integer"):
+        config_mod.load()
+
+
+def test_partial_toml_endpoint_merges_with_curated_defaults(tmp_path):
+    cfg_path = tmp_path / "docpipe.toml"
+    cfg_path.write_text(
+        """
+[[endpoints]]
+name = "oxcart"
+base_url = "http://local-oxcart:18002"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    cfg = config_mod.load(cfg_path)
+    by = {e.name: e for e in cfg.endpoints}
+
+    assert set(by) == {"oxcart", "blackbird"}
+    assert by["oxcart"].base_url == "http://local-oxcart:18002"
+    assert by["oxcart"].bearer == "EMPTY"
+    assert by["oxcart"].inflight == 6
+    assert by["blackbird"].enabled is False
+
+
+def test_unknown_toml_keys_are_rejected(tmp_path):
+    cfg_path = tmp_path / "docpipe.toml"
+    cfg_path.write_text(
+        """
+[rasterize]
+dip = 300
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="dip"):
+        config_mod.load(cfg_path)

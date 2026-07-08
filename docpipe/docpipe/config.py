@@ -17,12 +17,14 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 FiguresMode = Literal["enriched", "minimal", "skip"]
 
 
 class EndpointConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     base_url: str
     bearer: Optional[str] = None  # Authorization: Bearer <bearer> when set
@@ -46,12 +48,16 @@ class EndpointConfig(BaseModel):
 
 
 class RasterizeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     dpi: int = 200  # base render DPI (US-Letter@200 -> ~1700x2200 px)
     max_long_px: int = 2000  # clamp the long side; keeps image tokens ~3-5K/page
     escalate_dpi: int = 300  # retry DPI for pages QA flags as garbled
 
 
 class ConvertConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     temperature: float = 0.0
     max_tokens: int = 6000  # dense spec tables run long
     timeout_s: float = 240.0
@@ -62,6 +68,8 @@ class ConvertConfig(BaseModel):
 
 
 class OutputConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     # Scratch default per the standing decision: write outside the git-tracked
     # data/ingest/nutanix/ carve-out until placement is finalized.
     dir: str = "ETL-for-corpus/transformed-corpus"
@@ -69,6 +77,8 @@ class OutputConfig(BaseModel):
 
 
 class Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     input_dir: str = "ETL-for-corpus"
     work_dir: str = ".docpipe_work"  # manifest + per-page artifact cache
     model_id: Optional[str] = None  # None -> probe /v1/models
@@ -116,6 +126,43 @@ def default_config() -> Config:
     return Config(endpoints=_default_endpoints())
 
 
+def _parse_positive_int(value: str, env_name: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{env_name} must be a positive integer") from exc
+    if parsed <= 0:
+        raise ValueError(f"{env_name} must be a positive integer")
+    return parsed
+
+
+def _merge_endpoint_list(
+    base_endpoints: list[dict[str, Any]], override_endpoints: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    merged_by_name = {str(ep.get("name")): dict(ep) for ep in base_endpoints}
+    order = [str(ep.get("name")) for ep in base_endpoints]
+    for endpoint in override_endpoints:
+        name = str(endpoint.get("name"))
+        if name in merged_by_name:
+            merged_by_name[name] = {**merged_by_name[name], **endpoint}
+        else:
+            merged_by_name[name] = dict(endpoint)
+            order.append(name)
+    return [merged_by_name[name] for name in order]
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        if key == "endpoints" and isinstance(value, list):
+            merged[key] = _merge_endpoint_list(list(merged.get(key, [])), value)
+        elif isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(dict(merged[key]), value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def _apply_env(cfg: Config) -> Config:
     """Overlay DOCPIPE_* environment variables onto a config."""
 
@@ -132,7 +179,7 @@ def _apply_env(cfg: Config) -> Config:
         if v in ("enriched", "minimal", "skip"):
             cfg.figures = v  # type: ignore[assignment]
     if v := env.get("DOCPIPE_DPI"):
-        cfg.rasterize.dpi = int(v)
+        cfg.rasterize.dpi = _parse_positive_int(v, "DOCPIPE_DPI")
 
     by_name = {e.name: e for e in cfg.endpoints}
     if (v := env.get("DOCPIPE_BLACKBIRD_URL")) and "blackbird" in by_name:
@@ -152,9 +199,7 @@ def _apply_env(cfg: Config) -> Config:
 def _merge_toml(base: dict[str, Any], toml_path: Path) -> dict[str, Any]:
     with toml_path.open("rb") as fh:
         data = tomllib.load(fh)
-    merged = dict(base)
-    merged.update(data)
-    return merged
+    return _deep_merge(base, data)
 
 
 def load(config_path: str | os.PathLike[str] | None = None) -> Config:
@@ -179,7 +224,5 @@ def load(config_path: str | os.PathLike[str] | None = None) -> Config:
     if path is not None:
         raw = _merge_toml(cfg.model_dump(), path)
         cfg = Config.model_validate(raw)
-        if not cfg.endpoints:  # TOML omitted endpoints -> keep defaults
-            cfg.endpoints = _default_endpoints()
 
     return _apply_env(cfg)

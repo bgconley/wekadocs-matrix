@@ -105,9 +105,17 @@ it was resumed from cache.)
   by the relocation path refresh, the finding **#4** single-page fallback
   residual is covered by regression test, and the full package Pyright gate
   (`cd docpipe && pyright .`) is clean with tests included.
-- **Remaining gating work:** robustness/config mediums outside the resolved
-  clusters, then P1-5/R3.8 structure-aware `prev_tail`, P1-1 anchoring, and P1-2
-  sampler hardening.
+- **2026-07-08 — Config/status operator-safety cluster: RESOLVED.** Findings
+  **#10, #11, #12, #34, #35, #36, #37, #38, #41** fixed: zero active endpoints
+  fail fast before pool startup, malformed `--endpoint` selections and invalid
+  `DOCPIPE_DPI` values raise clear errors, partial TOML endpoint overrides merge
+  by endpoint name over curated defaults, unknown TOML keys are rejected,
+  `--limit 0` selects zero records, and status/discovery preserve prompt-version
+  keysets while showing the full model id. TDD: 9 behavior tests written RED
+  first, then green; full gate is **85 passed / 1 skipped** and `pyright .` clean.
+- **Remaining gating work:** remaining robustness lows/mediums not covered here,
+  then P1-5/R3.8 structure-aware `prev_tail`, P1-1 anchoring, and P1-2 sampler
+  hardening.
 
 ## Executive verdict
 
