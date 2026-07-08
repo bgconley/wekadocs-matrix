@@ -185,15 +185,28 @@ class Converter:
                 logger.error(
                     "worker crash", extra={"fields": {"wid": wid, "err": str(exc)}}
                 )
-                artifacts.write_failure(
-                    self.work_dir,
-                    sha256=job.sha256,
-                    page_no=job.page_no,
-                    dpi=self.dpi,
-                    model_id=self.model_id,
-                    error=f"worker crash: {exc}",
-                    attempts=job.attempts,
-                )
+                try:
+                    artifacts.write_failure(
+                        self.work_dir,
+                        sha256=job.sha256,
+                        page_no=job.page_no,
+                        dpi=self.dpi,
+                        model_id=self.model_id,
+                        error=f"worker crash: {exc}",
+                        attempts=job.attempts,
+                    )
+                except Exception as write_exc:
+                    logger.error(
+                        "failed to persist worker crash",
+                        extra={
+                            "fields": {
+                                "wid": wid,
+                                "sha": job.sha256[:8],
+                                "page": job.page_no,
+                                "err": str(write_exc),
+                            }
+                        },
+                    )
                 self._summary.failed += 1
                 self._tick()
             finally:
@@ -274,13 +287,22 @@ class Converter:
         exc: VLMError,
     ) -> None:
         job.attempts += 1
+        if not getattr(exc, "retryable", True):
+            self._fail(
+                job, f"non-retryable failure after {job.attempts} attempts: {exc}"
+            )
+            return
         if job.attempts >= self.config.convert.max_retries:
             self._fail(job, f"gave up after {job.attempts} attempts: {exc}")
             return
-        delay = min(
-            self.config.convert.backoff_base_s * (2 ** (job.attempts - 1)), 30.0
-        )
-        delay += random.uniform(0, delay * 0.25)  # jitter to de-synchronize retries
+        retry_after_s = getattr(exc, "retry_after_s", None)
+        if retry_after_s is not None:
+            delay = max(0.0, float(retry_after_s))
+        else:
+            delay = min(
+                self.config.convert.backoff_base_s * (2 ** (job.attempts - 1)), 30.0
+            )
+            delay += random.uniform(0, delay * 0.25)  # jitter to de-synchronize retries
         logger.warning(
             "page failed; retrying",
             extra={

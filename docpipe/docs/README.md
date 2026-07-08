@@ -50,15 +50,19 @@ it was resumed from cache.)
   live endpoint, all-dead resolution raises `VLMError`, pending conversion with
   zero runnable endpoints fails fast, and one bad PDF no longer aborts manifest
   discovery.
+- **2026-07-07 — Cluster 3 remaining fail-soft paths: RESOLVED.** Findings
+  **#7, #25, #30** fixed: non-retryable HTTP errors fail fast, retryable HTTP
+  errors honor `Retry-After`, worker crash handlers survive failure-sidecar I/O
+  errors, advisory `page_text()` QA cannot abort assembly, and `assemble_all`
+  isolates one document failure instead of aborting the whole output stage.
 - **2026-07-07 — P1-5/R3.9 bare-CLI fencing: RESOLVED.** `clean_document` now
   deterministically wraps unfenced `ncli`/`acli`/`ncli>`/`nutanix@`/
   `<acropolis>`/`$ ` command groups in top-level `bash` fences, while skipping
   existing fences. This closes the proven command-structure-loss fix; the
   structure-aware `prev_tail` half of P1-5/R3.8 remains open.
-- **Remaining gating work:** the rest of Cluster 3 / fail-soft orchestration
-  (notably #7/#25/#30), the still-open P0 roadmap items outside the resolved
-  clusters, then P1-5/R3.8 structure-aware `prev_tail`, P1-1 anchoring, and P1-2
-  sampler hardening.
+- **Remaining gating work:** the still-open P0 roadmap items outside the
+  resolved clusters, then P1-5/R3.8 structure-aware `prev_tail`, P1-1 anchoring,
+  and P1-2 sampler hardening.
 
 ## Executive verdict
 

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Optional
 
 import httpx
@@ -36,10 +38,43 @@ class VLMError(RuntimeError):
 
 
 class VLMHTTPError(VLMError):
-    def __init__(self, status: int, body: str):
+    def __init__(
+        self,
+        status: int,
+        body: str,
+        *,
+        retryable: bool,
+        retry_after_s: Optional[float] = None,
+    ):
         self.status = status
         self.body = body[:500]
+        self.retryable = retryable
+        self.retry_after_s = retry_after_s
         super().__init__(f"HTTP {status}: {self.body}")
+
+
+def _http_retryable(status: int) -> bool:
+    if status == 429 or status in {408, 409, 425}:
+        return True
+    if status >= 500:
+        return True
+    return False
+
+
+def _retry_after_seconds(value: Optional[str]) -> Optional[float]:
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        dt = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return max(0.0, (dt - datetime.now(timezone.utc)).total_seconds())
 
 
 class VLMTimeout(VLMError):
@@ -216,7 +251,12 @@ class VLMPool:
 
         if resp.status_code != 200:
             ep.stats.failures += 1
-            raise VLMHTTPError(resp.status_code, resp.text)
+            raise VLMHTTPError(
+                resp.status_code,
+                resp.text,
+                retryable=_http_retryable(resp.status_code),
+                retry_after_s=_retry_after_seconds(resp.headers.get("Retry-After")),
+            )
 
         try:
             data = resp.json()

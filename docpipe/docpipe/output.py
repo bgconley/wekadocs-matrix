@@ -94,7 +94,21 @@ def assemble_document(
         meta = artifacts.read_meta(work_dir, record.sha256, page_no, dpi, model_id)
         if meta and meta.endpoint:
             endpoints_used.add(meta.endpoint)
-        tl = page_text(record.pdf_path, page_no) if qa_overlap else None
+        tl = None
+        if qa_overlap:
+            try:
+                tl = page_text(record.pdf_path, page_no)
+            except Exception as exc:
+                logger.warning(
+                    "page text unavailable for QA",
+                    extra={
+                        "fields": {
+                            "doc": record.slug,
+                            "page": page_no,
+                            "err": str(exc),
+                        }
+                    },
+                )
         qa = assess_page(md, tl)
         if "empty" in qa.flags:
             result.empty_pages.append(page_no)
@@ -140,14 +154,27 @@ def assemble_all(
     allow_incomplete: bool = False,
     qa_overlap: bool = True,
 ) -> list[DocResult]:
-    return [
-        assemble_document(
-            config,
-            rec,
-            model_id,
-            dpi=dpi,
-            allow_incomplete=allow_incomplete,
-            qa_overlap=qa_overlap,
-        )
-        for rec in records
-    ]
+    results: list[DocResult] = []
+    for rec in records:
+        try:
+            result = assemble_document(
+                config,
+                rec,
+                model_id,
+                dpi=dpi,
+                allow_incomplete=allow_incomplete,
+                qa_overlap=qa_overlap,
+            )
+        except Exception as exc:
+            logger.error(
+                "doc assembly failed",
+                extra={"fields": {"doc": rec.slug, "err": str(exc)}},
+            )
+            result = DocResult(
+                sha256=rec.sha256,
+                slug=rec.slug,
+                page_count=rec.page_count,
+                failed_pages=list(range(1, rec.page_count + 1)),
+            )
+        results.append(result)
+    return results
