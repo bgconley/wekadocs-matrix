@@ -26,6 +26,7 @@ from . import manifest as manifest_mod
 from . import output as output_mod
 from .config import Config
 from .convert import Converter
+from .evaluation import evaluate_corpus
 from .log import get_logger, setup_logging
 from .prompts import build_messages
 from .rasterize import render_page_to_file
@@ -310,6 +311,29 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return asyncio.run(_doctor(cfg))
 
 
+def cmd_eval(args: argparse.Namespace) -> int:
+    cfg = _load_config(args)
+    root = Path(cfg.output.dir)
+    spec_path = Path(args.spec) if getattr(args, "spec", None) else None
+    report = evaluate_corpus(root, spec_path)
+    if getattr(args, "json", False):
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        print(
+            f"pass_fraction={report.pass_fraction:.3f} "
+            f"passed={report.passed}/{report.total}"
+        )
+        print(
+            f"tier0={report.tier0_pass_rate:.3f} "
+            f"boilerplate_leaks={report.boilerplate_leaks} "
+            f"table_validity={report.table_validity_rate}"
+        )
+        for result in report.case_results:
+            if not result.passed:
+                print(f"FAIL {result.id} {result.path}: {result.message}")
+    return 0 if report.pass_fraction == 1.0 else 1
+
+
 # --------------------------------------------------------------------------- parser
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="docpipe", description=__doc__)
@@ -368,6 +392,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     d = sub.add_parser("doctor", help="probe both endpoints")
     d.set_defaults(func=cmd_doctor)
+
+    e = sub.add_parser("eval", help="run offline corpus quality gates")
+    e.add_argument("--out", help="output corpus directory")
+    e.add_argument("--spec", help="optional JSON eval spec")
+    e.add_argument("--json", action="store_true", help="emit eval report as JSON")
+    e.set_defaults(func=cmd_eval)
 
     return p
 

@@ -32,6 +32,7 @@ def build_report(
     incomplete = [d for d in doc_results if not d.complete]
     suspect_total = sum(len(d.suspect_pages) for d in doc_results)
     empty_total = sum(len(d.empty_pages) for d in doc_results)
+    contract_failed = [d for d in doc_results if not d.contract_ok]
 
     lines: list[str] = []
     lines.append("=" * 68)
@@ -92,6 +93,16 @@ def build_report(
                     else f" (+{len(d.suspect_pages) - 12})"
                 )
                 lines.append(f"        ! {d.slug}: pages {shown}{more}")
+    if contract_failed:
+        lines.append(f"    Tier-0 contract failed {len(contract_failed)} document(s)")
+        for d in contract_failed:
+            shown = ", ".join(d.contract_violations[:8])
+            more = (
+                ""
+                if len(d.contract_violations) <= 8
+                else f" (+{len(d.contract_violations) - 8})"
+            )
+            lines.append(f"        x {d.slug}: {shown}{more}")
     lines.append("")
     for d in written:
         lines.append(f"    -> {d.out_path}")
@@ -143,6 +154,8 @@ def report_dict(
                 "empty_pages": d.empty_pages,
                 "failed_pages": d.failed_pages,
                 "missing_pages": d.missing_pages,
+                "contract_ok": d.contract_ok,
+                "contract_violations": d.contract_violations,
             }
             for d in doc_results
         ],

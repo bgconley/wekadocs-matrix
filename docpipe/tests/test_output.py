@@ -62,6 +62,24 @@ def test_assemble_document_tolerates_page_text_failure(tmp_path, monkeypatch):
     assert Path(result.out_path).is_file()
 
 
+def test_assemble_document_fails_closed_on_tier0_contract_violation(tmp_path):
+    cfg = _cfg(tmp_path)
+    rec = _rec(tmp_path, "raw-html")
+    _write_ok_page(
+        cfg,
+        rec,
+        "# Raw HTML\n\n<table><tr><td>silently dropped downstream</td></tr></table>",
+    )
+
+    result = assemble_document(cfg, rec, "model", qa_overlap=False)
+
+    assert result.written is False
+    assert result.out_path is None
+    assert not Path(cfg.output.dir, rec.slug, f"{rec.slug}.md").exists()
+    assert result.contract_ok is False
+    assert "html:raw_table_or_code" in result.contract_violations
+
+
 def test_assemble_all_isolates_single_document_failure(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     bad = _rec(tmp_path, "bad", "badbad")

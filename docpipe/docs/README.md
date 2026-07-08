@@ -124,8 +124,16 @@ it was resumed from cache.)
   bumped to **3** so anchored prompts are a natural cache miss. TDD: 6 behavior
   tests written RED first, then green; full gate is **91 passed / 1 skipped** and
   `pyright .` clean.
-- **Remaining gating work:** Tier-0 contract gate, eval harness/golden checks,
-  rasterization fidelity, and remaining robustness lows/mediums not covered here.
+- **2026-07-08 — Fail-closed quality gates: RESOLVED.** **P1-3 and the
+  deterministic P1-10 harness** fixed: final Markdown now passes a hard Tier-0
+  contract gate before write, contract failures surface in text/JSON reports, and
+  `docpipe eval` provides offline pass-fraction, Tier-0 pass rate, boilerplate
+  leak count, table-validity checks, baseline loop/compression guards, and
+  optional presence/absence/reading-order/table JSON cases. TDD: 8 behavior tests
+  written RED first, then green; full gate is **101 passed / 1 skipped** and
+  `pyright docpipe/.` clean.
+- **Remaining gating work:** rasterization fidelity, populated golden/citation
+  eval, and remaining robustness lows/mediums not covered here.
 
 ## Executive verdict
 
@@ -170,11 +178,11 @@ quality layers** — not architecture.
 | 4 | Model / endpoint choice | **PARTIAL** — engine sound; text-layer arbiter active; specialist oracle/A-B still pending |
 | 5 | Concurrency & throughput | **FULLY MET** (design) — bugs are robustness-within-the-design |
 | 6 | Resumability & caching | **PARTIAL** — page-level excellent; manifest reuse is size-based |
-| 7 | Validation / QA gates | **MISSING** — no fail-closed contract gate; heuristics only |
-| 8 | Evaluation harness & metrics | **MISSING** — no unit-test/TEDS eval suite |
+| 7 | Validation / QA gates | **PARTIAL** — fail-closed Tier-0 gate active; richer corpus QA still pending |
+| 8 | Evaluation harness & metrics | **PARTIAL** — offline pass-fraction harness active; populated gold/TEDS eval still pending |
 | 9 | Output artifact contract | **PARTIAL** — design met; runtime output violated by the P0 bugs |
 
-**1 fully met · 6 partial · 2 missing.**
+**1 fully met · 8 partial · 0 missing.**
 
 ---
 
@@ -211,8 +219,8 @@ a hang is maximally costly. All are addressable without changing the design.
   is all-or-nothing; `scan_pdf` and per-doc `page_text` are unguarded. Make failover
   actually engage. *(vlm_client.py, manifest.py, output.py)*
 
-**P1** now centers on the remaining proof layers (Tier-0 contract gate, eval
-harness, rasterization fidelity). **P2** is polish (dead config, DX, tests).
+**P1** now centers on rasterization fidelity plus populated golden/citation eval.
+**P2** is polish (dead config, DX, tests).
 Full detail in [GAP_ANALYSIS.md](GAP_ANALYSIS.md).
 
 ---

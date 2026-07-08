@@ -16,6 +16,7 @@ from typing import Optional
 from . import artifacts
 from .clean import RunMeta, clean_document
 from .config import Config
+from .contract import validate_contract
 from .log import get_logger
 from .manifest import DocRecord
 from .rasterize import page_text
@@ -39,6 +40,8 @@ class DocResult:
     empty_pages: list[int] = field(default_factory=list)
     failed_pages: list[int] = field(default_factory=list)
     missing_pages: list[int] = field(default_factory=list)
+    contract_ok: bool = True
+    contract_violations: list[str] = field(default_factory=list)
 
 
 def output_path(config: Config, slug: str) -> Path:
@@ -135,6 +138,22 @@ def assemble_document(
     )
     final_md, title = clean_document(body, record, run)
     result.title = title
+    contract = validate_contract(final_md)
+    if not contract.ok:
+        result.contract_ok = False
+        result.contract_violations = [
+            *dict.fromkeys(violation.code for violation in contract.violations)
+        ]
+        logger.warning(
+            "contract violation doc not written",
+            extra={
+                "fields": {
+                    "doc": record.slug,
+                    "violations": ",".join(result.contract_violations),
+                }
+            },
+        )
+        return result
 
     out = output_path(config, record.slug)
     out.parent.mkdir(parents=True, exist_ok=True)

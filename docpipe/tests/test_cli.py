@@ -49,6 +49,19 @@ def test_endpoint_selection_rejects_empty_names():
         cli._load_config(_args(endpoint=","))
 
 
+def test_build_parser_registers_eval_subcommand():
+    parser = cli.build_parser()
+
+    args = parser.parse_args(
+        ["eval", "--out", "corpus", "--spec", "eval.json", "--json"]
+    )
+
+    assert args.command == "eval"
+    assert args.out == "corpus"
+    assert args.spec == "eval.json"
+    assert args.json is True
+
+
 def test_select_records_limit_zero_selects_no_records():
     records = [object(), object()]
 
