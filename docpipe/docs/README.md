@@ -169,7 +169,11 @@ it was resumed from cache.)
   deterministic PDF text/table rescue for exhausted VLM-loop pages, stricter table
   normalization, and an eval-harness guard that ignores isolated pipe paragraphs
   that Markdown parses as prose.
-- **Remaining gating work:** downstream citation evaluation against the RAG gateway.
+- **2026-07-08 — Citation-eval runner: RESOLVED.** `docpipe.citation_eval` now
+  validates `docs/eval/citation_questions.json`, can dry-run the 14-question
+  fixture, calls the MCP gateway tool, and writes a pass/fail JSON report.
+- **Remaining gating work:** run the downstream citation evaluation against the
+  live RAG gateway after the corpus is ingested and the gateway is available.
 
 ## Executive verdict
 
@@ -302,6 +306,7 @@ silently dropped.
 ## Recommended next step
 
 Run the downstream citation evaluation against the RAG gateway using
-`docs/eval/citation_questions.json`. The full corpus build and deterministic
-artifact gates are already green; the next risk is answer/citation behavior after
-ingestion. P2 remains optional polish.
+`python -m docpipe.citation_eval --spec docs/eval/citation_questions.json`.
+The full corpus build and deterministic artifact gates are already green; the
+next risk is answer/citation behavior after ingestion. P2 remains optional
+polish.
