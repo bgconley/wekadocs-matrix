@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from docpipe.config import default_config
-from docpipe.vlm_client import VLMError, VLMHTTPError, VLMPool, _Endpoint
+from docpipe.vlm_client import VLMError, VLMHTTPError, VLMPool, VLMTimeout, _Endpoint
 
 
 def _pool_with_transports(
@@ -50,6 +50,13 @@ def _chat_status(status: int, *, retry_after: str | None = None) -> httpx.MockTr
     return httpx.MockTransport(handler)
 
 
+def _chat_timeout() -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("too slow", request=request)
+
+    return httpx.MockTransport(handler)
+
+
 def _chat_ok(seen: list[dict]) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(json.loads(request.content))
@@ -68,6 +75,20 @@ def _chat_ok(seen: list[dict]) -> httpx.MockTransport:
                 },
             },
         )
+
+    return httpx.MockTransport(handler)
+
+
+def _chat_response(payload: dict) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    return httpx.MockTransport(handler)
+
+
+def _chat_malformed_json() -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"{not-json")
 
     return httpx.MockTransport(handler)
 
@@ -129,6 +150,85 @@ async def test_chat_marks_rate_limit_retryable_with_retry_after():
     assert exc_info.value.status == 429
     assert getattr(exc_info.value, "retryable", None) is True
     assert getattr(exc_info.value, "retry_after_s", None) == 3.0
+
+
+@pytest.mark.asyncio
+async def test_chat_marks_server_http_error_retryable():
+    pool = _pool_with_transports({"oxcart": _chat_status(500)})
+    pool.model_id = "qwen36-27b"
+    try:
+        with pytest.raises(VLMHTTPError) as exc_info:
+            await pool.chat("oxcart", [{"role": "user", "content": "hi"}])
+    finally:
+        await _close_pool(pool)
+
+    assert exc_info.value.status == 500
+    assert getattr(exc_info.value, "retryable", None) is True
+
+
+@pytest.mark.asyncio
+async def test_chat_timeout_counts_failure():
+    pool = _pool_with_transports({"oxcart": _chat_timeout()})
+    pool.model_id = "qwen36-27b"
+    try:
+        with pytest.raises(VLMTimeout):
+            await pool.chat("oxcart", [{"role": "user", "content": "hi"}])
+    finally:
+        await _close_pool(pool)
+
+    assert pool.stats()["oxcart"].requests == 1
+    assert pool.stats()["oxcart"].failures == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_parses_truncation_usage_and_updates_stats():
+    pool = _pool_with_transports(
+        {
+            "oxcart": _chat_response(
+                {
+                    "choices": [
+                        {
+                            "message": {"content": "# partial"},
+                            "finish_reason": "length",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 123,
+                        "completion_tokens": 45,
+                        "prompt_tokens_details": {"image_tokens": 67},
+                    },
+                }
+            )
+        }
+    )
+    pool.model_id = "qwen36-27b"
+    try:
+        result = await pool.chat("oxcart", [{"role": "user", "content": "hi"}])
+    finally:
+        await _close_pool(pool)
+
+    assert result.truncated is True
+    assert result.image_tokens == 67
+    assert result.prompt_tokens == 123
+    assert result.completion_tokens == 45
+    stats = pool.stats()["oxcart"]
+    assert stats.requests == 1
+    assert stats.failures == 0
+    assert stats.prompt_tokens == 123
+    assert stats.completion_tokens == 45
+
+
+@pytest.mark.asyncio
+async def test_chat_rejects_malformed_json_and_counts_failure():
+    pool = _pool_with_transports({"oxcart": _chat_malformed_json()})
+    pool.model_id = "qwen36-27b"
+    try:
+        with pytest.raises(Exception, match="unexpected response shape"):
+            await pool.chat("oxcart", [{"role": "user", "content": "hi"}])
+    finally:
+        await _close_pool(pool)
+
+    assert pool.stats()["oxcart"].failures == 1
 
 
 @pytest.mark.asyncio

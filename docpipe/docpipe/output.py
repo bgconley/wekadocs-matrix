@@ -77,21 +77,6 @@ def assemble_document(
         missing_pages=cov.missing_pages,
     )
 
-    if not cov.complete and not allow_incomplete:
-        logger.warning(
-            "incomplete doc not written",
-            extra={
-                "fields": {
-                    "doc": record.slug,
-                    "ok": cov.ok_count,
-                    "of": record.page_count,
-                    "failed": len(cov.failed_pages),
-                    "missing": len(cov.missing_pages),
-                }
-            },
-        )
-        return result
-
     # Collect ok page markdown in order; run advisory QA.
     page_md: list[str] = []
     endpoints_used: set[str] = set()
@@ -128,6 +113,21 @@ def assemble_document(
             result.empty_pages.append(page_no)
         if qa.suspect:
             result.suspect_pages.append(page_no)
+
+    if not cov.complete and not allow_incomplete:
+        logger.warning(
+            "incomplete doc not written",
+            extra={
+                "fields": {
+                    "doc": record.slug,
+                    "ok": cov.ok_count,
+                    "of": record.page_count,
+                    "failed": len(cov.failed_pages),
+                    "missing": len(cov.missing_pages),
+                }
+            },
+        )
+        return result
 
     body = stitch_pages(page_md)
     run = RunMeta(

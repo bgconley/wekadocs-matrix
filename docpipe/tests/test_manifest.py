@@ -31,6 +31,28 @@ def test_infer_product():
     assert _infer_product("random-doc") is None
 
 
+def test_manifest_write_load_round_trip_preserves_record_fields(tmp_path):
+    record = DocRecord(
+        pdf_path=str(tmp_path / "guide.pdf"),
+        rel_path="nested/guide.pdf",
+        sha256="abc123",
+        size_bytes=42,
+        page_count=3,
+        slug="guide",
+        title="Guide",
+        author="Nutanix",
+        producer="Acrobat",
+        product="AOS",
+        doc_version="7.5",
+    )
+
+    path = manifest.write_manifest(tmp_path, [record])
+    loaded = manifest.load_manifest(tmp_path)
+
+    assert path == manifest.manifest_path(tmp_path)
+    assert loaded == {"abc123": record}
+
+
 def test_build_skips_pdf_that_fails_scan(tmp_path, monkeypatch):
     input_dir = tmp_path / "input"
     work_dir = tmp_path / "work"

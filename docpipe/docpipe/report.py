@@ -72,13 +72,19 @@ def build_report(
     lines.append("  Documents")
     lines.append(f"    written ........ {len(written)} / {len(doc_results)}")
     if incomplete:
+        written_incomplete = [d for d in incomplete if d.written]
+        skipped_incomplete = [d for d in incomplete if not d.written]
         lines.append(
-            f"    incomplete ..... {len(incomplete)} (not written unless --allow-incomplete)"
+            f"    incomplete ..... {len(incomplete)} "
+            f"({len(written_incomplete)} written with --allow-incomplete, "
+            f"{len(skipped_incomplete)} skipped)"
         )
         for d in incomplete:
             miss = len(d.missing_pages) + len(d.failed_pages)
+            status = "written" if d.written else "skipped"
             lines.append(
-                f"        - {d.slug}: {d.ok_count}/{d.page_count} ok, {miss} bad"
+                f"        - {d.slug}: {d.ok_count}/{d.page_count} ok, "
+                f"{miss} bad, {status}"
             )
     if suspect_total or empty_total:
         lines.append(

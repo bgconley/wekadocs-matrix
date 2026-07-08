@@ -148,8 +148,13 @@ it was resumed from cache.)
   clamp, VLM requests carry explicit `mm_processor_kwargs` pixel bounds, and
   garbled/low-overlap QA flags trigger a high-res retry before a page can be
   cached.
-- **Remaining gating work:** populated golden/citation eval and remaining
-  coverage-completeness lows.
+- **2026-07-08 — Coverage-completeness lows: RESOLVED.** **#45, #46, #47, and
+  the remaining P2-5 test gap** fixed/covered: `assemble_document` now QA-assesses
+  converted pages even when an incomplete doc is withheld, run reports distinguish
+  written-vs-skipped incomplete docs, and offline tests now cover assembly gates,
+  output layouts, report math/dicts, VLM HTTP/timeout/malformed/truncated paths,
+  and manifest JSONL round trips.
+- **Remaining gating work:** populated golden/citation eval.
 
 ## Executive verdict
 

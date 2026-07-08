@@ -3,7 +3,7 @@ from pathlib import Path
 from docpipe import artifacts
 from docpipe.config import default_config
 from docpipe.manifest import DocRecord
-from docpipe.output import DocResult, assemble_all, assemble_document
+from docpipe.output import DocResult, assemble_all, assemble_document, output_path
 
 
 def _cfg(tmp_path: Path):
@@ -13,7 +13,9 @@ def _cfg(tmp_path: Path):
     return cfg
 
 
-def _rec(tmp_path: Path, slug: str, sha256: str = "deadbeef") -> DocRecord:
+def _rec(
+    tmp_path: Path, slug: str, sha256: str = "deadbeef", page_count: int = 1
+) -> DocRecord:
     pdf = tmp_path / f"{slug}.pdf"
     pdf.write_bytes(b"%PDF-1.7\n")
     return DocRecord(
@@ -21,7 +23,7 @@ def _rec(tmp_path: Path, slug: str, sha256: str = "deadbeef") -> DocRecord:
         rel_path=f"{slug}.pdf",
         sha256=sha256,
         size_bytes=pdf.stat().st_size,
-        page_count=1,
+        page_count=page_count,
         slug=slug,
         title=None,
         doc_version="7.5",
@@ -43,6 +45,61 @@ def _write_ok_page(cfg, rec: DocRecord, markdown: str = "# Page\n\nbody") -> Non
         completion_tokens=None,
         attempts=1,
     )
+
+
+def test_output_path_honors_per_doc_and_flat_layouts(tmp_path):
+    cfg = _cfg(tmp_path)
+
+    assert output_path(cfg, "guide") == Path(cfg.output.dir, "guide", "guide.md")
+
+    cfg.output.layout = "flat"
+    assert output_path(cfg, "guide") == Path(cfg.output.dir, "guide.md")
+
+
+def test_complete_document_is_written_with_frontmatter_and_single_h1(tmp_path):
+    cfg = _cfg(tmp_path)
+    rec = _rec(tmp_path, "complete")
+    _write_ok_page(cfg, rec, "# Complete Guide\n\nbody")
+
+    result = assemble_document(cfg, rec, "model", qa_overlap=False)
+
+    assert result.written is True
+    assert result.out_path is not None
+    text = Path(result.out_path).read_text(encoding="utf-8")
+    assert text.startswith("---\n")
+    assert text.count("\n# ") == 1
+    assert "\n# Complete Guide\n" in text
+
+
+def test_incomplete_document_is_not_written_by_default_but_qa_runs(tmp_path):
+    cfg = _cfg(tmp_path)
+    rec = _rec(tmp_path, "partial", page_count=2)
+    _write_ok_page(cfg, rec, "\n".join(["DECODE LOOP"] * 8))
+
+    result = assemble_document(cfg, rec, "model", qa_overlap=False)
+
+    assert result.complete is False
+    assert result.written is False
+    assert result.missing_pages == [2]
+    assert result.suspect_pages == [1]
+    assert not Path(cfg.output.dir, rec.slug, f"{rec.slug}.md").exists()
+
+
+def test_allow_incomplete_writes_only_available_pages(tmp_path):
+    cfg = _cfg(tmp_path)
+    rec = _rec(tmp_path, "partial-allowed", page_count=2)
+    _write_ok_page(cfg, rec, "# First Page\n\navailable body")
+
+    result = assemble_document(
+        cfg, rec, "model", qa_overlap=False, allow_incomplete=True
+    )
+
+    assert result.complete is False
+    assert result.written is True
+    assert result.missing_pages == [2]
+    assert result.out_path is not None
+    text = Path(result.out_path).read_text(encoding="utf-8")
+    assert "available body" in text
 
 
 def test_assemble_document_tolerates_page_text_failure(tmp_path, monkeypatch):
