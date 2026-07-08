@@ -21,6 +21,15 @@ from . import artifacts
 from .manifest import DocRecord
 
 _WORD_RE = re.compile(r"[A-Za-z0-9]{3,}")
+_PROMPT_LEAKAGE_RE = re.compile(
+    r"\bPAGE_TEXT_ANCHOR\b|"
+    r"\bSelf-Correction\b|"
+    r"\bFinal Plan\b|"
+    r"OCR reference provided in the prompt|"
+    r"clean text (?:provided )?in [`\"]?PAGE_TEXT_ANCHOR|"
+    r"If image and reference disagree",
+    re.I,
+)
 
 
 @dataclass
@@ -62,6 +71,28 @@ def _repetition_flag(text: str) -> Optional[str]:
     return None
 
 
+def _intraline_loop_flag(text: str) -> Optional[str]:
+    for line in text.splitlines():
+        words = re.findall(r"[A-Za-z0-9]{2,}", line.lower())
+        run_word = None
+        run_len = 0
+        for word in words:
+            if word == run_word:
+                run_len += 1
+            else:
+                run_word = word
+                run_len = 1
+            if run_len >= 8:
+                return "garbled:intraline_loop"
+    return None
+
+
+def _prompt_leakage_flag(text: str) -> Optional[str]:
+    if _PROMPT_LEAKAGE_RE.search(text):
+        return "garbled:prompt_leakage"
+    return None
+
+
 def token_overlap(output: str, text_layer: str) -> Optional[float]:
     ref = set(_WORD_RE.findall(text_layer.lower()))
     if not ref:
@@ -81,6 +112,14 @@ def assess_page(markdown: str, text_layer: Optional[str] = None) -> PageQA:
     rep = _repetition_flag(body)
     if rep:
         qa.flags.append(rep)
+    if any(len(line) > 2000 for line in body.splitlines()):
+        qa.flags.append("garbled:long_line")
+    inline_loop = _intraline_loop_flag(body)
+    if inline_loop:
+        qa.flags.append(inline_loop)
+    prompt_leak = _prompt_leakage_flag(body)
+    if prompt_leak:
+        qa.flags.append(prompt_leak)
     if text_layer is not None:
         tl = text_layer.strip()
         if len(tl) > 200 and len(body) < 0.15 * len(tl) and not qa.suspect:

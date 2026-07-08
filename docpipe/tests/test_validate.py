@@ -24,6 +24,29 @@ def test_consecutive_loop_flagged():
     assert "garbled:repetition" not in flags
 
 
+def test_long_line_flagged():
+    body = "# Table\n\n| key | " + ("same value " * 300) + "|"
+
+    assert "garbled:long_line" in assess_page(body).flags
+
+
+def test_intraline_loop_flagged():
+    body = "# Table\n\n| key | " + ("notsupported " * 8) + "|"
+
+    assert "garbled:intraline_loop" in assess_page(body).flags
+
+
+def test_prompt_self_talk_and_anchor_leakage_flagged():
+    body = (
+        "# NAI Output\n\n"
+        "*(Self-Correction: I will use the clean text from the `PAGE_TEXT_ANCHOR` "
+        "instead of transcribing the image.)*\n\n"
+        "**Final Plan:** Use the anchor text for the table content.\n"
+    )
+
+    assert "garbled:prompt_leakage" in assess_page(body).flags
+
+
 def test_clean_page_not_suspect():
     md = "# Heading\n\nThis is a normal paragraph with several distinct words.\n\n- one\n- two"
     qa = assess_page(md)

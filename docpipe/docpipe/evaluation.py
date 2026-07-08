@@ -222,14 +222,20 @@ def _tables_rectangular(text: str) -> tuple[bool, str]:
 def _table_blocks(text: str) -> list[list[str]]:
     tables: list[list[str]] = []
     current: list[str] = []
+
+    def flush() -> None:
+        nonlocal current
+        if len(current) >= 2:
+            tables.append(current)
+        current = []
+
     for line, in_fence in iter_lines_with_fence_state(text):
         if not in_fence and _TABLE_ROW_RE.match(line):
             current.append(line)
         elif current:
-            tables.append(current)
-            current = []
+            flush()
     if current:
-        tables.append(current)
+        flush()
     return tables
 
 
@@ -239,7 +245,16 @@ def _split_table_row(line: str) -> list[str]:
         stripped = stripped[1:]
     if stripped.endswith("|"):
         stripped = stripped[:-1]
-    return [cell.strip() for cell in stripped.split("|")]
+    cells: list[str] = []
+    current: list[str] = []
+    for index, char in enumerate(stripped):
+        if char == "|" and (index == 0 or stripped[index - 1] != "\\"):
+            cells.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+    cells.append("".join(current).strip())
+    return cells
 
 
 def _baseline_ok(text: str) -> tuple[bool, str]:

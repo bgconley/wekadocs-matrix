@@ -92,3 +92,79 @@ def test_eval_applies_machine_checkable_spec_cases(tmp_path):
         "contract",
         "baseline",
     }
+
+
+def test_table_eval_treats_escaped_pipe_as_cell_content(tmp_path):
+    _write(
+        tmp_path,
+        "escaped.md",
+        """---
+title: Escaped
+version: "1"
+---
+
+# Escaped
+
+| Documentation | Description |
+| :--- | :--- |
+| [Release Notes \\| Nutanix Enterprise AI](https://portal.nutanix.com) | Release notes. |
+""",
+    )
+
+    report = evaluate_corpus(tmp_path)
+
+    table_results = [
+        result for result in report.case_results if result.type == "table_rectangular"
+    ]
+    assert table_results
+    assert all(result.passed for result in table_results)
+
+
+def test_table_eval_ignores_isolated_pipe_paragraphs(tmp_path):
+    _write(
+        tmp_path,
+        "isolated-pipe.md",
+        """---
+title: Isolated Pipe
+version: "1"
+---
+
+# Isolated Pipe
+
+Supported model types include:
+
+| Text Generation |
+Embedding
+Vision
+
+| Model | Type |
+| :--- | :--- |
+| Llama | Text Generation |
+""",
+    )
+
+    report = evaluate_corpus(tmp_path)
+
+    table_results = [
+        result for result in report.case_results if result.type == "table_rectangular"
+    ]
+    assert table_results
+    assert all(result.passed for result in table_results)
+
+
+def test_eval_baseline_rejects_prompt_self_talk(tmp_path):
+    _write(
+        tmp_path,
+        "leaked.md",
+        GOOD_MD
+        + "\n*(Self-Correction: I will use the `PAGE_TEXT_ANCHOR` directly.)*\n",
+    )
+
+    report = evaluate_corpus(tmp_path)
+
+    baseline = [result for result in report.case_results if result.type == "baseline"]
+    assert baseline
+    assert any(
+        not result.passed and "garbled:prompt_leakage" in result.message
+        for result in baseline
+    )

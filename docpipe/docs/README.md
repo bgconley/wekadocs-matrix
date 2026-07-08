@@ -158,8 +158,18 @@ it was resumed from cache.)
   `docs/eval/nutanix_gold.json` spec now contains 45 source-grounded cases across
   all nine Nutanix PDFs, and `docs/eval/citation_questions.json` contains 14
   source-grounded downstream citation questions.
-- **Remaining gating work:** full 936-page conversion plus post-build
-  deterministic gold and downstream citation evaluation.
+- **2026-07-08 — Full 936-page corpus build + deterministic QA: RESOLVED.** The
+  Oxcart run produced **936/936 ok pages**, **9/9 written docs**, **0 failed**,
+  **0 missing**, **0 empty**, **0 suspect**, and `contract_ok=true` for every
+  document in
+  `ETL-for-corpus/transformed-corpus-a8ced49-full-final7`. Post-build deterministic
+  evals are green: default eval **34/34** (`tier0_pass_rate=1.0`,
+  `boilerplate_leaks=0`, `table_validity_rate=1.0`) and populated gold eval
+  **45/45**. The final hardening pass added prompt/self-talk leakage QA,
+  deterministic PDF text/table rescue for exhausted VLM-loop pages, stricter table
+  normalization, and an eval-harness guard that ignores isolated pipe paragraphs
+  that Markdown parses as prose.
+- **Remaining gating work:** downstream citation evaluation against the RAG gateway.
 
 ## Executive verdict
 
@@ -185,9 +195,8 @@ judgment; (iv) one-model operational simplicity. Throughput is irrelevant at 936
 one-time pages. The two literature-imposed operating conditions are now present:
 current-page **text-layer anchoring** is injected as a glyph-disambiguation
 reference and text-heavy low-overlap pages retry, while the sampler no longer runs
-bare `temperature=0` without penalties. Remaining proof shifts from engine
-eligibility to corpus QA: Tier-0 contract gating, eval/golden checks, and the full
-build/citation evaluation.
+bare `temperature=0` without penalties. Full-build corpus QA is now proven green;
+the remaining proof layer is downstream citation behavior through the RAG gateway.
 
 **The holdbacks are a well-bounded set of data-loss/liveness bugs and two missing
 quality layers** — not architecture.
@@ -245,8 +254,7 @@ a hang is maximally costly. All are addressable without changing the design.
   is all-or-nothing; `scan_pdf` and per-doc `page_text` are unguarded. Make failover
   actually engage. *(vlm_client.py, manifest.py, output.py)*
 
-**P1** now centers on the full 936-page conversion and post-build
-gold/citation evaluation.
+**P1** now centers on downstream citation evaluation through the RAG gateway.
 **P2** is polish (dead config, DX, tests).
 Full detail in [GAP_ANALYSIS.md](GAP_ANALYSIS.md).
 
@@ -293,7 +301,7 @@ silently dropped.
 
 ## Recommended next step
 
-Run the remaining proof layers before the full 936-page build: Tier-0 contract
-gating, eval/golden checks, and rasterization-fidelity review. The engine-choice
-prerequisites (**P1-5/R3.8**, **P1-1**, **P1-2**) are now implemented; the next risk
-is proving the resulting corpus artifacts at build scale. P2 is optional polish.
+Run the downstream citation evaluation against the RAG gateway using
+`docs/eval/citation_questions.json`. The full corpus build and deterministic
+artifact gates are already green; the next risk is answer/citation behavior after
+ingestion. P2 remains optional polish.

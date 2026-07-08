@@ -481,6 +481,83 @@ async def test_low_text_layer_overlap_retries_before_caching(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_exhausted_low_overlap_can_use_pdf_table_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "docpipe.convert.render_page_data_url",
+        lambda *args, **kwargs: "data:image/png;base64,AAA=",
+    )
+    anchor = " ".join(f"anchorword{i}" for i in range(80))
+    monkeypatch.setattr("docpipe.convert.page_text", lambda *args, **kwargs: anchor)
+    fallback = "Table 1: Parameters\n\n" + anchor
+
+    import docpipe.pdf_tables as pdf_tables
+
+    monkeypatch.setattr(
+        pdf_tables,
+        "page_key_value_table_markdown",
+        lambda *args, **kwargs: fallback,
+    )
+    cfg = _cfg(tmp_path)
+    cfg.convert.max_retries = 1
+    pool = FakePool([_result("# Wrong\n\nunrelated hallucinated content only")])
+    conv = Converter(cfg, _pool(pool), "model")
+
+    summary = await conv.run([_rec(tmp_path)])
+
+    assert len(pool.calls) == 1
+    assert summary.converted == 1
+    assert summary.failed == 0
+    stored = artifacts.read_md(
+        Path(cfg.work_dir), "deadbeef", 1, cfg.rasterize.dpi, "model"
+    )
+    assert stored == fallback
+    meta = artifacts.read_meta(
+        Path(cfg.work_dir), "deadbeef", 1, cfg.rasterize.dpi, "model"
+    )
+    assert meta is not None
+    assert meta.endpoint == "pdf-text-fallback"
+    assert meta.attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_exhausted_garbled_page_can_use_text_layer_fallback(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "docpipe.convert.render_page_data_url",
+        lambda *args, **kwargs: "data:image/png;base64,AAA=",
+    )
+    anchor = "Cluster Name Cluster A Cluster B\nStorage RF3 capable RF2 capable"
+    monkeypatch.setattr("docpipe.convert.page_text", lambda *args, **kwargs: anchor)
+
+    import docpipe.pdf_tables as pdf_tables
+
+    monkeypatch.setattr(
+        pdf_tables,
+        "page_key_value_table_markdown",
+        lambda *args, **kwargs: None,
+    )
+    cfg = _cfg(tmp_path)
+    cfg.convert.max_retries = 1
+    pool = FakePool([_result("# Wrong\n\n| key | " + ("loopword " * 8) + "|")])
+    conv = Converter(cfg, _pool(pool), "model")
+
+    summary = await conv.run([_rec(tmp_path)])
+
+    assert summary.converted == 1
+    assert summary.failed == 0
+    stored = artifacts.read_md(
+        Path(cfg.work_dir), "deadbeef", 1, cfg.rasterize.dpi, "model"
+    )
+    assert stored == f"```text\n{anchor}\n```"
+    meta = artifacts.read_meta(
+        Path(cfg.work_dir), "deadbeef", 1, cfg.rasterize.dpi, "model"
+    )
+    assert meta is not None
+    assert meta.endpoint == "pdf-text-fallback"
+
+
+@pytest.mark.asyncio
 async def test_garbled_page_retries_with_escalated_raster_budget(tmp_path, monkeypatch):
     renders: list[tuple[int, int]] = []
 

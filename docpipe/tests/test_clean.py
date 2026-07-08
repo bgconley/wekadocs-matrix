@@ -9,6 +9,8 @@ from docpipe.clean import (
     first_h1_text,
     resolve_title,
 )
+from docpipe.contract import validate_contract
+from docpipe.fences import iter_lines_with_fence_state
 from docpipe.manifest import DocRecord
 
 _BASE = DocRecord(
@@ -160,6 +162,239 @@ def test_clean_document_does_not_refence_existing_cli_blocks():
     assert body.count("```bash") == 1
     assert body.count("```") == 2
     assert "```bash\n```bash" not in body
+
+
+def test_clean_document_lifts_indented_fences_to_contract_safe_top_level():
+    md, _title = clean_document(
+        "# AHV Maintenance\n\n"
+        "1. Run the status command.\n\n"
+        "    ```bash\n"
+        "    nutanix@cvm$ cluster status\n"
+        "    ```\n\n"
+        "    The output appears after the command.\n\n"
+        "        - **Name**: cluster status\n",
+        _rec(),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert validate_contract(md).ok
+    assert "\n```bash\nnutanix@cvm$ cluster status\n```\n" in md
+    assert "\n    ```" not in md
+    assert "\nThe output appears after the command." in md
+    assert "\n- **Name**: cluster status" in md
+
+
+def test_clean_document_lifts_fenced_shell_comments_before_h1_demote():
+    md, _title = clean_document(
+        "# Nutanix Kubernetes Engine Guide\n\n"
+        "6. Verify that services have started on all etcd nodes.\n\n"
+        "    ```bash\n"
+        "    # export ETCD_IP_0=<replace with etcd 0 IP address>\n"
+        "    # etcdctl -w table endpoint status\n"
+        "    ```\n\n"
+        "# Deleting a Private Registry\n\n"
+        "Body.\n",
+        _rec(slug="nutanix-kubernetes-engine-guide"),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert validate_contract(md).ok
+    h1s = [
+        line
+        for line, in_fence in iter_lines_with_fence_state(md)
+        if not in_fence and line.startswith("# ")
+    ]
+    assert h1s == ["# Nutanix Kubernetes Engine Guide"]
+    assert "```bash\n# export ETCD_IP_0=<replace with etcd 0 IP address>" in md
+    assert "\n## Deleting a Private Registry" in md
+
+
+def test_clean_document_lifts_blockquoted_fence_commands_to_top_level():
+    md, _title = clean_document(
+        "# NKE Deployment\n\n"
+        "> - To list the Prism Element UUID, run the following command.\n"
+        ">\n"
+        '> ```bashnutanix@CVM:~$ ncli cluster info |grep "Cluster Uuid"\n'
+        "> ```\n",
+        _rec(slug="nutanix-kubernetes-engine-guide"),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert validate_contract(md).ok
+    assert '```bash\nnutanix@CVM:~$ ncli cluster info |grep "Cluster Uuid"\n```' in md
+    assert "> ```" not in md
+
+
+def test_clean_document_outdents_blocks_revealed_after_fence_repair():
+    md, _title = clean_document(
+        "# AHV Repair\n\n"
+        "```text\n"
+        "output that forgot to close\n\n"
+        "## Follow Up\n\n"
+        "    a. AHV host IP address.\n\n"
+        "        Check the AHV host IP address.\n",
+        _rec(),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert validate_contract(md).ok
+    assert "\na. AHV host IP address." in md
+    assert "\nCheck the AHV host IP address." in md
+
+
+def test_clean_document_collapses_duplicated_fences_before_outdenting():
+    md, _title = clean_document(
+        "# AHV Startup\n\n"
+        "```bash\n"
+        "```bash\n"
+        "nutanix@cvm$ cluster start\n"
+        "```\n"
+        "```\n\n"
+        "    The cluster services start after the command.\n",
+        _rec(),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert validate_contract(md).ok
+    assert md.count("```bash") == 1
+    assert "\n```bash\nnutanix@cvm$ cluster start\n```\n" in md
+    assert "\nThe cluster services start after the command." in md
+
+
+def test_clean_document_repairs_indented_code_blocks_after_malformed_fences():
+    md, _title = clean_document(
+        "# AHV Startup\n\n"
+        "```text\n"
+        "open output\n"
+        "```bash\n"
+        "nutanix@cvm$ cluster start\n"
+        "```\n\n"
+        "    a. Continue with the next verification step.\n",
+        _rec(),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert validate_contract(md).ok
+    assert "\na. Continue with the next verification step." in md
+
+
+def test_clean_document_converges_after_nested_fence_reveals_later_indents():
+    md, _title = clean_document(
+        "# AHV Maintenance\n\n"
+        "```\n"
+        "service output\n"
+        "```bash\n"
+        "nutanix@cvm$ sudo shutdown -P now\n"
+        "```\n\n"
+        "    b. Ping each CVM (ping `cvm_ip_addr`) to verify shutdown.\n"
+        "6. Shut down each node in the cluster.\n\n"
+        "    a. Log on to the IPMI web console of each node.\n\n"
+        "    b. Under **Remote Control** > **Power Control**, select **Power Off Server - Orderly Shutdown**.\n\n"
+        "    > **Note:** The IPMI web console layout can change.\n\n"
+        "    c. Ping each host (`ping hypervisor_ip_addr`) to verify shutdown.\n\n"
+        "7. Complete the maintenance activity.\n",
+        _rec(),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert validate_contract(md).ok
+    assert "\na. Log on to the IPMI web console of each node." in md
+    assert "\n> **Note:** The IPMI web console layout can change." in md
+
+
+def test_clean_document_completes_pipe_table_rows():
+    md, _title = clean_document(
+        "# NC2 Guide\n\n"
+        "| Revision Date | Revision Description\n"
+        "| :--- | :--- |\n"
+        "| June 15, 2026 | Updated deployment guidance. |\n",
+        _rec(),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert "| Revision Date | Revision Description |" in md
+    assert "| June 15, 2026 | Updated deployment guidance. |" in md
+
+
+def test_clean_document_normalizes_extra_separator_cells():
+    md, _title = clean_document(
+        "# AOS Guide\n\n"
+        "| Module or Service | Module name | Disabled | Enabled |\n"
+        "| :--- | :--- | :--- | :--- | :--- |\n"
+        "| API Audit | api_audit | api_audit.log | api_audit.log |\n",
+        _rec(),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert "| :--- | :--- | :--- | :--- |\n" in md
+    assert "| :--- | :--- | :--- | :--- | :--- |" not in md
+
+
+def test_clean_document_pads_short_table_rows_to_header_width():
+    md, _title = clean_document(
+        "# AHV Guide\n\n"
+        "| Parameter | Description | Values | Values |\n"
+        "| :--- | :--- | :--- | :--- |\n"
+        "| Name | Displays the policy name. | (name) |\n",
+        _rec(),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert "| Name | Displays the policy name. | (name) |  |" in md
+
+
+def test_clean_document_merges_surplus_table_cells_to_expected_column():
+    md, _title = clean_document(
+        "# NKE Guide\n\n"
+        "| Service | Requests | Limits | Replicas |\n"
+        "| :--- | :--- | :--- | :--- |\n"
+        "| Prometheus | CPU: 110m | CPU: 600m | Memory: 240Mi | 1 overall |\n",
+        _rec(),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert "| Prometheus | CPU: 110m | CPU: 600m \\| Memory: 240Mi | 1 overall |" in md
+
+
+def test_clean_document_repairs_malformed_separator_rows():
+    md, _title = clean_document(
+        "# NKE Guide\n\n"
+        "| Parameter | Description |\n"
+        "| :--- | : | : : |\n"
+        "| Name | The name of the node. |\n",
+        _rec(),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert "| :--- | :--- |" in md
+    assert "| :--- | : | : : |" not in md
+
+
+def test_clean_document_repairs_colon_only_separator_rows():
+    md, _title = clean_document(
+        "# NKE Guide\n\n"
+        "| Parameter | Description |\n"
+        "| : : | : : |\n"
+        "| Name | The name of the node. |\n",
+        _rec(),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert "| :--- | :--- |" in md
+    assert "| : : | : : |" not in md
+
+
+def test_clean_document_adds_header_for_headerless_parameter_rows():
+    md, _title = clean_document(
+        "# NAI Guide\n\n"
+        "| naiAgent.agentImage.image | NAI Agent app image name | docker.io/nutanix/nai-agent-app |\n"
+        "| naiAgent.agentImage.tag | NAI Agent app image tag | v2.7.0 |\n",
+        _rec(),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert "| Key | Description | Default Value |" in md
+    assert "| :--- | :--- | :--- |" in md
 
 
 def test_clean_document_contract():

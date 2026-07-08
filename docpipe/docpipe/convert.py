@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import artifacts
+from . import artifacts, pdf_tables
 from .config import Config
 from .fences import is_fence_line
 from .log import get_logger
@@ -352,6 +352,57 @@ class Converter:
             or flag in {"short_vs_textlayer", "low_text_overlap"}
         ]
 
+    def _has_retry_capacity_after_failure(self, job: PageJob, endpoint: str) -> bool:
+        endpoint_attempts = dict(job.endpoint_attempts)
+        endpoint_attempts[endpoint] = endpoint_attempts.get(endpoint, 0) + 1
+        active_endpoints = self._active_endpoint_names or set(endpoint_attempts)
+        return any(
+            endpoint_attempts.get(name, 0) < self.config.convert.max_retries
+            for name in active_endpoints
+        )
+
+    async def _pdf_table_fallback(
+        self, job: PageJob, anchor_text: Optional[str]
+    ) -> str | None:
+        if not anchor_text:
+            return None
+        loop = self._loop
+        assert loop is not None
+        try:
+            markdown = await loop.run_in_executor(
+                None,
+                pdf_tables.page_key_value_table_markdown,
+                job.pdf_path,
+                job.page_no,
+            )
+        except Exception as exc:
+            logger.warning(
+                "pdf table fallback failed",
+                extra={
+                    "fields": {
+                        "sha": job.sha256[:8],
+                        "page": job.page_no,
+                        "err": str(exc)[:120],
+                    }
+                },
+            )
+            return None
+        candidates = [markdown] if markdown else []
+        escaped_anchor = anchor_text.strip().replace("```", "` ` `")
+        if escaped_anchor:
+            candidates.append(f"```text\n{escaped_anchor}\n```")
+        for candidate in candidates:
+            qa = assess_page(candidate, anchor_text)
+            if self._quality_retry_flags(qa):
+                continue
+            if (
+                qa.overlap is not None
+                and qa.overlap < self.config.convert.text_overlap_min
+            ):
+                continue
+            return candidate
+        return None
+
     async def _process(
         self, job: PageJob, endpoint: str, queue: "asyncio.Queue[PageJob]"
     ) -> None:
@@ -441,6 +492,34 @@ class Converter:
             if retry_flags:
                 if self._can_escalate_raster(job):
                     job.raster_escalated = True
+                if not self._has_retry_capacity_after_failure(job, endpoint):
+                    fallback = await self._pdf_table_fallback(job, anchor_text)
+                    if fallback is not None:
+                        artifacts.write_success(
+                            self.work_dir,
+                            sha256=job.sha256,
+                            page_no=job.page_no,
+                            dpi=self.dpi,
+                            model_id=self.model_id,
+                            markdown=fallback,
+                            endpoint="pdf-text-fallback",
+                            image_tokens=None,
+                            prompt_tokens=None,
+                            completion_tokens=None,
+                            attempts=job.attempts + 1,
+                        )
+                        self._outputs[(job.sha256, job.page_no)] = fallback
+                        latest_page = max(
+                            page_no
+                            for sha256, page_no in self._outputs
+                            if sha256 == job.sha256
+                        )
+                        for key in list(self._outputs):
+                            if key[0] == job.sha256 and key[1] != latest_page:
+                                del self._outputs[key]
+                        self._summary.converted += 1
+                        self._tick()
+                        return
                 await self._retry_or_fail(
                     job,
                     endpoint,
