@@ -153,11 +153,12 @@ def build_frontmatter(record: DocRecord, title: str, run: RunMeta) -> str:
     """Emit YAML front matter (byte 0). Only title/version/last_edited are read by
     the parser; the rest is provenance."""
 
+    timestamp = run.extracted_at or _now_iso()
     fields: list[tuple[str, object]] = [
         ("title", title),
         ("version", record.doc_version or "1.0"),
+        ("last_edited", timestamp),
     ]
-    # last_edited is parser-consumed but optional; only emit when we have it.
     fields += [
         ("product", record.product or "Nutanix"),
         ("source_pdf", record.rel_path),
@@ -167,7 +168,7 @@ def build_frontmatter(record: DocRecord, title: str, run: RunMeta) -> str:
         ("model_id", run.model_id),
         ("endpoint", run.endpoint),
         ("pipeline_version", PIPELINE_VERSION),
-        ("extracted_at", run.extracted_at or _now_iso()),
+        ("extracted_at", timestamp),
     ]
     lines = ["---"]
     lines += [f"{k}: {_yaml_scalar(v)}" for k, v in fields]

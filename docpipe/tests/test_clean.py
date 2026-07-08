@@ -178,3 +178,16 @@ def test_clean_document_contract():
     assert body.lstrip().startswith("# Hello World")  # body opens with the single H1
     assert sum(1 for ln in md.splitlines() if ln.startswith("# ")) == 1
     assert "\n\n\n" not in md  # blank runs collapsed
+
+
+def test_clean_document_emits_parser_consumed_last_edited():
+    run = RunMeta(
+        model_id="qwen36-27b-fp8-oxcart",
+        endpoint="oxcart",
+        dpi=200,
+        extracted_at="2026-07-08T02:50:00Z",
+    )
+
+    md, _title = clean_document("# Hello World\n\nbody", _rec(), run)
+
+    assert 'last_edited: "2026-07-08T02:50:00Z"' in md

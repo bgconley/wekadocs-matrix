@@ -139,8 +139,11 @@ it was resumed from cache.)
   latest page per document; low-alnum QA tolerates ASCII tables/box diagrams
   while still catching symbol noise; and kv logs quote `=` values plus escape
   newlines. TDD: 6 behavior tests written RED first, then green.
+- **2026-07-08 — Frontmatter parser contract: RESOLVED.** The final Markdown
+  frontmatter now emits parser-consumed `last_edited` using the run timestamp
+  alongside `extracted_at`; TDD covered the missing-field regression.
 - **Remaining gating work:** rasterization fidelity, populated golden/citation
-  eval, parser-consumed `last_edited`, and remaining coverage-completeness lows.
+  eval, and remaining coverage-completeness lows.
 
 ## Executive verdict
 
