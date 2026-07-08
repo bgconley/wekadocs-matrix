@@ -63,6 +63,11 @@ it was resumed from cache.)
   fixed: manifest fast-path reuse now requires same `rel_path`, same byte size,
   and the same current `sha256`, so same-size content edits are rescanned and
   cannot serve stale page artifacts under the old cache key.
+- **2026-07-07 — P0 manifest relocation path refresh: RESOLVED.** Finding
+  **#5** now fully closed: when a record is safely reused by matching
+  `rel_path`/size/current `sha256`, the cached metadata is kept but `pdf_path`,
+  `rel_path`, and `size_bytes` are refreshed from the currently discovered file,
+  so moved-but-identical corpus inputs do not retain stale absolute paths.
 - **2026-07-07 — P0 slug collision overwrite: RESOLVED.** Finding **#8 / P0-6**
   fixed: `assemble_all` detects duplicate output slugs in a batch and writes
   colliding documents under stable short-SHA-suffixed slugs, preventing

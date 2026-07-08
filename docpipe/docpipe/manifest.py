@@ -13,7 +13,7 @@ import hashlib
 import json
 import re
 import unicodedata
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Optional
 
@@ -200,7 +200,14 @@ def build(input_dir: Path, work_dir: Path) -> list[DocRecord]:
                 )
                 continue
             if prev.sha256 == current_sha:
-                records.append(prev)
+                records.append(
+                    replace(
+                        prev,
+                        pdf_path=str(pdf.resolve()),
+                        rel_path=rel,
+                        size_bytes=size_bytes,
+                    )
+                )
                 continue
         try:
             rec = scan_pdf(pdf, input_dir.resolve())

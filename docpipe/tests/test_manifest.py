@@ -106,3 +106,34 @@ def test_build_rescans_same_size_pdf_when_content_hash_changes(tmp_path, monkeyp
 
     assert scanned == ["guide.pdf"]
     assert [record.sha256 for record in records] == ["newsha"]
+
+
+def test_build_reuse_refreshes_absolute_pdf_path_after_relocation(tmp_path):
+    old_input = tmp_path / "old"
+    new_input = tmp_path / "new"
+    work_dir = tmp_path / "work"
+    old_input.mkdir()
+    new_input.mkdir()
+    old_pdf = old_input / "guide.pdf"
+    new_pdf = new_input / "guide.pdf"
+    content = b"%PDF-1.7\nsame\n"
+    old_pdf.write_bytes(content)
+    new_pdf.write_bytes(content)
+    old = DocRecord(
+        pdf_path=str(old_pdf.resolve()),
+        rel_path="guide.pdf",
+        sha256=manifest.sha256_file(old_pdf),
+        size_bytes=old_pdf.stat().st_size,
+        page_count=1,
+        slug="guide",
+        title=None,
+        doc_version=None,
+        product=None,
+    )
+    manifest.write_manifest(work_dir, [old])
+
+    records = manifest.build(new_input, work_dir)
+
+    assert len(records) == 1
+    assert records[0].sha256 == old.sha256
+    assert records[0].pdf_path == str(new_pdf.resolve())
