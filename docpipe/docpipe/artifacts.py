@@ -73,14 +73,24 @@ def is_done(work_dir: Path, sha256: str, page_no: int, dpi: int, model_id: str) 
     m = read_meta(work_dir, sha256, page_no, dpi, model_id)
     if m is None or m.status != "ok":
         return False
-    return md_path(work_dir, sha256, page_no, dpi, model_id).is_file()
+    return read_md(work_dir, sha256, page_no, dpi, model_id) is not None
 
 
 def read_md(
     work_dir: Path, sha256: str, page_no: int, dpi: int, model_id: str
 ) -> Optional[str]:
     p = md_path(work_dir, sha256, page_no, dpi, model_id)
-    return p.read_text(encoding="utf-8") if p.is_file() else None
+    if not p.is_file():
+        return None
+    text = p.read_text(encoding="utf-8")
+    meta = read_meta(work_dir, sha256, page_no, dpi, model_id)
+    if meta is None or meta.status != "ok":
+        return None
+    if not text.strip():
+        return None
+    if len(text) != meta.char_len:
+        return None
+    return text
 
 
 def write_success(

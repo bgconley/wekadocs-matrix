@@ -114,8 +114,14 @@ def document_coverage(
         meta = artifacts.read_meta(work_dir, record.sha256, page_no, dpi, model_id)
         if meta is None:
             cov.missing_pages.append(page_no)
-        elif meta.status == "ok":
+        elif (
+            meta.status == "ok"
+            and artifacts.read_md(work_dir, record.sha256, page_no, dpi, model_id)
+            is not None
+        ):
             cov.ok_pages.append(page_no)
+        elif meta.status == "ok":
+            cov.missing_pages.append(page_no)
         else:
             cov.failed_pages.append(page_no)
     return cov

@@ -229,6 +229,16 @@ class Converter:
                 self._summary.truncated_bumps += 1
                 bumped = min(int(self.config.convert.max_tokens * 1.6), 12000)
                 result = await self.pool.chat(endpoint, messages, max_tokens=bumped)
+                if result.truncated:
+                    await self._retry_or_fail(
+                        job, endpoint, queue, VLMError("model response still truncated")
+                    )
+                    return
+            if not result.content.strip():
+                await self._retry_or_fail(
+                    job, endpoint, queue, VLMError("empty model response")
+                )
+                return
         except VLMError as exc:
             await self._retry_or_fail(job, endpoint, queue, exc)
             return
