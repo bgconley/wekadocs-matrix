@@ -192,7 +192,14 @@ def build(input_dir: Path, work_dir: Path) -> list[DocRecord]:
         if prev is not None and prev.size_bytes == pdf.stat().st_size:
             records.append(prev)
             continue
-        rec = scan_pdf(pdf, input_dir.resolve())
+        try:
+            rec = scan_pdf(pdf, input_dir.resolve())
+        except Exception as exc:
+            logger.warning(
+                "skipping pdf after scan failure",
+                extra={"fields": {"path": str(pdf), "error": str(exc)}},
+            )
+            continue
         logger.info(
             "scanned",
             extra={

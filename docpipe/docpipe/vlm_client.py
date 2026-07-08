@@ -119,10 +119,25 @@ class VLMPool:
 
         out: dict[str, str] = {}
         for name, ep in self._endpoints.items():
-            resp = await ep.client.get(ep.cfg.models_url)
-            resp.raise_for_status()
-            data = resp.json()
-            served = data["data"][0]["id"]
+            try:
+                resp = await ep.client.get(ep.cfg.models_url)
+                resp.raise_for_status()
+                data = resp.json()
+                served = data["data"][0]["id"]
+                if not isinstance(served, str) or not served.strip():
+                    raise VLMBadResponse("missing served model id")
+            except Exception as exc:
+                logger.warning(
+                    "model probe failed",
+                    extra={
+                        "fields": {
+                            "endpoint": name,
+                            "url": ep.cfg.models_url,
+                            "error": str(exc),
+                        }
+                    },
+                )
+                continue
             out[name] = served
         return out
 
@@ -132,6 +147,8 @@ class VLMPool:
         if self.model_id:
             return self.model_id
         served = await self.probe_models()
+        if not served:
+            raise VLMError("no live endpoints responded to /v1/models")
         ids = set(served.values())
         if len(ids) > 1:
             logger.warning(

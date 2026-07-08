@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -111,3 +112,20 @@ async def test_still_truncated_bumped_response_is_failed_not_cached_ok(
     assert meta is not None
     assert meta.status == "failed"
     assert "truncated" in (meta.error or "")
+
+
+@pytest.mark.asyncio
+async def test_run_with_pending_pages_and_no_active_endpoints_fails_fast(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "docpipe.convert.render_page_data_url",
+        lambda *args, **kwargs: "data:image/png;base64,AAA=",
+    )
+    cfg = _cfg(tmp_path)
+    for ep in cfg.endpoints:
+        ep.enabled = False
+    conv = Converter(cfg, FakePool([]), "model")
+
+    with pytest.raises(RuntimeError, match="no active endpoints"):
+        await asyncio.wait_for(conv.run([_rec(tmp_path)]), timeout=0.2)

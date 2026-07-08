@@ -121,6 +121,12 @@ class Converter:
             )
             return self._summary
 
+        active_endpoints = [
+            ep for ep in self.config.active_endpoints if ep.inflight > 0
+        ]
+        if not active_endpoints:
+            raise RuntimeError("no active endpoints configured")
+
         logger.info(
             "starting conversion",
             extra={
@@ -137,7 +143,7 @@ class Converter:
             queue.put_nowait(job)
 
         workers: list[asyncio.Task] = []
-        for ep in self.config.active_endpoints:
+        for ep in active_endpoints:
             for i in range(ep.inflight):
                 workers.append(
                     asyncio.create_task(
