@@ -60,6 +60,11 @@ it was resumed from cache.)
   key, and the single-page page-number fallback now preserves table-shaped rows.
   Real rows ending in numeric cells (for example, capacity limits) survive while
   recurring footer bands like `AHV | Networking | 11/12` still drop.
+- **2026-07-07 — P0 furniture structural-safety: RESOLVED.** Finding **#18**
+  fixed: recurring section labels such as `Syntax`/`Parameters`/`Example`, table
+  headers, separators, and fence lines are no longer classified as page
+  furniture; repeated furniture strings are removed only from page-edge
+  positions, so body occurrences survive.
 - **2026-07-07 — P0 stitch seam-repair cluster: RESOLVED.** Findings **#19,
   #20, #21** fixed: `_merge_seam` only deduplicates a repeated table header when
   it matches the current table header, joins rule-8-compliant table continuation

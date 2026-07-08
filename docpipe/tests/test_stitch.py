@@ -93,6 +93,59 @@ def test_furniture_and_page_numbers_stripped():
     assert "# Host Networking" in joined
 
 
+def test_recurring_section_labels_are_not_stripped_as_furniture():
+    pages = [
+        "# ncli storage list\nSyntax\nncli storage list\nAHV | Networking | 11",
+        "# ncli storage get\nSyntax\nncli storage get\nAHV | Networking | 12",
+        "# ncli host add\nParameters\nhost-name string\nAHV | Networking | 13",
+        "# ncli host remove\nParameters\nhost-name string\nAHV | Networking | 14",
+        "# acli vm.create\nExample\nacli vm.create demo\nAHV | Networking | 15",
+        "# acli vm.delete\nExample\nacli vm.delete demo\nAHV | Networking | 16",
+    ]
+
+    cleaned = strip_page_furniture(pages)
+    joined = "\n".join(cleaned)
+
+    assert joined.count("Syntax") == 2
+    assert joined.count("Parameters") == 2
+    assert joined.count("Example") == 2
+    assert "AHV | Networking |" not in joined
+
+
+def test_repeated_table_headers_are_not_stripped_as_furniture():
+    pages = [
+        "| Command | Description |\n|---|---|\n| ncli sp ls | list pools |\nAHV | Networking | 11",
+        "| Command | Description |\n|---|---|\n| ncli sp get | get pool |\nAHV | Networking | 12",
+        "| Command | Description |\n|---|---|\n| acli net.list | list networks |\nAHV | Networking | 13",
+        "| Command | Description |\n|---|---|\n| acli vm.list | list vms |\nAHV | Networking | 14",
+    ]
+
+    cleaned = strip_page_furniture(pages)
+    joined = "\n".join(cleaned)
+
+    assert "| Command | Description |" in cleaned[0]
+    assert "|---|---|" in cleaned[0]
+    assert joined.count("| Command | Description |") == 4
+    assert joined.count("|---|---|") == 4
+    assert "AHV | Networking |" not in joined
+
+
+def test_recurring_furniture_is_removed_only_from_edge_positions():
+    pages = [
+        "Nutanix AHV Guide\n# Topic A\nintro\nNutanix AHV Guide\nbody\ndetail\nmore\nAHV | Networking | 11",
+        "Nutanix AHV Guide\n# Topic B\nintro\nNutanix AHV Guide\nbody\ndetail\nmore\nAHV | Networking | 12",
+        "Nutanix AHV Guide\n# Topic C\nintro\nNutanix AHV Guide\nbody\ndetail\nmore\nAHV | Networking | 13",
+        "Nutanix AHV Guide\n# Topic D\nintro\nNutanix AHV Guide\nbody\ndetail\nmore\nAHV | Networking | 14",
+    ]
+
+    cleaned = strip_page_furniture(pages)
+    joined = "\n".join(cleaned)
+
+    assert all(not page.startswith("Nutanix AHV Guide") for page in cleaned)
+    assert joined.count("Nutanix AHV Guide") == 4
+    assert "AHV | Networking |" not in joined
+
+
 def test_numeric_table_rows_are_not_stripped_as_footer_furniture():
     pages = [
         "# Capacity\n\n| Metric | Scope | Value |\n| --- | --- | --- |\nReplication factor | Minimum | 2\n| Max nodes | Cluster | 32\nAHV | Networking | 11",
