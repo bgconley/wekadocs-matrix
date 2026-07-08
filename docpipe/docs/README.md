@@ -88,14 +88,23 @@ it was resumed from cache.)
   `<acropolis>`/`$ ` command groups in top-level `bash` fences, while skipping
   existing fences. This closes the proven command-structure-loss fix; the
   structure-aware `prev_tail` half of P1-5/R3.8 remains open.
+- **2026-07-07 — Convert-loop reliability mediums: RESOLVED.** Findings **#13,
+  #14, #16, #17** fixed: retry budget is tracked per endpoint so a dead oxcart
+  worker cannot exhaust blackbird's opportunity to transcribe a page; workers
+  defer retry jobs to still-untried endpoints; backoff sleeps happen in detached
+  requeue tasks instead of occupying worker slots; truncation retries use a
+  genuinely higher token ceiling and refuse shorter retry output; and
+  `_prev_tail` sidecar reads are executor-backed, guarded, and fall back to
+  native PDF text on read faults. TDD: 5 behavior tests written RED first, then
+  green against the real converter loop.
 - **2026-07-07 — Review correction pass: RESOLVED.** The external follow-up's
   three corrections are reflected in code/status: finding **#5** is fully closed
   by the relocation path refresh, the finding **#4** single-page fallback
   residual is covered by regression test, and the full package Pyright gate
   (`cd docpipe && pyright .`) is clean with tests included.
-- **Remaining gating work:** the still-open P0 roadmap items outside the
-  resolved clusters, then P1-5/R3.8 structure-aware `prev_tail`, P1-1 anchoring,
-  and P1-2 sampler hardening.
+- **Remaining gating work:** robustness/config mediums outside the resolved
+  clusters, then P1-5/R3.8 structure-aware `prev_tail`, P1-1 anchoring, and P1-2
+  sampler hardening.
 
 ## Executive verdict
 
