@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -44,6 +46,28 @@ def _chat_status(status: int, *, retry_after: str | None = None) -> httpx.MockTr
     def handler(request: httpx.Request) -> httpx.Response:
         headers = {"Retry-After": retry_after} if retry_after is not None else {}
         return httpx.Response(status, headers=headers, text="nope")
+
+    return httpx.MockTransport(handler)
+
+
+def _chat_ok(seen: list[dict]) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": "# ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 20,
+                },
+            },
+        )
 
     return httpx.MockTransport(handler)
 
@@ -105,3 +129,20 @@ async def test_chat_marks_rate_limit_retryable_with_retry_after():
     assert exc_info.value.status == 429
     assert getattr(exc_info.value, "retryable", None) is True
     assert getattr(exc_info.value, "retry_after_s", None) == 3.0
+
+
+@pytest.mark.asyncio
+async def test_chat_sends_sampler_hardening_parameters():
+    seen: list[dict] = []
+    pool = _pool_with_transports({"oxcart": _chat_ok(seen)})
+    pool.model_id = "qwen36-27b"
+    try:
+        await pool.chat("oxcart", [{"role": "user", "content": "hi"}])
+    finally:
+        await _close_pool(pool)
+
+    assert seen
+    body = seen[0]
+    assert body["frequency_penalty"] == pytest.approx(0.2)
+    assert body["top_p"] == pytest.approx(0.9)
+    assert body["temperature"] == pytest.approx(0.1)

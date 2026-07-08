@@ -229,6 +229,8 @@ class VLMPool:
         body: dict = {
             "model": model,
             "temperature": self.config.convert.temperature,
+            "top_p": self.config.convert.top_p,
+            "frequency_penalty": self.config.convert.frequency_penalty,
             "max_tokens": max_tokens or self.config.convert.max_tokens,
             "messages": messages,
         }

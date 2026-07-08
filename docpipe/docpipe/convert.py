@@ -17,16 +17,19 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
 from . import artifacts
 from .config import Config
+from .fences import is_fence_line
 from .log import get_logger
 from .manifest import DocRecord
 from .prompts import build_messages
 from .rasterize import page_text, render_page_data_url
+from .validate import PageQA, assess_page
 from .vlm_client import VLMError, VLMPool
 
 logger = get_logger("convert")
@@ -60,6 +63,76 @@ class ConvertSummary:
     @property
     def pending_at_start(self) -> int:
         return self.converted + self.failed
+
+
+_LIST_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
+_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
+_ANCHOR_RETRY_FLAGS = {"short_vs_textlayer", "low_text_overlap"}
+
+
+def _is_table_row(line: str) -> bool:
+    stripped = line.strip()
+    return (
+        stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2
+    )
+
+
+def _is_table_separator(line: str) -> bool:
+    return bool(_TABLE_SEPARATOR_RE.match(line))
+
+
+def _join_tail_lines(lines: list[str], start: int) -> str:
+    return "\n".join(lines[start:]).strip()
+
+
+def _structure_aware_tail(text: str, n: int) -> str:
+    """Return continuity context, expanding to the last open block boundary."""
+
+    stripped = text.strip()
+    if not stripped:
+        return ""
+    lines = stripped.splitlines()
+
+    if sum(1 for line in lines if is_fence_line(line)) % 2 == 1:
+        for idx in range(len(lines) - 1, -1, -1):
+            if is_fence_line(lines[idx]):
+                return _join_tail_lines(lines, idx)
+
+    end = len(lines) - 1
+    while end >= 0 and not lines[end].strip():
+        end -= 1
+    if end >= 0 and _is_table_row(lines[end]):
+        start = end
+        while start > 0 and _is_table_row(lines[start - 1]):
+            start -= 1
+        block = lines[start : end + 1]
+        if len(block) >= 2 and any(_is_table_separator(line) for line in block):
+            return _join_tail_lines(lines, start)
+
+    if end >= 0 and _LIST_RE.match(lines[end]):
+        start = end
+        while start > 0 and _LIST_RE.match(lines[start - 1]):
+            start -= 1
+        return _join_tail_lines(lines, start)
+
+    return _tail(stripped, n)
+
+
+def _anchor_slice(text: str, max_chars: int) -> Optional[str]:
+    stripped = text.strip()
+    if not stripped:
+        return None
+    if len(stripped) <= max_chars:
+        return stripped
+    clipped = stripped[:max_chars]
+    cut = max(clipped.rfind("\n"), clipped.rfind(" "))
+    if cut > max_chars // 2:
+        clipped = clipped[:cut]
+    return clipped.strip() or None
+
+
+def _anchor_divergence_flags(qa: PageQA) -> list[str]:
+    return [flag for flag in qa.flags if flag in _ANCHOR_RETRY_FLAGS]
 
 
 def _tail(text: str, n: int) -> str:
@@ -242,6 +315,17 @@ class Converter:
             if other != endpoint
         )
 
+    async def _anchor_text(self, job: PageJob) -> Optional[str]:
+        loop = self._loop
+        assert loop is not None
+        try:
+            text = await loop.run_in_executor(
+                None, page_text, job.pdf_path, job.page_no
+            )
+        except Exception:
+            return None
+        return _anchor_slice(text, self.config.convert.anchor_max_chars)
+
     async def _process(
         self, job: PageJob, endpoint: str, queue: "asyncio.Queue[PageJob]"
     ) -> None:
@@ -263,11 +347,13 @@ class Converter:
             return
 
         prev_tail = await self._prev_tail(job)
+        anchor_text = await self._anchor_text(job)
         messages = build_messages(
             image_data_url=data_url,
             page_no=job.page_no,
             total_pages=job.total_pages,
             prev_tail=prev_tail,
+            anchor_text=anchor_text,
             figures=self.config.figures,
         )
 
@@ -311,6 +397,24 @@ class Converter:
                     job, endpoint, queue, VLMError("empty model response")
                 )
                 return
+            if anchor_text:
+                qa = assess_page(result.content, anchor_text)
+                divergence = _anchor_divergence_flags(qa)
+                if (
+                    len(anchor_text) > 200
+                    and qa.overlap is not None
+                    and qa.overlap < self.config.convert.text_overlap_min
+                    and "low_text_overlap" not in divergence
+                ):
+                    divergence.append("low_text_overlap")
+                if divergence:
+                    await self._retry_or_fail(
+                        job,
+                        endpoint,
+                        queue,
+                        VLMError("text-layer divergence: " + ",".join(divergence)),
+                    )
+                    return
         except VLMError as exc:
             await self._retry_or_fail(job, endpoint, queue, exc)
             return
@@ -430,7 +534,7 @@ class Converter:
                     self.model_id,
                 )
             if md:
-                return _tail(md, n)
+                return _structure_aware_tail(md, n)
         except Exception:
             pass
         # Fallback: previous page's native text layer (keeps continuity even when

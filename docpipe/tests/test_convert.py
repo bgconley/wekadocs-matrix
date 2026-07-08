@@ -105,6 +105,16 @@ class MultiEndpointPool:
         }
 
 
+class RecordingPool(FakePool):
+    def __init__(self, results: list[ChatResult]):
+        super().__init__(results)
+        self.messages: list[list[dict]] = []
+
+    async def chat(self, endpoint: str, messages: list[dict], *, max_tokens=None):
+        self.messages.append(messages)
+        return await super().chat(endpoint, messages, max_tokens=max_tokens)
+
+
 def _pool(fake: FakePool | ScriptedPool | MultiEndpointPool) -> VLMPool:
     return cast(VLMPool, fake)
 
@@ -328,6 +338,122 @@ async def test_prev_tail_read_fault_falls_back_to_native_pdf_text(
     )
 
     assert await conv._prev_tail(job) == "native previous page text"
+
+
+@pytest.mark.asyncio
+async def test_prev_tail_starts_at_open_fence_boundary(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.convert.prev_tail_chars = 30
+    conv = Converter(cfg, _pool(FakePool([])), "model")
+    conv._loop = asyncio.get_running_loop()
+    rec = _rec(tmp_path)
+    job = PageJob(rec.sha256, rec.pdf_path, 2, 2)
+    conv._outputs[(rec.sha256, 1)] = (
+        "# Previous\n\n"
+        + "\n".join(f"setup line {i}" for i in range(20))
+        + "\n\n```bash\nncli cluster get\nncli storage list\n"
+    )
+
+    tail = await conv._prev_tail(job)
+
+    assert tail is not None
+    assert tail.startswith("```bash")
+    assert "ncli cluster get" in tail
+    assert len(tail) > cfg.convert.prev_tail_chars
+
+
+@pytest.mark.asyncio
+async def test_prev_tail_keeps_open_table_header(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.convert.prev_tail_chars = 45
+    conv = Converter(cfg, _pool(FakePool([])), "model")
+    conv._loop = asyncio.get_running_loop()
+    rec = _rec(tmp_path)
+    job = PageJob(rec.sha256, rec.pdf_path, 2, 2)
+    conv._outputs[(rec.sha256, 1)] = (
+        "# Previous\n\n"
+        + "\n".join(f"prose line {i}" for i in range(12))
+        + "\n\n| Name | Value |\n|---|---|\n| CVM memory | 32 GiB |\n| Disk count | 6 |\n"
+    )
+
+    tail = await conv._prev_tail(job)
+
+    assert tail is not None
+    assert tail.startswith("| Name | Value |")
+    assert "|---|---|" in tail
+    assert "| Disk count | 6 |" in tail
+
+
+@pytest.mark.asyncio
+async def test_prev_tail_keeps_dangling_list_boundary(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.convert.prev_tail_chars = 40
+    conv = Converter(cfg, _pool(FakePool([])), "model")
+    conv._loop = asyncio.get_running_loop()
+    rec = _rec(tmp_path)
+    job = PageJob(rec.sha256, rec.pdf_path, 2, 2)
+    conv._outputs[(rec.sha256, 1)] = (
+        "Intro\n\n"
+        + "\n".join(f"background {i}" for i in range(15))
+        + "\n\n1. Open Prism Element.\n2. Select the VM.\n3. Review the alerts.\n"
+    )
+
+    tail = await conv._prev_tail(job)
+
+    assert tail is not None
+    assert tail.startswith("1. Open Prism Element.")
+    assert "3. Review the alerts." in tail
+
+
+@pytest.mark.asyncio
+async def test_convert_injects_current_page_text_layer_anchor(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "docpipe.convert.render_page_data_url",
+        lambda *args, **kwargs: "data:image/png;base64,AAA=",
+    )
+    monkeypatch.setattr(
+        "docpipe.convert.page_text",
+        lambda *args, **kwargs: "ANCHOR_ONLY_CLI ncli cluster get --redundancy-factor",
+    )
+    cfg = _cfg(tmp_path)
+    pool = RecordingPool([_result("# ok\n\nANCHOR_ONLY_CLI")])
+    conv = Converter(cfg, _pool(pool), "model")
+
+    summary = await conv.run([_rec(tmp_path)])
+
+    assert summary.converted == 1
+    user_text = pool.messages[0][1]["content"][0]["text"]
+    assert "ANCHOR_ONLY_CLI ncli cluster get --redundancy-factor" in user_text
+    assert "Use this text only to disambiguate glyphs" in user_text
+
+
+@pytest.mark.asyncio
+async def test_low_text_layer_overlap_retries_before_caching(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "docpipe.convert.render_page_data_url",
+        lambda *args, **kwargs: "data:image/png;base64,AAA=",
+    )
+    anchor = " ".join(f"anchorword{i}" for i in range(80))
+    monkeypatch.setattr("docpipe.convert.page_text", lambda *args, **kwargs: anchor)
+    cfg = _cfg(tmp_path)
+    cfg.convert.max_retries = 2
+    pool = FakePool(
+        [
+            _result("# Wrong\n\nunrelated hallucinated content only"),
+            _result("# Correct\n\n" + anchor),
+        ]
+    )
+    conv = Converter(cfg, _pool(pool), "model")
+
+    summary = await conv.run([_rec(tmp_path)])
+
+    assert len(pool.calls) == 2
+    assert summary.converted == 1
+    stored = artifacts.read_md(
+        Path(cfg.work_dir), "deadbeef", 1, cfg.rasterize.dpi, "model"
+    )
+    assert stored is not None
+    assert "anchorword79" in stored
 
 
 @pytest.mark.asyncio

@@ -26,7 +26,7 @@ FiguresMode = Literal["enriched", "minimal", "skip"]
 
 # Bump when the prompt text changes: it is folded into the page-artifact cache key
 # so a prompt change invalidates cached pages instead of serving stale output.
-PROMPT_VERSION = "2"
+PROMPT_VERSION = "3"
 
 # --- Figure instruction variants -------------------------------------------------
 
@@ -118,12 +118,15 @@ def build_messages(
     page_no: int,
     total_pages: int,
     prev_tail: str | None,
+    anchor_text: str | None = None,
     figures: FiguresMode = "enriched",
 ) -> list[dict]:
     """Assemble the OpenAI ``messages`` array for one page request.
 
     ``prev_tail`` is the trailing slice of the PREVIOUS page's generated Markdown
     (or a text-layer fallback) used purely for cross-page structural continuity.
+    ``anchor_text`` is THIS page's born-digital text layer, used only to
+    disambiguate glyphs visible in the page image.
     """
 
     parts: list[str] = []
@@ -145,6 +148,17 @@ def build_messages(
                 "PREV_PAGE_TAIL>>>"
             )
         parts.append("Now transcribe THIS page per the rules.")
+
+    if anchor_text:
+        parts.append(
+            "Born-digital text layer for THIS page, provided as a reference only. "
+            "Use this text only to disambiguate glyphs visible in the image; do not "
+            "invent text that is not present in the image or this reference. If the "
+            "image and reference disagree, the image is authoritative.\n"
+            "<<<PAGE_TEXT_ANCHOR\n"
+            f"{anchor_text.strip()}\n"
+            "PAGE_TEXT_ANCHOR>>>"
+        )
 
     user_text = "\n\n".join(parts)
 

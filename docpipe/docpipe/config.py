@@ -58,12 +58,16 @@ class RasterizeConfig(BaseModel):
 class ConvertConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    temperature: float = 0.0
+    temperature: float = 0.1
+    top_p: float = 0.9
+    frequency_penalty: float = 0.2
     max_tokens: int = 6000  # dense spec tables run long
     timeout_s: float = 240.0
     max_retries: int = 4
     backoff_base_s: float = 2.0  # exponential: base * 2**attempt (+ jitter)
     prev_tail_chars: int = 800  # ~200 tokens of previous-page context
+    anchor_max_chars: int = 6000  # cap text-layer anchor to ~1-2k tokens
+    text_overlap_min: float = 0.60
     disable_thinking: bool = True  # verified to suppress reasoning on both engines
 
 

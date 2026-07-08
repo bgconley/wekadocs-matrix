@@ -87,7 +87,8 @@ it was resumed from cache.)
   deterministically wraps unfenced `ncli`/`acli`/`ncli>`/`nutanix@`/
   `<acropolis>`/`$ ` command groups in top-level `bash` fences, while skipping
   existing fences. This closes the proven command-structure-loss fix; the
-  structure-aware `prev_tail` half of P1-5/R3.8 remains open.
+  structure-aware `prev_tail` half of P1-5/R3.8 was closed in the
+  2026-07-08 engine-justification P1 cluster below.
 - **2026-07-07 — Convert-loop reliability mediums: RESOLVED.** Findings **#13,
   #14, #16, #17** fixed: retry budget is tracked per endpoint so a dead oxcart
   worker cannot exhaust blackbird's opportunity to transcribe a page; workers
@@ -113,9 +114,18 @@ it was resumed from cache.)
   `--limit 0` selects zero records, and status/discovery preserve prompt-version
   keysets while showing the full model id. TDD: 9 behavior tests written RED
   first, then green; full gate is **85 passed / 1 skipped** and `pyright .` clean.
-- **Remaining gating work:** remaining robustness lows/mediums not covered here,
-  then P1-5/R3.8 structure-aware `prev_tail`, P1-1 anchoring, and P1-2 sampler
-  hardening.
+- **2026-07-08 — Engine-justification P1 cluster: RESOLVED.** **P1-5/R3.8,
+  P1-1, and P1-2** fixed: `prev_tail` now expands to the last open fence/table/
+  list boundary instead of blindly clipping to a fixed character count; current
+  page text-layer anchors are injected into `build_messages` with strict
+  glyph-disambiguation framing; low text-layer overlap on text-heavy pages retries
+  instead of caching a hallucinated/omissive page; and sampler requests now use
+  `temperature=0.1`, `top_p=0.9`, and `frequency_penalty=0.2`. `PROMPT_VERSION`
+  bumped to **3** so anchored prompts are a natural cache miss. TDD: 6 behavior
+  tests written RED first, then green; full gate is **91 passed / 1 skipped** and
+  `pyright .` clean.
+- **Remaining gating work:** Tier-0 contract gate, eval harness/golden checks,
+  rasterization fidelity, and remaining robustness lows/mediums not covered here.
 
 ## Executive verdict
 
@@ -128,8 +138,9 @@ cache (with `prompt_version` in the key), probe-don't-hardcode endpoint handling
 and the contract-tuned prompt are all real and well-executed. **Every gap is
 fixable within the existing stage boundaries — none requires re-architecting.**
 
-**Qwen3.6-27B is the right engine — conditionally, and the conditions are not yet
-met.** On pure OCR-per-parameter, specialists beat it: OmniDocBench places
+**Qwen3.6-27B is the right engine — conditionally, and the core operating
+conditions are now implemented.** On pure OCR-per-parameter, specialists beat it:
+OmniDocBench places
 MinerU2.5 (1.2B) at 90.67 and PaddleOCR-VL (0.9B) at 92.56, *above* Qwen3-VL-235B
 (89.15). But a general VLM is justified here for four reasons a specialist cannot
 satisfy: (i) it **describes** figures for retrieval (specialists only *box* them);
@@ -137,13 +148,12 @@ satisfy: (i) it **describes** figures for retrieval (specialists only *box* them
 fenced code + single H1 — whereas the leaderboard winners emit HTML/OTSL/DocTags
 that our parser *silently drops*; (iii) it does CLI-vs-prose + cross-page seam
 judgment; (iv) one-model operational simplicity. Throughput is irrelevant at 936
-one-time pages. **However**, the literature makes that choice explicitly
-conditional on two things the code lacks: **text-layer anchoring** (the #1
-anti-hallucination lever, olmOCR) and **repetition/determinism hardening** — the
-sampler currently runs bare `temperature=0` with no penalties, the exact config
-Holtzman et al. (arXiv:1904.09751) show degenerates into repetition, and FP8+MTP
-already voids the determinism rationale. Landing those two is what *earns* the 27B
-its justification and retires the #1 risk: hallucinated CLI flags feeding GraphRAG.
+one-time pages. The two literature-imposed operating conditions are now present:
+current-page **text-layer anchoring** is injected as a glyph-disambiguation
+reference and text-heavy low-overlap pages retry, while the sampler no longer runs
+bare `temperature=0` without penalties. Remaining proof shifts from engine
+eligibility to corpus QA: Tier-0 contract gating, eval/golden checks, and the full
+build/citation evaluation.
 
 **The holdbacks are a well-bounded set of data-loss/liveness bugs and two missing
 quality layers** — not architecture.
@@ -154,10 +164,10 @@ quality layers** — not architecture.
 
 | # | Dimension | Rating |
 |---|-----------|--------|
-| 1 | Architecture & stage decomposition | **PARTIAL** — anchoring stage absent |
+| 1 | Architecture & stage decomposition | **PARTIAL** — anchoring present; Tier-0/eval layers still pending |
 | 2 | Rasterization strategy | **PARTIAL** — DPI-not-patch-aligned; escalation dead/defective |
-| 3 | Model & prompt strategy | **PARTIAL** — strong prompt; anchoring + sampler hardening missing |
-| 4 | Model / endpoint choice | **PARTIAL** — engine sound; text-layer arbiter advisory-only |
+| 3 | Model & prompt strategy | **PARTIAL** — anchoring, structure-aware tail, and sampler hardening present; metadata-first/eval still pending |
+| 4 | Model / endpoint choice | **PARTIAL** — engine sound; text-layer arbiter active; specialist oracle/A-B still pending |
 | 5 | Concurrency & throughput | **FULLY MET** (design) — bugs are robustness-within-the-design |
 | 6 | Resumability & caching | **PARTIAL** — page-level excellent; manifest reuse is size-based |
 | 7 | Validation / QA gates | **MISSING** — no fail-closed contract gate; heuristics only |
@@ -201,8 +211,8 @@ a hang is maximally costly. All are addressable without changing the design.
   is all-or-nothing; `scan_pdf` and per-doc `page_text` are unguarded. Make failover
   actually engage. *(vlm_client.py, manifest.py, output.py)*
 
-**P1** closes the spec gaps (anchoring, sampler hardening, Tier-0 contract gate,
-eval harness, rasterization fidelity). **P2** is polish (dead config, DX, tests).
+**P1** now centers on the remaining proof layers (Tier-0 contract gate, eval
+harness, rasterization fidelity). **P2** is polish (dead config, DX, tests).
 Full detail in [GAP_ANALYSIS.md](GAP_ANALYSIS.md).
 
 ---
@@ -248,7 +258,7 @@ silently dropped.
 
 ## Recommended next step
 
-Execute **P0** (data-loss/liveness) before running the full 936-page build — those
-bugs would bake silent corruption into a one-time corpus. Then **P1-1 (anchoring)**
-and **P1-2 (sampler hardening)**, which are what the engine choice presupposes and
-which retire the top hallucination risk. P2 is optional polish.
+Run the remaining proof layers before the full 936-page build: Tier-0 contract
+gating, eval/golden checks, and rasterization-fidelity review. The engine-choice
+prerequisites (**P1-5/R3.8**, **P1-1**, **P1-2**) are now implemented; the next risk
+is proving the resulting corpus artifacts at build scale. P2 is optional polish.

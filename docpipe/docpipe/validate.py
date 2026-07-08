@@ -30,7 +30,9 @@ class PageQA:
 
     @property
     def suspect(self) -> bool:
-        return any(f.startswith(("garbled", "short")) for f in self.flags)
+        return any(
+            f.startswith(("garbled", "short", "low_text_overlap")) for f in self.flags
+        )
 
 
 def _alnum_ratio(text: str) -> float:
@@ -83,6 +85,8 @@ def assess_page(markdown: str, text_layer: Optional[str] = None) -> PageQA:
         if len(tl) > 200 and len(body) < 0.15 * len(tl) and not qa.suspect:
             qa.flags.append("short_vs_textlayer")
         qa.overlap = token_overlap(body, tl)
+        if len(tl) > 200 and qa.overlap is not None and qa.overlap < 0.60:
+            qa.flags.append("low_text_overlap")
     return qa
 
 
