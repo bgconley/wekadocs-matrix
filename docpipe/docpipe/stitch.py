@@ -28,6 +28,12 @@ def _nonempty(lines: list[str]) -> list[str]:
     return [ln for ln in lines if ln.strip()]
 
 
+def _furniture_band_key(line: str) -> str | None:
+    if not _FURNITURE_BAND_RE.match(line):
+        return None
+    return re.sub(r"\d+\s*$", "#", line.strip())
+
+
 def strip_page_furniture(pages: list[str]) -> list[str]:
     """Remove recurring running headers/footers and standalone page numbers.
 
@@ -40,30 +46,48 @@ def strip_page_furniture(pages: list[str]) -> list[str]:
         return [_drop_page_numbers(p) for p in pages]
 
     edge_counter: Counter[str] = Counter()
+    band_counter: Counter[str] = Counter()
+    page_edge_indices: list[set[int]] = []
     for p in pages:
-        lines = _nonempty(p.splitlines())
+        raw_lines = p.splitlines()
+        nonempty_indices = [i for i, ln in enumerate(raw_lines) if ln.strip()]
+        edge_indices = set(nonempty_indices[:2] + nonempty_indices[-3:])
+        page_edge_indices.append(edge_indices)
         # Count each distinct edge line ONCE per page: on a short page the top-2
         # and bottom-3 windows overlap, and we must not mistake a page's own
         # heading for recurring furniture just because it appears in both windows.
         page_edges = {
-            s for s in (ln.strip() for ln in lines[:2] + lines[-3:]) if 0 < len(s) <= 90
+            raw_lines[i].strip()
+            for i in edge_indices
+            if 0 < len(raw_lines[i].strip()) <= 90
         }
         for s in page_edges:
             edge_counter[s] += 1
+            key = _furniture_band_key(s)
+            if key is not None:
+                band_counter[key] += 1
 
     threshold = max(2, int(len(pages) * 0.3))
     furniture = {
         s for s, c in edge_counter.items() if c >= threshold and (len(s) <= 90)
     }
+    furniture_bands = {key for key, c in band_counter.items() if c >= threshold}
 
     cleaned: list[str] = []
-    for p in pages:
+    for p, edge_indices in zip(pages, page_edge_indices):
         out_lines = []
-        for ln in p.splitlines():
+        for i, ln in enumerate(p.splitlines()):
             s = ln.strip()
             if s in furniture:
                 continue
-            if _PAGE_NUM_RE.match(s) or _FURNITURE_BAND_RE.match(s):
+            if _PAGE_NUM_RE.match(s):
+                continue
+            band_key = _furniture_band_key(s)
+            if (
+                i in edge_indices
+                and band_key is not None
+                and band_key in furniture_bands
+            ):
                 continue
             out_lines.append(ln)
         cleaned.append("\n".join(out_lines).strip("\n"))

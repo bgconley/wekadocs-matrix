@@ -68,6 +68,21 @@ def test_furniture_and_page_numbers_stripped():
     assert "# Host Networking" in joined
 
 
+def test_numeric_table_rows_are_not_stripped_as_footer_furniture():
+    pages = [
+        "# Capacity\n\n| Metric | Scope | Value |\n| --- | --- | --- |\nReplication factor | Minimum | 2\n| Max nodes | Cluster | 32\nAHV | Networking | 11",
+        "# Ports\n\nPort | Protocol | 9440\nAHV | Networking | 12",
+    ]
+
+    cleaned = strip_page_furniture(pages)
+    joined = "\n".join(cleaned)
+
+    assert "Replication factor | Minimum | 2" in joined
+    assert "| Max nodes | Cluster | 32" in joined
+    assert "Port | Protocol | 9440" in joined
+    assert "AHV | Networking |" not in joined
+
+
 def test_stitch_pages_end_to_end():
     out = stitch_pages(["# Title\n\nIntro para", "## Section\n\nBody"])
     assert out.startswith("# Title")

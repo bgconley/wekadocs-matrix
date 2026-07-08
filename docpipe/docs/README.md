@@ -55,6 +55,10 @@ it was resumed from cache.)
   errors honor `Retry-After`, worker crash handlers survive failure-sidecar I/O
   errors, advisory `page_text()` QA cannot abort assembly, and `assemble_all`
   isolates one document failure instead of aborting the whole output stage.
+- **2026-07-07 — P0 furniture/table-row stripping: RESOLVED.** Finding **#4**
+  fixed: footer-band removal now requires a recurring page-edge band key, so
+  real table rows ending in numeric cells (for example, capacity limits) survive
+  while recurring footer bands like `AHV | Networking | 11/12` still drop.
 - **2026-07-07 — P1-5/R3.9 bare-CLI fencing: RESOLVED.** `clean_document` now
   deterministically wraps unfenced `ncli`/`acli`/`ncli>`/`nutanix@`/
   `<acropolis>`/`$ ` command groups in top-level `bash` fences, while skipping
