@@ -8,7 +8,8 @@ must not silently enter the corpus) -- pass ``allow_incomplete=True`` to overrid
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections import Counter
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
@@ -155,11 +156,33 @@ def assemble_all(
     qa_overlap: bool = True,
 ) -> list[DocResult]:
     results: list[DocResult] = []
+    slug_counts = Counter(rec.slug for rec in records)
+    used_slugs: set[str] = set()
     for rec in records:
+        assembly_rec = rec
+        if slug_counts[rec.slug] > 1:
+            base_slug = f"{rec.slug}-{rec.sha256[:8]}"
+            unique_slug = base_slug
+            n = 2
+            while unique_slug in used_slugs:
+                unique_slug = f"{base_slug}-{n}"
+                n += 1
+            assembly_rec = replace(rec, slug=unique_slug)
+            logger.warning(
+                "disambiguating duplicate output slug",
+                extra={
+                    "fields": {
+                        "slug": rec.slug,
+                        "unique_slug": unique_slug,
+                        "sha": rec.sha256[:8],
+                    }
+                },
+            )
+        used_slugs.add(assembly_rec.slug)
         try:
             result = assemble_document(
                 config,
-                rec,
+                assembly_rec,
                 model_id,
                 dpi=dpi,
                 allow_incomplete=allow_incomplete,
@@ -168,11 +191,11 @@ def assemble_all(
         except Exception as exc:
             logger.error(
                 "doc assembly failed",
-                extra={"fields": {"doc": rec.slug, "err": str(exc)}},
+                extra={"fields": {"doc": assembly_rec.slug, "err": str(exc)}},
             )
             result = DocResult(
                 sha256=rec.sha256,
-                slug=rec.slug,
+                slug=assembly_rec.slug,
                 page_count=rec.page_count,
                 failed_pages=list(range(1, rec.page_count + 1)),
             )

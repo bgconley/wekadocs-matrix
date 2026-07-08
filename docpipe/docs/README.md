@@ -63,6 +63,10 @@ it was resumed from cache.)
   fixed: manifest fast-path reuse now requires same `rel_path`, same byte size,
   and the same current `sha256`, so same-size content edits are rescanned and
   cannot serve stale page artifacts under the old cache key.
+- **2026-07-07 — P0 slug collision overwrite: RESOLVED.** Finding **#8 / P0-6**
+  fixed: `assemble_all` detects duplicate output slugs in a batch and writes
+  colliding documents under stable short-SHA-suffixed slugs, preventing
+  same-stem PDFs in different directories from overwriting each other.
 - **2026-07-07 — P1-5/R3.9 bare-CLI fencing: RESOLVED.** `clean_document` now
   deterministically wraps unfenced `ncli`/`acli`/`ncli>`/`nutanix@`/
   `<acropolis>`/`$ ` command groups in top-level `bash` fences, while skipping

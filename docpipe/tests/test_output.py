@@ -87,3 +87,22 @@ def test_assemble_all_isolates_single_document_failure(tmp_path, monkeypatch):
     assert results[0].written is False
     assert results[0].failed_pages == [1]
     assert results[1].written is True
+
+
+def test_assemble_all_disambiguates_duplicate_slugs(tmp_path):
+    cfg = _cfg(tmp_path)
+    first = _rec(tmp_path, "release-notes", "11111111aaaaaaaa")
+    second = _rec(tmp_path, "release-notes", "22222222bbbbbbbb")
+    _write_ok_page(cfg, first, "# First Release Notes\n\nfirst body")
+    _write_ok_page(cfg, second, "# Second Release Notes\n\nsecond body")
+
+    results = assemble_all(cfg, [first, second], "model", qa_overlap=False)
+
+    paths = [result.out_path for result in results]
+    assert all(result.written for result in results)
+    assert None not in paths
+    assert len(set(paths)) == 2
+    first_text = Path(paths[0]).read_text(encoding="utf-8")
+    second_text = Path(paths[1]).read_text(encoding="utf-8")
+    assert "first body" in first_text
+    assert "second body" in second_text
