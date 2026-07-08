@@ -142,8 +142,14 @@ it was resumed from cache.)
 - **2026-07-08 — Frontmatter parser contract: RESOLVED.** The final Markdown
   frontmatter now emits parser-consumed `last_edited` using the run timestamp
   alongside `extracted_at`; TDD covered the missing-field regression.
-- **Remaining gating work:** rasterization fidelity, populated golden/citation
-  eval, and remaining coverage-completeness lows.
+- **2026-07-08 — Rasterization fidelity: RESOLVED.** **P1-8 / findings #33,
+  #39, and #44** fixed: base rendering now targets a Qwen patch-grid-aligned
+  ~2400 px long side, high-resolution QA retries raise both DPI and the long-side
+  clamp, VLM requests carry explicit `mm_processor_kwargs` pixel bounds, and
+  garbled/low-overlap QA flags trigger a high-res retry before a page can be
+  cached.
+- **Remaining gating work:** populated golden/citation eval and remaining
+  coverage-completeness lows.
 
 ## Executive verdict
 
@@ -182,8 +188,8 @@ quality layers** — not architecture.
 
 | # | Dimension | Rating |
 |---|-----------|--------|
-| 1 | Architecture & stage decomposition | **PARTIAL** — anchoring present; Tier-0/eval layers still pending |
-| 2 | Rasterization strategy | **PARTIAL** — DPI-not-patch-aligned; escalation dead/defective |
+| 1 | Architecture & stage decomposition | **PARTIAL** — anchoring, Tier-0, and deterministic eval present; populated eval still pending |
+| 2 | Rasterization strategy | **FULLY MET** — patch-grid base render, explicit pixel bounds, high-res QA retry |
 | 3 | Model & prompt strategy | **PARTIAL** — anchoring, structure-aware tail, and sampler hardening present; metadata-first/eval still pending |
 | 4 | Model / endpoint choice | **PARTIAL** — engine sound; text-layer arbiter active; specialist oracle/A-B still pending |
 | 5 | Concurrency & throughput | **FULLY MET** (design) — bugs are robustness-within-the-design |
@@ -192,7 +198,7 @@ quality layers** — not architecture.
 | 8 | Evaluation harness & metrics | **PARTIAL** — offline pass-fraction harness active; populated gold/TEDS eval still pending |
 | 9 | Output artifact contract | **PARTIAL** — design met; runtime output violated by the P0 bugs |
 
-**1 fully met · 8 partial · 0 missing.**
+**2 fully met · 7 partial · 0 missing.**
 
 ---
 
@@ -229,7 +235,7 @@ a hang is maximally costly. All are addressable without changing the design.
   is all-or-nothing; `scan_pdf` and per-doc `page_text` are unguarded. Make failover
   actually engage. *(vlm_client.py, manifest.py, output.py)*
 
-**P1** now centers on rasterization fidelity plus populated golden/citation eval.
+**P1** now centers on populated golden/citation eval.
 **P2** is polish (dead config, DX, tests).
 Full detail in [GAP_ANALYSIS.md](GAP_ANALYSIS.md).
 

@@ -233,6 +233,10 @@ class VLMPool:
             "frequency_penalty": self.config.convert.frequency_penalty,
             "max_tokens": max_tokens or self.config.convert.max_tokens,
             "messages": messages,
+            "mm_processor_kwargs": {
+                "min_pixels": self.config.rasterize.min_pixels,
+                "max_pixels": self.config.rasterize.max_pixels,
+            },
         }
         if self.config.convert.disable_thinking:
             body["chat_template_kwargs"] = {"enable_thinking": False}

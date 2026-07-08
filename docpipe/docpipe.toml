@@ -11,9 +11,12 @@ figures   = "enriched"          # enriched | minimal | skip
 # model_id = "qwen36-27b-fp8-oxcart"   # leave unset to auto-probe
 
 [rasterize]
-dpi          = 200              # US-Letter@200 -> ~1700x2200 px, ~3-5K image tokens/page
-max_long_px  = 2000             # clamp long side (server pixel bounds are not exposed)
+dpi          = 218              # US-Letter -> ~2400 px long side, patch-grid aligned
+max_long_px  = 2408             # 86 * 28, base clamp
 escalate_dpi = 300              # higher-fidelity retry DPI for garbled pages
+escalate_max_long_px = 3304     # 118 * 28, higher-res QA retry clamp
+min_pixels   = 200704           # 28 * 28 * 256
+max_pixels   = 8605184          # 28 * 28 * 10976
 
 [convert]
 temperature       = 0.1         # mild nonzero sampling helps retry escape loops

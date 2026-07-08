@@ -50,9 +50,12 @@ class EndpointConfig(BaseModel):
 class RasterizeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    dpi: int = 200  # base render DPI (US-Letter@200 -> ~1700x2200 px)
-    max_long_px: int = 2000  # clamp the long side; keeps image tokens ~3-5K/page
+    dpi: int = 218  # base render DPI (US-Letter -> ~2400 px long side)
+    max_long_px: int = 2408  # 86 * 28; Qwen patch-grid aligned base clamp
     escalate_dpi: int = 300  # retry DPI for pages QA flags as garbled
+    escalate_max_long_px: int = 3304  # 118 * 28; higher-res QA retry clamp
+    min_pixels: int = 28 * 28 * 256
+    max_pixels: int = 28 * 28 * 10976
 
 
 class ConvertConfig(BaseModel):

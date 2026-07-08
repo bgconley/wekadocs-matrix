@@ -31,5 +31,14 @@ def test_render_produces_png(sample_pdf):
     assert len(png) > 100
 
 
+def test_render_dimensions_are_qwen_patch_grid_aligned(sample_pdf):
+    png = render_page_png(sample_pdf, 1, dpi=218, max_long_px=2408)
+    pix = fitz.Pixmap(png)
+
+    assert pix.width % 28 == 0
+    assert pix.height % 28 == 0
+    assert max(pix.width, pix.height) == 2408
+
+
 def test_page_text_reads_layer(sample_pdf):
     assert "docpipe rasterization" in page_text(sample_pdf, 1)

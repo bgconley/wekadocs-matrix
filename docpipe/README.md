@@ -23,7 +23,7 @@ advisory QA cross-check.)
 | Stage | Module | What it does |
 |------:|--------|--------------|
 | 0 | `manifest.py` | Discover PDFs, sha256, page counts, embedded metadata → JSONL manifest (resume backbone) |
-| 1 | `rasterize.py` | Page → PNG via PyMuPDF at a target DPI, long-side clamped |
+| 1 | `rasterize.py` | Page → PNG via PyMuPDF at a patch-grid-aligned pixel budget |
 | 2 | `convert.py` | One page/request to the VLM, prev-page context, concurrent + resumable |
 | 3 | `stitch.py` | Concatenate pages; repair split tables/code/paragraphs; strip headers/footers |
 | 4 | `clean.py` | De-hyphenate, single-H1, collapse whitespace, prepend YAML front matter |

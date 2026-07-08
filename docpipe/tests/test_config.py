@@ -12,6 +12,13 @@ def test_defaults_match_environment():
     # Oxcart (pinned vLLM) is the default target; Blackbird is configured but off.
     assert {e.name for e in cfg.active_endpoints} == {"oxcart"}
     assert cfg.total_inflight == 6
+    assert cfg.rasterize.dpi == 218
+    assert cfg.rasterize.max_long_px == 2408
+    assert cfg.rasterize.max_long_px % 28 == 0
+    assert cfg.rasterize.escalate_dpi == 300
+    assert getattr(cfg.rasterize, "escalate_max_long_px", None) == 3304
+    assert getattr(cfg.rasterize, "min_pixels", None) == 28 * 28 * 256
+    assert getattr(cfg.rasterize, "max_pixels", None) == 28 * 28 * 10976
 
 
 def test_endpoint_auth_headers():
@@ -58,6 +65,9 @@ def test_shipped_toml_keeps_engine_sampler_hardened():
 
     cfg = config_mod.load(cfg_path)
 
+    assert cfg.rasterize.dpi == 218
+    assert cfg.rasterize.max_long_px == 2408
+    assert cfg.rasterize.escalate_max_long_px == 3304
     assert cfg.convert.temperature == pytest.approx(0.1)
     assert cfg.convert.top_p == pytest.approx(0.9)
     assert cfg.convert.frequency_penalty == pytest.approx(0.2)

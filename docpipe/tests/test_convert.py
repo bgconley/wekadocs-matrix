@@ -481,6 +481,34 @@ async def test_low_text_layer_overlap_retries_before_caching(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_garbled_page_retries_with_escalated_raster_budget(tmp_path, monkeypatch):
+    renders: list[tuple[int, int]] = []
+
+    def fake_render(pdf_path, page_no, dpi, max_long_px):
+        renders.append((dpi, max_long_px))
+        return "data:image/png;base64,AAA="
+
+    monkeypatch.setattr("docpipe.convert.render_page_data_url", fake_render)
+    monkeypatch.setattr("docpipe.convert.page_text", lambda *args, **kwargs: "")
+    cfg = _cfg(tmp_path)
+    cfg.convert.max_retries = 2
+    cfg.rasterize.dpi = 218
+    cfg.rasterize.max_long_px = 2408
+    garbled = "\n".join(["DECODE LOOP"] * 8)
+    pool = FakePool([_result(garbled), _result("# ok\n\nRecovered dense table")])
+    conv = Converter(cfg, _pool(pool), "model")
+
+    summary = await conv.run([_rec(tmp_path)])
+
+    assert renders == [(218, 2408), (300, 3304)]
+    assert summary.converted == 1
+    assert summary.failed == 0
+    stored = artifacts.read_md(Path(cfg.work_dir), "deadbeef", 1, 218, "model")
+    assert stored is not None
+    assert "Recovered dense table" in stored
+
+
+@pytest.mark.asyncio
 async def test_retry_backoff_requeues_without_blocking_worker_slot(
     tmp_path, monkeypatch
 ):

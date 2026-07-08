@@ -49,6 +49,7 @@ class PageJob:
     attempts: int = 0
     endpoint_attempts: dict[str, int] = field(default_factory=dict)
     failed_endpoints: set[str] = field(default_factory=set)
+    raster_escalated: bool = False
 
 
 @dataclass
@@ -326,6 +327,31 @@ class Converter:
             return None
         return _anchor_slice(text, self.config.convert.anchor_max_chars)
 
+    def _raster_budget(self, job: PageJob) -> tuple[int, int]:
+        if job.raster_escalated:
+            return (
+                self.config.rasterize.escalate_dpi,
+                self.config.rasterize.escalate_max_long_px,
+            )
+        return self.dpi, self.config.rasterize.max_long_px
+
+    def _can_escalate_raster(self, job: PageJob) -> bool:
+        if job.raster_escalated:
+            return False
+        return (
+            self.config.rasterize.escalate_dpi > self.dpi
+            or self.config.rasterize.escalate_max_long_px
+            > self.config.rasterize.max_long_px
+        )
+
+    def _quality_retry_flags(self, qa: PageQA) -> list[str]:
+        return [
+            flag
+            for flag in qa.flags
+            if flag.startswith("garbled")
+            or flag in {"short_vs_textlayer", "low_text_overlap"}
+        ]
+
     async def _process(
         self, job: PageJob, endpoint: str, queue: "asyncio.Queue[PageJob]"
     ) -> None:
@@ -334,13 +360,14 @@ class Converter:
 
         # Rasterize (CPU-bound) off the event loop.
         try:
+            raster_dpi, raster_max_long_px = self._raster_budget(job)
             data_url = await loop.run_in_executor(
                 None,
                 render_page_data_url,
                 job.pdf_path,
                 job.page_no,
-                self.dpi,
-                self.config.rasterize.max_long_px,
+                raster_dpi,
+                raster_max_long_px,
             )
         except Exception as exc:
             self._fail(job, f"rasterize error: {exc}")
@@ -397,8 +424,9 @@ class Converter:
                     job, endpoint, queue, VLMError("empty model response")
                 )
                 return
+            qa = assess_page(result.content, anchor_text)
+            retry_flags = self._quality_retry_flags(qa)
             if anchor_text:
-                qa = assess_page(result.content, anchor_text)
                 divergence = _anchor_divergence_flags(qa)
                 if (
                     len(anchor_text) > 200
@@ -407,14 +435,19 @@ class Converter:
                     and "low_text_overlap" not in divergence
                 ):
                     divergence.append("low_text_overlap")
-                if divergence:
-                    await self._retry_or_fail(
-                        job,
-                        endpoint,
-                        queue,
-                        VLMError("text-layer divergence: " + ",".join(divergence)),
-                    )
-                    return
+                for flag in divergence:
+                    if flag not in retry_flags:
+                        retry_flags.append(flag)
+            if retry_flags:
+                if self._can_escalate_raster(job):
+                    job.raster_escalated = True
+                await self._retry_or_fail(
+                    job,
+                    endpoint,
+                    queue,
+                    VLMError("page QA retry: " + ",".join(retry_flags)),
+                )
+                return
         except VLMError as exc:
             await self._retry_or_fail(job, endpoint, queue, exc)
             return

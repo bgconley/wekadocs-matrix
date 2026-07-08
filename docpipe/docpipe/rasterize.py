@@ -1,10 +1,8 @@
 """Stage 1 -- rasterize a PDF page to a PNG for the vision model.
 
-Rendered with PyMuPDF at a target DPI, with the long side clamped so the encoded
-image lands in a predictable image-token band (US-Letter@200 DPI ~= 1700x2200 px,
-~3-5K image tokens at the model's ~28x28 px/patch). The clamp matters because the
-served processor's pixel bounds are not exposed via the API -- capping ourselves
-keeps upload size and token cost bounded regardless.
+Rendered with PyMuPDF at a target DPI, with dimensions aligned to Qwen's 28 px
+effective patch grid so the served processor does not apply a second resize that
+can blur small CLI/table glyphs.
 
 Everything here is synchronous/CPU-bound and is expected to be called inside a
 thread executor by the async converter. A ``fitz.Document`` is opened per call so
@@ -18,6 +16,8 @@ from pathlib import Path
 
 import fitz  # PyMuPDF
 
+_PATCH_GRID = 28
+
 
 def _zoom_for(page: "fitz.Page", dpi: int, max_long_px: int) -> float:
     """Zoom factor that honours ``dpi`` but never exceeds ``max_long_px`` on the long side."""
@@ -30,6 +30,18 @@ def _zoom_for(page: "fitz.Page", dpi: int, max_long_px: int) -> float:
     return base
 
 
+def _align_px(value: float) -> int:
+    return max(_PATCH_GRID, int(round(value / _PATCH_GRID)) * _PATCH_GRID)
+
+
+def _target_size_for(page: "fitz.Page", dpi: int, max_long_px: int) -> tuple[int, int]:
+    base = _zoom_for(page, dpi, max_long_px)
+    rect = page.rect
+    width = _align_px(max(1.0, rect.width * base))
+    height = _align_px(max(1.0, rect.height * base))
+    return width, height
+
+
 def render_page_png(
     pdf_path: str | Path, page_no: int, dpi: int, max_long_px: int
 ) -> bytes:
@@ -37,8 +49,11 @@ def render_page_png(
 
     with fitz.open(pdf_path) as doc:
         page = doc.load_page(page_no - 1)  # fitz is 0-indexed
-        zoom = _zoom_for(page, dpi, max_long_px)
-        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        target_w, target_h = _target_size_for(page, dpi, max_long_px)
+        rect = page.rect
+        zoom_x = target_w / (rect.width or 1.0)
+        zoom_y = target_h / (rect.height or 1.0)
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom_x, zoom_y), alpha=False)
         return pix.tobytes("png")
 
 

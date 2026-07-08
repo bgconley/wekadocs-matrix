@@ -146,3 +146,21 @@ async def test_chat_sends_sampler_hardening_parameters():
     assert body["frequency_penalty"] == pytest.approx(0.2)
     assert body["top_p"] == pytest.approx(0.9)
     assert body["temperature"] == pytest.approx(0.1)
+
+
+@pytest.mark.asyncio
+async def test_chat_sends_mm_processor_pixel_bounds():
+    seen: list[dict] = []
+    pool = _pool_with_transports({"oxcart": _chat_ok(seen)})
+    pool.model_id = "qwen36-27b"
+    try:
+        await pool.chat("oxcart", [{"role": "user", "content": "hi"}])
+    finally:
+        await _close_pool(pool)
+
+    assert seen
+    body = seen[0]
+    assert body["mm_processor_kwargs"] == {
+        "min_pixels": 28 * 28 * 256,
+        "max_pixels": 28 * 28 * 10976,
+    }
