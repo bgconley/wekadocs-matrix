@@ -60,6 +60,11 @@ it was resumed from cache.)
   key, and the single-page page-number fallback now preserves table-shaped rows.
   Real rows ending in numeric cells (for example, capacity limits) survive while
   recurring footer bands like `AHV | Networking | 11/12` still drop.
+- **2026-07-07 — P0 stitch seam-repair cluster: RESOLVED.** Findings **#19,
+  #20, #21** fixed: `_merge_seam` only deduplicates a repeated table header when
+  it matches the current table header, joins rule-8-compliant table continuation
+  rows with a single newline, and preserves closed fence pairs as separate code
+  blocks so the second block's language is not lost.
 - **2026-07-07 — P0 manifest stale-reuse: RESOLVED.** Finding **#32 / P0-5**
   fixed: manifest fast-path reuse now requires same `rel_path`, same byte size,
   and the same current `sha256`, so same-size content edits are rescanned and

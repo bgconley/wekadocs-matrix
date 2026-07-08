@@ -22,12 +22,15 @@ def test_open_fence_seam_joins_with_newline():
     assert merged.count("```") == 2
 
 
-def test_fence_reopen_merged_into_one_block():
+def test_closed_fence_reopen_preserves_separate_blocks_and_languages():
     acc = "```bash\nncli storage list\n```"
-    nxt = "```bash\nncli storage get\n```"
+    nxt = "```text\nName    Size\npool0   10TB\n```"
+
     merged = _merge_seam(acc, nxt)
-    assert merged == "```bash\nncli storage list\nncli storage get\n```"
-    assert merged.count("```") == 2  # exactly one fenced block, not two
+
+    assert "```bash\nncli storage list\n```" in merged
+    assert "```text\nName    Size\npool0   10TB\n```" in merged
+    assert merged.count("```") == 4  # two separate fenced blocks
 
 
 def test_table_header_dedup_across_seam():
@@ -36,6 +39,28 @@ def test_table_header_dedup_across_seam():
     merged = _merge_seam(acc, nxt)
     assert merged.count("| A | B |") == 1
     assert "| 1 | 2 |" in merged and "| 3 | 4 |" in merged
+
+
+def test_table_header_dedup_keeps_different_next_table_header():
+    acc = "| Command | Description |\n|---|---|\n| ncli | old |"
+    nxt = "| Flag | Meaning |\n|---|---|\n| -v | verbose |"
+
+    merged = _merge_seam(acc, nxt)
+
+    assert "| Command | Description |" in merged
+    assert "| Flag | Meaning |" in merged
+    assert merged.count("|---|---|") == 2
+    assert "| ncli | old |\n\n| Flag | Meaning |" in merged
+
+
+def test_split_table_continuation_rows_join_without_blank_line():
+    acc = "| Node | RAM |\n|---|---|\n| a | 64 |"
+    nxt = "| b | 128 |\n| c | 256 |"
+
+    merged = _merge_seam(acc, nxt)
+
+    assert "| a | 64 |\n| b | 128 |\n| c | 256 |" in merged
+    assert "| a | 64 |\n\n| b | 128 |" not in merged
 
 
 def test_paragraph_join_midsentence():

@@ -132,22 +132,35 @@ def _merge_seam(acc: str, nxt: str) -> str:
     acc_last = acc_lines[-1]
     nxt_first = nxt_lines[0]
 
-    # 1) Code fence closed at page bottom and reopened at page top -> one block.
-    if _FENCE_RE.match(acc_last.strip()) and _FENCE_RE.match(nxt_first.strip()):
-        merged = acc_lines[:-1] + nxt_lines[1:]
-        return "\n".join(merged)
+    def normalized_table_row(line: str) -> tuple[str, ...]:
+        cells = line.strip().strip("|").split("|")
+        return tuple(cell.strip() for cell in cells)
 
-    # 2) Table continued across the break with a repeated header -> drop the repeat.
-    if (
-        _is_table_row(acc_last)
-        and len(nxt_lines) >= 2
-        and _is_table_row(nxt_first)
-        and _TABLE_SEP_RE.match(nxt_lines[1])
-    ):
-        merged = acc_lines + nxt_lines[2:]
-        return "\n".join(merged)
+    def current_table_header() -> str | None:
+        for idx in range(len(acc_lines) - 2, 0, -1):
+            if _TABLE_SEP_RE.match(acc_lines[idx].strip()) and _is_table_row(
+                acc_lines[idx - 1]
+            ):
+                return acc_lines[idx - 1]
+        return None
 
-    # 3) Word split by a trailing hyphen at the seam (finding #40): join the
+    # 1) Table continued across the break with a repeated header: only drop the
+    # repeat when the next page's header is the same table header. A different
+    # header+separator pair is a new table and must remain intact.
+    if _is_table_row(acc_last) and _is_table_row(nxt_first):
+        nxt_starts_with_header = len(nxt_lines) >= 2 and _TABLE_SEP_RE.match(
+            nxt_lines[1].strip()
+        )
+        if nxt_starts_with_header:
+            acc_header = current_table_header()
+            if acc_header is not None and normalized_table_row(
+                acc_header
+            ) == normalized_table_row(nxt_first):
+                return "\n".join(acc_lines + nxt_lines[2:])
+            return acc.rstrip("\n") + "\n\n" + nxt
+        return "\n".join(acc_lines + nxt_lines)
+
+    # 2) Word split by a trailing hyphen at the seam (finding #40): join the
     # fragments onto one line but KEEP the hyphen. At a page boundary a trailing
     # hyphen is far more often a real compound ("read-only", "high-availability")
     # than a soft line-wrap, and corrupting a real term ("readonly") is worse than
@@ -157,7 +170,7 @@ def _merge_seam(acc: str, nxt: str) -> str:
         merged = acc_lines[:-1] + [joined_first] + nxt_lines[1:]
         return "\n".join(merged)
 
-    # 4) Paragraph split mid-sentence -> rejoin with a space (no blank line).
+    # 3) Paragraph split mid-sentence -> rejoin with a space (no blank line).
     if (
         _is_prose(acc_last)
         and not acc_last.rstrip().endswith(_SENTENCE_END)
@@ -168,7 +181,9 @@ def _merge_seam(acc: str, nxt: str) -> str:
         merged = acc_lines[:-1] + [joined_first] + nxt_lines[1:]
         return "\n".join(merged)
 
-    # Default: normal block separation.
+    # Default: normal block separation. Closed fence pairs deliberately land here:
+    # a closed block at the bottom of one page followed by a new fence at the top
+    # of the next page is a separate block, not a continuation.
     return acc.rstrip("\n") + "\n\n" + nxt
 
 
