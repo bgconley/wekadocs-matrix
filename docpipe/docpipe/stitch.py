@@ -95,11 +95,15 @@ def strip_page_furniture(pages: list[str]) -> list[str]:
 
 
 def _drop_page_numbers(page: str) -> str:
-    return "\n".join(
-        ln
-        for ln in page.splitlines()
-        if not (_PAGE_NUM_RE.match(ln.strip()) or _FURNITURE_BAND_RE.match(ln.strip()))
-    ).strip("\n")
+    kept = []
+    for ln in page.splitlines():
+        s = ln.strip()
+        if _PAGE_NUM_RE.match(s):
+            continue
+        if _FURNITURE_BAND_RE.match(s) and not _is_table_row(s):
+            continue
+        kept.append(ln)
+    return "\n".join(kept).strip("\n")
 
 
 def _is_table_row(line: str) -> bool:

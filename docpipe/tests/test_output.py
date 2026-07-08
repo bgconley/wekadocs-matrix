@@ -101,8 +101,9 @@ def test_assemble_all_disambiguates_duplicate_slugs(tmp_path):
     paths = [result.out_path for result in results]
     assert all(result.written for result in results)
     assert None not in paths
-    assert len(set(paths)) == 2
-    first_text = Path(paths[0]).read_text(encoding="utf-8")
-    second_text = Path(paths[1]).read_text(encoding="utf-8")
+    written_paths = [path for path in paths if path is not None]
+    assert len(set(written_paths)) == 2
+    first_text = Path(written_paths[0]).read_text(encoding="utf-8")
+    second_text = Path(written_paths[1]).read_text(encoding="utf-8")
     assert "first body" in first_text
     assert "second body" in second_text

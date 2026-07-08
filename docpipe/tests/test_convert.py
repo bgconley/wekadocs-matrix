@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -7,7 +8,7 @@ from docpipe import artifacts
 from docpipe.config import default_config
 from docpipe.convert import Converter, PageJob
 from docpipe.manifest import DocRecord
-from docpipe.vlm_client import ChatResult, EndpointStats, VLMHTTPError
+from docpipe.vlm_client import ChatResult, EndpointStats, VLMHTTPError, VLMPool
 
 
 def _rec(tmp_path: Path) -> DocRecord:
@@ -82,6 +83,10 @@ class ScriptedPool:
         return {"oxcart": EndpointStats(requests=len(self.calls))}
 
 
+def _pool(fake: FakePool | ScriptedPool) -> VLMPool:
+    return cast(VLMPool, fake)
+
+
 def _http_error(
     status: int, *, retryable: bool = True, retry_after_s: float | None = None
 ) -> VLMHTTPError:
@@ -101,7 +106,7 @@ async def test_empty_model_response_is_failed_not_cached_ok(tmp_path, monkeypatc
     )
     cfg = _cfg(tmp_path)
     pool = FakePool([_result("")])
-    conv = Converter(cfg, pool, "model")
+    conv = Converter(cfg, _pool(pool), "model")
 
     summary = await conv.run([_rec(tmp_path)])
 
@@ -127,7 +132,7 @@ async def test_still_truncated_bumped_response_is_failed_not_cached_ok(
     )
     cfg = _cfg(tmp_path)
     pool = FakePool([_result("cut one", "length"), _result("cut two", "length")])
-    conv = Converter(cfg, pool, "model")
+    conv = Converter(cfg, _pool(pool), "model")
 
     summary = await conv.run([_rec(tmp_path)])
 
@@ -154,7 +159,7 @@ async def test_run_with_pending_pages_and_no_active_endpoints_fails_fast(
     cfg = _cfg(tmp_path)
     for ep in cfg.endpoints:
         ep.enabled = False
-    conv = Converter(cfg, FakePool([]), "model")
+    conv = Converter(cfg, _pool(FakePool([])), "model")
 
     with pytest.raises(RuntimeError, match="no active endpoints"):
         await asyncio.wait_for(conv.run([_rec(tmp_path)]), timeout=0.2)
@@ -169,7 +174,7 @@ async def test_non_retryable_http_error_fails_without_retrying(tmp_path, monkeyp
     cfg = _cfg(tmp_path)
     cfg.convert.max_retries = 4
     pool = ScriptedPool([_http_error(401, retryable=False)])
-    conv = Converter(cfg, pool, "model")
+    conv = Converter(cfg, _pool(pool), "model")
 
     summary = await conv.run([_rec(tmp_path)])
 
@@ -202,7 +207,7 @@ async def test_retryable_http_error_honors_retry_after_delay(tmp_path, monkeypat
     pool = ScriptedPool(
         [_http_error(429, retryable=True, retry_after_s=1.5), _result("# ok")]
     )
-    conv = Converter(cfg, pool, "model")
+    conv = Converter(cfg, _pool(pool), "model")
 
     summary = await conv.run([_rec(tmp_path)])
 
@@ -215,7 +220,7 @@ async def test_retryable_http_error_honors_retry_after_delay(tmp_path, monkeypat
 @pytest.mark.asyncio
 async def test_worker_survives_failure_sidecar_write_error(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
-    conv = Converter(cfg, FakePool([]), "model")
+    conv = Converter(cfg, _pool(FakePool([])), "model")
     conv.dpi = cfg.rasterize.dpi
     conv._loop = asyncio.get_running_loop()
     queue: asyncio.Queue[PageJob] = asyncio.Queue()

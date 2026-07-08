@@ -37,7 +37,7 @@ it was resumed from cache.)
   balanced block is never mistaken for a heading; `stitch._merge_seam`
   newline-joins an open-fence seam and keeps real hyphens (`read-only`, not
   `readonly`). TDD: 5 failing tests written first → 9 tests added (**41 pass**),
-  `pyright docpipe/` clean, and finding #2's exact failure verified resolved
+  `cd docpipe && pyright .` clean, and finding #2's exact failure verified resolved
   through the real downstream parser (**4 corrupt sections → 1 intact section**,
   commands retained as `code_blocks`).
 - **2026-07-07 — Cluster 2 (payload-validation gate): RESOLVED.** Findings
@@ -56,9 +56,10 @@ it was resumed from cache.)
   errors, advisory `page_text()` QA cannot abort assembly, and `assemble_all`
   isolates one document failure instead of aborting the whole output stage.
 - **2026-07-07 — P0 furniture/table-row stripping: RESOLVED.** Finding **#4**
-  fixed: footer-band removal now requires a recurring page-edge band key, so
-  real table rows ending in numeric cells (for example, capacity limits) survive
-  while recurring footer bands like `AHV | Networking | 11/12` still drop.
+  fixed: multi-page footer-band removal now requires a recurring page-edge band
+  key, and the single-page page-number fallback now preserves table-shaped rows.
+  Real rows ending in numeric cells (for example, capacity limits) survive while
+  recurring footer bands like `AHV | Networking | 11/12` still drop.
 - **2026-07-07 — P0 manifest stale-reuse: RESOLVED.** Finding **#32 / P0-5**
   fixed: manifest fast-path reuse now requires same `rel_path`, same byte size,
   and the same current `sha256`, so same-size content edits are rescanned and
@@ -77,6 +78,11 @@ it was resumed from cache.)
   `<acropolis>`/`$ ` command groups in top-level `bash` fences, while skipping
   existing fences. This closes the proven command-structure-loss fix; the
   structure-aware `prev_tail` half of P1-5/R3.8 remains open.
+- **2026-07-07 — Review correction pass: RESOLVED.** The external follow-up's
+  three corrections are reflected in code/status: finding **#5** is fully closed
+  by the relocation path refresh, the finding **#4** single-page fallback
+  residual is covered by regression test, and the full package Pyright gate
+  (`cd docpipe && pyright .`) is clean with tests included.
 - **Remaining gating work:** the still-open P0 roadmap items outside the
   resolved clusters, then P1-5/R3.8 structure-aware `prev_tail`, P1-1 anchoring,
   and P1-2 sampler hardening.

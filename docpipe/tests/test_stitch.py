@@ -83,6 +83,17 @@ def test_numeric_table_rows_are_not_stripped_as_footer_furniture():
     assert "AHV | Networking |" not in joined
 
 
+def test_single_page_numeric_table_rows_are_not_stripped_as_footer_furniture():
+    pages = [
+        "# Capacity\n\n| Metric | Scope | Value |\n| --- | --- | --- |\nReplication factor | Minimum | 2\nAHV | Networking | 11"
+    ]
+
+    cleaned = strip_page_furniture(pages)
+
+    assert "Replication factor | Minimum | 2" in cleaned[0]
+    assert "AHV | Networking | 11" in cleaned[0]
+
+
 def test_stitch_pages_end_to_end():
     out = stitch_pages(["# Title\n\nIntro para", "## Section\n\nBody"])
     assert out.startswith("# Title")
