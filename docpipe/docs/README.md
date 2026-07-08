@@ -154,7 +154,12 @@ it was resumed from cache.)
   written-vs-skipped incomplete docs, and offline tests now cover assembly gates,
   output layouts, report math/dicts, VLM HTTP/timeout/malformed/truncated paths,
   and manifest JSONL round trips.
-- **Remaining gating work:** populated golden/citation eval.
+- **2026-07-08 — Populated eval specs: RESOLVED.** The deterministic
+  `docs/eval/nutanix_gold.json` spec now contains 45 source-grounded cases across
+  all nine Nutanix PDFs, and `docs/eval/citation_questions.json` contains 14
+  source-grounded downstream citation questions.
+- **Remaining gating work:** full 936-page conversion plus post-build
+  deterministic gold and downstream citation evaluation.
 
 ## Executive verdict
 
@@ -240,7 +245,8 @@ a hang is maximally costly. All are addressable without changing the design.
   is all-or-nothing; `scan_pdf` and per-doc `page_text` are unguarded. Make failover
   actually engage. *(vlm_client.py, manifest.py, output.py)*
 
-**P1** now centers on populated golden/citation eval.
+**P1** now centers on the full 936-page conversion and post-build
+gold/citation evaluation.
 **P2** is polish (dead config, DX, tests).
 Full detail in [GAP_ANALYSIS.md](GAP_ANALYSIS.md).
 

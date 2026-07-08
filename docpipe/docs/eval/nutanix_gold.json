@@ -1,0 +1,295 @@
+{
+  "description": "Stratified deterministic gold checks for the nine local Nutanix source PDFs. These cases are designed to run after the full corpus conversion with: docpipe eval --out ETL-for-corpus/transformed-corpus --spec docs/eval/nutanix_gold.json",
+  "source_set": [
+    "13a-book-of-dr-services.pdf",
+    "5a-book-of-ahv-architecture.pdf",
+    "5b-book-of-ahv-how-it-works.pdf",
+    "5c-book-of-ahv-administration.pdf",
+    "AHV-Admin-Guide-v11_0.pdf",
+    "Advanced-Admin-AOS-v7_5.pdf",
+    "Nutanix-Cloud-Clusters-Azure-4.pdf",
+    "Nutanix-Enterprise-AI-v2_7.pdf",
+    "Nutanix-Kubernetes-Engine-v2_10-2.pdf"
+  ],
+  "tests": [
+    {
+      "id": "dr-title",
+      "path": "13a-book-of-dr-services/13a-book-of-dr-services.md",
+      "type": "presence",
+      "text": "Backup/DR Services - Nutanix Disaster Recovery"
+    },
+    {
+      "id": "dr-rpo",
+      "path": "13a-book-of-dr-services/13a-book-of-dr-services.md",
+      "type": "presence",
+      "text": "Recovery Point Objective (RPO)"
+    },
+    {
+      "id": "dr-rto",
+      "path": "13a-book-of-dr-services/13a-book-of-dr-services.md",
+      "type": "presence",
+      "text": "Recovery Time Objective (RTO)"
+    },
+    {
+      "id": "dr-protection-policy",
+      "path": "13a-book-of-dr-services/13a-book-of-dr-services.md",
+      "type": "presence",
+      "text": "Protection Policy"
+    },
+    {
+      "id": "dr-protection-before-recovery-plan",
+      "path": "13a-book-of-dr-services/13a-book-of-dr-services.md",
+      "type": "reading_order",
+      "before": "Protection Policy",
+      "after": "Recovery Plan"
+    },
+    {
+      "id": "ahv-architecture-title",
+      "path": "5a-book-of-ahv-architecture/5a-book-of-ahv-architecture.md",
+      "type": "presence",
+      "text": "AHV - AHV Architecture"
+    },
+    {
+      "id": "ahv-architecture-cvm",
+      "path": "5a-book-of-ahv-architecture/5a-book-of-ahv-architecture.md",
+      "type": "presence",
+      "text": "Controller VM (CVM)"
+    },
+    {
+      "id": "ahv-architecture-kvm-kmod",
+      "path": "5a-book-of-ahv-architecture/5a-book-of-ahv-architecture.md",
+      "type": "presence",
+      "text": "KVM-kmod"
+    },
+    {
+      "id": "ahv-architecture-libvirtd",
+      "path": "5a-book-of-ahv-architecture/5a-book-of-ahv-architecture.md",
+      "type": "presence",
+      "text": "Libvirtd"
+    },
+    {
+      "id": "ahv-architecture-node-before-kvm",
+      "path": "5a-book-of-ahv-architecture/5a-book-of-ahv-architecture.md",
+      "type": "reading_order",
+      "before": "Node Architecture",
+      "after": "KVM Architecture"
+    },
+    {
+      "id": "ahv-how-title",
+      "path": "5b-book-of-ahv-how-it-works/5b-book-of-ahv-how-it-works.md",
+      "type": "presence",
+      "text": "AHV - How Nutanix AHV Works"
+    },
+    {
+      "id": "ahv-how-storage-io",
+      "path": "5b-book-of-ahv-how-it-works/5b-book-of-ahv-how-it-works.md",
+      "type": "presence",
+      "text": "Storage I/O Path"
+    },
+    {
+      "id": "ahv-how-iscsi-redirector",
+      "path": "5b-book-of-ahv-how-it-works/5b-book-of-ahv-how-it-works.md",
+      "type": "presence",
+      "text": "iSCSI redirector"
+    },
+    {
+      "id": "ahv-how-local-cvm-down",
+      "path": "5b-book-of-ahv-how-it-works/5b-book-of-ahv-how-it-works.md",
+      "type": "presence",
+      "text": "Local CVM Down"
+    },
+    {
+      "id": "ahv-how-storage-before-frodo",
+      "path": "5b-book-of-ahv-how-it-works/5b-book-of-ahv-how-it-works.md",
+      "type": "reading_order",
+      "before": "Storage I/O Path",
+      "after": "Frodo I/O Path"
+    },
+    {
+      "id": "ahv-admin-title",
+      "path": "5c-book-of-ahv-administration/5c-book-of-ahv-administration.md",
+      "type": "presence",
+      "text": "AHV - AHV Administration"
+    },
+    {
+      "id": "ahv-admin-uplinks",
+      "path": "5c-book-of-ahv-administration/5c-book-of-ahv-administration.md",
+      "type": "presence",
+      "text": "manage_ovs show_uplinks"
+    },
+    {
+      "id": "ahv-admin-lacp-command",
+      "path": "5c-book-of-ahv-administration/5c-book-of-ahv-administration.md",
+      "type": "presence",
+      "text": "ovs-vsctl set port bond lacp=active/passive"
+    },
+    {
+      "id": "ahv-admin-dump-flows",
+      "path": "5c-book-of-ahv-administration/5c-book-of-ahv-administration.md",
+      "type": "presence",
+      "text": "ovs-ofctl dump-flows br0"
+    },
+    {
+      "id": "ahv-admin-command-ref-before-troubleshooting",
+      "path": "5c-book-of-ahv-administration/5c-book-of-ahv-administration.md",
+      "type": "reading_order",
+      "before": "Command Reference",
+      "after": "Troubleshooting & Advanced Administration"
+    },
+    {
+      "id": "ahv-guide-title",
+      "path": "ahv-admin-guide-v11-0/ahv-admin-guide-v11-0.md",
+      "type": "presence",
+      "text": "AHV Administration Guide"
+    },
+    {
+      "id": "ahv-guide-storage-overview",
+      "path": "ahv-admin-guide-v11-0/ahv-admin-guide-v11-0.md",
+      "type": "presence",
+      "text": "Storage Overview"
+    },
+    {
+      "id": "ahv-guide-ads",
+      "path": "ahv-admin-guide-v11-0/ahv-admin-guide-v11-0.md",
+      "type": "presence",
+      "text": "Acropolis Dynamic Scheduling"
+    },
+    {
+      "id": "ahv-guide-virtio",
+      "path": "ahv-admin-guide-v11-0/ahv-admin-guide-v11-0.md",
+      "type": "presence",
+      "text": "Nutanix VirtIO for Windows"
+    },
+    {
+      "id": "ahv-guide-contents-before-overview",
+      "path": "ahv-admin-guide-v11-0/ahv-admin-guide-v11-0.md",
+      "type": "reading_order",
+      "before": "Contents",
+      "after": "AHV Overview"
+    },
+    {
+      "id": "aos-guide-title",
+      "path": "advanced-admin-aos-v7-5/advanced-admin-aos-v7-5.md",
+      "type": "presence",
+      "text": "Acropolis Advanced Administration Guide"
+    },
+    {
+      "id": "aos-guide-architecture",
+      "path": "advanced-admin-aos-v7-5/advanced-admin-aos-v7-5.md",
+      "type": "presence",
+      "text": "Nutanix AOS Architecture"
+    },
+    {
+      "id": "aos-guide-syslog-module",
+      "path": "advanced-admin-aos-v7-5/advanced-admin-aos-v7-5.md",
+      "type": "presence",
+      "text": "SYSLOG_MODULE"
+    },
+    {
+      "id": "aos-guide-home-log-messages",
+      "path": "advanced-admin-aos-v7-5/advanced-admin-aos-v7-5.md",
+      "type": "presence",
+      "text": "/home/log/messages"
+    },
+    {
+      "id": "aos-guide-overview-before-logs",
+      "path": "advanced-admin-aos-v7-5/advanced-admin-aos-v7-5.md",
+      "type": "reading_order",
+      "before": "Overview",
+      "after": "Logs"
+    },
+    {
+      "id": "nc2-title",
+      "path": "nutanix-cloud-clusters-azure-4/nutanix-cloud-clusters-azure-4.md",
+      "type": "presence",
+      "text": "Nutanix Cloud Clusters on Azure Deployment and User Guide"
+    },
+    {
+      "id": "nc2-key-benefits",
+      "path": "nutanix-cloud-clusters-azure-4/nutanix-cloud-clusters-azure-4.md",
+      "type": "presence",
+      "text": "NC2 Key Benefits"
+    },
+    {
+      "id": "nc2-client-secret",
+      "path": "nutanix-cloud-clusters-azure-4/nutanix-cloud-clusters-azure-4.md",
+      "type": "presence",
+      "text": "Creating a New Client Secret"
+    },
+    {
+      "id": "nc2-reconnect-cloud-account",
+      "path": "nutanix-cloud-clusters-azure-4/nutanix-cloud-clusters-azure-4.md",
+      "type": "presence",
+      "text": "Reconnecting a Cloud Account"
+    },
+    {
+      "id": "nc2-client-secret-before-reconnect",
+      "path": "nutanix-cloud-clusters-azure-4/nutanix-cloud-clusters-azure-4.md",
+      "type": "reading_order",
+      "before": "Creating a New Client Secret",
+      "after": "Reconnecting a Cloud Account"
+    },
+    {
+      "id": "nai-title",
+      "path": "nutanix-enterprise-ai-v2-7/nutanix-enterprise-ai-v2-7.md",
+      "type": "presence",
+      "text": "Nutanix Enterprise AI Guide"
+    },
+    {
+      "id": "nai-workflow",
+      "path": "nutanix-enterprise-ai-v2-7/nutanix-enterprise-ai-v2-7.md",
+      "type": "presence",
+      "text": "Workflow for Nutanix Enterprise AI"
+    },
+    {
+      "id": "nai-requests-summary",
+      "path": "nutanix-enterprise-ai-v2-7/nutanix-enterprise-ai-v2-7.md",
+      "type": "presence",
+      "text": "Requests Summary"
+    },
+    {
+      "id": "nai-unified-endpoints",
+      "path": "nutanix-enterprise-ai-v2-7/nutanix-enterprise-ai-v2-7.md",
+      "type": "presence",
+      "text": "Unified Endpoints"
+    },
+    {
+      "id": "nai-getting-started-before-dashboard",
+      "path": "nutanix-enterprise-ai-v2-7/nutanix-enterprise-ai-v2-7.md",
+      "type": "reading_order",
+      "before": "Getting Started with Nutanix Enterprise AI",
+      "after": "Viewing the Dashboard in Nutanix Enterprise AI"
+    },
+    {
+      "id": "nke-title",
+      "path": "nutanix-kubernetes-engine-v2-10-2/nutanix-kubernetes-engine-v2-10-2.md",
+      "type": "presence",
+      "text": "Nutanix Kubernetes Engine Guide"
+    },
+    {
+      "id": "nke-requirements",
+      "path": "nutanix-kubernetes-engine-v2-10-2/nutanix-kubernetes-engine-v2-10-2.md",
+      "type": "presence",
+      "text": "Requirements"
+    },
+    {
+      "id": "nke-resource-recommendations",
+      "path": "nutanix-kubernetes-engine-v2-10-2/nutanix-kubernetes-engine-v2-10-2.md",
+      "type": "presence",
+      "text": "Resource Recommendations"
+    },
+    {
+      "id": "nke-reclaim-policy",
+      "path": "nutanix-kubernetes-engine-v2-10-2/nutanix-kubernetes-engine-v2-10-2.md",
+      "type": "presence",
+      "text": "reclaim_policy"
+    },
+    {
+      "id": "nke-requirements-before-cluster-setup",
+      "path": "nutanix-kubernetes-engine-v2-10-2/nutanix-kubernetes-engine-v2-10-2.md",
+      "type": "reading_order",
+      "before": "Requirements",
+      "after": "Cluster Setup"
+    }
+  ]
+}

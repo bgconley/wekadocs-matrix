@@ -1,0 +1,218 @@
+{
+  "description": "Post-build citation eval questions for the Nutanix docpipe corpus. These are source-grounded prompts for a downstream RAG/citation check, not model calls inside docpipe.",
+  "questions": [
+    {
+      "id": "cite-ahv-admin-show-uplinks",
+      "question": "Which command shows OVS uplinks on the local AHV host?",
+      "expected_sources": [
+        {
+          "source_pdf": "5c-book-of-ahv-administration.pdf",
+          "slug": "5c-book-of-ahv-administration",
+          "must_cite_text": "manage_ovs show_uplinks"
+        }
+      ],
+      "must_answer_contain": [
+        "manage_ovs show_uplinks"
+      ]
+    },
+    {
+      "id": "cite-ahv-admin-dump-flows",
+      "question": "Which command dumps OpenFlow rules for br0?",
+      "expected_sources": [
+        {
+          "source_pdf": "5c-book-of-ahv-administration.pdf",
+          "slug": "5c-book-of-ahv-administration",
+          "must_cite_text": "ovs-ofctl dump-flows br0"
+        }
+      ],
+      "must_answer_contain": [
+        "ovs-ofctl dump-flows br0"
+      ]
+    },
+    {
+      "id": "cite-ahv-architecture-kvm-components",
+      "question": "Which main KVM components does the AHV architecture section list?",
+      "expected_sources": [
+        {
+          "source_pdf": "5a-book-of-ahv-architecture.pdf",
+          "slug": "5a-book-of-ahv-architecture",
+          "must_cite_text": "KVM-kmod"
+        }
+      ],
+      "must_answer_contain": [
+        "KVM-kmod",
+        "Libvirtd",
+        "Qemu-kvm"
+      ]
+    },
+    {
+      "id": "cite-ahv-how-iscsi-redirector-failover",
+      "question": "What does the iSCSI redirector do when the active local Stargate goes down?",
+      "expected_sources": [
+        {
+          "source_pdf": "5b-book-of-ahv-how-it-works.pdf",
+          "slug": "5b-book-of-ahv-how-it-works",
+          "must_cite_text": "mark the local Stargate as unhealthy"
+        }
+      ],
+      "must_answer_contain": [
+        "iSCSI redirector",
+        "unhealthy",
+        "healthy Stargate"
+      ]
+    },
+    {
+      "id": "cite-dr-protection-policy",
+      "question": "What does a Nutanix DR protection policy define?",
+      "expected_sources": [
+        {
+          "source_pdf": "13a-book-of-dr-services.pdf",
+          "slug": "13a-book-of-dr-services",
+          "must_cite_text": "A protection policy defines the RPO"
+        }
+      ],
+      "must_answer_contain": [
+        "RPO",
+        "recovery location",
+        "snapshot retention",
+        "categories"
+      ]
+    },
+    {
+      "id": "cite-dr-rto",
+      "question": "What does Recovery Time Objective mean in the Nutanix DR terminology?",
+      "expected_sources": [
+        {
+          "source_pdf": "13a-book-of-dr-services.pdf",
+          "slug": "13a-book-of-dr-services",
+          "must_cite_text": "Refers to the period of time from failure event to restored service"
+        }
+      ],
+      "must_answer_contain": [
+        "failure event",
+        "restored service"
+      ]
+    },
+    {
+      "id": "cite-nc2-expired-secret",
+      "question": "What should an NC2 administrator do if the Azure shared secret or client secret expires?",
+      "expected_sources": [
+        {
+          "source_pdf": "Nutanix-Cloud-Clusters-Azure-4.pdf",
+          "slug": "nutanix-cloud-clusters-azure-4",
+          "must_cite_text": "create a new client secret and update it in your Azure cloud account"
+        }
+      ],
+      "must_answer_contain": [
+        "new client secret",
+        "update",
+        "Azure cloud account"
+      ]
+    },
+    {
+      "id": "cite-nc2-client-secret-duration",
+      "question": "How long can Microsoft Azure client secrets last according to the NC2 guide?",
+      "expected_sources": [
+        {
+          "source_pdf": "Nutanix-Cloud-Clusters-Azure-4.pdf",
+          "slug": "nutanix-cloud-clusters-azure-4",
+          "must_cite_text": "Microsoft Azure allows client secrets to last up to two years"
+        }
+      ],
+      "must_answer_contain": [
+        "up to two years"
+      ]
+    },
+    {
+      "id": "cite-nai-requests-summary",
+      "question": "What does the Nutanix Enterprise AI dashboard Requests Summary widget display?",
+      "expected_sources": [
+        {
+          "source_pdf": "Nutanix-Enterprise-AI-v2_7.pdf",
+          "slug": "nutanix-enterprise-ai-v2-7",
+          "must_cite_text": "Requests Summary"
+        }
+      ],
+      "must_answer_contain": [
+        "API requests",
+        "API tokens",
+        "Local Endpoints",
+        "Unified Endpoints"
+      ]
+    },
+    {
+      "id": "cite-nai-unified-endpoint-requirements",
+      "question": "What must exist before accessing a Nutanix Enterprise AI unified endpoint with OpenAI compatible clients?",
+      "expected_sources": [
+        {
+          "source_pdf": "Nutanix-Enterprise-AI-v2_7.pdf",
+          "slug": "nutanix-enterprise-ai-v2-7",
+          "must_cite_text": "The ML Admin user has created the unified endpoints"
+        }
+      ],
+      "must_answer_contain": [
+        "ML Admin user",
+        "unified endpoint",
+        "API key"
+      ]
+    },
+    {
+      "id": "cite-nke-kubeconfig-expiry",
+      "question": "How long does an NKE kubeconfig token last?",
+      "expected_sources": [
+        {
+          "source_pdf": "Nutanix-Kubernetes-Engine-v2_10-2.pdf",
+          "slug": "nutanix-kubernetes-engine-v2-10-2",
+          "must_cite_text": "The kubeconfig token expires after 24 hours"
+        }
+      ],
+      "must_answer_contain": [
+        "24 hours"
+      ]
+    },
+    {
+      "id": "cite-nke-reclaim-policy",
+      "question": "Which NKE deployment attribute controls the storage class reclaim policy and what default value is shown?",
+      "expected_sources": [
+        {
+          "source_pdf": "Nutanix-Kubernetes-Engine-v2_10-2.pdf",
+          "slug": "nutanix-kubernetes-engine-v2-10-2",
+          "must_cite_text": "reclaim_policy"
+        }
+      ],
+      "must_answer_contain": [
+        "reclaim_policy",
+        "Delete"
+      ]
+    },
+    {
+      "id": "cite-aos-syslog-module-files",
+      "question": "Which AHV host log file is included under the AOS SYSLOG_MODULE mapping?",
+      "expected_sources": [
+        {
+          "source_pdf": "Advanced-Admin-AOS-v7_5.pdf",
+          "slug": "advanced-admin-aos-v7-5",
+          "must_cite_text": "/home/log/messages"
+        }
+      ],
+      "must_answer_contain": [
+        "SYSLOG_MODULE",
+        "/home/log/messages"
+      ]
+    },
+    {
+      "id": "cite-aos-genesis-log-tail",
+      "question": "Which command tails the latest genesis.out log from a Controller VM?",
+      "expected_sources": [
+        {
+          "source_pdf": "Advanced-Admin-AOS-v7_5.pdf",
+          "slug": "advanced-admin-aos-v7-5",
+          "must_cite_text": "tail -F ~/data/logs/genesis.out"
+        }
+      ],
+      "must_answer_contain": [
+        "tail -F ~/data/logs/genesis.out"
+      ]
+    }
+  ]
+}
