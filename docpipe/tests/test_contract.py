@@ -43,6 +43,22 @@ def test_contract_rejects_extra_h1_and_heading_level_jump():
     assert "heading:level_jump" in _codes(skipped_h2)
 
 
+def test_contract_rejects_true_setext_headings():
+    setext_h2 = GOOD_MD.replace("## Commands", "Commands\n---")
+    setext_h1 = GOOD_MD.replace("## Commands", "Commands\n===")
+
+    assert "heading:setext" in _codes(setext_h2)
+    assert "heading:setext" in _codes(setext_h1)
+
+
+def test_contract_allows_parser_non_setext_rule_lines_after_blank():
+    horizontal_rule = GOOD_MD.replace("## Commands", "## Commands\n\nDivider\n\n---")
+    equals_paragraph = GOOD_MD.replace("## Commands", "## Commands\n\nDivider\n\n===")
+
+    assert "heading:setext" not in _codes(horizontal_rule)
+    assert "heading:setext" not in _codes(equals_paragraph)
+
+
 def test_contract_rejects_orphan_content_before_first_heading():
     orphan = GOOD_MD.replace("# Good Title", "orphan intro\n\n# Good Title")
 

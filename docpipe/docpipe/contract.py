@@ -12,7 +12,6 @@ from .fences import is_fence_line, iter_lines_with_fence_state, open_fence_at_en
 
 _FRONTMATTER_RE = re.compile(r"\A---[ \t]*\n(.*?)\n---[ \t]*\n", re.DOTALL)
 _ATX_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t#]*$")
-_SETEXT_RE = re.compile(r"^[ \t]*(=+|-+)[ \t]*$")
 _RAW_HTML_RE = re.compile(r"<\s*/?\s*(table|thead|tbody|tr|td|th|pre|code)\b", re.I)
 _TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
 _MD = MarkdownIt("gfm-like")
@@ -122,7 +121,6 @@ def _scan_lines(
 
     headings: list[tuple[int, str, int]] = []
     first_heading_seen = False
-    previous_nonblank: tuple[str, int] | None = None
 
     for index, (line, in_fence) in enumerate(
         iter_lines_with_fence_state(body), start=1
@@ -176,22 +174,6 @@ def _scan_lines(
                 )
             )
 
-        if (
-            previous_nonblank is not None
-            and _SETEXT_RE.match(line)
-            and not previous_nonblank[0].startswith("|")
-        ):
-            violations.append(
-                ContractViolation(
-                    "heading:setext",
-                    "Only ATX headings are accepted by the corpus contract.",
-                    line_no,
-                )
-            )
-
-        if stripped:
-            previous_nonblank = (stripped, line_no)
-
     h1s = [(text, line_no) for level, text, line_no in headings if level == 1]
     if len(h1s) != 1:
         line = h1s[0][1] if h1s else None
@@ -238,7 +220,15 @@ def _scan_ast(
 ) -> None:
     for token in _MD.parse(body):
         line_no = body_line_offset + token.map[0] + 1 if token.map is not None else None
-        if token.type == "code_block":
+        if token.type == "heading_open" and token.markup in {"=", "-"}:
+            violations.append(
+                ContractViolation(
+                    "heading:setext",
+                    "Only ATX headings are accepted by the corpus contract.",
+                    line_no,
+                )
+            )
+        elif token.type == "code_block":
             violations.append(
                 ContractViolation(
                     "code:not_fenced",
