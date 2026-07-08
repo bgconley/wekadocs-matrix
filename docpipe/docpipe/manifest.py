@@ -108,8 +108,14 @@ def scan_pdf(pdf_path: Path, input_dir: Path) -> DocRecord:
     """Read one PDF's metadata into a :class:`DocRecord` (no rasterization)."""
 
     with fitz.open(pdf_path) as doc:
+        if bool(getattr(doc, "needs_pass", False)) or bool(
+            getattr(doc, "is_encrypted", False)
+        ):
+            raise ValueError(f"encrypted PDF cannot be transcribed: {pdf_path}")
         meta = doc.metadata or {}
         page_count = doc.page_count
+        if page_count <= 0:
+            raise ValueError(f"PDF has zero pages: {pdf_path}")
     stem = pdf_path.stem
     title = (meta.get("title") or "").strip() or None
     author = (meta.get("author") or "").strip() or None

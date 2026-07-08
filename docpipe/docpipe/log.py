@@ -47,8 +47,9 @@ class _JsonFormatter(logging.Formatter):
 
 
 def _fmt(value: Any) -> str:
-    s = str(value)
-    return f'"{s}"' if " " in s else s
+    raw = str(value)
+    s = raw.replace("\\", "\\\\").replace("\n", "\\n")
+    return f'"{s}"' if any(c.isspace() for c in raw) or "=" in raw else s
 
 
 def setup_logging(level: str | int = "INFO") -> None:

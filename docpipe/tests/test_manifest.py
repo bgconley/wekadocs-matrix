@@ -63,6 +63,56 @@ def test_build_skips_pdf_that_fails_scan(tmp_path, monkeypatch):
     assert list(manifest.load_manifest(work_dir)) == ["cafebabe"]
 
 
+def test_scan_pdf_rejects_zero_page_pdf(tmp_path, monkeypatch):
+    pdf = tmp_path / "empty.pdf"
+    pdf.write_bytes(b"%PDF-1.7\n")
+
+    class FakeDoc:
+        metadata = {}
+        page_count = 0
+        needs_pass = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(manifest.fitz, "open", lambda path: FakeDoc())
+
+    try:
+        manifest.scan_pdf(pdf, tmp_path)
+    except ValueError as exc:
+        assert "zero pages" in str(exc)
+    else:
+        raise AssertionError("zero-page PDF should be rejected")
+
+
+def test_scan_pdf_rejects_encrypted_pdf(tmp_path, monkeypatch):
+    pdf = tmp_path / "encrypted.pdf"
+    pdf.write_bytes(b"%PDF-1.7\n")
+
+    class FakeDoc:
+        metadata = {}
+        page_count = 3
+        needs_pass = True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(manifest.fitz, "open", lambda path: FakeDoc())
+
+    try:
+        manifest.scan_pdf(pdf, tmp_path)
+    except ValueError as exc:
+        assert "encrypted" in str(exc)
+    else:
+        raise AssertionError("encrypted PDF should be rejected")
+
+
 def test_build_rescans_same_size_pdf_when_content_hash_changes(tmp_path, monkeypatch):
     input_dir = tmp_path / "input"
     work_dir = tmp_path / "work"

@@ -433,6 +433,12 @@ class Converter:
             attempts=job.attempts + 1,
         )
         self._outputs[(job.sha256, job.page_no)] = result.content
+        latest_page = max(
+            page_no for sha256, page_no in self._outputs if sha256 == job.sha256
+        )
+        for key in list(self._outputs):
+            if key[0] == job.sha256 and key[1] != latest_page:
+                del self._outputs[key]
         self._summary.converted += 1
         self._tick()
 

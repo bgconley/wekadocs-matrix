@@ -31,6 +31,25 @@ def test_clean_page_not_suspect():
     assert "empty" not in qa.flags
 
 
+def test_ascii_table_not_flagged_low_alnum():
+    table = """
++----------------------+----------------------+
+| Field                | Value                |
++----------------------+----------------------+
+| Nutanix CVM address  | 10.10.10.10          |
+| acli command         | <acropolis> net.list |
++----------------------+----------------------+
+"""
+
+    assert "garbled:low_alnum" not in assess_page(table).flags
+
+
+def test_symbol_noise_still_flagged_low_alnum():
+    noise = "\n".join(["@@@@ !!!! ???? ~~~~"] * 4)
+
+    assert "garbled:low_alnum" in assess_page(noise).flags
+
+
 def test_short_vs_textlayer():
     text_layer = "word " * 200  # long real text layer
     qa = assess_page("# H\n\ntiny", text_layer)

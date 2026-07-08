@@ -39,8 +39,9 @@ def _alnum_ratio(text: str) -> float:
     stripped = text.strip()
     if not stripped:
         return 0.0
-    alnum = sum(c.isalnum() or c.isspace() for c in stripped)
-    return alnum / len(stripped)
+    structural = set("|+-=:_./\\<>[](){}$#*`,;\"'")
+    signal = sum(c.isalnum() or c.isspace() or c in structural for c in stripped)
+    return signal / len(stripped)
 
 
 def _repetition_flag(text: str) -> Optional[str]:

@@ -132,8 +132,15 @@ it was resumed from cache.)
   optional presence/absence/reading-order/table JSON cases. TDD: 8 behavior tests
   written RED first, then green; full gate is **101 passed / 1 skipped** and
   `pyright docpipe/.` clean.
+- **2026-07-08 — Loose LOW cleanup: RESOLVED.** **#23, #42, #43, #48, and
+  #49** fixed: procedure prompts preserve visible ordinals in prose (`Step 2:`);
+  zero-page/encrypted PDFs fail during manifest scan instead of becoming
+  frontmatter-only artifacts; converter continuity memory is bounded to the
+  latest page per document; low-alnum QA tolerates ASCII tables/box diagrams
+  while still catching symbol noise; and kv logs quote `=` values plus escape
+  newlines. TDD: 6 behavior tests written RED first, then green.
 - **Remaining gating work:** rasterization fidelity, populated golden/citation
-  eval, and remaining robustness lows/mediums not covered here.
+  eval, parser-consumed `last_edited`, and remaining coverage-completeness lows.
 
 ## Executive verdict
 

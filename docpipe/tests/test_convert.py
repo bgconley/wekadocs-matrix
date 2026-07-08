@@ -27,6 +27,12 @@ def _rec(tmp_path: Path) -> DocRecord:
     )
 
 
+def _rec_pages(tmp_path: Path, page_count: int) -> DocRecord:
+    rec = _rec(tmp_path)
+    rec.page_count = page_count
+    return rec
+
+
 def _cfg(tmp_path: Path):
     cfg = default_config()
     cfg.work_dir = str(tmp_path / "work")
@@ -152,6 +158,24 @@ async def test_empty_model_response_is_failed_not_cached_ok(tmp_path, monkeypatc
     assert not artifacts.md_path(
         Path(cfg.work_dir), "deadbeef", 1, cfg.rasterize.dpi, "model"
     ).exists()
+
+
+@pytest.mark.asyncio
+async def test_converter_keeps_only_latest_page_markdown_in_memory(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "docpipe.convert.render_page_data_url",
+        lambda *args, **kwargs: "data:image/png;base64,AAA=",
+    )
+    cfg = _cfg(tmp_path)
+    pool = FakePool([_result("# Page 1\n\nbody"), _result("# Page 2\n\nbody")])
+    conv = Converter(cfg, _pool(pool), "model")
+
+    summary = await conv.run([_rec_pages(tmp_path, 2)])
+
+    assert summary.converted == 2
+    assert set(conv._outputs) == {("deadbeef", 2)}
 
 
 @pytest.mark.asyncio
