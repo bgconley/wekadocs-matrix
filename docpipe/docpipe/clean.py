@@ -30,6 +30,15 @@ _H1_RE = re.compile(r"^# +(\S.*?)\s*$")
 _ANY_H1_RE = re.compile(r"^# +(?=\S)")
 _MULTI_BLANK_RE = re.compile(r"\n{3,}")
 _H2PLUS_RE = re.compile(r"^#{2,6}\s")
+_ATX_HEADING_RE = re.compile(r"^#{1,6}\s+\S")
+_TOC_HEADING_RE = re.compile(r"^#{1,6}\s+(?:table\s+of\s+contents|contents)\s*$", re.I)
+_TOC_DOT_LEADER_RE = re.compile(r"\.{4,}|(?:^|[ \t])(?:\.\s*){6,}$")
+_TOC_SPACED_DOT_PAGE_RE = re.compile(r"(?:\.\s*){6,}\*{0,2}\d{1,4}\*{0,2}\s*$")
+_TOC_SYMBOL_LEADER_RE = re.compile(r"(?:^|[ \t])(?:[*!@#$%^~]\s*){4,}$")
+_TOC_TRAILING_PAGE_RE = re.compile(r"(?:\.{2,}|\s{3,})\s*\*{0,2}\d{1,4}\*{0,2}\s*$")
+_TOC_TITLE_PAGE_RE = re.compile(r"^\S.{2,120}\.\s+\*{0,2}\d{1,4}\*{0,2}\s*$")
+_TOC_STANDALONE_PAGE_RE = re.compile(r"^-?\d{1,4}$")
+_TOC_PIPE_GARBAGE_RE = re.compile(r"\|\|---|(?:\|\s*){8,}|\.\.\.\|")
 _BARE_CLI_RE = re.compile(r"^\s*(?:nutanix@|<acropolis>|ncli\s|acli\s|ncli>|\$\s).+")
 _INDENTED_BLOCK_RE = re.compile(r"^(?: {4,}|\t+)")
 _INDENTED_FENCE_RE = re.compile(r"^(?P<indent>[ \t]+)(?P<fence>```.*)$")
@@ -106,6 +115,109 @@ def ensure_title_h1(body: str, title: str) -> str:
 def collapse_blanks(body: str) -> str:
     body = "\n".join(line.rstrip() for line in body.splitlines())
     return _MULTI_BLANK_RE.sub("\n\n", body).strip("\n")
+
+
+def _has_toc_marker(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if _TOC_STANDALONE_PAGE_RE.match(stripped):
+        return True
+    if _TOC_DOT_LEADER_RE.search(stripped):
+        return True
+    if _TOC_SPACED_DOT_PAGE_RE.search(stripped):
+        return True
+    if _TOC_SYMBOL_LEADER_RE.search(stripped):
+        return True
+    if _TOC_TRAILING_PAGE_RE.search(stripped):
+        return True
+    if _TOC_TITLE_PAGE_RE.match(stripped):
+        return True
+    if _TOC_PIPE_GARBAGE_RE.search(stripped):
+        return True
+    return False
+
+
+def _next_nonblank_index(lines: list[str], start: int) -> Optional[int]:
+    for idx in range(start, len(lines)):
+        if lines[idx].strip():
+            return idx
+    return None
+
+
+def _is_toc_heading_entry(lines: list[str], idx: int) -> bool:
+    if not _ATX_HEADING_RE.match(lines[idx].strip()):
+        return False
+    next_idx = _next_nonblank_index(lines, idx + 1)
+    return next_idx is not None and _has_toc_marker(lines[next_idx])
+
+
+def _is_plain_toc_heading_entry(lines: list[str], idx: int) -> bool:
+    stripped = lines[idx].strip()
+    if (
+        not stripped
+        or _ATX_HEADING_RE.match(stripped)
+        or stripped.startswith(("|", ">", "```", "-", "*", "+"))
+        or len(stripped) > 160
+    ):
+        return False
+    next_idx = _next_nonblank_index(lines, idx + 1)
+    return next_idx is not None and _has_toc_marker(lines[next_idx])
+
+
+def _is_toc_continuation(lines: list[str], idx: int) -> bool:
+    stripped = lines[idx].strip()
+    if not stripped:
+        return True
+    if _TOC_HEADING_RE.match(stripped):
+        return True
+    if _has_toc_marker(stripped):
+        return True
+    return _is_toc_heading_entry(lines, idx) or _is_plain_toc_heading_entry(lines, idx)
+
+
+def _is_toc_evidence(line: str) -> bool:
+    stripped = line.strip()
+    return bool(
+        stripped and not _TOC_HEADING_RE.match(stripped) and _has_toc_marker(line)
+    )
+
+
+def strip_leading_table_of_contents(body: str) -> str:
+    """Drop transcribed PDF table-of-contents pages from the leading matter."""
+
+    lines = body.splitlines()
+    nonempty_seen = 0
+    start = None
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped:
+            if _TOC_HEADING_RE.match(stripped) and nonempty_seen <= 40:
+                start = idx
+                break
+            nonempty_seen += 1
+
+    if start is None:
+        return body
+
+    end = start + 1
+    evidence = False
+    while end < len(lines) and _is_toc_continuation(lines, end):
+        evidence = evidence or _is_toc_evidence(lines[end])
+        end += 1
+
+    if not evidence:
+        return body
+
+    prefix = lines[:start]
+    suffix = lines[end:]
+    while prefix and not prefix[-1].strip():
+        prefix.pop()
+    while suffix and not suffix[0].strip():
+        suffix.pop(0)
+    if prefix and suffix:
+        return "\n".join([*prefix, "", *suffix])
+    return "\n".join([*prefix, *suffix])
 
 
 def _split_fence_suffix(suffix: str) -> tuple[str, str]:
@@ -476,6 +588,7 @@ def clean_document(
         run.extracted_at = _now_iso()
     body = collapse_blanks(stitched_body)
     body = normalize_top_level_blocks(body)
+    body = strip_leading_table_of_contents(body)
     title = resolve_title(body, record)
     body = ensure_title_h1(body, title)
     body = fence_bare_cli_commands(body)

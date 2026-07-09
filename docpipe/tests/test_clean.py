@@ -397,6 +397,162 @@ def test_clean_document_adds_header_for_headerless_parameter_rows():
     assert "| :--- | :--- | :--- |" in md
 
 
+def test_clean_document_strips_leading_table_of_contents_noise():
+    md, _title = clean_document(
+        "# NC2 Azure Guide\n\n"
+        "Cloud Clusters (NC2) Hosted\n"
+        "July 6, 2026\n\n"
+        "# Contents\n\n"
+        "**Setting Up Azure Tenant** ........................................ 43\n"
+        "- Creating an App Registration .................................... 45\n"
+        "  - Creating an Azure Custom Role For Primary Subscription ......... "
+        "|   |   |   |   |   |...|...||---||---|||||||||| || || ||\n"
+        "Creating a New Client Secret                       # # # # # # #\n\n"
+        "NC2 Licensing and Billing.......................................... 56\n\n"
+        "## NC2 Cluster Management..........................................128\n\n"
+        "- NC2 Management Console........................................... 128\n\n"
+        "## ABOUT NC2 ON AZURE DEPLOYMENT AND USER GUIDE\n\n"
+        "This guide covers deploying Nutanix Cloud Clusters on Azure.\n",
+        _rec(slug="nutanix-cloud-clusters-azure-4"),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert validate_contract(md).ok
+    assert "## Contents" not in md
+    assert "||---|" not in md
+    assert "# # # # # # #" not in md
+    assert (
+        "NC2 Cluster Management..........................................128" not in md
+    )
+    assert "## ABOUT NC2 ON AZURE DEPLOYMENT AND USER GUIDE" in md
+    assert "This guide covers deploying Nutanix Cloud Clusters on Azure." in md
+
+
+def test_clean_document_strips_heading_entries_inside_leading_toc():
+    md, _title = clean_document(
+        "# AHV Administration Guide\n\n"
+        "AHV 11.0\n"
+        "July 1, 2026\n\n"
+        "NUTANIX\n\n"
+        "## Contents\n\n"
+        "## AHV Overview\n\n"
+        "- Storage Overview................................................................7\n"
+        "AHV Turbo........................................................................8\n\n"
+        "## Node Management\n\n"
+        "Controller VM Access............................................................17\n\n"
+        "## AHV Overview\n\n"
+        "AHV is the Nutanix hypervisor for running user VMs.\n",
+        _rec(slug="ahv-admin-guide-v11-0"),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert "## Contents" not in md
+    assert (
+        "Storage Overview................................................................7"
+        not in md
+    )
+    assert "## Node Management" not in md
+    assert "## AHV Overview" in md
+    assert "AHV is the Nutanix hypervisor for running user VMs." in md
+
+
+def test_clean_document_strips_short_page_refs_inside_leading_toc():
+    md, _title = clean_document(
+        "# Nutanix Enterprise AI Guide\n\n"
+        "Nutanix Enterprise AI 2.7\n"
+        "June 18, 2026\n\n"
+        "## Contents\n\n"
+        "**About this Publication** . . . . . . . . . . . . . . . . . . 6\n"
+        "Nutanix Enterprise AI Overview. 7\n"
+        "Deploy Nutanix Enterprise AI. 21\n"
+        "**Viewing the Dashboard in Nutanix Enterprise AI** ........... **133**\n"
+        "Dashboard Widgets................................................ **133**\n\n"
+        "## About this Publication\n\n"
+        "This publication describes Nutanix Enterprise AI.\n",
+        _rec(slug="nutanix-enterprise-ai-v2-7"),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert "## Contents" not in md
+    assert "Nutanix Enterprise AI Overview. 7" not in md
+    assert (
+        "Dashboard Widgets................................................ **133**"
+        not in md
+    )
+    assert "## About this Publication" in md
+    assert "This publication describes Nutanix Enterprise AI." in md
+
+
+def test_clean_document_strips_wrapped_plain_heading_entries_inside_leading_toc():
+    md, _title = clean_document(
+        "# Nutanix Enterprise AI Guide\n\n"
+        "Nutanix Enterprise AI 2.7\n"
+        "June 18, 2026\n\n"
+        "## Contents\n\n"
+        "**Getting Started with Nutanix Enterprise AI** . . . . . . . . . . 7\n"
+        "Configuring OpenTelemetry Collector to view Nutanix Enterprise AI\n"
+        "   Metrics................................................................249\n"
+        "Nutanix Enterprise AI Support Bundle......................................261\n"
+        "Copyright................................................................266\n\n"
+        "## ABOUT THIS PUBLICATION\n\n"
+        "This document provides information about Nutanix Enterprise AI.\n",
+        _rec(slug="nutanix-enterprise-ai-v2-7"),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert "## Contents" not in md
+    assert "Configuring OpenTelemetry Collector to view Nutanix Enterprise AI" not in md
+    assert (
+        "Metrics................................................................249"
+        not in md
+    )
+    assert (
+        "Copyright................................................................266"
+        not in md
+    )
+    assert "## ABOUT THIS PUBLICATION" in md
+    assert "This document provides information about Nutanix Enterprise AI." in md
+
+
+def test_clean_document_keeps_real_contents_section_without_toc_evidence():
+    md, _title = clean_document(
+        "# Admin Guide\n\n"
+        "## Contents\n\n"
+        "This section describes package contents and supported files.\n\n"
+        "## Install\n\n"
+        "Install the package from the downloaded archive.\n",
+        _rec(slug="admin-guide"),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert "## Contents" in md
+    assert "This section describes package contents and supported files." in md
+    assert "## Install" in md
+
+
+def test_clean_document_keeps_real_contents_section_with_wide_table():
+    md, _title = clean_document(
+        "# Package Guide\n\n"
+        "## Contents\n\n"
+        "| Name | Type | Default | Minimum | Maximum | Units | Required | Notes |\n"
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
+        "| cache_size | integer | 8 | 1 | 64 | GiB | yes | Runtime cache size. |\n\n"
+        "## Install\n\n"
+        "Install the package from the downloaded archive.\n",
+        _rec(slug="package-guide"),
+        RunMeta(model_id="qwen36-27b-fp8-oxcart", endpoint="oxcart", dpi=218),
+    )
+
+    assert "## Contents" in md
+    assert (
+        "| Name | Type | Default | Minimum | Maximum | Units | Required | Notes |" in md
+    )
+    assert (
+        "| cache_size | integer | 8 | 1 | 64 | GiB | yes | Runtime cache size. |" in md
+    )
+    assert "## Install" in md
+
+
 def test_clean_document_contract():
     md, title = clean_document(
         "# Hello World\n\nbody\n\n\n\n\nmore",

@@ -125,7 +125,7 @@
     },
     {
       "id": "cite-nai-requests-summary",
-      "question": "What does the Nutanix Enterprise AI dashboard Requests Summary widget display?",
+      "question": "What does the Nutanix Enterprise AI dashboard show about endpoints, API requests, API keys, and the Requests Summary widget?",
       "expected_sources": [
         {
           "source_pdf": "Nutanix-Enterprise-AI-v2_7.pdf",
@@ -135,7 +135,7 @@
       ],
       "must_answer_contain": [
         "API requests",
-        "API tokens",
+        "API keys",
         "Local Endpoints",
         "Unified Endpoints"
       ]
@@ -187,7 +187,7 @@
     },
     {
       "id": "cite-aos-syslog-module-files",
-      "question": "Which AHV host log file is included under the AOS SYSLOG_MODULE mapping?",
+      "question": "Which Controller VM log file is included under the AOS SYSLOG_MODULE mapping?",
       "expected_sources": [
         {
           "source_pdf": "Advanced-Admin-AOS-v7_5.pdf",

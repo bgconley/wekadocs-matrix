@@ -29,6 +29,18 @@ def test_load_questions_accepts_docpipe_citation_spec():
     assert first.expected_sources[0].slug == "5c-book-of-ahv-administration"
 
 
+def test_nai_requests_summary_fixture_uses_source_term_api_keys():
+    questions = {question.id: question for question in load_questions(SPEC)}
+    question = questions["cite-nai-requests-summary"]
+
+    terms = question.must_answer_contain
+
+    assert "API keys" in question.question
+    assert "Requests Summary" in question.question
+    assert "API keys" in terms
+    assert "API tokens" not in terms
+
+
 def test_evaluate_payload_passes_when_answer_and_expected_source_quote_match():
     question = CitationQuestion(
         id="cite-ahv-admin-show-uplinks",
@@ -132,6 +144,44 @@ def test_evaluate_payload_reads_legacy_search_documentation_shape():
     }
 
     assert evaluate_payload(question, payload).passed
+
+
+def test_evaluate_payload_uses_quotes_when_evidence_tool_returns_status_text():
+    question = CitationQuestion(
+        id="cite-ahv-admin-show-uplinks",
+        question="Which command shows OVS uplinks on the local AHV host?",
+        expected_sources=[
+            SourceExpectation(
+                source_pdf="5c-book-of-ahv-administration.pdf",
+                slug="5c-book-of-ahv-administration",
+                must_cite_text="manage_ovs show_uplinks",
+            )
+        ],
+        must_answer_contain=["manage_ovs show_uplinks"],
+    )
+    payload = {
+        "content": [
+            {
+                "type": "text",
+                "text": "kb_retrieve_evidence returned 1 quotes.",
+            }
+        ],
+        "structuredContent": {
+            "quotes": [
+                {
+                    "doc_tag": "nutanix",
+                    "uri": "file:///app/data/ingest/nutanix/"
+                    "5c-book-of-ahv-administration/5c-book-of-ahv-administration.md",
+                    "quote": "Run manage_ovs show_uplinks to display uplinks.",
+                }
+            ]
+        },
+    }
+
+    result = evaluate_payload(question, payload)
+
+    assert result.passed
+    assert result.answer_source == "quotes"
 
 
 def test_load_questions_rejects_missing_question_list(tmp_path):

@@ -172,8 +172,22 @@ it was resumed from cache.)
 - **2026-07-08 — Citation-eval runner: RESOLVED.** `docpipe.citation_eval` now
   validates `docs/eval/citation_questions.json`, can dry-run the 14-question
   fixture, calls the MCP gateway tool, and writes a pass/fail JSON report.
-- **Remaining gating work:** run the downstream citation evaluation against the
-  live RAG gateway after the corpus is ingested and the gateway is available.
+- **2026-07-09 — Leading ToC stripping applied corpus-wide: RESOLVED.**
+  `clean_document` now strips evidence-gated leading PDF tables of contents while
+  preserving a real prose `Contents` section. All nine final7 documents were
+  reassembled from cached page artifacts, and the regenerated corpus has no
+  leading `## Contents`, pipe-garbage, or symbol-leader residue. The default
+  deterministic eval remains green at **34/34**.
+- **2026-07-09 — Downstream citation evaluation: source-aligned 14/14, still
+  provisional as RAG proof.** `cite-nai-requests-summary` now uses the source term
+  `API keys` instead of the fixture-only term `API tokens`, and the question
+  explicitly asks for both the dashboard summary and the Requests Summary widget.
+  A live local gateway run reaches **14/14** (`pass_fraction=1.000`); report:
+  `ETL-for-corpus/docpipe-citation-eval-live-api-keys-current.json`. This remains
+  outside the docpipe extraction gate until the retrieval/MCP changes are reviewed
+  and committed. The syslog question wording remains corrected to "Controller VM"
+  because the expected `/home/log/messages` row is a Controller VM log row, not an
+  AHV host log row.
 
 ## Executive verdict
 
@@ -199,11 +213,15 @@ judgment; (iv) one-model operational simplicity. Throughput is irrelevant at 936
 one-time pages. The two literature-imposed operating conditions are now present:
 current-page **text-layer anchoring** is injected as a glyph-disambiguation
 reference and text-heavy low-overlap pages retry, while the sampler no longer runs
-bare `temperature=0` without penalties. Full-build corpus QA is now proven green;
-the remaining proof layer is downstream citation behavior through the RAG gateway.
+bare `temperature=0` without penalties. Full-build corpus QA is proven green;
+downstream citation behavior through the RAG gateway is source-aligned at 14/14
+but remains provisional until the retrieval/MCP changes are reviewed and
+committed.
 
-**The holdbacks are a well-bounded set of data-loss/liveness bugs and two missing
-quality layers** — not architecture.
+**The former docpipe extraction holdbacks were a well-bounded set of
+data-loss/liveness bugs and quality-proof gaps** — not architecture. Those
+extraction gating classes are resolved; downstream RAG citation proof is a
+separate, still-provisional layer.
 
 ---
 
@@ -211,24 +229,26 @@ quality layers** — not architecture.
 
 | # | Dimension | Rating |
 |---|-----------|--------|
-| 1 | Architecture & stage decomposition | **PARTIAL** — anchoring, Tier-0, and deterministic eval present; populated eval still pending |
+| 1 | Architecture & stage decomposition | **PARTIAL** — stages, anchoring, Tier-0, and deterministic eval present; downstream citation proof is separate/provisional |
 | 2 | Rasterization strategy | **FULLY MET** — patch-grid base render, explicit pixel bounds, high-res QA retry |
-| 3 | Model & prompt strategy | **PARTIAL** — anchoring, structure-aware tail, and sampler hardening present; metadata-first/eval still pending |
+| 3 | Model & prompt strategy | **PARTIAL** — anchoring, structure-aware tail, and sampler hardening present; metadata-first remains optional/out of scope |
 | 4 | Model / endpoint choice | **PARTIAL** — engine sound; text-layer arbiter active; specialist oracle/A-B still pending |
 | 5 | Concurrency & throughput | **FULLY MET** (design) — bugs are robustness-within-the-design |
-| 6 | Resumability & caching | **PARTIAL** — page-level excellent; manifest reuse is size-based |
-| 7 | Validation / QA gates | **PARTIAL** — fail-closed Tier-0 gate active; richer corpus QA still pending |
-| 8 | Evaluation harness & metrics | **PARTIAL** — offline pass-fraction harness active; populated gold/TEDS eval still pending |
-| 9 | Output artifact contract | **PARTIAL** — design met; runtime output violated by the P0 bugs |
+| 6 | Resumability & caching | **PARTIAL** — page-level excellent; remaining concerns are lower-priority polish |
+| 7 | Validation / QA gates | **PARTIAL** — fail-closed Tier-0 gate active and full corpus QA green; richer optional AST/TEDS checks remain |
+| 8 | Evaluation harness & metrics | **PARTIAL** — offline pass-fraction harness, populated gold fixtures, and full-build eval are green; live citation/RAG eval is source-aligned at 14/14 but remains provisional pending RAG review/commit |
+| 9 | Output artifact contract | **PARTIAL** — design and runtime conformance are gated/proven; canonical terminology normalization remains optional |
 
 **2 fully met · 7 partial · 0 missing.**
 
 ---
 
-## The P0 roadmap (correctness / data-loss / liveness)
+## Historical P0 roadmap (correctness / data-loss / liveness)
 
 These matter most because this is a **one-time 936-page build** — a silent drop or
-a hang is maximally costly. All are addressable without changing the design.
+a hang is maximally costly. The items below are retained as the historical
+roadmap; the resolution log above records their closure and the current full-build
+proof.
 
 - **P0-1 — Truncated & empty output cached as `status=ok` forever.** Re-check
   `truncated` after the token-bump; treat still-truncated **or** empty content as a
@@ -258,8 +278,9 @@ a hang is maximally costly. All are addressable without changing the design.
   is all-or-nothing; `scan_pdf` and per-doc `page_text` are unguarded. Make failover
   actually engage. *(vlm_client.py, manifest.py, output.py)*
 
-**P1** now centers on downstream citation evaluation through the RAG gateway.
-**P2** is polish (dead config, DX, tests).
+**P1** extraction/eval gating is closed for docpipe artifacts; live RAG citation
+proof remains provisional and should be reviewed as a separate retrieval/MCP
+change. **P2** is optional polish/scored metrics.
 Full detail in [GAP_ANALYSIS.md](GAP_ANALYSIS.md).
 
 ---
@@ -303,10 +324,11 @@ silently dropped.
 
 ---
 
-## Recommended next step
+## Current closure status
 
-Run the downstream citation evaluation against the RAG gateway using
-`python -m docpipe.citation_eval --spec docs/eval/citation_questions.json`.
-The full corpus build and deterministic artifact gates are already green; the
-next risk is answer/citation behavior after ingestion. P2 remains optional
-polish.
+The full corpus build, deterministic artifact gates, populated gold eval, and
+source-aligned citation fixture are green for the extraction pipeline. The
+downstream live citation/RAG result is still provisional: it now runs **14/14**,
+but the code that improved citation behavior lives in a substantial uncommitted
+retrieval/MCP diff that needs its own review before any citation-proof claim
+stands.

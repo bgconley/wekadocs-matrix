@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -12,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+_EVIDENCE_STATUS_RE = re.compile(r"\Akb_retrieve_evidence returned \d+ quotes?\.\Z")
 
 
 @dataclass(frozen=True)
@@ -240,7 +243,9 @@ def _extract_answer_text(
 
     for item in _content_items(payload):
         if item.get("type") == "text" and isinstance(item.get("text"), str):
-            parts.append(item["text"])
+            text = item["text"].strip()
+            if text and not _is_evidence_status_text(text):
+                parts.append(text)
         if item.get("type") == "json" and isinstance(item.get("json"), dict):
             answer_json = item["json"]
             for key in ("answer", "answer_markdown"):
@@ -251,6 +256,10 @@ def _extract_answer_text(
     if parts:
         return "\n".join(parts), "answer"
     return "\n".join(_quote_text(quote) for quote in quotes), "quotes"
+
+
+def _is_evidence_status_text(text: str) -> bool:
+    return bool(_EVIDENCE_STATUS_RE.match(text))
 
 
 def _quote_text(quote: dict[str, Any]) -> str:
