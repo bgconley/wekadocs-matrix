@@ -235,11 +235,11 @@ if [[ "$LIVE" != "1" ]]; then
   echo "DRY RUN: pass --live to execute service-touching commands."
 fi
 
-mkdir -p "$ARTIFACT_DIR"
+run mkdir -p "$ARTIFACT_DIR"
 
 run docker compose up -d
 run python scripts/reset_datastores.py
-run scripts/ingestctl ingest "$CORPUS_PATH" --tag nutanix --watch --json
+run scripts/ingestctl ingest "$CORPUS_PATH" --tag nutanix --json
 
 run python scripts/smoke_test_golden_queries.py \
   --queries tests/fixtures/golden_query_set.yaml \
@@ -258,7 +258,7 @@ run python scripts/eval/check_evidence_citations.py \
 echo "Release proof artifacts: $ARTIFACT_DIR"
 ```
 
-Before committing this script, verify each invoked flag against `--help`. If a runner does not expose the exact flag shown above, update this plan's command and the script together; do not leave a known-bad runbook.
+Before committing this script, verify each invoked flag against `--help`. If a runner does not expose the exact flag shown above, update this plan's command and the script together; do not leave a known-bad runbook. The ingest step intentionally omits `ingestctl --watch`; that flag is currently an unimplemented stub that exits non-zero. Without `--watch` or `--no-wait`, `ingestctl ingest` uses its implemented monitoring path.
 
 - [ ] **Step 2: Author `docs/RELEASE-PROOF.md`**
 
@@ -285,10 +285,16 @@ python -m py_compile scripts/smoke_test_golden_queries.py \
   scripts/run_canonical_retrieval_benchmark.py \
   scripts/eval/check_evidence_citations.py
 pytest tests/test_evidence_citation_scoring.py -q
+pytest tests/test_release_proof_script.py -q
 bash -n scripts/release_proof.sh
 bash scripts/release_proof.sh
 NEO4J_PASSWORD=x REDIS_PASSWORD=x JWT_SECRET=x docker compose config >/dev/null
 ```
+
+The release proof ingest step intentionally omits `ingestctl --watch` because
+that flag is not implemented in the current CLI and exits non-zero. Without
+`--watch` or `--no-wait`, `ingestctl ingest` uses its implemented progress
+monitoring path.
 
 ## Live Proof
 

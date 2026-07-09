@@ -18,10 +18,16 @@ python -m py_compile scripts/smoke_test_golden_queries.py \
   scripts/run_canonical_retrieval_benchmark.py \
   scripts/eval/check_evidence_citations.py
 pytest tests/test_evidence_citation_scoring.py -q
+pytest tests/test_release_proof_script.py -q
 bash -n scripts/release_proof.sh
 bash scripts/release_proof.sh
 NEO4J_PASSWORD=x REDIS_PASSWORD=x JWT_SECRET=x docker compose config >/dev/null
 ```
+
+The release proof ingest step intentionally omits `ingestctl --watch` because
+that flag is not implemented in the current CLI and exits non-zero. Without
+`--watch` or `--no-wait`, `ingestctl ingest` uses its implemented progress
+monitoring path.
 
 ## Live Proof
 

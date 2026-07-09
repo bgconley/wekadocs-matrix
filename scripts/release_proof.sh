@@ -30,7 +30,7 @@ run mkdir -p "$ARTIFACT_DIR"
 
 run docker compose up -d
 run python scripts/reset_datastores.py
-run scripts/ingestctl ingest "$CORPUS_PATH" --tag nutanix --watch --json
+run scripts/ingestctl ingest "$CORPUS_PATH" --tag nutanix --json
 
 run python scripts/smoke_test_golden_queries.py \
   --queries tests/fixtures/golden_query_set.yaml \
